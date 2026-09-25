@@ -5,12 +5,16 @@ namespace Tests\Feature;
 use App\Filament\Resources\Centers\Pages\CreateCenter;
 use App\Filament\Resources\Centers\Pages\ViewCenter;
 use App\Jobs\ProvisionCenter;
+use App\Mail\CenterInvitationMail;
 use App\Models\Center;
+use App\Models\CenterInvitation;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 use RuntimeException;
@@ -61,6 +65,7 @@ class CenterProvisioningTest extends TestCase
 
     public function test_platform_owner_can_create_and_retry_a_center_without_duplicate_identity(): void
     {
+        Mail::fake();
         $owner = User::factory()->create(['platform_role' => 'platform_owner']);
         $this->actingAs($owner);
 
@@ -98,6 +103,7 @@ class CenterProvisioningTest extends TestCase
             ->assertOk()->assertJsonPath('center.provisioning_status', 'active');
 
         $this->assertSame(1, DB::connection('central')->table('center_invitations')->where('tenant_id', $center->id)->count());
+        Mail::assertSent(CenterInvitationMail::class, 1);
         $this->assertSame(1, Center::where('slug', 'alpha')->count());
     }
 
@@ -126,6 +132,68 @@ class CenterProvisioningTest extends TestCase
             ->assertOk()->assertJsonPath('center.provisioning_status', 'active');
         $this->assertSame(1, Center::where('slug', 'gamma')->count());
         $this->assertSame(1, DB::connection('central')->table('center_invitations')->where('tenant_id', $center->id)->count());
+    }
+
+    public function test_retry_does_not_resend_when_mail_was_delivered_but_recording_delivery_failed(): void
+    {
+        Mail::fake();
+        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']));
+        $failDeliveryRecord = true;
+        DB::connection('central')->beforeExecuting(function (string $query) use (&$failDeliveryRecord): void {
+            if ($failDeliveryRecord && str_contains(strtolower($query), 'update "center_invitations"')
+                && str_contains($query, 'sent_at')) {
+                $failDeliveryRecord = false;
+                throw new RuntimeException('Simulated delivery record failure');
+            }
+        });
+
+        $this->postJson('http://courses.test/api/v1/platform/centers', [
+            'name' => 'Alpha Center', 'slug' => 'alpha', 'subdomain' => 'alpha',
+            'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
+        ])->assertCreated()->assertJsonPath('center.provisioning_status', 'failed');
+        $center = Center::where('slug', 'alpha')->firstOrFail();
+        Mail::assertSent(CenterInvitationMail::class, 1);
+        $invitation = CenterInvitation::where('tenant_id', $center->id)->firstOrFail();
+        $this->assertNotNull($invitation->delivery_claimed_at);
+        $this->assertNull($invitation->sent_at);
+
+        $this->postJson("http://courses.test/api/v1/platform/centers/{$center->id}/retry")
+            ->assertOk()->assertJsonPath('center.provisioning_status', 'failed');
+        Mail::assertSent(CenterInvitationMail::class, 1);
+
+        $this->assertSame(0, Artisan::call('courses:resolve-owner-invitation', [
+            'slug' => 'alpha', 'outcome' => 'delivered',
+        ]));
+        $this->postJson("http://courses.test/api/v1/platform/centers/{$center->id}/retry")
+            ->assertOk()->assertJsonPath('center.provisioning_status', 'active');
+        Mail::assertSent(CenterInvitationMail::class, 1);
+    }
+
+    public function test_confirmed_undelivered_expired_invitation_gets_a_fresh_link_on_retry(): void
+    {
+        Mail::fake();
+        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']))
+            ->postJson('http://courses.test/api/v1/platform/centers', [
+                'name' => 'Alpha Center', 'slug' => 'alpha', 'subdomain' => 'alpha',
+                'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
+            ])->assertCreated();
+        $center = Center::where('slug', 'alpha')->firstOrFail();
+        $invitation = CenterInvitation::where('tenant_id', $center->id)->firstOrFail();
+        $oldToken = $invitation->token_ciphertext;
+        $invitation->update(['sent_at' => null, 'expires_at' => now()->subMinute()]);
+        $center->update(['provisioning_status' => 'failed']);
+        Mail::fake();
+
+        $this->assertSame(0, Artisan::call('courses:resolve-owner-invitation', [
+            'slug' => 'alpha', 'outcome' => 'not-delivered',
+        ]));
+        $this->postJson("http://courses.test/api/v1/platform/centers/{$center->id}/retry")
+            ->assertOk()->assertJsonPath('center.provisioning_status', 'active');
+        Mail::assertSent(CenterInvitationMail::class, 1);
+        $newToken = $invitation->fresh()->token_ciphertext;
+        $this->assertNotSame($oldToken, $newToken);
+        $this->getJson("http://alpha.courses.test/api/v1/center/invitations/{$oldToken}")->assertStatus(410);
+        $this->getJson("http://alpha.courses.test/api/v1/center/invitations/{$newToken}")->assertOk();
     }
 
     public function test_failed_migration_keeps_its_applied_version_and_retry_preserves_the_other_center(): void

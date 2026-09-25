@@ -91,28 +91,51 @@ class ProvisionCenter implements ShouldQueue
 
     private function inviteFirstOwner(Center $center): void
     {
-        $invitation = CenterInvitation::where('tenant_id', $center->id)
-            ->where('email', $center->owner_email)
-            ->first();
+        $invitation = DB::connection('central')->transaction(function () use ($center): ?CenterInvitation {
+            Center::query()->whereKey($center->id)->lockForUpdate()->firstOrFail();
+            $invitation = CenterInvitation::where('tenant_id', $center->id)
+                ->where('email', $center->owner_email)
+                ->lockForUpdate()
+                ->first();
 
-        if ($invitation?->accepted_at) {
+            if ($invitation?->accepted_at || $invitation?->sent_at) {
+                return null;
+            }
+
+            if ($invitation?->delivery_claimed_at) {
+                throw new RuntimeException('Invitation delivery is uncertain. Inspect the mailbox before retrying.');
+            }
+
+            if (! $invitation) {
+                $token = Str::random(64);
+                $invitation = CenterInvitation::create([
+                    'tenant_id' => $center->id,
+                    'email' => $center->owner_email,
+                    'token_hash' => hash('sha256', $token),
+                    'token_ciphertext' => $token,
+                    'center_role' => 'center_owner',
+                    'expires_at' => now()->addDays(7),
+                ]);
+            } elseif (! $invitation->expires_at->isFuture()) {
+                $token = Str::random(64);
+                $invitation->update([
+                    'token_hash' => hash('sha256', $token),
+                    'token_ciphertext' => $token,
+                    'expires_at' => now()->addDays(7),
+                ]);
+            }
+
+            $invitation->update(['delivery_claimed_at' => now()]);
+
+            return $invitation;
+        });
+
+        if (! $invitation) {
             return;
         }
 
-        if (! $invitation) {
-            $token = Str::random(64);
-            $invitation = CenterInvitation::create([
-                'tenant_id' => $center->id,
-                'email' => $center->owner_email,
-                'token_hash' => hash('sha256', $token),
-                'token_ciphertext' => $token,
-                'center_role' => 'center_owner',
-                'expires_at' => now()->addDays(7),
-            ]);
-        }
-
         $url = 'http://'.$center->domains()->firstOrFail()->domain.'/invitations/'.$invitation->token_ciphertext;
-
         Mail::to($center->owner_email)->send(new CenterInvitationMail($center->name, $url));
+        $invitation->update(['sent_at' => now()]);
     }
 }

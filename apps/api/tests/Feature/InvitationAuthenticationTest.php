@@ -4,21 +4,100 @@ namespace Tests\Feature;
 
 use App\Mail\CenterInvitationMail;
 use App\Models\Center;
+use App\Models\CenterInvitation;
+use App\Models\CenterMembership;
 use App\Models\User;
 use Illuminate\Auth\Notifications\ResetPassword as ResetPasswordNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Routing\Middleware\ThrottleRequests;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification;
 use PragmaRX\Google2FA\Google2FA;
+use RuntimeException;
 use Tests\Concerns\CleansCenterDatabases;
 use Tests\TestCase;
 
 class InvitationAuthenticationTest extends TestCase
 {
     use CleansCenterDatabases, RefreshDatabase;
+
+    public function test_first_owner_invitation_is_host_bound_single_use_and_within_read_budget(): void
+    {
+        $this->withoutMiddleware(ThrottleRequests::class);
+        Mail::fake();
+        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']));
+        foreach (['alpha', 'beta'] as $slug) {
+            $this->postJson('http://courses.test/api/v1/platform/centers', [
+                'name' => ucfirst($slug), 'slug' => $slug, 'subdomain' => $slug,
+                'plan' => 'starter', 'owner_email' => "owner@{$slug}.test",
+            ])->assertCreated();
+        }
+
+        $alpha = Center::where('slug', 'alpha')->firstOrFail();
+        $invitation = CenterInvitation::where('tenant_id', $alpha->id)->firstOrFail();
+        $token = $invitation->token_ciphertext;
+        $this->getJson("http://beta.courses.test/api/v1/center/invitations/{$token}")->assertStatus(410);
+        $this->postJson("http://beta.courses.test/api/v1/center/invitations/{$token}", [
+            'name' => 'Wrong Center', 'password' => 'correct-horse-battery-staple',
+            'password_confirmation' => 'correct-horse-battery-staple',
+        ])->assertStatus(410);
+
+        $page = $this->getJson("http://alpha.courses.test/api/v1/center/invitations/{$token}")
+            ->assertOk()->assertJsonPath('email', 'owner@alpha.test');
+        $this->assertLessThanOrEqual(6, (int) $page->headers->get('X-Courses-Query-Count'));
+        $invitation->update(['expires_at' => now()->subMinute()]);
+        $this->getJson("http://alpha.courses.test/api/v1/center/invitations/{$token}")->assertStatus(410);
+        $this->postJson("http://alpha.courses.test/api/v1/center/invitations/{$token}", [
+            'name' => 'Expired Owner', 'password' => 'correct-horse-battery-staple',
+            'password_confirmation' => 'correct-horse-battery-staple',
+        ])->assertStatus(410);
+        $this->assertSame(0, User::where('email', 'owner@alpha.test')->count());
+        $this->assertSame(0, CenterMembership::where('tenant_id', $alpha->id)->count());
+    }
+
+    public function test_partial_acceptance_can_be_reconciled_and_retried_without_duplicate_identity(): void
+    {
+        $this->withoutMiddleware(ThrottleRequests::class);
+        Mail::fake();
+        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']))
+            ->postJson('http://courses.test/api/v1/platform/centers', [
+                'name' => 'Alpha', 'slug' => 'alpha', 'subdomain' => 'alpha',
+                'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
+            ])->assertCreated();
+        $center = Center::where('slug', 'alpha')->firstOrFail();
+        $invitation = CenterInvitation::where('tenant_id', $center->id)->firstOrFail();
+        $url = "http://alpha.courses.test/api/v1/center/invitations/{$invitation->token_ciphertext}";
+        $payload = [
+            'name' => 'First Owner', 'password' => 'correct-horse-battery-staple',
+            'password_confirmation' => 'correct-horse-battery-staple',
+        ];
+
+        $failAudit = true;
+        DB::connection('central')->listen(function ($query) use (&$failAudit): void {
+            if ($failAudit && $query->connectionName === 'central'
+                && str_contains(strtolower($query->sql), 'insert into "center_audit_outbox"')) {
+                $failAudit = false;
+                throw new RuntimeException('Simulated central commit failure');
+            }
+        });
+        $this->postJson($url, $payload)->assertStatus(500);
+        $this->assertSame(0, User::where('email', 'owner@alpha.test')->count());
+        $this->assertSame(0, CenterMembership::where('tenant_id', $center->id)->count());
+        $this->assertNull($invitation->fresh()->accepted_at);
+        $this->assertSame(1, $center->run(fn () => DB::table('center_grants')->count()));
+
+        $this->assertSame(0, Artisan::call('courses:reconcile-grants', ['slug' => 'alpha', '--apply' => true]));
+        $this->assertSame(0, $center->run(fn () => DB::table('center_grants')->count()));
+        $this->postJson($url, $payload)->assertOk();
+        $owner = User::where('email', 'owner@alpha.test')->firstOrFail();
+        $this->assertTrue($owner->hasVerifiedEmail());
+        $this->assertSame(1, CenterMembership::where('tenant_id', $center->id)->where('user_id', $owner->id)->count());
+        $this->assertSame(1, $center->run(fn () => DB::table('center_grants')->where('user_id', $owner->id)->where('role', 'center_owner')->count()));
+        $this->postJson($url, $payload)->assertStatus(410);
+    }
 
     public function test_first_owner_accepts_invitation_and_can_opt_in_to_mfa(): void
     {
@@ -53,6 +132,8 @@ class InvitationAuthenticationTest extends TestCase
             'name' => 'First Owner', 'password' => 'correct-horse-battery-staple',
             'password_confirmation' => 'correct-horse-battery-staple',
         ])->assertStatus(410);
+        $this->assertSame(1, CenterMembership::where('tenant_id', $center->id)
+            ->where('user_id', User::where('email', 'owner@alpha.test')->value('id'))->count());
 
         $this->postJson('http://alpha.courses.test/api/v1/center/auth/login', [
             'email' => 'owner@alpha.test', 'password' => 'correct-horse-battery-staple',
