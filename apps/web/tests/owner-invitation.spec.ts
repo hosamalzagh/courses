@@ -103,6 +103,25 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await page.getByRole("button", { name: "دخول المركز" }).click();
     await expect(page).toHaveURL(`${host}/admin`);
     await expect(page.getByText("مالك المركز")).toBeVisible();
+    for (const [name, branchSlug] of [["فرع التجربة الشمالي", "pilot-north"], ["فرع التجربة الجنوبي", "pilot-south"]]) {
+      await page.getByRole("button", { name: "إنشاء فرع" }).click();
+      await page.getByRole("textbox", { name: "اسم الفرع" }).fill(name);
+      await page.getByRole("textbox", { name: "رمز الفرع" }).fill(branchSlug);
+      const created = page.waitForResponse((response) => response.url().endsWith("/api/v1/center/branches") && response.request().method() === "POST");
+      await page.getByRole("button", { name: "حفظ الفرع" }).click();
+      expect((await created).status()).toBe(201);
+      await expect(page.getByRole("heading", { name })).toBeVisible();
+    }
+    const northCard = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "فرع التجربة الشمالي" }) });
+    await northCard.getByRole("button", { name: "تعديل بيانات الفرع" }).click();
+    await northCard.getByRole("textbox", { name: "اسم الفرع" }).fill("فرع التجربة الشمالي المحدّث");
+    await northCard.getByRole("textbox", { name: "العنوان" }).fill("شارع التجربة ١");
+    const updated = page.waitForResponse((response) => /\/api\/v1\/center\/branches\/\d+$/.test(response.url()) && response.request().method() === "PATCH");
+    await northCard.getByRole("button", { name: "حفظ التعديل" }).click();
+    expect((await updated).status()).toBe(200);
+    await expect(page.getByRole("heading", { name: "فرع التجربة الشمالي المحدّث" })).toBeVisible();
+    await expect(page.getByRole("article").filter({ has: page.getByRole("heading", { name: "فرع التجربة الشمالي المحدّث" }) })).toContainText("شارع التجربة ١");
+    await expect(page.getByRole("heading", { name: "فرع التجربة الجنوبي" })).toBeVisible();
     runFixture(String.raw`
       $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
       $user = \App\Models\User::where('email', getenv('COURSES_BROWSER_EMAIL'))->firstOrFail();
