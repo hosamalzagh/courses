@@ -6,9 +6,11 @@ use App\Jobs\ProvisionCenter;
 use App\Models\Center;
 use App\Models\CenterMembership;
 use App\Models\User;
+use App\Support\CenterAuditDelivery;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schema;
 use Tests\Concerns\CleansCenterDatabases;
 use Tests\TestCase;
 
@@ -44,10 +46,23 @@ class CenterRestoreTest extends TestCase
             }
         });
 
+        // Simulate a snapshot taken before the audit delivery migration.
+        $alpha->run(function (): void {
+            Schema::table('center_audit_logs', fn ($table) => $table->dropColumn('source_event_id'));
+            DB::table('migrations')->where('migration', '2026_09_25_220000_add_audit_source_event_id')->delete();
+        });
+
         $this->assertSame(0, Artisan::call('courses:backup', ['slug' => 'alpha']));
         $files = glob(storage_path("app/private/backups/alpha-{$alpha->id}-*.dump"));
         $file = end($files);
         $this->assertFileExists($file);
+        $this->assertSame(0, Artisan::call('tenants:migrate', [
+            '--tenants' => [$alpha->id], '--force' => true,
+        ]));
+        $auditId = CenterAuditDelivery::record($alpha->id, $owner->id, 'test.after_backup', []);
+        CenterAuditDelivery::deliver($auditId);
+        $this->assertSame(1, $alpha->run(fn () => DB::table('center_audit_logs')
+            ->where('source_event_id', $auditId)->count()));
         $laterOwner = User::factory()->create(['email_verified_at' => now()]);
         CenterMembership::create(['tenant_id' => $alpha->id, 'user_id' => $laterOwner->id, 'status' => 'active']);
         $alpha->run(function () use ($owner, $laterOwner): void {
@@ -64,6 +79,9 @@ class CenterRestoreTest extends TestCase
             'slug' => 'alpha', 'file' => $file, '--confirm' => 'alpha',
         ]));
         $this->assertSame(['alpha'], $alpha->run(fn () => DB::table('branches')->pluck('slug')->all()));
+        $this->assertTrue($alpha->run(fn () => Schema::hasColumn('center_audit_logs', 'source_event_id')));
+        $this->assertSame(1, $alpha->run(fn () => DB::table('center_audit_logs')
+            ->where('source_event_id', $auditId)->count()));
         $this->assertSame(['beta'], $beta->run(fn () => DB::table('branches')->pluck('slug')->all()));
         $this->assertSame(0, $alpha->run(fn () => DB::table('center_grants')->where('user_id', 999999)->count()));
         $this->actingAs($owner)->withSession(['center_id' => $alpha->id]);

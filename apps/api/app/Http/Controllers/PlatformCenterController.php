@@ -90,8 +90,10 @@ class PlatformCenterController extends Controller
             'suspended' => ['sometimes', 'required', 'boolean'],
         ]);
 
-        $center->update($data);
-        $this->audit($request, $center, 'center.updated', $data);
+        DB::connection('central')->transaction(function () use ($request, $center, $data): void {
+            $center->update($data);
+            $this->audit($request, $center, 'center.updated', $data);
+        });
 
         return response()->json(['center' => $center->fresh()->load('domains')]);
     }
@@ -106,11 +108,11 @@ class PlatformCenterController extends Controller
         $domain = CenterDomain::fromSubdomain($data['subdomain']);
         CenterDomain::validateUnique($domain);
 
-        DB::connection('central')->transaction(function () use ($center, $domain): void {
+        DB::connection('central')->transaction(function () use ($request, $center, $domain): void {
             $center->domains()->delete();
             $center->domains()->create(['domain' => $domain]);
+            $this->audit($request, $center, 'center.domain_changed', ['domain' => $domain]);
         });
-        $this->audit($request, $center, 'center.domain_changed', ['domain' => $domain]);
 
         return response()->json(['center' => $center->fresh()->load('domains')]);
     }

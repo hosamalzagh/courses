@@ -32,11 +32,13 @@ export async function responseMessage(response: Response): Promise<string> {
   if (response.status === 401) return "انتهت جلسة الدخول. سجّل الدخول من جديد.";
   if (response.status === 403) return "هذه العملية خارج صلاحيتك في هذا المركز.";
   if (response.status === 410) return "انتهت صلاحية الدعوة أو استُخدمت بالفعل.";
+  if (response.status === 429) return "تجاوزت عدد المحاولات المسموح. انتظر قليلًا ثم حاول مرة أخرى.";
   if (response.status === 422) {
     const data = await response.json().catch(() => ({}));
-    return typeof data.message === "string" && data.message !== "The given data was invalid."
-      ? data.message
-      : "راجع البيانات المدخلة ثم حاول مرة أخرى.";
+    if (data.message === "Invalid credentials.") return "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
+    if (data.message === "Existing account password is incorrect.") return "كلمة مرور الحساب الموجود غير صحيحة.";
+    return typeof data.message === "string" && /[\u0600-\u06ff]/.test(data.message)
+      ? data.message : "راجع البيانات المدخلة ثم حاول مرة أخرى.";
   }
   return "تعذر إكمال العملية. حاول مرة أخرى.";
 }

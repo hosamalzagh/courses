@@ -1,43 +1,14 @@
 import { randomBytes } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { writeFileSync } from "node:fs";
+import { expect, test } from "@playwright/test";
+import { credentials, ensureLocalFixtures, signIn } from "./local-fixtures";
 
 const alpha = "http://alpha.courses.test";
 const beta = "http://beta.courses.test";
-const credentialsDir = path.resolve(process.cwd(), "../api/storage/app/private");
-
-function credentials(name: "alpha" | "beta" | "staff") {
-  const file = path.join(credentialsDir, `local-${name}-credentials.txt`);
-  const lines = readFileSync(file, "utf8").split("\n");
-  const value = (key: string) => lines.find((line) => line.startsWith(key))?.slice(key.length);
-  const email = value("Email: ") ?? value("email=");
-  const password = value("Password: ") ?? value("password=");
-  if (!email || !password) throw new Error(`Missing ${name} local credentials. Complete README local setup first.`);
-  return { file, email, password };
-}
-
-async function signIn(page: Page, host: string, email: string, password: string) {
-  await page.goto(`${host}/login`);
-  let signedIn = false;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(email);
-    await page.getByRole("textbox", { name: "كلمة المرور" }).fill(password);
-    const responsePromise = page.waitForResponse((response) => response.url().endsWith("/api/v1/center/auth/login") && response.request().method() === "POST");
-    await page.getByRole("button", { name: "دخول المركز" }).click();
-    const response = await responsePromise;
-    if (response.status() === 429) {
-      const retryAfter = Number(response.headers()["retry-after"] ?? "60");
-      await page.waitForTimeout((retryAfter + 1) * 1_000);
-      continue;
-    }
-    expect(response.ok()).toBe(true);
-    signedIn = true;
-    break;
-  }
-  expect(signedIn).toBe(true);
-  await expect(page).toHaveURL(`${host}/admin`);
-}
+test.beforeAll(async ({ browser }) => {
+  test.setTimeout(180_000);
+  await ensureLocalFixtures(browser);
+});
 
 test("alpha and beta keep pages, sessions, and cached data separate", async ({ browser }) => {
   test.setTimeout(180_000);

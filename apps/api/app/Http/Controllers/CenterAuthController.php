@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\CenterInvitation;
 use App\Models\CenterMembership;
 use App\Models\User;
+use App\Support\CenterAuditDelivery;
 use App\Support\CenterRecoveryCodes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -38,7 +39,7 @@ class CenterAuthController extends Controller
         ]);
         $center = $request->attributes->get('center');
 
-        DB::connection('central')->transaction(function () use ($token, $data, $center): void {
+        $auditId = DB::connection('central')->transaction(function () use ($token, $data, $center): int {
             $invitation = CenterInvitation::where('tenant_id', $center->id)
                 ->where('token_hash', hash('sha256', $token))
                 ->lockForUpdate()
@@ -68,22 +69,21 @@ class CenterAuthController extends Controller
                 ['status' => 'active'],
             );
 
-            if ($invitation->center_role) {
-                DB::connection('tenant')->table('center_grants')->updateOrInsert(
-                    ['user_id' => $user->id, 'role' => $invitation->center_role],
-                    ['created_at' => now(), 'updated_at' => now()],
-                );
-            }
+            DB::connection('tenant')->transaction(function () use ($invitation, $user): void {
+                if ($invitation->center_role) {
+                    DB::connection('tenant')->table('center_grants')->updateOrInsert(
+                        ['user_id' => $user->id, 'role' => $invitation->center_role],
+                        ['created_at' => now(), 'updated_at' => now()],
+                    );
+                }
+            });
 
             $invitation->update(['accepted_at' => now()]);
 
-            DB::connection('tenant')->table('center_audit_logs')->insert([
-                'actor_id' => $user->id,
-                'event' => 'invitation.accepted',
-                'details' => json_encode(['email' => $invitation->email]),
-                'created_at' => now(),
-            ]);
+            return CenterAuditDelivery::record($center->id, $user->id,
+                'invitation.accepted', ['email' => $invitation->email]);
         });
+        CenterAuditDelivery::tryDeliver($auditId);
 
         return response()->json(['status' => 'accepted']);
     }

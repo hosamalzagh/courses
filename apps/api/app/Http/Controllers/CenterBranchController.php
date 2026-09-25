@@ -31,8 +31,12 @@ class CenterBranchController extends Controller
             'slug' => ['required', 'regex:/^[a-z][a-z0-9-]{1,62}$/', 'unique:tenant.branches,slug'],
             'address' => ['nullable', 'string', 'max:2000'],
         ]);
-        $branch = Branch::create($data);
-        $this->audit($request, $branch, 'branch.created', $data);
+        $branch = DB::connection('tenant')->transaction(function () use ($request, $data): Branch {
+            $branch = Branch::create($data);
+            $this->audit($request, $branch, 'branch.created', $data);
+
+            return $branch;
+        });
 
         return response()->json(['branch' => $branch], 201);
     }
@@ -54,8 +58,10 @@ class CenterBranchController extends Controller
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'address' => ['sometimes', 'nullable', 'string', 'max:2000'],
         ]);
-        $branch->update($data);
-        $this->audit($request, $branch, 'branch.updated', $data);
+        DB::connection('tenant')->transaction(function () use ($request, $branch, $data): void {
+            $branch->update($data);
+            $this->audit($request, $branch, 'branch.updated', $data);
+        });
 
         return response()->json(['branch' => $branch]);
     }

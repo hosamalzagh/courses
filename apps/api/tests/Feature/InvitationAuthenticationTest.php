@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use App\Mail\CenterInvitationMail;
+use App\Models\Center;
 use App\Models\User;
 use Illuminate\Auth\Notifications\ResetPassword as ResetPasswordNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Routing\Middleware\ThrottleRequests;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification;
@@ -41,6 +43,12 @@ class InvitationAuthenticationTest extends TestCase
             'password_confirmation' => 'correct-horse-battery-staple',
         ])->assertOk();
         $this->assertTrue(User::where('email', 'owner@alpha.test')->firstOrFail()->hasVerifiedEmail());
+        $center = Center::where('slug', 'alpha')->firstOrFail();
+        $acceptedAudit = DB::connection('central')->table('center_audit_outbox')
+            ->where('tenant_id', $center->id)->where('event', 'invitation.accepted')->first();
+        $this->assertNotNull($acceptedAudit?->delivered_at);
+        $this->assertSame(1, $center->run(fn () => DB::table('center_audit_logs')
+            ->where('source_event_id', $acceptedAudit->id)->count()));
         $this->postJson("http://alpha.courses.test/api/v1/center/invitations/{$token}", [
             'name' => 'First Owner', 'password' => 'correct-horse-battery-staple',
             'password_confirmation' => 'correct-horse-battery-staple',

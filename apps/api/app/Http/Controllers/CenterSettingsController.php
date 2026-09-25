@@ -27,13 +27,15 @@ class CenterSettingsController extends Controller
             'phone' => ['nullable', 'string', 'max:50'],
             'address' => ['nullable', 'string', 'max:2000'],
         ]);
-        DB::connection('tenant')->table('center_settings')->updateOrInsert(
-            ['id' => 1], [...$data, 'updated_at' => now(), 'created_at' => now()],
-        );
-        DB::connection('tenant')->table('center_audit_logs')->insert([
-            'actor_id' => $request->user()->id, 'event' => 'center.settings_updated',
-            'details' => json_encode(array_keys($data)), 'created_at' => now(),
-        ]);
+        DB::connection('tenant')->transaction(function () use ($request, $data): void {
+            DB::connection('tenant')->table('center_settings')->updateOrInsert(
+                ['id' => 1], [...$data, 'updated_at' => now(), 'created_at' => now()],
+            );
+            DB::connection('tenant')->table('center_audit_logs')->insert([
+                'actor_id' => $request->user()->id, 'event' => 'center.settings_updated',
+                'details' => json_encode(array_keys($data)), 'created_at' => now(),
+            ]);
+        });
 
         return $this->show($request);
     }

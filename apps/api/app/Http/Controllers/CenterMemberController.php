@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Mail\CenterInvitationMail;
 use App\Models\CenterInvitation;
 use App\Models\CenterMembership;
+use App\Support\CenterAuditDelivery;
 use App\Support\CenterPermissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,6 +13,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use RuntimeException;
+use Throwable;
 
 class CenterMemberController extends Controller
 {
@@ -129,12 +132,18 @@ class CenterMemberController extends Controller
             ->where('status', 'active')->exists(), 409);
 
         $token = Str::random(64);
-        $invitation = CenterInvitation::query()->updateOrCreate(
-            ['tenant_id' => $center->id, 'email' => $email],
-            ['token_hash' => hash('sha256', $token), 'token_ciphertext' => $token,
-                'center_role' => $data['center_role'] ?? null, 'expires_at' => now()->addDays(7), 'accepted_at' => null],
-        );
-        $this->audit($request, 'member.invited', ['email' => $email, 'center_role' => $invitation->center_role]);
+        [$invitation, $auditId] = DB::connection('central')->transaction(function () use ($request, $center, $email, $data, $token): array {
+            $invitation = CenterInvitation::query()->updateOrCreate(
+                ['tenant_id' => $center->id, 'email' => $email],
+                ['token_hash' => hash('sha256', $token), 'token_ciphertext' => $token,
+                    'center_role' => $data['center_role'] ?? null, 'expires_at' => now()->addDays(7), 'accepted_at' => null],
+            );
+            $auditId = CenterAuditDelivery::record($center->id, $request->user()->id,
+                'member.invited', ['email' => $email, 'center_role' => $invitation->center_role]);
+
+            return [$invitation, $auditId];
+        });
+        CenterAuditDelivery::tryDeliver($auditId);
         Mail::to($email)->send(new CenterInvitationMail($center->name, 'http://'.$request->getHost().'/invitations/'.$token));
 
         return response()->json(['invitation' => $invitation->only(['id', 'email', 'center_role', 'expires_at'])], 201);
@@ -145,22 +154,26 @@ class CenterMemberController extends Controller
         $this->requireManager($request);
         $this->assertSameCenter($request, $membership);
         $data = $request->validate(['status' => ['required', Rule::in(['active', 'suspended'])]]);
-        DB::connection('central')->transaction(function () use ($membership, $data): void {
+        $auditId = DB::connection('central')->transaction(function () use ($membership, $data, $request): int {
             $this->lockCenter($membership);
+            $this->assertCurrentManager($request);
             $membership->refresh();
             if ($data['status'] === 'suspended') {
                 $this->protectLastOwner($membership);
             }
             $membership->update(['status' => $data['status']]);
+
+            return CenterAuditDelivery::record($membership->tenant_id, $request->user()->id,
+                'member.status_changed', ['user_id' => $membership->user_id, 'status' => $data['status']]);
         });
-        $this->audit($request, 'member.status_changed', ['user_id' => $membership->user_id, 'status' => $data['status']]);
+        CenterAuditDelivery::tryDeliver($auditId);
 
         return response()->json(['status' => $membership->status]);
     }
 
     public function updateGrants(Request $request, CenterMembership $membership): JsonResponse
     {
-        $permissions = $this->requireManager($request);
+        $this->requireManager($request);
         $this->assertSameCenter($request, $membership);
         $data = $request->validate([
             'center_roles' => ['present', 'array'],
@@ -169,48 +182,73 @@ class CenterMemberController extends Controller
             'branch_roles.*' => ['array'],
             'branch_roles.*.*' => [Rule::in(['branch_manager', 'branch_viewer', 'branch_auditor'])],
         ]);
-        // Commit the central version before the tenant transaction commits. A failed
-        // tenant commit may leave a version ahead, which is safe; grants must never
-        // commit while their central version remains stale.
-        DB::connection('tenant')->transaction(function () use ($membership, $data, $permissions, $request): void {
-            DB::connection('central')->transaction(function () use ($membership, $data, $permissions, $request): void {
+        // Keep the center row locked until the tenant grants commit. Otherwise two
+        // owners can concurrently remove themselves after each sees the other.
+        $tenantCommitted = false;
+        try {
+            DB::connection('central')->transaction(function () use ($membership, $data, $request, &$tenantCommitted): void {
                 $this->lockCenter($membership);
-                $membership->refresh();
-                $centerRoles = array_values(array_unique($data['center_roles']));
-                $targetIsOwner = DB::connection('tenant')->table('center_grants')
-                    ->where('user_id', $membership->user_id)->where('role', 'center_owner')->exists();
-                abort_if($targetIsOwner && ! $permissions->isOwner(), 403);
-                abort_if(in_array('center_owner', $centerRoles, true) && ! $permissions->isOwner(), 403);
-                if (! in_array('center_owner', $centerRoles, true)) {
-                    $this->protectLastOwner($membership);
-                }
+                $permissions = $this->assertCurrentManager($request);
+                DB::connection('tenant')->transaction(function () use ($membership, $data, $permissions, $request): void {
+                    $membership->refresh();
+                    $centerRoles = array_values(array_unique($data['center_roles']));
+                    $targetIsOwner = DB::connection('tenant')->table('center_grants')
+                        ->where('user_id', $membership->user_id)->where('role', 'center_owner')->exists();
+                    abort_if($targetIsOwner && ! $permissions->isOwner(), 403);
+                    abort_if(in_array('center_owner', $centerRoles, true) && ! $permissions->isOwner(), 403);
+                    if (! in_array('center_owner', $centerRoles, true)) {
+                        $this->protectLastOwner($membership);
+                    }
 
-                $branchIds = array_map('intval', array_keys($data['branch_roles']));
-                $validIds = DB::connection('tenant')->table('branches')->whereIn('id', $branchIds)->pluck('id')->all();
-                abort_unless(count($validIds) === count($branchIds), 422);
+                    $branchIds = array_map('intval', array_keys($data['branch_roles']));
+                    $validIds = DB::connection('tenant')->table('branches')->whereIn('id', $branchIds)->pluck('id')->all();
+                    abort_unless(count($validIds) === count($branchIds), 422);
 
-                DB::connection('tenant')->table('center_grants')->where('user_id', $membership->user_id)->delete();
-                DB::connection('tenant')->table('branch_grants')->where('user_id', $membership->user_id)->delete();
-                foreach ($centerRoles as $role) {
-                    DB::connection('tenant')->table('center_grants')->insert([
-                        'user_id' => $membership->user_id, 'role' => $role,
-                        'created_at' => now(), 'updated_at' => now(),
-                    ]);
-                }
-                foreach ($data['branch_roles'] as $branchId => $roles) {
-                    foreach (array_unique($roles) as $role) {
-                        DB::connection('tenant')->table('branch_grants')->insert([
-                            'user_id' => $membership->user_id, 'branch_id' => (int) $branchId, 'role' => $role,
+                    DB::connection('tenant')->table('center_grants')->where('user_id', $membership->user_id)->delete();
+                    DB::connection('tenant')->table('branch_grants')->where('user_id', $membership->user_id)->delete();
+                    foreach ($centerRoles as $role) {
+                        DB::connection('tenant')->table('center_grants')->insert([
+                            'user_id' => $membership->user_id, 'role' => $role,
                             'created_at' => now(), 'updated_at' => now(),
                         ]);
                     }
-                }
-                $this->audit($request, 'member.grants_changed', [
-                    'user_id' => $membership->user_id, 'center_roles' => $centerRoles, 'branch_roles' => $data['branch_roles'],
-                ]);
-                $membership->increment('grants_version');
+                    foreach ($data['branch_roles'] as $branchId => $roles) {
+                        foreach (array_unique($roles) as $role) {
+                            DB::connection('tenant')->table('branch_grants')->insert([
+                                'user_id' => $membership->user_id, 'branch_id' => (int) $branchId, 'role' => $role,
+                                'created_at' => now(), 'updated_at' => now(),
+                            ]);
+                        }
+                    }
+                    $this->audit($request, 'member.grants_changed', [
+                        'user_id' => $membership->user_id, 'center_roles' => $centerRoles, 'branch_roles' => $data['branch_roles'],
+                    ]);
+                    $membership->increment('grants_version');
+                });
+                $tenantCommitted = true;
             });
-        });
+        } catch (Throwable $exception) {
+            if ($tenantCommitted) {
+                // The tenant commit may have succeeded while the central commit failed.
+                // Authorization reads tenant grants directly; retry version invalidation.
+                report($exception);
+                try {
+                    DB::purge('central');
+                    CenterMembership::query()->whereKey($membership->id)->increment('grants_version');
+                    $membership->refresh();
+
+                    return response()->json(['grants_version' => $membership->grants_version]);
+                } catch (Throwable $recoveryFailure) {
+                    $slug = $request->attributes->get('center')->slug;
+                    report(new RuntimeException(
+                        "Grant version recovery is pending for center {$slug}. After central recovery run: courses:reconcile-grants {$slug} --apply --invalidate-versions",
+                        0,
+                        $recoveryFailure,
+                    ));
+                }
+            }
+            throw $exception;
+        }
 
         return response()->json(['grants_version' => $membership->grants_version]);
     }
@@ -218,6 +256,17 @@ class CenterMemberController extends Controller
     private function requireManager(Request $request): CenterPermissions
     {
         $permissions = $request->attributes->get('center_permissions');
+        abort_unless($permissions->isCenterManager(), 403);
+
+        return $permissions;
+    }
+
+    private function assertCurrentManager(Request $request): CenterPermissions
+    {
+        $center = $request->attributes->get('center');
+        abort_unless(CenterMembership::query()->where('tenant_id', $center->id)
+            ->where('user_id', $request->user()->id)->where('status', 'active')->exists(), 403);
+        $permissions = CenterPermissions::forUser($request->user()->id);
         abort_unless($permissions->isCenterManager(), 403);
 
         return $permissions;

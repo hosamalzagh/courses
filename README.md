@@ -54,6 +54,8 @@ cd apps/api
 
 The LaunchAgents start the built Next.js UI, the Redis worker for provisioning, and `schedule:run` after Mac login. Rebuild `apps/web` and rerun `install-web-launch-agent.py` after UI changes. Herd remains responsible for PHP-FPM and Nginx. The routing script backs up Herd's original `courses.test` Nginx file before editing and checks Nginx syntax before restart.
 
+After pulling code changes into an existing local installation, run `php85 artisan migrate --database=central --force` and `php85 artisan tenants:migrate --force` before testing center writes. The scheduler retries center audit entries that could not be delivered during a temporary center database outage; `php85 artisan courses:deliver-center-audit` runs the same retry on demand.
+
 ## Verify and maintain
 
 ```bash
@@ -71,7 +73,7 @@ npm run test:browser
 
 An unauthenticated center `user` response is `401`. Unknown or retired center hosts return `404` from the API. Suspended centers return `423` before center data is read. The tests use `courses_test_central`, temporary center databases, and Redis. Never point the test environment at `courses_central`.
 
-The browser suite runs against the local Herd, Next.js, and Mailpit services with the accepted alpha/beta demo invitations and the ignored local credential files. It verifies the two hosts, CSRF, inline validation, a nonblocking confirmation, cache isolation, and a Mailpit password reset. The reset test updates the ignored staff credential file to the new password so the suite can run again. See `docs/local-acceptance.md` for the one-time provisioning and suspended-center browser checks.
+The browser suite runs against the local Herd, Next.js, and Mailpit services after `courses:bootstrap-local`. On a fresh install it accepts the alpha/beta invitations from Mailpit, creates sample branches, invites a staff account, and stores passwords only in ignored mode-0600 local credential files. It then verifies the two hosts, CSRF, inline validation, a nonblocking confirmation, cache isolation, and a Mailpit password reset. The reset test updates the ignored staff credential file to the new password so the suite can run again. If you reset the local databases, remove the three ignored `local-{alpha,beta,staff}-credentials.txt` files before running bootstrap and the browser suite again. If a sample invitation was already used but its credential file was removed, restore that password or reset the local sample databases. For a sample account with MFA enabled, disable it from **أمان الحساب** using its authenticator before running the automated suite. See `docs/local-acceptance.md` for the manual provisioning and suspended-center browser checks.
 
 To migrate all centers, run `php85 artisan tenants:migrate --force --no-interaction`; to migrate one, add `--tenants=<center UUID>`. The worker uses queue `platform` for provisioning. Telescope is available only locally at `/telescope` to platform owners; authentication, invitation, MFA, and credential-producing jobs are excluded from recording, and mail, event, and Redis watchers are disabled to avoid retaining secrets. It still records ordinary page reads and their queries. The scheduler prunes entries older than 48 hours.
 
@@ -83,8 +85,9 @@ Back up and restore one local center with:
 php85 artisan courses:backup alpha
 php85 artisan courses:restore alpha storage/app/private/backups/alpha-<uuid>-<timestamp>.dump --confirm=alpha
 php85 artisan courses:reconcile-grants alpha --apply
+php85 artisan courses:reconcile-grants alpha --apply --invalidate-versions # after a rare central commit failure
 ```
 
-Restore accepts only a backup file whose name contains that center's exact UUID. It restores that center's database, then removes grants without active central membership and repairs the first accepted owner's role if necessary. The central database and other center databases are untouched. These commands are restricted to local/testing environments.
+Restore accepts only a backup file whose name contains that center's exact UUID. It restores that center's database, reapplies current center migrations, removes grants without active central membership, repairs the first accepted owner's role if necessary, and replays centrally recorded audit entries missing from the snapshot. The central database and other center databases are untouched. These commands are restricted to local/testing environments.
 
 See [permission matrix](docs/permissions.md) and [query measurements](docs/query-budget.md). The domain vocabulary and data boundaries are in [CONTEXT.md](CONTEXT.md) and `docs/adr/`.

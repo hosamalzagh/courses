@@ -5,8 +5,10 @@ namespace Tests\Feature;
 use App\Models\Center;
 use App\Models\CenterMembership;
 use App\Models\User;
+use App\Support\CenterAuditDelivery;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use RuntimeException;
@@ -100,5 +102,64 @@ class CenterMemberManagementTest extends TestCase
         $this->actingAs($staff)->withSession(['center_id' => $alpha->id]);
         $this->patchJson("http://alpha.courses.test/api/v1/center/branches/{$branchId}", ['name' => 'Allowed'])->assertOk();
         $this->assertSame(0, $beta->run(fn () => DB::table('branch_grants')->count()));
+
+        $failAuditInsert = false;
+        DB::connection('central')->listen(function (QueryExecuted $query) use (&$failAuditInsert): void {
+            if ($failAuditInsert && $query->connectionName === 'tenant'
+                && str_contains(strtolower($query->sql), 'insert into "center_audit_logs"')) {
+                $failAuditInsert = false;
+                throw new RuntimeException('Simulated tenant audit failure');
+            }
+        });
+        $this->actingAs($owner)->withSession(['center_id' => $alpha->id]);
+        $failAuditInsert = true;
+        $this->postJson('http://alpha.courses.test/api/v1/center/branches', [
+            'name' => 'Not Created', 'slug' => 'not-created',
+        ])->assertStatus(500);
+        $this->assertSame(0, $alpha->run(fn () => DB::table('branches')->where('slug', 'not-created')->count()));
+
+        $failAuditInsert = true;
+        $this->patchJson("http://alpha.courses.test/api/v1/center/branches/{$branchId}", ['name' => 'Not Saved'])
+            ->assertStatus(500);
+        $this->assertSame('Allowed', $alpha->run(fn () => DB::table('branches')->where('id', $branchId)->value('name')));
+
+        $failAuditInsert = true;
+        $this->patchJson('http://alpha.courses.test/api/v1/center/settings', ['phone' => 'not-saved'])
+            ->assertStatus(500);
+        $this->assertNull($alpha->run(fn () => DB::table('center_settings')->where('id', 1)->value('phone')));
+
+        $failAuditInsert = true;
+        $this->patchJson("http://alpha.courses.test/api/v1/center/members/{$staffMembership->id}/status", [
+            'status' => 'suspended',
+        ])->assertOk();
+        $this->assertSame('suspended', $staffMembership->fresh()->status);
+        $pending = DB::connection('central')->table('center_audit_outbox')
+            ->where('tenant_id', $alpha->id)->where('event', 'member.status_changed')
+            ->whereNull('delivered_at')->first();
+        $this->assertNotNull($pending);
+        $this->assertSame(0, $alpha->run(fn () => DB::table('center_audit_logs')
+            ->where('source_event_id', $pending->id)->count()));
+        $betaAuditId = CenterAuditDelivery::record($beta->id, $owner->id, 'test.beta', []);
+        $failAuditInsert = true;
+        $this->assertSame(1, Artisan::call('courses:deliver-center-audit'));
+        $this->assertNull(tenant());
+        $this->assertSame(1, $beta->run(fn () => DB::table('center_audit_logs')
+            ->where('source_event_id', $betaAuditId)->count()));
+        $this->assertNotNull(DB::connection('central')->table('center_audit_outbox')
+            ->where('id', $pending->id)->value('next_attempt_at'));
+        DB::connection('central')->table('center_audit_outbox')->where('id', $pending->id)
+            ->update(['next_attempt_at' => now()->subMinute()]);
+        $this->assertSame(0, Artisan::call('courses:deliver-center-audit'));
+        $this->assertSame(1, $alpha->run(fn () => DB::table('center_audit_logs')
+            ->where('source_event_id', $pending->id)->count()));
+        $this->assertSame(0, Artisan::call('courses:deliver-center-audit'));
+        $this->assertSame(1, $alpha->run(fn () => DB::table('center_audit_logs')
+            ->where('source_event_id', $pending->id)->count()));
+
+        $versionBeforeReconcile = $staffMembership->fresh()->grants_version;
+        $this->assertSame(0, Artisan::call('courses:reconcile-grants', [
+            'slug' => 'alpha', '--apply' => true, '--invalidate-versions' => true,
+        ]));
+        $this->assertGreaterThan($versionBeforeReconcile, $staffMembership->fresh()->grants_version);
     }
 }

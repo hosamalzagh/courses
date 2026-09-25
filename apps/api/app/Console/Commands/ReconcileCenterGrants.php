@@ -11,7 +11,7 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
-#[Signature('courses:reconcile-grants {slug} {--apply} {--retain-owner=*}')]
+#[Signature('courses:reconcile-grants {slug} {--apply} {--retain-owner=*} {--invalidate-versions}')]
 #[Description('Find or remove tenant grants without active central membership')]
 class ReconcileCenterGrants extends Command
 {
@@ -51,6 +51,13 @@ class ReconcileCenterGrants extends Command
             return [$centerGrants, $branchGrants, count($restoreOwnerIds)];
         });
         $this->info("Orphan center grants: {$result[0]}; branch grants: {$result[1]}; owners to restore: {$result[2]}");
+        if ($this->option('apply') && $this->option('invalidate-versions')) {
+            DB::connection('central')->transaction(function () use ($center): void {
+                DB::connection('central')->table('tenants')->where('id', $center->id)->lockForUpdate()->first(['id']);
+                CenterMembership::query()->where('tenant_id', $center->id)->increment('grants_version');
+            });
+            $this->info('Invalidated central grant versions for this center.');
+        }
 
         return self::SUCCESS;
     }

@@ -4,8 +4,10 @@ namespace Tests\Feature;
 
 use App\Models\Center;
 use App\Models\User;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 use Tests\Concerns\CleansCenterDatabases;
 use Tests\TestCase;
 
@@ -101,5 +103,36 @@ class CenterProvisioningTest extends TestCase
             'plan' => 'starter', 'owner_email' => 'owner@denied.test',
         ])->assertForbidden();
         $this->getJson('http://alpha.courses.test/api/v1/center/user')->assertUnauthorized();
+    }
+
+    public function test_center_changes_roll_back_when_their_platform_audit_cannot_be_written(): void
+    {
+        $owner = User::factory()->create(['platform_role' => 'platform_owner']);
+        $this->actingAs($owner)->postJson('http://courses.test/api/v1/platform/centers', [
+            'name' => 'Alpha Center', 'slug' => 'alpha', 'subdomain' => 'alpha',
+            'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
+        ])->assertCreated();
+        $center = Center::where('slug', 'alpha')->firstOrFail();
+
+        $failAuditInsert = false;
+        DB::connection('central')->listen(function (QueryExecuted $query) use (&$failAuditInsert): void {
+            if ($failAuditInsert && $query->connectionName === 'central'
+                && str_contains(strtolower($query->sql), 'insert into "platform_audit_logs"')) {
+                $failAuditInsert = false;
+                throw new RuntimeException('Simulated platform audit failure');
+            }
+        });
+        $failAuditInsert = true;
+        $this->patchJson("http://courses.test/api/v1/platform/centers/{$center->id}", [
+            'name' => 'Not Saved', 'suspended' => true,
+        ])->assertStatus(500);
+        $this->assertSame('Alpha Center', $center->fresh()->name);
+        $this->assertFalse($center->fresh()->suspended);
+
+        $failAuditInsert = true;
+        $this->putJson("http://courses.test/api/v1/platform/centers/{$center->id}/domain", [
+            'subdomain' => 'not-saved',
+        ])->assertStatus(500);
+        $this->assertSame('alpha.courses.test', $center->domains()->firstOrFail()->domain);
     }
 }

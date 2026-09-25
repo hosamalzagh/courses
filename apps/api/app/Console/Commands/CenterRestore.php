@@ -3,11 +3,13 @@
 namespace App\Console\Commands;
 
 use App\Models\Center;
+use App\Support\CenterAuditDelivery;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 use Symfony\Component\Process\Process;
 
 #[Signature('courses:restore {slug} {file} {--confirm=}')]
@@ -44,9 +46,16 @@ class CenterRestore extends Command
             '--username='.$connection['username'], '--dbname='.$center->database()->getName(), $file,
         ], null, ['PGPASSWORD' => $connection['password']]);
         $process->mustRun();
-        Artisan::call('courses:reconcile-grants', [
+        if (Artisan::call('tenants:migrate', ['--tenants' => [$center->id], '--force' => true]) !== 0) {
+            throw new RuntimeException('Restored center migrations failed.');
+        }
+        if (Artisan::call('courses:reconcile-grants', [
             'slug' => $center->slug, '--apply' => true, '--retain-owner' => $currentOwnerIds,
-        ]);
+            '--invalidate-versions' => true,
+        ]) !== 0) {
+            throw new RuntimeException('Restored center grant reconciliation failed.');
+        }
+        CenterAuditDelivery::replayForCenter($center->id);
         $this->info('Restored '.$center->slug.' and reconciled its grants.');
 
         return self::SUCCESS;
