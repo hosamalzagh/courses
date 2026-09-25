@@ -1,0 +1,3 @@
+[mcp_servers.laravel-boost]
+command = "herd"
+args = ["php", "artisan", "boost:mcp"]

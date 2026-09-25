@@ -1,0 +1,117 @@
+:root {
+  --ink: #17313d;
+  --body: #38545c;
+  --teal: #126d7e;
+  --teal-soft: #e2f0f1;
+  --paper: #f7f9f7;
+  --surface: #ffffff;
+  --border: #d7e2e2;
+  --amber: #a96b22;
+  --danger: #a33131;
+}
+
+* { box-sizing: border-box; }
+html { min-height: 100%; scrollbar-gutter: stable; scrollbar-color: #8aa5aa var(--paper); scrollbar-width: thin; }
+body { min-height: 100vh; margin: 0; background: var(--paper); color: var(--ink); font: 400 1rem/1.7 "IBM Plex Sans Arabic", Arial, sans-serif; }
+button, input, textarea { font: inherit; }
+button { cursor: pointer; }
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--teal); outline-offset: 3px; }
+::selection { background: var(--teal-soft); }
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-thumb { background: #8aa5aa; border: 2px solid var(--paper); border-radius: 10px; }
+::-webkit-scrollbar-track { background: var(--paper); }
+
+.auth-shell { min-height: 100vh; display: grid; grid-template-columns: minmax(280px, 0.8fr) minmax(360px, 1.2fr); }
+.auth-intro { background: var(--ink); color: #f4f9f7; padding: clamp(2rem, 5vw, 5rem); display: flex; flex-direction: column; justify-content: space-between; }
+.brand { display: inline-flex; align-items: center; gap: 0.75rem; font-weight: 600; font-size: 1.15rem; text-decoration: none; }
+.brand-mark { width: 2.25rem; height: 2.25rem; border-radius: 0.6rem; background: var(--teal-soft); color: var(--teal); display: grid; place-items: center; font-family: "IBM Plex Sans", sans-serif; font-size: 1.1rem; }
+.auth-intro h2 { font-size: clamp(2rem, 3.5vw, 3.3rem); line-height: 1.25; margin: 2rem 0 1rem; max-width: 12ch; }
+.auth-intro p { color: #c9dcdd; max-width: 32ch; }
+.auth-intro small { color: #a8c0c4; }
+.auth-main { display: flex; align-items: center; justify-content: center; padding: clamp(1.5rem, 5vw, 5rem); }
+.auth-card { width: min(100%, 27rem); }
+.eyebrow { color: var(--teal); font-family: "IBM Plex Sans", sans-serif; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; }
+h1, h2, h3, p { overflow-wrap: anywhere; }
+h1 { font-size: clamp(1.9rem, 3vw, 2.7rem); line-height: 1.3; margin: 0.5rem 0 0.7rem; font-weight: 600; }
+h2 { line-height: 1.35; }
+.muted { color: var(--body); }
+.form-stack { display: grid; gap: 1.25rem; margin-top: 2rem; }
+.field { display: grid; gap: 0.4rem; }
+.field label { font-weight: 600; font-size: 0.94rem; }
+.field input, .field textarea { width: 100%; min-height: 3rem; padding: 0.7rem 0.9rem; background: var(--surface); color: var(--ink); border: 1px solid #9db4b8; border-radius: 0.5rem; }
+.field textarea { min-height: 6rem; resize: vertical; }
+.field input[dir="ltr"] { text-align: left; }
+.field input[aria-invalid="true"] { border-color: var(--danger); }
+.field-hint { font-size: 0.85rem; color: var(--body); }
+.field-error { color: var(--danger); font-size: 0.85rem; }
+.button { min-height: 3rem; padding: 0.6rem 1.2rem; border-radius: 0.5rem; border: 1px solid transparent; font-weight: 600; display: inline-flex; justify-content: center; align-items: center; gap: 0.4rem; text-decoration: none; white-space: nowrap; }
+.button-primary { background: var(--teal); color: #fff; }
+.button-primary:hover:not(:disabled) { background: #0d5664; }
+.button-secondary { background: var(--surface); color: var(--ink); border-color: var(--border); }
+.button-secondary:hover:not(:disabled) { background: var(--teal-soft); }
+.button:disabled { opacity: 0.55; cursor: not-allowed; }
+.text-link { color: var(--teal); font-weight: 600; text-underline-offset: 0.25rem; }
+.notice { border: 1px solid var(--border); border-inline-start: 4px solid var(--teal); background: var(--teal-soft); padding: 0.8rem 1rem; border-radius: 0.5rem; color: var(--ink); }
+.notice-error { border-inline-start-color: var(--danger); background: #fff1f0; }
+.notice-warning { border-inline-start-color: var(--amber); background: #fff7e9; }
+.auth-footnote { margin-top: 2rem; font-size: 0.9rem; color: var(--body); }
+.mfa-secret { direction: ltr; text-align: center; font-family: "IBM Plex Sans", monospace; letter-spacing: 0.13em; padding: 0.7rem; background: var(--surface); border: 1px solid var(--border); border-radius: 0.5rem; overflow-wrap: anywhere; }
+.qr-wrap { width: fit-content; margin: 1.25rem auto; padding: 1rem; background: #fff; border-radius: 0.75rem; border: 1px solid var(--border); }
+
+.workspace { min-height: 100vh; }
+.workspace-header { background: var(--surface); border-bottom: 1px solid var(--border); }
+.workspace-header-inner { max-width: 72rem; margin: auto; padding: 1rem 1.5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.workspace-header-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.workspace-main { max-width: 72rem; margin: auto; padding: clamp(1.5rem, 4vw, 3rem) 1.5rem 5rem; display: grid; grid-template-columns: minmax(0, 1fr) 18rem; gap: clamp(1.5rem, 4vw, 3.5rem); }
+.page-heading { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+.page-heading p { margin: 0; }
+.section-heading { margin: 2rem 0 1rem; font-size: 1.25rem; }
+.branch-list { position: relative; display: grid; gap: 1rem; padding-inline-start: 1.75rem; }
+.branch-list::before { content: ""; position: absolute; inset-block: 0.7rem; inset-inline-start: 0.45rem; width: 2px; background: var(--teal); opacity: 0.28; }
+.branch-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.25rem; }
+.branch-card::before { content: ""; position: absolute; inset-inline-start: -1.73rem; top: 1.55rem; width: 0.75rem; height: 0.75rem; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 4px var(--paper); }
+.branch-card h3 { margin: 0; font-size: 1.1rem; }
+.branch-card p { margin: 0.35rem 0 0; color: var(--body); }
+.branch-card-actions { display: flex; gap: 0.7rem; flex-wrap: wrap; margin-top: 1rem; }
+.context-card { background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.3rem; height: fit-content; }
+.context-card h2 { font-size: 1.1rem; margin: 0 0 0.8rem; }
+.context-card p { margin: 0.5rem 0; }
+.role-list { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.8rem; }
+.role-pill { border-radius: 2rem; background: var(--teal-soft); color: var(--teal); padding: 0.2rem 0.65rem; font-size: 0.8rem; }
+.edit-panel { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.empty-state { background: var(--surface); border: 1px dashed #a8babc; border-radius: 0.75rem; padding: 2rem; }
+.state-page { min-height: 100vh; display: grid; place-items: center; padding: 2rem; text-align: center; }
+.state-page > div { max-width: 32rem; }
+.members-main { max-width: 62rem; margin: auto; padding: 2rem 1.5rem 5rem; display: grid; gap: 1.5rem; }
+.member-invite-form { display: grid; gap: 1rem; max-width: 28rem; }
+.member-list { display: grid; gap: 0.8rem; }
+.member-card { background: var(--surface); border: 1px solid var(--border); border-radius: 0.7rem; padding: 1.2rem; }
+.member-card h3, .member-card p { margin: 0; }
+.member-card-head, .member-actions { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; flex-wrap: wrap; }
+.member-actions { justify-content: flex-start; margin-top: 0.8rem; }
+.check-row { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; }
+.check-row input { width: 1.1rem; height: 1.1rem; accent-color: var(--teal); }
+.grant-editor { border-top: 1px solid var(--border); margin-top: 1rem; padding-top: 1rem; display: grid; gap: 0.5rem; }
+.grant-editor h4 { margin: 0.8rem 0 0.2rem; }
+.branch-grant { border: 1px solid var(--border); border-radius: 0.5rem; display: flex; flex-wrap: wrap; gap: 1rem; }
+.workspace-links { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+
+@media (max-width: 750px) {
+  .auth-shell { grid-template-columns: 1fr; }
+  .auth-intro { min-height: 12rem; padding: 1.5rem; }
+  .auth-intro h2, .auth-intro small { display: none; }
+  .auth-intro p { margin: 0.5rem 0 0; }
+  .auth-main { align-items: start; }
+  .workspace-main { grid-template-columns: 1fr; }
+  .context-card { grid-row: 1; }
+  .workspace-header-inner { align-items: start; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .button, .branch-card { transition: background-color 150ms ease, border-color 150ms ease; }
+}
+
+@media (forced-colors: active) {
+  .branch-list::before, .branch-card::before { display: none; }
+}

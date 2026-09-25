@@ -1,0 +1,115 @@
+"use client";
+
+import { useState, type FormEvent } from "react";
+import { FormField } from "@/components/FormField";
+import { InlineNotice } from "@/components/InlineNotice";
+import { centerRequest, responseMessage } from "@/lib/client-api";
+import type { Member, MemberContext, Invitation } from "@/lib/server-context";
+
+const branchRoleLabels: Record<string, string> = {
+  branch_manager: "مدير الفرع",
+  branch_viewer: "عرض الفرع",
+  branch_auditor: "تدقيق الفرع",
+};
+
+export function MemberWorkspace({ context }: { context: MemberContext }) {
+  const [members, setMembers] = useState<Member[]>(context.members);
+  const [invitations, setInvitations] = useState<Invitation[]>(context.invitations);
+  const [email, setEmail] = useState("");
+  const [inviteAsAdmin, setInviteAsAdmin] = useState(false);
+  const [editing, setEditing] = useState<number | null>(null);
+  const [centerRoles, setCenterRoles] = useState<string[]>([]);
+  const [branchRoles, setBranchRoles] = useState<Record<string, string[]>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const isOwner = context.permissions.center_roles.includes("center_owner");
+
+  async function reload() {
+    const response = await centerRequest("member-workspace", "GET");
+    if (!response.ok) throw new Error(await responseMessage(response));
+    const data: { members: Member[]; invitations: Invitation[] } = await response.json();
+    setMembers(data.members);
+    setInvitations(data.invitations);
+  }
+
+  async function invite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await centerRequest("members/invitations", "POST", { email, center_role: inviteAsAdmin ? "center_admin" : null });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      setEmail(""); setInviteAsAdmin(false);
+      await reload();
+      setNotice("أُرسلت الدعوة إلى البريد المحدد.");
+    } catch (failure) { setError(failure instanceof Error ? failure.message : "تعذر إرسال الدعوة."); }
+    finally { setBusy(false); }
+  }
+
+  async function changeStatus(member: Member) {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await centerRequest(`members/${member.id}/status`, "PATCH", { status: member.status === "active" ? "suspended" : "active" });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      await reload(); setNotice("حُدّثت حالة العضوية.");
+    } catch (failure) { setError(failure instanceof Error ? failure.message : "تعذر تحديث العضوية."); }
+    finally { setBusy(false); }
+  }
+
+  function edit(member: Member) {
+    setEditing(member.id);
+    setCenterRoles([...member.center_roles]);
+    setBranchRoles(structuredClone(member.branch_roles));
+    setError(""); setNotice("");
+  }
+
+  function toggleCenter(role: string) {
+    setCenterRoles((previous) => previous.includes(role) ? previous.filter((item) => item !== role) : [...previous, role]);
+  }
+
+  function toggleBranch(branchId: number, role: string) {
+    const key = String(branchId);
+    setBranchRoles((previous) => {
+      const roles = previous[key] ?? [];
+      return { ...previous, [key]: roles.includes(role) ? roles.filter((item) => item !== role) : [...roles, role] };
+    });
+  }
+
+  async function saveGrants(member: Member) {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await centerRequest(`members/${member.id}/grants`, "PUT", { center_roles: centerRoles, branch_roles: branchRoles });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      setEditing(null); await reload(); setNotice("حُفظت أدوار الموظف وإسنادات فروعه.");
+    } catch (failure) { setError(failure instanceof Error ? failure.message : "تعذر حفظ الأدوار."); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="workspace">
+    <header className="workspace-header"><div className="workspace-header-inner"><a className="brand" href="/admin"><span className="brand-mark">C</span>Courses</a><a className="text-link" href="/admin">العودة إلى الفروع</a></div></header>
+    <main className="members-main">
+      <div><span className="eyebrow">{context.center.name}</span><h1>موظفو المركز</h1><p className="muted">الدعوات والعضويات وأدوار كل فرع.</p></div>
+      {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+      {notice ? <InlineNotice>{notice}</InlineNotice> : null}
+      <section className="context-card"><h2>دعوة موظف</h2><form className="member-invite-form" onSubmit={invite}>
+        <FormField id="invite-email" label="البريد الإلكتروني" type="email" value={email} onChange={setEmail} direction="ltr" required />
+        {isOwner ? <label className="check-row"><input type="checkbox" checked={inviteAsAdmin} onChange={(event) => setInviteAsAdmin(event.target.checked)} />دعوة بصفة مسؤول مركز</label> : null}
+        <button className="button button-primary" disabled={busy || !email}>إرسال الدعوة</button>
+      </form></section>
+      {invitations.length > 0 ? <section><h2 className="section-heading">دعوات بانتظار القبول</h2><div className="member-list">{invitations.map((invitation) => <div className="member-card" key={invitation.id}><bdi dir="ltr">{invitation.email}</bdi><span className="muted">تنتهي {new Date(invitation.expires_at).toLocaleDateString("ar-EG")}</span></div>)}</div></section> : null}
+      <section><h2 className="section-heading">العضويات</h2>
+        <div className="member-list">{members.map((member) => <article className="member-card" key={member.id}>
+          <div className="member-card-head"><div><h3>{member.user.name}</h3><p className="muted"><bdi dir="ltr">{member.user.email}</bdi></p></div><span className="role-pill">{member.status === "active" ? "نشط" : "موقوف"}</span></div>
+          <p className="muted">{member.center_roles.includes("center_owner") ? "مالك المركز" : member.center_roles.includes("center_admin") ? "مسؤول المركز" : "موظف المركز"}</p>
+          <div className="member-actions"><button className="button button-secondary" type="button" onClick={() => edit(member)}>تعديل الأدوار</button><button className="button button-secondary" type="button" onClick={() => changeStatus(member)} disabled={busy || (member.user.id === context.user.id && member.center_roles.includes("center_owner"))}>{member.status === "active" ? "إيقاف العضوية" : "تنشيط العضوية"}</button></div>
+          {editing === member.id ? <div className="grant-editor"><h4>أدوار المركز</h4>
+            {isOwner ? <label className="check-row"><input type="checkbox" checked={centerRoles.includes("center_owner")} onChange={() => toggleCenter("center_owner")} />مالك المركز</label> : null}
+            <label className="check-row"><input type="checkbox" checked={centerRoles.includes("center_admin")} onChange={() => toggleCenter("center_admin")} />مسؤول المركز</label>
+            <h4>إسنادات الفروع</h4>{context.branches.map((branch) => <fieldset key={branch.id} className="branch-grant"><legend>{branch.name}</legend>{Object.entries(branchRoleLabels).map(([role, label]) => <label className="check-row" key={role}><input type="checkbox" checked={(branchRoles[String(branch.id)] ?? []).includes(role)} onChange={() => toggleBranch(branch.id, role)} />{label}</label>)}</fieldset>)}
+            <div className="member-actions"><button className="button button-primary" type="button" onClick={() => saveGrants(member)} disabled={busy}>حفظ الأدوار</button><button className="button button-secondary" type="button" onClick={() => setEditing(null)}>إلغاء</button></div>
+          </div> : null}
+        </article>)}</div>
+      </section>
+    </main>
+  </div>;
+}
