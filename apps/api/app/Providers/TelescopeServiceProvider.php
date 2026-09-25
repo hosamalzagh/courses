@@ -29,6 +29,29 @@ class TelescopeServiceProvider extends TelescopeApplicationServiceProvider
                    $entry->isScheduledTask() ||
                    $entry->hasMonitoredTag();
         });
+
+        Telescope::filterBatch(function (): bool {
+            if (app()->runningInConsole()) {
+                return false;
+            }
+
+            $request = request();
+            if ($request->is(
+                'livewire/*',
+                'admin/login',
+                'api/v1/center/invitations/*',
+                'api/v1/center/auth/*',
+                'api/v1/center/security/*',
+            )) {
+                return false;
+            }
+
+            return ! ($request->isMethod('POST') && $request->is(
+                'api/v1/platform/centers',
+                'api/v1/platform/centers/*/retry',
+                'api/v1/center/members/invitations',
+            ));
+        });
     }
 
     /**

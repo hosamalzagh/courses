@@ -9,16 +9,19 @@ use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
 
-#[Signature('courses:bootstrap-local {--email=admin@courses.test}')]
+#[Signature('courses:bootstrap-local {--email=admin@courses.test} {--without-centers}')]
 #[Description('Create a local platform owner and two isolated demonstration centers')]
 class BootstrapLocalDemo extends Command
 {
     public function handle(): int
     {
-        if (! app()->environment('local') || config('database.connections.central.database') !== 'courses_central') {
+        $database = config('database.connections.central.database');
+        if (! ((app()->environment('local') && $database === 'courses_central')
+            || (app()->runningUnitTests() && $database === 'courses_test_central'))) {
             $this->error('This command is restricted to the local courses_central database.');
 
             return self::FAILURE;
@@ -34,16 +37,49 @@ class BootstrapLocalDemo extends Command
         $owner = User::query()->where('email', $email)->first();
         if (! $owner) {
             $password = Str::password(28);
-            $owner = User::create(['name' => 'Local Platform Owner', 'email' => $email, 'password' => $password]);
-            $owner->platform_role = 'platform_owner';
-            $owner->email_verified_at = now();
-            $owner->save();
-            $path = storage_path('app/private/local-platform-credentials.txt');
-            file_put_contents($path, "URL: http://courses.test/admin/login\nEmail: {$email}\nPassword: {$password}\n");
-            chmod($path, 0600);
+            $path = Storage::disk('local')->path('local-platform-credentials.txt');
+            $previousUmask = umask(0077);
+            try {
+                $file = @fopen($path, 'x');
+            } finally {
+                umask($previousUmask);
+            }
+            if ($file === false) {
+                $this->error("Credentials file already exists: {$path}");
+
+                return self::FAILURE;
+            }
+            try {
+                $contents = "URL: http://courses.test/admin/login\nEmail: {$email}\nPassword: {$password}\n";
+                $written = fwrite($file, $contents);
+                fclose($file);
+                if ($written !== strlen($contents) || ! chmod($path, 0600)) {
+                    throw new RuntimeException('Could not save credentials securely.');
+                }
+                DB::connection('central')->transaction(function () use ($email, $password): void {
+                    $owner = User::create(['name' => 'Local Platform Owner', 'email' => $email, 'password' => $password]);
+                    $owner->platform_role = 'platform_owner';
+                    $owner->email_verified_at = now();
+                    $owner->save();
+                });
+            } catch (\Throwable $exception) {
+                if (is_resource($file)) {
+                    fclose($file);
+                }
+                unlink($path);
+                throw $exception;
+            }
             $this->info("Platform owner created. Credentials are in {$path}");
+        } elseif ($owner->platform_role !== 'platform_owner') {
+            $this->error('This email belongs to an account without the platform owner role.');
+
+            return self::FAILURE;
         } else {
             $this->info('Platform owner already exists. Its password was not changed.');
+        }
+
+        if ($this->option('without-centers')) {
+            return self::SUCCESS;
         }
 
         foreach (['alpha', 'beta'] as $slug) {

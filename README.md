@@ -50,7 +50,7 @@ cd apps/api
 /Users/hosamalzagh/Library/'Application Support'/Herd/bin/php85 artisan courses:bootstrap-local --no-interaction
 ```
 
-`courses:bootstrap-local` creates a platform owner and provisions alpha and beta. It writes the platform owner's initial local password to `apps/api/storage/app/private/local-platform-credentials.txt` with mode `0600`; it never prints the password. The two center-owner invitations are sent to Mailpit. Accept each invitation once, then sign in with the password. Center MFA is off by default and can be enabled from **أمان الحساب** on the center dashboard. Once enabled, it applies to that central identity in every center where they are a member. Platform MFA remains required. The local bootstrap command is idempotent and is restricted to the `courses_central` database.
+`courses:bootstrap-local` creates a platform owner and provisions alpha and beta. Add `--without-centers` to create only the first platform owner. It writes the platform owner's initial local password to `apps/api/storage/app/private/local-platform-credentials.txt` with mode `0600`; it never prints the password or replaces credentials for an existing account. The two center-owner invitations are sent to Mailpit. Accept each invitation once, then sign in with the password. Center MFA is off by default and can be enabled from **أمان الحساب** on the center dashboard. Once enabled, it applies to that central identity in every center where they are a member. Platform MFA remains required. The local bootstrap command is idempotent and is restricted to the `courses_central` database.
 
 The LaunchAgents start the built Next.js UI, the Redis worker for provisioning, and `schedule:run` after Mac login. Rebuild `apps/web` and rerun `install-web-launch-agent.py` after UI changes. Herd remains responsible for PHP-FPM and Nginx. The routing script backs up Herd's original `courses.test` Nginx file before editing and checks Nginx syntax before restart.
 
@@ -70,7 +70,7 @@ npm run build
 
 An unauthenticated center `user` response is `401`. Unknown or retired center hosts return `404` from the API. Suspended centers return `423` before center data is read. The tests use `courses_test_central`, temporary center databases, and Redis. Never point the test environment at `courses_central`.
 
-To migrate all centers, run `php85 artisan tenants:migrate --force --no-interaction`; to migrate one, add `--tenants=<center UUID>`. The worker uses queue `platform` for provisioning. Telescope is available only locally at `/telescope` to platform owners; the scheduler prunes entries older than 48 hours.
+To migrate all centers, run `php85 artisan tenants:migrate --force --no-interaction`; to migrate one, add `--tenants=<center UUID>`. The worker uses queue `platform` for provisioning. Telescope is available only locally at `/telescope` to platform owners; authentication, invitation, MFA, and credential-producing jobs are excluded from recording, and mail, event, and Redis watchers are disabled to avoid retaining secrets. It still records ordinary page reads and their queries. The scheduler prunes entries older than 48 hours.
 
 In the maintenance commands below, `php85` denotes `/Users/hosamalzagh/Library/'Application Support'/Herd/bin/php85`.
 
