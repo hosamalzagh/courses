@@ -2,11 +2,16 @@
 
 namespace Tests\Feature;
 
+use App\Filament\Resources\Centers\Pages\CreateCenter;
+use App\Jobs\ProvisionCenter;
 use App\Models\Center;
 use App\Models\User;
+use Filament\Facades\Filament;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
+use Livewire\Livewire;
 use RuntimeException;
 use Tests\Concerns\CleansCenterDatabases;
 use Tests\TestCase;
@@ -14,6 +19,44 @@ use Tests\TestCase;
 class CenterProvisioningTest extends TestCase
 {
     use CleansCenterDatabases, RefreshDatabase;
+
+    public function test_landlord_creation_stays_pending_until_provisioning_runs_and_rejects_duplicate_identity(): void
+    {
+        Queue::fake();
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']));
+
+        Livewire::test(CreateCenter::class)
+            ->fillForm([
+                'name' => 'Alpha Center', 'slug' => 'alpha', 'subdomain' => 'alpha',
+                'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
+            ])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $center = Center::where('slug', 'alpha')->firstOrFail();
+        $this->assertSame('pending', $center->provisioning_status);
+        $this->assertSame('alpha.courses.test', $center->domains()->firstOrFail()->domain);
+        Queue::assertPushed(ProvisionCenter::class, fn (ProvisionCenter $job) => $job->centerId === $center->id && $job->connection === 'platform' && $job->queue === 'platform');
+
+        Livewire::test(CreateCenter::class)
+            ->fillForm([
+                'name' => 'Duplicate', 'slug' => 'alpha', 'subdomain' => 'different',
+                'plan' => 'starter', 'owner_email' => 'duplicate@alpha.test',
+            ])
+            ->call('create')
+            ->assertHasFormErrors(['slug']);
+
+        Livewire::test(CreateCenter::class)
+            ->fillForm([
+                'name' => 'Duplicate', 'slug' => 'different', 'subdomain' => 'alpha',
+                'plan' => 'starter', 'owner_email' => 'duplicate@alpha.test',
+            ])
+            ->call('create')
+            ->assertHasFormErrors(['subdomain']);
+
+        $this->assertSame(1, Center::count());
+    }
 
     public function test_platform_owner_can_create_and_retry_a_center_without_duplicate_identity(): void
     {
@@ -35,6 +78,16 @@ class CenterProvisioningTest extends TestCase
         $this->assertSame(1, DB::connection('central')->table('center_invitations')->where('tenant_id', $center->id)->count());
         $this->assertTrue((bool) DB::connection('central')->selectOne(
             'SELECT 1 FROM pg_database WHERE datname = ?', [$center->database()->getName()],
+        ));
+        $this->assertFalse(DB::connection('central')->selectOne(
+            'SELECT rolcreatedb FROM pg_roles WHERE rolname = current_user',
+        )->rolcreatedb);
+        $this->assertNotSame(
+            config('database.connections.central.username'),
+            config('database.connections.provisioning.username'),
+        );
+        $this->assertSame('owner@alpha.test', $center->run(
+            fn () => DB::table('center_settings')->where('id', 1)->value('contact_email'),
         ));
 
         $center->update(['provisioning_status' => 'failed']);

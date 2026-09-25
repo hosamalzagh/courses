@@ -21,7 +21,7 @@ agent.parent.mkdir(parents=True, exist_ok=True)
 logs.mkdir(parents=True, exist_ok=True)
 payload = {
     "Label": label,
-    "ProgramArguments": [str(php), "artisan", "queue:work", "redis", "--queue=platform,default", "--sleep=1", "--tries=3"],
+    "ProgramArguments": [str(php), "artisan", "horizon", "--no-interaction"],
     "WorkingDirectory": str(api),
     "EnvironmentVariables": {"APP_ENV": "local", "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"},
     "RunAtLoad": True,

@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use Illuminate\Support\Arr;
 use Illuminate\Validation\Rule;
 
 class CenterDomain
@@ -13,15 +14,19 @@ class CenterDomain
 
     public static function fromSubdomain(string $subdomain, string $field = 'subdomain'): string
     {
-        validator([$field => $subdomain], [$field => self::subdomainRules()])->validate();
+        $input = [];
+        Arr::set($input, $field, $subdomain);
+        validator($input, [$field => self::subdomainRules()])->validate();
 
         return $subdomain.'.'.config('courses.base_domain');
     }
 
-    public static function validateUnique(string $domain, ?string $currentDomain = null): void
+    public static function validateUnique(string $domain, ?string $currentDomain = null, string $field = 'domain'): void
     {
         if ($domain !== $currentDomain) {
-            validator(['domain' => $domain], ['domain' => 'unique:domains,domain'])->validate();
+            $input = [];
+            Arr::set($input, $field, $domain);
+            validator($input, [$field => 'unique:domains,domain'])->validate();
         }
     }
 }

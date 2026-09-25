@@ -32,7 +32,7 @@ class EditCenter extends EditRecord
     {
         $domain = CenterDomain::fromSubdomain($data['subdomain'], 'data.subdomain');
         $old = $record->domains()->first()?->domain;
-        CenterDomain::validateUnique($domain, $old);
+        CenterDomain::validateUnique($domain, $old, 'data.subdomain');
         unset($data['subdomain'], $data['slug'], $data['owner_email']);
         DB::connection('central')->transaction(function () use ($record, $data, $domain, $old): void {
             $record->update($data);

@@ -210,6 +210,18 @@ return [
             'timeout' => 60,
             'nice' => 0,
         ],
+        'supervisor-platform' => [
+            'connection' => 'platform',
+            'queue' => ['platform'],
+            'balance' => 'simple',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'tries' => 3,
+            'timeout' => 540,
+            'nice' => 0,
+        ],
     ],
 
     'environments' => [

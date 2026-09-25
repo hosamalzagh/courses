@@ -17,7 +17,7 @@ class CreateCenter extends CreateRecord
     protected function handleRecordCreation(array $data): Model
     {
         $domain = CenterDomain::fromSubdomain($data['subdomain'], 'data.subdomain');
-        CenterDomain::validateUnique($domain);
+        CenterDomain::validateUnique($domain, field: 'data.subdomain');
 
         $center = DB::connection('central')->transaction(function () use ($data, $domain): Center {
             $center = Center::create([

@@ -73,6 +73,15 @@ return [
             'after_commit' => false,
         ],
 
+        'platform' => [
+            'driver' => env('PLATFORM_QUEUE_DRIVER', 'redis'),
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
+            'queue' => 'platform',
+            'retry_after' => 600,
+            'block_for' => null,
+            'after_commit' => false,
+        ],
+
         'deferred' => [
             'driver' => 'deferred',
         ],

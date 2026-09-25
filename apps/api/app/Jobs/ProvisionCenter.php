@@ -23,6 +23,7 @@ class ProvisionCenter implements ShouldQueue
 
     public function __construct(public string $centerId)
     {
+        $this->onConnection('platform');
         $this->onQueue('platform');
     }
 
@@ -52,6 +53,12 @@ class ProvisionCenter implements ShouldQueue
             }
 
             $center->run(function () use ($center): void {
+                DB::table('center_settings')->insertOrIgnore([
+                    'id' => 1,
+                    'contact_email' => $center->owner_email,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
                 $center->update([
                     'migration_version' => DB::table('migrations')->max('migration'),
                 ]);
