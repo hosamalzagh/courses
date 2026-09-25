@@ -50,7 +50,7 @@ cd apps/api
 /Users/hosamalzagh/Library/'Application Support'/Herd/bin/php85 artisan courses:bootstrap-local --no-interaction
 ```
 
-`courses:bootstrap-local` creates a platform owner and provisions alpha and beta. It writes the platform owner's initial local password to `apps/api/storage/app/private/local-platform-credentials.txt` with mode `0600`; it never prints the password. The two center-owner invitations are sent to Mailpit. Accept each invitation once, then set up the authenticator app when prompted. The local bootstrap command is idempotent and is restricted to the `courses_central` database.
+`courses:bootstrap-local` creates a platform owner and provisions alpha and beta. It writes the platform owner's initial local password to `apps/api/storage/app/private/local-platform-credentials.txt` with mode `0600`; it never prints the password. The two center-owner invitations are sent to Mailpit. Accept each invitation once, then sign in with the password. Center MFA is off by default and can be enabled from **أمان الحساب** on the center dashboard. Once enabled, it applies to that central identity in every center where they are a member. Platform MFA remains required. The local bootstrap command is idempotent and is restricted to the `courses_central` database.
 
 The LaunchAgents start the built Next.js UI, the Redis worker for provisioning, and `schedule:run` after Mac login. Rebuild `apps/web` and rerun `install-web-launch-agent.py` after UI changes. Herd remains responsible for PHP-FPM and Nginx. The routing script backs up Herd's original `courses.test` Nginx file before editing and checks Nginx syntax before restart.
 

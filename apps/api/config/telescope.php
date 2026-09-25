@@ -119,6 +119,8 @@ return [
         '_boost*',
         '.well-known*',
         'api/v1/center/invitations/*',
+        'api/v1/center/auth/mfa/*',
+        'api/v1/center/security/mfa/*',
     ],
 
     'ignore_commands' => [

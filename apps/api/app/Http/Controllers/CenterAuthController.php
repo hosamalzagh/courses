@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\CenterInvitation;
 use App\Models\CenterMembership;
 use App\Models\User;
+use App\Support\CenterRecoveryCodes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -111,20 +112,13 @@ class CenterAuthController extends Controller
 
         abort_unless($membership && $user->hasVerifiedEmail(), 403);
 
-        $isOwner = DB::connection('tenant')->table('center_grants')
-            ->where('user_id', $user->id)
-            ->where('role', 'center_owner')
-            ->exists();
-
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        if ($isOwner) {
+        if ($user->getAppAuthenticationSecret()) {
             $request->session()->put('pending_center_login', ['user_id' => $user->id, 'center_id' => $center->id]);
 
-            return response()->json([
-                'status' => $user->getAppAuthenticationSecret() ? 'mfa_challenge_required' : 'mfa_setup_required',
-            ], 202);
+            return response()->json(['status' => 'mfa_challenge_required'], 202);
         }
 
         $this->finishLogin($request, $user);
@@ -132,44 +126,23 @@ class CenterAuthController extends Controller
         return response()->json(['status' => 'authenticated']);
     }
 
-    public function mfaSetup(Request $request, Google2FA $totp): JsonResponse
-    {
-        $user = $this->pendingUser($request);
-        abort_if($user->getAppAuthenticationSecret(), 409);
-
-        $secret = $request->session()->get('pending_center_mfa_secret') ?: $totp->generateSecretKey();
-        $request->session()->put('pending_center_mfa_secret', $secret);
-
-        return response()->json([
-            'secret' => $secret,
-            'otpauth_url' => 'otpauth://totp/'.rawurlencode('Courses:'.$user->email)
-                .'?secret='.$secret.'&issuer=Courses',
-        ])->header('Cache-Control', 'no-store');
-    }
-
-    public function mfaConfirm(Request $request, Google2FA $totp): JsonResponse
-    {
-        $data = $request->validate(['code' => ['required', 'digits:6']]);
-        $user = $this->pendingUser($request);
-        abort_if($user->getAppAuthenticationSecret(), 409);
-        $secret = $request->session()->get('pending_center_mfa_secret');
-        abort_unless($secret && $totp->verifyKey($secret, $data['code']), 422);
-
-        $user->saveAppAuthenticationSecret($secret);
-        $this->finishLogin($request, $user);
-
-        return response()->json(['status' => 'authenticated']);
-    }
-
     public function mfaChallenge(Request $request, Google2FA $totp): JsonResponse
     {
-        $data = $request->validate(['code' => ['required', 'digits:6']]);
+        $data = $request->validate([
+            'code' => ['nullable', 'required_without:recovery_code', 'digits:6'],
+            'recovery_code' => ['nullable', 'required_without:code', 'string', 'max:100'],
+        ]);
         $user = $this->pendingUser($request);
         $secret = $user->getAppAuthenticationSecret();
-        abort_unless($secret && $totp->verifyKey($secret, $data['code']), 422);
+        abort_unless($secret, 422);
 
-        $key = 'mfa-used:'.$request->attributes->get('center')->id.':'.$user->id.':'.$data['code'];
-        abort_unless(Cache::add($key, true, 90), 422);
+        if (isset($data['recovery_code'])) {
+            abort_unless(CenterRecoveryCodes::consume($user, $data['recovery_code']), 422);
+        } else {
+            abort_unless($totp->verifyKey($secret, $data['code']), 422);
+            $key = 'mfa-used:'.$request->attributes->get('center')->id.':'.$user->id.':'.$data['code'];
+            abort_unless(Cache::add($key, true, 90), 422);
+        }
 
         $this->finishLogin($request, $user);
 

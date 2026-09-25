@@ -109,7 +109,7 @@ export function BranchWorkspace({ context }: { context: CenterContext }) {
     <div className="workspace">
       <header className="workspace-header"><div className="workspace-header-inner">
         <div className="brand"><span className="brand-mark" aria-hidden="true">C</span><span>Courses</span></div>
-        <div className="workspace-header-actions"><span className="muted">{context.center.name} · عضويتك نشطة · {context.user.name}</span><button className="button button-secondary" type="button" onClick={signOut} disabled={busy}>{busy ? "جارٍ تسجيل الخروج…" : "تسجيل الخروج"}</button></div>
+        <div className="workspace-header-actions"><span className="muted">{context.center.name} · عضويتك نشطة · {context.user.name}</span><a className="text-link" href="/admin/security">أمان الحساب</a><button className="button button-secondary" type="button" onClick={signOut} disabled={busy}>{busy ? "جارٍ تسجيل الخروج…" : "تسجيل الخروج"}</button></div>
       </div></header>
       <main className="workspace-main">
         <section>

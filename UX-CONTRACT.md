@@ -3,7 +3,7 @@
 ## Product context
 
 - Audience: Center owners, center administrators, and branch staff.
-- Primary jobs: Sign in, accept invitations, verify ownership with TOTP, see active membership, and manage authorized branches, staff, settings, and audit.
+- Primary jobs: Sign in, accept invitations, optionally enable TOTP from account security, see active membership, and manage authorized branches, staff, settings, and audit.
 - Active locale: Arabic, RTL; email and domain strings remain left to right. Timezone: Africa/Cairo for local operations.
 - Accessibility target: WCAG 2.2 AA.
 

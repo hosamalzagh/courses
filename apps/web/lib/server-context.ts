@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 export type Branch = { id: number; name: string; slug: string; address: string | null };
 export type CenterContext = {
-  user: { id: number; name: string; email: string };
+  user: { id: number; name: string; email: string; mfa_enabled?: boolean; mfa_required_for_platform?: boolean };
   membership: { status: string; grants_version: number };
   center: { id: string; name: string; slug: string };
   permissions: {

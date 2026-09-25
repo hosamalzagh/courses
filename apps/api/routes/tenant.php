@@ -4,6 +4,7 @@ use App\Http\Controllers\CenterAuditController;
 use App\Http\Controllers\CenterAuthController;
 use App\Http\Controllers\CenterBranchController;
 use App\Http\Controllers\CenterMemberController;
+use App\Http\Controllers\CenterSecurityController;
 use App\Http\Controllers\CenterSettingsController;
 use App\Http\Middleware\MeasureCenterQueries;
 use App\Http\Middleware\RequireCenterMember;
@@ -17,8 +18,6 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
     Route::get('invitations/{token}', [CenterAuthController::class, 'invitation'])->middleware('throttle:20,1');
     Route::post('invitations/{token}', [CenterAuthController::class, 'acceptInvitation'])->middleware('throttle:5,1');
     Route::post('auth/login', [CenterAuthController::class, 'login'])->middleware('throttle:5,1');
-    Route::post('auth/mfa/setup', [CenterAuthController::class, 'mfaSetup'])->middleware('throttle:5,1');
-    Route::post('auth/mfa/confirm', [CenterAuthController::class, 'mfaConfirm'])->middleware('throttle:5,1');
     Route::post('auth/mfa/challenge', [CenterAuthController::class, 'mfaChallenge'])->middleware('throttle:5,1');
     Route::post('auth/logout', [CenterAuthController::class, 'logout']);
     Route::post('auth/forgot-password', [CenterAuthController::class, 'forgotPassword'])->middleware('throttle:3,1');
@@ -33,7 +32,12 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
             }
 
             $payload = [
-                'user' => [...$request->user()->only(['id', 'name', 'email']), 'permissions' => $permissions->toArray()],
+                'user' => [
+                    ...$request->user()->only(['id', 'name', 'email']),
+                    'permissions' => $permissions->toArray(),
+                    'mfa_enabled' => (bool) $request->user()->getAppAuthenticationSecret(),
+                    'mfa_required_for_platform' => in_array($request->user()->platform_role, ['platform_owner', 'platform_support'], true),
+                ],
                 'membership' => $request->attributes->get('center_membership')->only(['status', 'grants_version']),
                 'permissions' => $permissions->toArray(),
                 'center' => $request->attributes->get('center')->only(['id', 'name', 'slug']),
@@ -74,5 +78,9 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('settings', [CenterSettingsController::class, 'show']);
         Route::patch('settings', [CenterSettingsController::class, 'update']);
         Route::get('audit', [CenterAuditController::class, 'index']);
+        Route::post('security/mfa/setup', [CenterSecurityController::class, 'setup'])->middleware('throttle:5,1');
+        Route::post('security/mfa/confirm', [CenterSecurityController::class, 'confirm'])->middleware('throttle:5,1');
+        Route::post('security/mfa/cancel', [CenterSecurityController::class, 'cancel'])->middleware('throttle:5,1');
+        Route::post('security/mfa/disable', [CenterSecurityController::class, 'disable'])->middleware('throttle:5,1');
     });
 });

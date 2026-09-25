@@ -2,13 +2,12 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { QRCodeSVG } from "qrcode.react";
 import { AuthShell } from "@/components/AuthShell";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
 import { centerRequest, responseMessage } from "@/lib/client-api";
 
-type Step = "credentials" | "setup" | "challenge";
+type Step = "credentials" | "challenge";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,8 +15,8 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
-  const [secret, setSecret] = useState("");
-  const [otpauthUrl, setOtpauthUrl] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [useRecovery, setUseRecovery] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -42,15 +41,7 @@ export default function LoginPage() {
         setStep("challenge");
         return;
       }
-      const setup = await centerRequest("auth/mfa/setup", "POST");
-      if (!setup.ok) {
-        setError(await responseMessage(setup));
-        return;
-      }
-      const details: { secret: string; otpauth_url: string } = await setup.json();
-      setSecret(details.secret);
-      setOtpauthUrl(details.otpauth_url);
-      setStep("setup");
+      setError("تعذر إكمال الدخول. حاول مرة أخرى.");
     } catch {
       setError("تعذر الاتصال بالمركز. تحقق من الاتصال وحاول مرة أخرى.");
     } finally {
@@ -63,10 +54,9 @@ export default function LoginPage() {
     setError("");
     setBusy(true);
     try {
-      const path = step === "setup" ? "auth/mfa/confirm" : "auth/mfa/challenge";
-      const response = await centerRequest(path, "POST", { code });
+      const response = await centerRequest("auth/mfa/challenge", "POST", useRecovery ? { recovery_code: recoveryCode } : { code });
       if (!response.ok) {
-        setCode("");
+        setCode(""); setRecoveryCode("");
         setError(await responseMessage(response));
         return;
       }
@@ -82,9 +72,9 @@ export default function LoginPage() {
   return (
     <AuthShell>
       <span className="eyebrow">دخول المركز</span>
-      <h1>{step === "credentials" ? "أهلًا بك في مركزك" : step === "setup" ? "فعّل الحماية الإضافية" : "تحقق من هويتك"}</h1>
+      <h1>{step === "credentials" ? "أهلًا بك في مركزك" : "تحقق من هويتك"}</h1>
       <p className="muted">
-        {step === "credentials" ? "استخدم بريد عضويتك وكلمة المرور للمتابعة." : step === "setup" ? "امسح الرمز في تطبيق المصادقة، ثم أدخل الرقم الظاهر فيه." : "أدخل الرمز الحالي من تطبيق المصادقة."}
+        {step === "credentials" ? "استخدم بريد عضويتك وكلمة المرور للمتابعة." : "أدخل الرمز الحالي من تطبيق المصادقة."}
       </p>
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
 
@@ -97,17 +87,12 @@ export default function LoginPage() {
         </form>
       ) : (
         <>
-          {step === "setup" ? (
-            <div>
-              <div className="qr-wrap"><QRCodeSVG value={otpauthUrl} size={168} aria-label="رمز إعداد تطبيق المصادقة" /></div>
-              <p className="muted">إذا تعذّر مسح الرمز، أدخل هذا المفتاح في التطبيق:</p>
-              <div className="mfa-secret" aria-label="مفتاح المصادقة">{secret}</div>
-            </div>
-          ) : null}
           <form className="form-stack" noValidate onSubmit={submitCode}>
-            <FormField id="code" label="رمز التحقق" value={code} onChange={setCode} autoComplete="one-time-code" required direction="ltr" hint="ستة أرقام من تطبيق المصادقة" />
-            <button className="button button-primary" type="submit" disabled={busy || !/^\d{6}$/.test(code)}>{busy ? "جارٍ التحقق…" : "تحقق وادخل"}</button>
+            {useRecovery ? <FormField id="recovery-code" label="رمز الاستعادة" value={recoveryCode} onChange={setRecoveryCode} required direction="ltr" hint="كل رمز استعادة يُستخدم مرة واحدة" /> :
+              <FormField id="code" label="رمز التحقق" value={code} onChange={setCode} autoComplete="one-time-code" required direction="ltr" hint="ستة أرقام من تطبيق المصادقة" />}
+            <button className="button button-primary" type="submit" disabled={busy || (useRecovery ? !recoveryCode : !/^\d{6}$/.test(code))}>{busy ? "جارٍ التحقق…" : "تحقق وادخل"}</button>
           </form>
+          <button className="text-link" type="button" onClick={() => { setUseRecovery(!useRecovery); setCode(""); setRecoveryCode(""); }}>{useRecovery ? "استخدام تطبيق المصادقة" : "استخدام رمز استعادة"}</button>
         </>
       )}
       <p className="auth-footnote">لا تملك دعوة؟ اطلبها من مالك المركز أو مسؤوله.</p>
