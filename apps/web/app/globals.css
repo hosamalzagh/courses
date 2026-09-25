@@ -61,7 +61,7 @@ h2 { line-height: 1.35; }
 
 .workspace { min-height: 100vh; }
 .workspace-header { background: var(--surface); border-bottom: 1px solid var(--border); }
-.workspace-header-inner { max-width: 72rem; margin: auto; padding: 1rem 1.5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.workspace-header-inner { max-width: 72rem; margin: auto; padding: 1rem 1.5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .workspace-header-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .workspace-main { max-width: 72rem; margin: auto; padding: clamp(1.5rem, 4vw, 3rem) 1.5rem 5rem; display: grid; grid-template-columns: minmax(0, 1fr) 18rem; gap: clamp(1.5rem, 4vw, 3.5rem); }
 .page-heading { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }

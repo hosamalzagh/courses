@@ -4,10 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Jobs\ProvisionCenter;
 use App\Models\Center;
+use App\Support\CenterDomain;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
 
 class PlatformCenterController extends Controller
 {
@@ -34,13 +34,13 @@ class PlatformCenterController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'slug' => ['required', 'regex:/^[a-z][a-z0-9-]{1,62}$/', 'unique:tenants,slug'],
-            'subdomain' => ['required', 'regex:/^[a-z][a-z0-9-]{1,62}$/', Rule::notIn(['platform', 'www', 'api'])],
+            'subdomain' => CenterDomain::subdomainRules(),
             'plan' => ['required', 'string', 'max:80'],
             'owner_email' => ['required', 'email', 'max:255'],
         ]);
 
-        $domain = $data['subdomain'].'.'.config('courses.base_domain');
-        validator(['domain' => $domain], ['domain' => 'unique:domains,domain'])->validate();
+        $domain = CenterDomain::fromSubdomain($data['subdomain']);
+        CenterDomain::validateUnique($domain);
 
         $center = DB::connection('central')->transaction(function () use ($data, $domain, $request): Center {
             $center = Center::create([
@@ -101,10 +101,10 @@ class PlatformCenterController extends Controller
         $this->platformOwner($request);
 
         $data = $request->validate([
-            'subdomain' => ['required', 'regex:/^[a-z][a-z0-9-]{1,62}$/', Rule::notIn(['platform', 'www', 'api'])],
+            'subdomain' => CenterDomain::subdomainRules(),
         ]);
-        $domain = $data['subdomain'].'.'.config('courses.base_domain');
-        validator(['domain' => $domain], ['domain' => 'unique:domains,domain'])->validate();
+        $domain = CenterDomain::fromSubdomain($data['subdomain']);
+        CenterDomain::validateUnique($domain);
 
         DB::connection('central')->transaction(function () use ($center, $domain): void {
             $center->domains()->delete();

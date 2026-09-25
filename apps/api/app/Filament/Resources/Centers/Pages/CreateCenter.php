@@ -5,10 +5,10 @@ namespace App\Filament\Resources\Centers\Pages;
 use App\Filament\Resources\Centers\CenterResource;
 use App\Jobs\ProvisionCenter;
 use App\Models\Center;
+use App\Support\CenterDomain;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 
 class CreateCenter extends CreateRecord
 {
@@ -16,9 +16,8 @@ class CreateCenter extends CreateRecord
 
     protected function handleRecordCreation(array $data): Model
     {
-        $this->validateSubdomain($data['subdomain']);
-        $domain = $data['subdomain'].'.'.config('courses.base_domain');
-        validator(['domain' => $domain], ['domain' => 'unique:domains,domain'])->validate();
+        $domain = CenterDomain::fromSubdomain($data['subdomain'], 'data.subdomain');
+        CenterDomain::validateUnique($domain);
 
         $center = DB::connection('central')->transaction(function () use ($data, $domain): Center {
             $center = Center::create([
@@ -37,13 +36,5 @@ class CreateCenter extends CreateRecord
         ProvisionCenter::dispatch($center->id);
 
         return $center;
-    }
-
-    private function validateSubdomain(string $value): void
-    {
-        if (! preg_match('/^[a-z][a-z0-9-]{1,62}$/', $value)
-            || in_array($value, ['platform', 'www', 'api'], true)) {
-            throw ValidationException::withMessages(['data.subdomain' => 'استخدم حروفًا صغيرة وأرقامًا وشرطة، ويبدأ النطاق بحرف.']);
-        }
     }
 }

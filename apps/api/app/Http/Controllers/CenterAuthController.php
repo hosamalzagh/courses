@@ -55,8 +55,11 @@ class CenterAuthController extends Controller
                     'email' => $invitation->email,
                     'password' => $data['password'],
                 ]);
-                $user->email_verified_at = now();
-                $user->save();
+            }
+
+            // The one-use invitation is delivered to this exact mailbox.
+            if (! $user->hasVerifiedEmail()) {
+                $user->markEmailAsVerified();
             }
 
             CenterMembership::updateOrCreate(

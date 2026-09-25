@@ -28,7 +28,7 @@ export function SettingsWorkspace({ centerName, initialSettings }: { centerName:
   }
 
   return <div className="workspace">
-    <header className="workspace-header"><div className="workspace-header-inner"><a className="brand" href="/admin"><span className="brand-mark">C</span>Courses</a><a className="text-link" href="/admin">العودة إلى الفروع</a></div></header>
+    <header className="workspace-header"><div className="workspace-header-inner"><a className="brand" href="/admin"><span className="brand-mark">C</span>Courses</a><span className="muted">{centerName} · عضويتك نشطة</span><a className="text-link" href="/admin">العودة إلى الفروع</a></div></header>
     <main className="members-main"><div><span className="eyebrow">{centerName}</span><h1>إعدادات المركز</h1><p className="muted">بيانات التواصل والعنوان المستخدمة في التشغيل اليومي.</p></div>
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}

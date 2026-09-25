@@ -47,6 +47,7 @@ export function MemberWorkspace({ context }: { context: MemberContext }) {
   }
 
   async function changeStatus(member: Member) {
+    if (member.status === "active" && !window.confirm(`إيقاف عضوية ${member.user.name}؟ سيفقد الوصول من الطلب التالي.`)) return;
     setBusy(true); setError(""); setNotice("");
     try {
       const response = await centerRequest(`members/${member.id}/status`, "PATCH", { status: member.status === "active" ? "suspended" : "active" });
@@ -76,6 +77,10 @@ export function MemberWorkspace({ context }: { context: MemberContext }) {
   }
 
   async function saveGrants(member: Member) {
+    const removesCenterRole = member.center_roles.some((role) => !centerRoles.includes(role));
+    const removesBranchRole = Object.entries(member.branch_roles).some(([branchId, roles]) =>
+      roles.some((role) => !(branchRoles[branchId] ?? []).includes(role)));
+    if ((removesCenterRole || removesBranchRole) && !window.confirm(`إزالة صلاحيات ${member.user.name}؟ يسري التغيير من الطلب التالي.`)) return;
     setBusy(true); setError(""); setNotice("");
     try {
       const response = await centerRequest(`members/${member.id}/grants`, "PUT", { center_roles: centerRoles, branch_roles: branchRoles });
@@ -86,7 +91,7 @@ export function MemberWorkspace({ context }: { context: MemberContext }) {
   }
 
   return <div className="workspace">
-    <header className="workspace-header"><div className="workspace-header-inner"><a className="brand" href="/admin"><span className="brand-mark">C</span>Courses</a><a className="text-link" href="/admin">العودة إلى الفروع</a></div></header>
+    <header className="workspace-header"><div className="workspace-header-inner"><a className="brand" href="/admin"><span className="brand-mark">C</span>Courses</a><span className="muted">{context.center.name} · عضويتك نشطة</span><a className="text-link" href="/admin">العودة إلى الفروع</a></div></header>
     <main className="members-main">
       <div><span className="eyebrow">{context.center.name}</span><h1>موظفو المركز</h1><p className="muted">الدعوات والعضويات وأدوار كل فرع.</p></div>
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
@@ -94,19 +99,19 @@ export function MemberWorkspace({ context }: { context: MemberContext }) {
       <section className="context-card"><h2>دعوة موظف</h2><form className="member-invite-form" onSubmit={invite}>
         <FormField id="invite-email" label="البريد الإلكتروني" type="email" value={email} onChange={setEmail} direction="ltr" required />
         {isOwner ? <label className="check-row"><input type="checkbox" checked={inviteAsAdmin} onChange={(event) => setInviteAsAdmin(event.target.checked)} />دعوة بصفة مسؤول مركز</label> : null}
-        <button className="button button-primary" disabled={busy || !email}>إرسال الدعوة</button>
+        <button className="button button-primary" disabled={busy || !email}>{busy ? "جارٍ إرسال الدعوة…" : "إرسال الدعوة"}</button>
       </form></section>
       {invitations.length > 0 ? <section><h2 className="section-heading">دعوات بانتظار القبول</h2><div className="member-list">{invitations.map((invitation) => <div className="member-card" key={invitation.id}><bdi dir="ltr">{invitation.email}</bdi><span className="muted">تنتهي {new Date(invitation.expires_at).toLocaleDateString("ar-EG")}</span></div>)}</div></section> : null}
       <section><h2 className="section-heading">العضويات</h2>
         <div className="member-list">{members.map((member) => <article className="member-card" key={member.id}>
           <div className="member-card-head"><div><h3>{member.user.name}</h3><p className="muted"><bdi dir="ltr">{member.user.email}</bdi></p></div><span className="role-pill">{member.status === "active" ? "نشط" : "موقوف"}</span></div>
           <p className="muted">{member.center_roles.includes("center_owner") ? "مالك المركز" : member.center_roles.includes("center_admin") ? "مسؤول المركز" : "موظف المركز"}</p>
-          <div className="member-actions"><button className="button button-secondary" type="button" onClick={() => edit(member)}>تعديل الأدوار</button><button className="button button-secondary" type="button" onClick={() => changeStatus(member)} disabled={busy || (member.user.id === context.user.id && member.center_roles.includes("center_owner"))}>{member.status === "active" ? "إيقاف العضوية" : "تنشيط العضوية"}</button></div>
+          <div className="member-actions"><button className="button button-secondary" type="button" onClick={() => edit(member)} disabled={busy}>تعديل الأدوار</button><button className="button button-secondary" type="button" onClick={() => changeStatus(member)} disabled={busy || (member.user.id === context.user.id && member.center_roles.includes("center_owner"))}>{busy ? "جارٍ التحديث…" : member.status === "active" ? "إيقاف العضوية" : "تنشيط العضوية"}</button></div>
           {editing === member.id ? <div className="grant-editor"><h4>أدوار المركز</h4>
             {isOwner ? <label className="check-row"><input type="checkbox" checked={centerRoles.includes("center_owner")} onChange={() => toggleCenter("center_owner")} />مالك المركز</label> : null}
             <label className="check-row"><input type="checkbox" checked={centerRoles.includes("center_admin")} onChange={() => toggleCenter("center_admin")} />مسؤول المركز</label>
             <h4>إسنادات الفروع</h4>{context.branches.map((branch) => <fieldset key={branch.id} className="branch-grant"><legend>{branch.name}</legend>{Object.entries(branchRoleLabels).map(([role, label]) => <label className="check-row" key={role}><input type="checkbox" checked={(branchRoles[String(branch.id)] ?? []).includes(role)} onChange={() => toggleBranch(branch.id, role)} />{label}</label>)}</fieldset>)}
-            <div className="member-actions"><button className="button button-primary" type="button" onClick={() => saveGrants(member)} disabled={busy}>حفظ الأدوار</button><button className="button button-secondary" type="button" onClick={() => setEditing(null)}>إلغاء</button></div>
+            <div className="member-actions"><button className="button button-primary" type="button" onClick={() => saveGrants(member)} disabled={busy}>{busy ? "جارٍ حفظ الأدوار…" : "حفظ الأدوار"}</button><button className="button button-secondary" type="button" onClick={() => setEditing(null)} disabled={busy}>إلغاء</button></div>
           </div> : null}
         </article>)}</div>
       </section>

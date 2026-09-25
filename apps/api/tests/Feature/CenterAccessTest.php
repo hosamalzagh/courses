@@ -53,6 +53,10 @@ class CenterAccessTest extends TestCase
             ->assertForbidden();
         $this->patchJson('http://alpha.courses.test/api/v1/center/settings', ['phone' => '123'])
             ->assertForbidden();
+        $this->getJson('http://alpha.courses.test/api/v1/center/settings')
+            ->assertForbidden();
+        $this->getJson('http://alpha.courses.test/api/v1/center/user')
+            ->assertOk()->assertJsonCount(2, 'user.permissions.branch_roles.'.$firstBranch);
         $this->getJson('http://beta.courses.test/api/v1/center/user?tenant_id='.$alpha->id)
             ->assertUnauthorized();
         $this->getJson('http://unknown.courses.test/api/v1/center/user')

@@ -10,6 +10,7 @@ class CenterSettingsController extends Controller
 {
     public function show(Request $request): JsonResponse
     {
+        abort_unless($request->attributes->get('center_permissions')->isCenterManager(), 403);
         $settings = DB::connection('tenant')->table('center_settings')->where('id', 1)
             ->first(['contact_email', 'phone', 'address']);
 

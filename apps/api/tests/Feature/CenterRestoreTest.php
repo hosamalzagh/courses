@@ -48,6 +48,14 @@ class CenterRestoreTest extends TestCase
         $files = glob(storage_path("app/private/backups/alpha-{$alpha->id}-*.dump"));
         $file = end($files);
         $this->assertFileExists($file);
+        $laterOwner = User::factory()->create(['email_verified_at' => now()]);
+        CenterMembership::create(['tenant_id' => $alpha->id, 'user_id' => $laterOwner->id, 'status' => 'active']);
+        $alpha->run(function () use ($owner, $laterOwner): void {
+            DB::table('center_grants')->where('user_id', $owner->id)->delete();
+            DB::table('center_grants')->insert([
+                'user_id' => $laterOwner->id, 'role' => 'center_owner', 'created_at' => now(), 'updated_at' => now(),
+            ]);
+        });
         $alpha->run(fn () => DB::table('branches')->insert([
             'name' => 'temporary', 'slug' => 'temporary', 'created_at' => now(), 'updated_at' => now(),
         ]));
@@ -59,6 +67,9 @@ class CenterRestoreTest extends TestCase
         $this->assertSame(['beta'], $beta->run(fn () => DB::table('branches')->pluck('slug')->all()));
         $this->assertSame(0, $alpha->run(fn () => DB::table('center_grants')->where('user_id', 999999)->count()));
         $this->actingAs($owner)->withSession(['center_id' => $alpha->id]);
+        $this->getJson('http://alpha.courses.test/api/v1/center/user')
+            ->assertOk()->assertJsonPath('permissions.center_roles.0', 'center_owner');
+        $this->actingAs($laterOwner)->withSession(['center_id' => $alpha->id]);
         $this->getJson('http://alpha.courses.test/api/v1/center/user')
             ->assertOk()->assertJsonPath('permissions.center_roles.0', 'center_owner');
         unlink($file);

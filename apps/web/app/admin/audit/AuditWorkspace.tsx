@@ -12,7 +12,7 @@ const eventNames: Record<string, string> = {
 export function AuditWorkspace({ centerName, initialEntries }: { centerName: string; initialEntries: AuditEntry[] }) {
 
   return <div className="workspace">
-    <header className="workspace-header"><div className="workspace-header-inner"><a className="brand" href="/admin"><span className="brand-mark">C</span>Courses</a><a className="text-link" href="/admin">العودة إلى الفروع</a></div></header>
+    <header className="workspace-header"><div className="workspace-header-inner"><a className="brand" href="/admin"><span className="brand-mark">C</span>Courses</a><span className="muted">{centerName} · عضويتك نشطة</span><a className="text-link" href="/admin">العودة إلى الفروع</a></div></header>
     <main className="members-main"><div><span className="eyebrow">{centerName}</span><h1>سجل التدقيق</h1><p className="muted">آخر 50 تغييرًا ضمن نطاق صلاحيتك.</p></div>
       {initialEntries.length === 0 ? <div className="empty-state">لا توجد أحداث بعد.</div> : null}
       <div className="member-list">{initialEntries.map((entry) => <article className="member-card" key={entry.id}>

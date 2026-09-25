@@ -33,7 +33,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
             }
 
             $payload = [
-                'user' => $request->user()->only(['id', 'name', 'email']),
+                'user' => [...$request->user()->only(['id', 'name', 'email']), 'permissions' => $permissions->toArray()],
                 'membership' => $request->attributes->get('center_membership')->only(['status', 'grants_version']),
                 'permissions' => $permissions->toArray(),
                 'center' => $request->attributes->get('center')->only(['id', 'name', 'slug']),

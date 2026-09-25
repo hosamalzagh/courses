@@ -7,6 +7,7 @@ use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\Process\Process;
 
 #[Signature('courses:restore {slug} {file} {--confirm=}')]
@@ -32,6 +33,10 @@ class CenterRestore extends Command
         }
 
         $connection = config('database.connections.central');
+        $activeMemberIds = DB::connection('central')->table('center_memberships')
+            ->where('tenant_id', $center->id)->where('status', 'active')->pluck('user_id')->all();
+        $currentOwnerIds = $center->run(fn () => DB::table('center_grants')
+            ->where('role', 'center_owner')->whereIn('user_id', $activeMemberIds)->pluck('user_id')->all());
         $tool = config('courses.pg_bin').'/pg_restore';
         $process = new Process([
             $tool, '--clean', '--if-exists', '--single-transaction', '--no-owner', '--no-acl',
@@ -39,7 +44,9 @@ class CenterRestore extends Command
             '--username='.$connection['username'], '--dbname='.$center->database()->getName(), $file,
         ], null, ['PGPASSWORD' => $connection['password']]);
         $process->mustRun();
-        Artisan::call('courses:reconcile-grants', ['slug' => $center->slug, '--apply' => true]);
+        Artisan::call('courses:reconcile-grants', [
+            'slug' => $center->slug, '--apply' => true, '--retain-owner' => $currentOwnerIds,
+        ]);
         $this->info('Restored '.$center->slug.' and reconciled its grants.');
 
         return self::SUCCESS;

@@ -11,7 +11,7 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
-#[Signature('courses:reconcile-grants {slug} {--apply}')]
+#[Signature('courses:reconcile-grants {slug} {--apply} {--retain-owner=*}')]
 #[Description('Find or remove tenant grants without active central membership')]
 class ReconcileCenterGrants extends Command
 {
@@ -22,30 +22,35 @@ class ReconcileCenterGrants extends Command
             ->where('status', 'active')->pluck('user_id')->all();
         $candidate = CenterInvitation::query()->where('tenant_id', $center->id)
             ->where('center_role', 'center_owner')->whereNotNull('accepted_at')
-            ->whereIn('email', User::query()->whereIn('id', $activeIds)->pluck('email'))->first();
+            ->whereIn('email', User::query()->whereIn('id', $activeIds)->pluck('email'))
+            ->orderByDesc('accepted_at')->first();
         $candidateId = $candidate ? User::query()->where('email', $candidate->email)->value('id') : null;
-        $result = $center->run(function () use ($activeIds, $candidateId): array {
+        $retainedOwnerIds = array_values(array_intersect(array_map('intval', $this->option('retain-owner')), $activeIds));
+        $result = $center->run(function () use ($activeIds, $candidateId, $retainedOwnerIds): array {
             $centerGrants = DB::table('center_grants')->whereNotIn('user_id', $activeIds)->count();
             $branchGrants = DB::table('branch_grants')->whereNotIn('user_id', $activeIds)->count();
-            $activeOwnerCount = DB::table('center_grants')->where('role', 'center_owner')
-                ->whereIn('user_id', $activeIds)->count();
-            $restoreOwner = $activeOwnerCount === 0 && $candidateId;
+            $activeOwnerIds = DB::table('center_grants')->where('role', 'center_owner')
+                ->whereIn('user_id', $activeIds)->pluck('user_id')->all();
+            $restoreOwnerIds = array_values(array_diff($retainedOwnerIds, $activeOwnerIds));
+            if ($activeOwnerIds === [] && $restoreOwnerIds === [] && $candidateId) {
+                $restoreOwnerIds = [$candidateId];
+            }
             if ($this->option('apply')) {
-                DB::transaction(function () use ($activeIds, $restoreOwner): void {
+                DB::transaction(function () use ($activeIds, $restoreOwnerIds): void {
                     DB::table('center_grants')->whereNotIn('user_id', $activeIds)->delete();
                     DB::table('branch_grants')->whereNotIn('user_id', $activeIds)->delete();
-                    if ($restoreOwner) {
+                    foreach ($restoreOwnerIds as $restoreOwnerId) {
                         DB::table('center_grants')->updateOrInsert(
-                            ['user_id' => $restoreOwner, 'role' => 'center_owner'],
+                            ['user_id' => $restoreOwnerId, 'role' => 'center_owner'],
                             ['created_at' => now(), 'updated_at' => now()],
                         );
                     }
                 });
             }
 
-            return [$centerGrants, $branchGrants, (bool) $restoreOwner];
+            return [$centerGrants, $branchGrants, count($restoreOwnerIds)];
         });
-        $this->info("Orphan center grants: {$result[0]}; branch grants: {$result[1]}; owner repair needed: ".($result[2] ? 'yes' : 'no'));
+        $this->info("Orphan center grants: {$result[0]}; branch grants: {$result[1]}; owners to restore: {$result[2]}");
 
         return self::SUCCESS;
     }

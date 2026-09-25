@@ -3,11 +3,11 @@
 namespace App\Filament\Resources\Centers\Pages;
 
 use App\Filament\Resources\Centers\CenterResource;
+use App\Support\CenterDomain;
 use Filament\Actions\ViewAction;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 
 class EditCenter extends EditRecord
 {
@@ -30,16 +30,9 @@ class EditCenter extends EditRecord
 
     protected function handleRecordUpdate(Model $record, array $data): Model
     {
-        $subdomain = $data['subdomain'];
-        if (! preg_match('/^[a-z][a-z0-9-]{1,62}$/', $subdomain)
-            || in_array($subdomain, ['platform', 'www', 'api'], true)) {
-            throw ValidationException::withMessages(['data.subdomain' => 'النطاق الفرعي غير صالح.']);
-        }
-        $domain = $subdomain.'.'.config('courses.base_domain');
+        $domain = CenterDomain::fromSubdomain($data['subdomain'], 'data.subdomain');
         $old = $record->domains()->first()?->domain;
-        if ($domain !== $old) {
-            validator(['domain' => $domain], ['domain' => 'unique:domains,domain'])->validate();
-        }
+        CenterDomain::validateUnique($domain, $old);
         unset($data['subdomain'], $data['slug'], $data['owner_email']);
         DB::connection('central')->transaction(function () use ($record, $data, $domain, $old): void {
             $record->update($data);

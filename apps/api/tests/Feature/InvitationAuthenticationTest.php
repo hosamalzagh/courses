@@ -38,6 +38,7 @@ class InvitationAuthenticationTest extends TestCase
             'name' => 'First Owner', 'password' => 'correct-horse-battery-staple',
             'password_confirmation' => 'correct-horse-battery-staple',
         ])->assertOk();
+        $this->assertTrue(User::where('email', 'owner@alpha.test')->firstOrFail()->hasVerifiedEmail());
         $this->postJson("http://alpha.courses.test/api/v1/center/invitations/{$token}", [
             'name' => 'First Owner', 'password' => 'correct-horse-battery-staple',
             'password_confirmation' => 'correct-horse-battery-staple',
