@@ -4,11 +4,18 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class CenterAuditController extends Controller
 {
     public function index(Request $request): JsonResponse
+    {
+        return response()->json(['entries' => self::visibleEntries($request)])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public static function visibleEntries(Request $request): Collection
     {
         $permissions = $request->attributes->get('center_permissions');
         $query = DB::connection('tenant')->table('center_audit_logs');
@@ -19,7 +26,6 @@ class CenterAuditController extends Controller
             $query->whereIn('branch_id', $auditableBranches);
         }
 
-        return response()->json(['entries' => $query->orderByDesc('id')->limit(50)->get()])
-            ->header('Cache-Control', 'private, no-store');
+        return $query->orderByDesc('id')->limit(50)->get();
     }
 }

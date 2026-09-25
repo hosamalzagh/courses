@@ -36,6 +36,7 @@ class ProvisionCenter implements ShouldQueue
 
         $center->update(['provisioning_status' => 'provisioning', 'provisioning_error' => null]);
 
+        $step = 'إنشاء قاعدة بيانات المركز';
         try {
             $manager = $center->database()->manager();
 
@@ -45,6 +46,7 @@ class ProvisionCenter implements ShouldQueue
 
             $center->update(['database_state' => 'available']);
 
+            $step = 'ترحيل قاعدة بيانات المركز';
             if (Artisan::call('tenants:migrate', ['--tenants' => [$center->id], '--force' => true]) !== 0) {
                 throw new RuntimeException('Center migrations failed.');
             }
@@ -55,6 +57,7 @@ class ProvisionCenter implements ShouldQueue
                 ]);
             });
 
+            $step = 'إرسال دعوة المالك الأول';
             $this->inviteFirstOwner($center);
 
             $center->update([
@@ -64,7 +67,7 @@ class ProvisionCenter implements ShouldQueue
         } catch (Throwable $exception) {
             $center->update([
                 'provisioning_status' => 'failed',
-                'provisioning_error' => class_basename($exception),
+                'provisioning_error' => "تعذر {$step}. راجع سجل التشغيل وأعد المحاولة.",
             ]);
 
             report($exception);

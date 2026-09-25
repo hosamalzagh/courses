@@ -74,7 +74,10 @@ class CenterMemberController extends Controller
         }
 
         return response()->json([
-            'user' => $request->user()->only(['id', 'name', 'email']),
+            'user' => [
+                ...$request->user()->only(['id', 'name', 'email']),
+                'permissions' => $permissions->toArray(),
+            ],
             'membership' => $request->attributes->get('center_membership')->only(['status', 'grants_version']),
             'permissions' => $permissions->toArray(),
             'center' => $center->only(['id', 'name', 'slug']),
@@ -166,23 +169,26 @@ class CenterMemberController extends Controller
             'branch_roles.*' => ['array'],
             'branch_roles.*.*' => [Rule::in(['branch_manager', 'branch_viewer', 'branch_auditor'])],
         ]);
-        DB::connection('central')->transaction(function () use ($membership, $data, $permissions, $request): void {
-            $this->lockCenter($membership);
-            $membership->refresh();
-            $centerRoles = array_values(array_unique($data['center_roles']));
-            $targetIsOwner = DB::connection('tenant')->table('center_grants')
-                ->where('user_id', $membership->user_id)->where('role', 'center_owner')->exists();
-            abort_if($targetIsOwner && ! $permissions->isOwner(), 403);
-            abort_if(in_array('center_owner', $centerRoles, true) && ! $permissions->isOwner(), 403);
-            if (! in_array('center_owner', $centerRoles, true)) {
-                $this->protectLastOwner($membership);
-            }
+        // Commit the central version before the tenant transaction commits. A failed
+        // tenant commit may leave a version ahead, which is safe; grants must never
+        // commit while their central version remains stale.
+        DB::connection('tenant')->transaction(function () use ($membership, $data, $permissions, $request): void {
+            DB::connection('central')->transaction(function () use ($membership, $data, $permissions, $request): void {
+                $this->lockCenter($membership);
+                $membership->refresh();
+                $centerRoles = array_values(array_unique($data['center_roles']));
+                $targetIsOwner = DB::connection('tenant')->table('center_grants')
+                    ->where('user_id', $membership->user_id)->where('role', 'center_owner')->exists();
+                abort_if($targetIsOwner && ! $permissions->isOwner(), 403);
+                abort_if(in_array('center_owner', $centerRoles, true) && ! $permissions->isOwner(), 403);
+                if (! in_array('center_owner', $centerRoles, true)) {
+                    $this->protectLastOwner($membership);
+                }
 
-            $branchIds = array_map('intval', array_keys($data['branch_roles']));
-            $validIds = DB::connection('tenant')->table('branches')->whereIn('id', $branchIds)->pluck('id')->all();
-            abort_unless(count($validIds) === count($branchIds), 422);
+                $branchIds = array_map('intval', array_keys($data['branch_roles']));
+                $validIds = DB::connection('tenant')->table('branches')->whereIn('id', $branchIds)->pluck('id')->all();
+                abort_unless(count($validIds) === count($branchIds), 422);
 
-            DB::connection('tenant')->transaction(function () use ($membership, $centerRoles, $data, $request): void {
                 DB::connection('tenant')->table('center_grants')->where('user_id', $membership->user_id)->delete();
                 DB::connection('tenant')->table('branch_grants')->where('user_id', $membership->user_id)->delete();
                 foreach ($centerRoles as $role) {
@@ -202,8 +208,8 @@ class CenterMemberController extends Controller
                 $this->audit($request, 'member.grants_changed', [
                     'user_id' => $membership->user_id, 'center_roles' => $centerRoles, 'branch_roles' => $data['branch_roles'],
                 ]);
+                $membership->increment('grants_version');
             });
-            $membership->increment('grants_version');
         });
 
         return response()->json(['grants_version' => $membership->grants_version]);

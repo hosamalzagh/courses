@@ -40,3 +40,12 @@ export async function responseMessage(response: Response): Promise<string> {
   }
   return "تعذر إكمال العملية. حاول مرة أخرى.";
 }
+
+export async function responseFieldErrors(response: Response): Promise<Record<string, string>> {
+  if (response.status !== 422) return {};
+  const data = await response.clone().json().catch(() => ({}));
+  if (!data.errors || typeof data.errors !== "object") return {};
+  return Object.fromEntries(Object.entries(data.errors)
+    .filter((entry): entry is [string, string[]] => Array.isArray(entry[1]) && entry[1].length > 0)
+    .map(([field, messages]) => [field, /[\u0600-\u06ff]/.test(messages[0]) ? messages[0] : "راجع قيمة هذا الحقل ثم حاول مرة أخرى."]));
+}

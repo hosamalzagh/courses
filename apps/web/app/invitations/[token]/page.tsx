@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { AuthShell } from "@/components/AuthShell";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
-import { centerRequest, responseMessage } from "@/lib/client-api";
+import { centerRequest, responseFieldErrors, responseMessage } from "@/lib/client-api";
 
 type Invitation = { email: string; center: { name: string } };
 
@@ -19,6 +19,7 @@ export default function InvitationPage() {
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const controller = new AbortController();
@@ -38,9 +39,9 @@ export default function InvitationPage() {
 
   async function accept(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError("");
+    setError(""); setFieldErrors({});
     if (password.length < 12 || password !== confirmation) {
-      setError("استخدم كلمة مرور من 12 حرفًا على الأقل، وتأكد من تطابقها.");
+      setFieldErrors(password.length < 12 ? { password: "استخدم 12 حرفًا على الأقل." } : { password_confirmation: "تأكيد كلمة المرور غير مطابق." });
       return;
     }
     setBusy(true);
@@ -49,6 +50,7 @@ export default function InvitationPage() {
         name, password, password_confirmation: confirmation,
       });
       if (!response.ok) {
+        setFieldErrors(await responseFieldErrors(response));
         setError(await responseMessage(response));
         return;
       }
@@ -70,9 +72,9 @@ export default function InvitationPage() {
         <>
           <p className="muted">دُعيت إلى <strong>{invitation.center.name}</strong> بالبريد <bdi dir="ltr">{invitation.email}</bdi>.</p>
           <form className="form-stack" noValidate onSubmit={accept}>
-            <FormField id="name" label="الاسم" value={name} onChange={setName} autoComplete="name" required />
-            <FormField id="password" label="كلمة المرور" type="password" value={password} onChange={setPassword} autoComplete="new-password" hint="12 حرفًا على الأقل. إذا كان لك حساب سابق، أدخل كلمة مروره." required />
-            <FormField id="password-confirmation" label="تأكيد كلمة المرور" type="password" value={confirmation} onChange={setConfirmation} autoComplete="new-password" required />
+            <FormField id="name" label="الاسم" value={name} onChange={(value) => { setName(value); setFieldErrors({}); }} error={fieldErrors.name} autoComplete="name" required />
+            <FormField id="password" label="كلمة المرور" type="password" value={password} onChange={(value) => { setPassword(value); setFieldErrors({}); }} error={fieldErrors.password} autoComplete="new-password" hint="12 حرفًا على الأقل. إذا كان لك حساب سابق، أدخل كلمة مروره." required />
+            <FormField id="password-confirmation" label="تأكيد كلمة المرور" type="password" value={confirmation} onChange={(value) => { setConfirmation(value); setFieldErrors({}); }} error={fieldErrors.password_confirmation} autoComplete="new-password" required />
             <button className="button button-primary" type="submit" disabled={busy || !name || !password || !confirmation}>{busy ? "جارٍ قبول الدعوة…" : "قبول الدعوة"}</button>
           </form>
         </>

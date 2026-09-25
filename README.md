@@ -66,9 +66,12 @@ cd ../web
 npm run lint
 npx tsc --noEmit
 npm run build
+npm run test:browser
 ```
 
 An unauthenticated center `user` response is `401`. Unknown or retired center hosts return `404` from the API. Suspended centers return `423` before center data is read. The tests use `courses_test_central`, temporary center databases, and Redis. Never point the test environment at `courses_central`.
+
+The browser suite runs against the local Herd, Next.js, and Mailpit services with the accepted alpha/beta demo invitations and the ignored local credential files. It verifies the two hosts, CSRF, inline validation, a nonblocking confirmation, cache isolation, and a Mailpit password reset. The reset test updates the ignored staff credential file to the new password so the suite can run again. See `docs/local-acceptance.md` for the one-time provisioning and suspended-center browser checks.
 
 To migrate all centers, run `php85 artisan tenants:migrate --force --no-interaction`; to migrate one, add `--tenants=<center UUID>`. The worker uses queue `platform` for provisioning. Telescope is available only locally at `/telescope` to platform owners; authentication, invitation, MFA, and credential-producing jobs are excluded from recording, and mail, event, and Redis watchers are disabled to avoid retaining secrets. It still records ordinary page reads and their queries. The scheduler prunes entries older than 48 hours.
 

@@ -52,14 +52,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
             }
 
             if ($request->query('include') === 'audit') {
-                $audit = DB::connection('tenant')->table('center_audit_logs');
-                if (! $permissions->isCenterManager()) {
-                    $branchIds = array_keys(array_filter($permissions->branchRoles,
-                        fn ($roles) => in_array('branch_auditor', $roles, true)));
-                    abort_if($branchIds === [], 403);
-                    $audit->whereIn('branch_id', $branchIds);
-                }
-                $payload['audit_entries'] = $audit->orderByDesc('id')->limit(50)->get();
+                $payload['audit_entries'] = CenterAuditController::visibleEntries($request);
             }
 
             return response()->json($payload)->header('Cache-Control', 'private, no-store');

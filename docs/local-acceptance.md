@@ -20,4 +20,8 @@ See `docs/query-budget.md` for the corresponding page read counts and the API qu
 
 After changing center MFA to opt-in, a fresh browser session signed in as the alpha owner with email/password alone and reached `/admin`. The **أمان الحساب** link opened `/admin/security`, which reported MFA off. Starting enrollment displayed a QR code; cancelling it returned to the off state. The authenticated `user` response still used five SQL queries. The backend feature test covers enabling MFA, the next login challenge, one-use recovery codes, disabling MFA, and refusal to disable MFA for an account with a platform role.
 
+Beta's newly invited owner also enabled MFA in the browser, signed out, saw the six-digit challenge on the next password login, and entered successfully with a current authenticator code. MFA was then disabled from the security page and the page returned to the off state. This leaves the local beta sample account at the requested default.
+
 The temporary platform-support browser run also confirmed that MFA remains required for Landlord accounts. A later browser read of Landlord's center list, user list, and audit list and each Next.js center page was measured at first load after clearing Laravel's application cache and again on reload. Telescope recorded one Laravel data request per center page; the counts are in `docs/query-budget.md`.
+
+The repeatable local Playwright suite is `cd apps/web && npm run test:browser`. It covers the alpha/beta host boundary and cached page content, CSRF rejection, inline branch validation, cancellation of the staff suspension dialog, and the Mailpit reset/login path. The manual checks above additionally cover provisioning, support MFA and denial, center suspension, and center MFA enable/challenge/disable.

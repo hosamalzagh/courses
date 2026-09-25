@@ -17,7 +17,7 @@ class CenterInfolist
                 TextEntry::make('provisioning_status')->label('حالة التجهيز')->badge(),
                 TextEntry::make('database_state')->label('قاعدة البيانات'),
                 TextEntry::make('migration_version')->label('آخر migration'),
-                TextEntry::make('provisioning_error')->label('فئة الخطأ'),
+                TextEntry::make('provisioning_error')->label('سبب فشل التجهيز'),
                 TextEntry::make('domains.domain')->label('النطاقات'),
             ]);
     }

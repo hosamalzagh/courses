@@ -53,6 +53,11 @@ class PlatformAccessTest extends TestCase
         $this->assertNotNull($response->headers->get('X-Courses-Query-Count'));
         $this->assertGreaterThan(0, (int) $response->headers->get('X-Courses-Query-Count'));
         $this->assertLessThanOrEqual(6, (int) $response->headers->get('X-Courses-Query-Count'));
+        foreach (['centers', 'users', 'platform-audit-logs'] as $page) {
+            Auth::forgetGuards();
+            $pageResponse = $this->get("http://courses.test/admin/{$page}")->assertOk();
+            $this->assertLessThanOrEqual(6, (int) $pageResponse->headers->get('X-Courses-Query-Count'), $page);
+        }
     }
 
     public function test_telescope_routes_are_absent_in_production_even_if_enabled_by_environment(): void

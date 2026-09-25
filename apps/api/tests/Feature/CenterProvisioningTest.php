@@ -64,6 +64,8 @@ class CenterProvisioningTest extends TestCase
 
         $center = Center::where('slug', 'gamma')->firstOrFail();
         $this->assertSame('not_created', $center->database_state);
+        $this->assertStringContainsString('إنشاء قاعدة بيانات المركز', $center->provisioning_error);
+        $this->assertStringNotContainsString('Exception', $center->provisioning_error);
         $this->postJson("http://courses.test/api/v1/platform/centers/{$center->id}/retry")
             ->assertOk()->assertJsonPath('center.provisioning_status', 'active');
         $this->assertSame(1, Center::where('slug', 'gamma')->count());
