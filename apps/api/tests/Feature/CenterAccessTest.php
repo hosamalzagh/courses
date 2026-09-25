@@ -15,6 +15,29 @@ class CenterAccessTest extends TestCase
 {
     use CleansCenterDatabases, RefreshDatabase;
 
+    public function test_suspended_membership_denies_existing_session_and_new_login_with_a_clear_state(): void
+    {
+        Mail::fake();
+        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']))
+            ->postJson('http://courses.test/api/v1/platform/centers', [
+                'name' => 'Alpha', 'slug' => 'alpha', 'subdomain' => 'alpha',
+                'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
+            ])->assertCreated();
+        $alpha = Center::where('slug', 'alpha')->firstOrFail();
+        $staff = User::factory()->create(['email_verified_at' => now(), 'password' => 'correct-horse-battery-staple']);
+        $membership = CenterMembership::create(['user_id' => $staff->id, 'tenant_id' => $alpha->id, 'status' => 'active']);
+
+        $this->actingAs($staff)->withSession(['center_id' => $alpha->id]);
+        $this->getJson('http://alpha.courses.test/api/v1/center/user')->assertOk();
+        $membership->update(['status' => 'suspended']);
+        $denied = $this->getJson('http://alpha.courses.test/api/v1/center/user')
+            ->assertForbidden()->assertJsonPath('code', 'membership_suspended')->assertDontSee($staff->email);
+        $this->assertLessThanOrEqual(6, (int) $denied->headers->get('X-Courses-Query-Count'));
+        $this->postJson('http://alpha.courses.test/api/v1/center/auth/login', [
+            'email' => $staff->email, 'password' => 'correct-horse-battery-staple',
+        ])->assertForbidden()->assertJsonPath('code', 'membership_suspended');
+    }
+
     public function test_login_rate_limit_does_not_block_a_separate_invitation_operation(): void
     {
         Mail::fake();

@@ -99,8 +99,7 @@ export function BranchWorkspace({ context }: { context: CenterContext }) {
         setError(await responseMessage(response));
         return;
       }
-      router.replace("/login");
-      router.refresh();
+      window.location.replace("/login");
     } catch {
       setError("تعذر تسجيل الخروج. حاول مرة أخرى.");
     } finally {

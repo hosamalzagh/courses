@@ -100,6 +100,20 @@ test("Mailpit password reset changes the local staff password and permits login"
   await page.getByRole("button", { name: "حفظ كلمة المرور" }).click();
   await expect(page.getByRole("status")).toContainText("حُفظت كلمة المرور");
   writeFileSync(staff.file, `email=${staff.email}\npassword=${newPassword}\n`, { mode: 0o600 });
+
+  await page.goto(resetUrl);
+  await page.getByRole("textbox", { name: "كلمة المرور الجديدة" }).fill(randomBytes(24).toString("base64url"));
+  await page.getByRole("textbox", { name: "تأكيد كلمة المرور" }).fill("different-password");
+  await page.getByRole("button", { name: "حفظ كلمة المرور" }).click();
+  await expect(page.locator("#confirmation-error")).toContainText("تأكيد كلمة المرور غير مطابق");
+  const replayPassword = randomBytes(24).toString("base64url");
+  await page.getByRole("textbox", { name: "كلمة المرور الجديدة" }).fill(replayPassword);
+  await page.getByRole("textbox", { name: "تأكيد كلمة المرور" }).fill(replayPassword);
+  const replayResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/center/auth/reset-password") && response.request().method() === "POST");
+  await page.getByRole("button", { name: "حفظ كلمة المرور" }).click();
+  expect((await replayResponse).status()).toBe(422);
+  await expect(page.locator(".notice[role=alert]")).toContainText("استُخدم بالفعل");
+
   await signIn(page, alpha, staff.email, newPassword);
   await expect(page.getByRole("heading", { name: "الفرع الشمالي" })).toBeVisible();
 });

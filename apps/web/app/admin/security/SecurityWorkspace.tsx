@@ -105,7 +105,7 @@ export function SecurityWorkspace({ centerName, email, initialEnabled, requiredF
           </div> : null}
           <p className="muted">عند تسجيل الدخول سيُطلب رمز من تطبيق المصادقة بعد كلمة المرور.</p>
           {requiredForPlatform ? <p className="muted">هذا الحساب يدخل لوحة المنصة، لذلك يبقى التحقق مطلوبًا لها ولا يمكن إيقافه من المركز.</p> :
-            <form className="form-stack" onSubmit={requestDisable}>
+            <form className="form-stack" noValidate onSubmit={requestDisable}>
               <FormField id="disable-password" label="كلمة المرور الحالية" type="password" value={disablePassword} onChange={(value) => { setDisablePassword(value); setFieldErrors({}); }} error={fieldErrors.password} autoComplete="current-password" required />
               {useRecovery ? <FormField id="disable-recovery" label="رمز الاستعادة" value={recoveryCode} onChange={(value) => { setRecoveryCode(value); setFieldErrors({}); }} error={fieldErrors.recovery_code} direction="ltr" required /> :
                 <FormField id="disable-code" label="رمز المصادقة الحالي" value={code} onChange={(value) => { setCode(value); setFieldErrors({}); }} error={fieldErrors.code} autoComplete="one-time-code" direction="ltr" required />}
@@ -117,14 +117,14 @@ export function SecurityWorkspace({ centerName, email, initialEnabled, requiredF
           <div className="qr-wrap"><QRCodeSVG value={otpauthUrl} size={168} aria-label="رمز إعداد تطبيق المصادقة" /></div>
           <p className="muted">إذا تعذّر مسح الرمز، أدخل هذا المفتاح في التطبيق:</p>
           <div className="mfa-secret" aria-label="مفتاح المصادقة">{secret}</div>
-          <form className="form-stack" onSubmit={confirmSetup}>
+          <form className="form-stack" noValidate onSubmit={confirmSetup}>
             <FormField id="setup-code" label="رمز التحقق" value={code} onChange={(value) => { setCode(value); setFieldErrors({}); }} error={fieldErrors.code} autoComplete="one-time-code" direction="ltr" required />
             <button className="button button-primary" disabled={busy || !/^\d{6}$/.test(code)}>{busy ? "جارٍ التفعيل…" : "تفعيل التحقق"}</button>
           </form>
           <button className="button button-secondary" type="button" onClick={cancelSetup} disabled={busy}>إلغاء الإعداد</button>
         </> : <>
           <p className="muted">تدخل الآن بكلمة المرور فقط. يمكنك إضافة رمز المصادقة لحماية حسابك.</p>
-          <form className="form-stack" onSubmit={startSetup}>
+          <form className="form-stack" noValidate onSubmit={startSetup}>
             <FormField id="setup-password" label="كلمة المرور الحالية" type="password" value={setupPassword} onChange={(value) => { setSetupPassword(value); setFieldErrors({}); }} error={fieldErrors.password} autoComplete="current-password" required />
             <button className="button button-primary" disabled={busy || !setupPassword}>{busy ? "جارٍ إعداد الحماية…" : "تفعيل التحقق بخطوتين"}</button>
           </form>

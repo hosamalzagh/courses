@@ -28,7 +28,9 @@ export type Member = {
 export type Invitation = { id: number; email: string; center_role: string | null; expires_at: string };
 export type MemberContext = CenterContext & { members: Member[]; invitations: Invitation[] };
 
-async function fetchCenterPayload<T>(path: string): Promise<T | "forbidden" | "unavailable"> {
+export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable";
+
+async function fetchCenterPayload<T>(path: string): Promise<T | CenterAccessFailure> {
   const incoming = await headers();
   const host = incoming.get("host")?.split(":")[0].toLowerCase() ?? "";
 
@@ -48,8 +50,14 @@ async function fetchCenterPayload<T>(path: string): Promise<T | "forbidden" | "u
     return "unavailable";
   }
 
-  if (response.status === 401) redirect("/login");
-  if (response.status === 403) return "forbidden";
+  if (response.status === 401) {
+    const hadSession = /(?:^|;\s*)[A-Za-z0-9_-]*session=/i.test(incoming.get("cookie") ?? "");
+    redirect(hadSession ? "/login?expired=1" : "/login");
+  }
+  if (response.status === 403) {
+    const data = await response.json().catch(() => ({}));
+    return data.code === "membership_suspended" ? "suspended" : "forbidden";
+  }
   if (response.status === 404) notFound();
   if (response.status === 423 || response.status === 503) return "unavailable";
   if (!response.ok) return "unavailable";
@@ -57,10 +65,10 @@ async function fetchCenterPayload<T>(path: string): Promise<T | "forbidden" | "u
   return response.json() as Promise<T>;
 }
 
-export function loadCenterContext(include?: "settings" | "audit"): Promise<CenterContext | "forbidden" | "unavailable"> {
+export function loadCenterContext(include?: "settings" | "audit"): Promise<CenterContext | CenterAccessFailure> {
   return fetchCenterPayload<CenterContext>(`user${include ? `?include=${include}` : ""}`);
 }
 
-export function loadMemberWorkspace(): Promise<MemberContext | "forbidden" | "unavailable"> {
+export function loadMemberWorkspace(): Promise<MemberContext | CenterAccessFailure> {
   return fetchCenterPayload<MemberContext>("member-workspace");
 }

@@ -103,6 +103,52 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await page.getByRole("button", { name: "دخول المركز" }).click();
     await expect(page).toHaveURL(`${host}/admin`);
     await expect(page.getByText("مالك المركز")).toBeVisible();
+    runFixture(String.raw`
+      $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
+      $user = \App\Models\User::where('email', getenv('COURSES_BROWSER_EMAIL'))->firstOrFail();
+      $center->run(fn () => \Illuminate\Support\Facades\DB::table('center_grants')->where('user_id', $user->id)->where('role', 'center_owner')->delete());
+    `, slug, email);
+    await page.getByRole("button", { name: "إنشاء فرع" }).click();
+    await page.getByRole("textbox", { name: "اسم الفرع" }).fill("Denied Browser Branch");
+    await page.getByRole("textbox", { name: "رمز الفرع" }).fill("denied-browser-branch");
+    const forbiddenResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/center/branches") && response.request().method() === "POST");
+    await page.getByRole("button", { name: "حفظ الفرع" }).click();
+    expect((await forbiddenResponse).status()).toBe(403);
+    await expect(page.locator(".notice[role=alert]")).toContainText("خارج صلاحيتك");
+    runFixture(String.raw`
+      $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
+      $user = \App\Models\User::where('email', getenv('COURSES_BROWSER_EMAIL'))->firstOrFail();
+      $center->run(fn () => \Illuminate\Support\Facades\DB::table('center_grants')->insert(['user_id' => $user->id, 'role' => 'center_owner', 'created_at' => now(), 'updated_at' => now()]));
+    `, slug, email);
+    runFixture(String.raw`
+      $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
+      $user = \App\Models\User::where('email', getenv('COURSES_BROWSER_EMAIL'))->firstOrFail();
+      \App\Models\CenterMembership::where('tenant_id', $center->id)->where('user_id', $user->id)->update(['status' => 'suspended']);
+    `, slug, email);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "أُوقفت عضويتك في هذا المركز" })).toBeVisible();
+    await expect(page.getByText(email)).toHaveCount(0);
+    const suspended = await page.evaluate(async () => {
+      const response = await fetch("/api/v1/center/user", { headers: { Accept: "application/json" } });
+      return { status: response.status, body: await response.json() };
+    });
+    expect(suspended).toEqual({ status: 403, body: { code: "membership_suspended" } });
+    await page.goto(`${host}/login`);
+    await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(email);
+    await page.getByRole("textbox", { name: "كلمة المرور" }).fill(password);
+    await page.getByRole("button", { name: "دخول المركز" }).click();
+    await expect(page.locator(".notice[role=alert]")).toContainText("أُوقفت عضويتك");
+    runFixture(String.raw`
+      $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
+      $user = \App\Models\User::where('email', getenv('COURSES_BROWSER_EMAIL'))->firstOrFail();
+      \App\Models\CenterMembership::where('tenant_id', $center->id)->where('user_id', $user->id)->update(['status' => 'active']);
+    `, slug, email);
+    await page.goto(`${host}/login`);
+    await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(email);
+    await page.getByRole("textbox", { name: "كلمة المرور" }).fill(password);
+    await page.getByRole("button", { name: "دخول المركز" }).click();
+    await expect(page).toHaveURL(`${host}/admin`);
+    await expect(page.getByText("مالك المركز")).toBeVisible();
     const sequence = Number(runFixture(String.raw`
       echo \Illuminate\Support\Facades\DB::connection('central')->table('telescope_entries')->max('sequence');
     `, slug, email));
@@ -151,10 +197,18 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await expect(page.getByRole("heading", { name: "التحقق بخطوتين مفعّل" })).toBeVisible();
 
     await page.goto(`${host}/admin`);
+    const expiredSession = (await page.context().cookies(host)).find((cookie) => cookie.name.includes("session"));
+    if (!expiredSession) throw new Error("The center session cookie was missing before logout.");
     await page.getByRole("button", { name: "تسجيل الخروج" }).click();
     await expect(page).toHaveURL(`${host}/login`);
+    await page.goBack();
+    await expect(page.getByText(email)).toHaveCount(0);
     const afterLogout = await page.evaluate(async () => (await fetch("/api/v1/center/user", { headers: { Accept: "application/json" } })).status);
     expect(afterLogout).toBe(401);
+    await page.context().addCookies([expiredSession]);
+    await page.goto(`${host}/admin`);
+    await expect(page).toHaveURL(`${host}/login?expired=1`);
+    await expect(page.getByRole("status")).toContainText("انتهت جلسة الدخول");
 
     await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(email);
     await page.getByRole("textbox", { name: "كلمة المرور" }).fill(password);

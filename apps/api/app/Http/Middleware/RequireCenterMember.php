@@ -22,10 +22,12 @@ class RequireCenterMember
         $membership = CenterMembership::query()
             ->where('tenant_id', $center->id)
             ->where('user_id', $user->id)
-            ->where('status', 'active')
             ->first();
 
         abort_unless($membership, 401);
+        if ($membership->status !== 'active') {
+            return response()->json(['code' => 'membership_suspended'], 403);
+        }
 
         $request->attributes->set('center_membership', $membership);
         try {

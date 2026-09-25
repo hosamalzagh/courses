@@ -36,7 +36,7 @@ export function SettingsWorkspace({ centerName, initialSettings }: { centerName:
     <main className="members-main"><div><span className="eyebrow">{centerName}</span><h1>إعدادات المركز</h1><p className="muted">بيانات التواصل والعنوان المستخدمة في التشغيل اليومي.</p></div>
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-      <form className="context-card form-stack" onSubmit={save}>
+      <form className="context-card form-stack" noValidate onSubmit={save}>
         <FormField id="contact-email" label="بريد التواصل" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.contact_email} direction="ltr" />
         <FormField id="phone" label="الهاتف" type="tel" value={phone} onChange={(value) => { setPhone(value); setFieldErrors({}); }} error={fieldErrors.phone} direction="ltr" />
         <FormField id="address" label="العنوان" value={address} onChange={(value) => { setAddress(value); setFieldErrors({}); }} error={fieldErrors.address} />

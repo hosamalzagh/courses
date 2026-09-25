@@ -126,7 +126,7 @@ export function MemberWorkspace({ context }: { context: MemberContext }) {
       <div><span className="eyebrow">{context.center.name}</span><h1>موظفو المركز</h1><p className="muted">الدعوات والعضويات وأدوار كل فرع.</p></div>
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-      <section className="context-card"><h2>دعوة موظف</h2><form className="member-invite-form" onSubmit={invite}>
+      <section className="context-card"><h2>دعوة موظف</h2><form className="member-invite-form" noValidate onSubmit={invite}>
         <FormField id="invite-email" label="البريد الإلكتروني" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.email} direction="ltr" required />
         {isOwner ? <label className="check-row"><input type="checkbox" checked={inviteAsAdmin} onChange={(event) => setInviteAsAdmin(event.target.checked)} />دعوة بصفة مسؤول مركز</label> : null}
         <button className="button button-primary" disabled={busy || !email}>{busy ? "جارٍ إرسال الدعوة…" : "إرسال الدعوة"}</button>

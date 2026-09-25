@@ -30,7 +30,7 @@ export default function ForgotPasswordPage() {
     <p className="muted">أدخل بريدك. إذا كان الحساب موجودًا، ستصلك رسالة لاستعادة الدخول.</p>
     {sent ? <InlineNotice>إذا كان الحساب موجودًا، أُرسلت رسالة الاستعادة.</InlineNotice> : null}
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
-    <form className="form-stack" onSubmit={submit}><FormField id="email" label="البريد الإلكتروني" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.email} direction="ltr" required />
+    <form className="form-stack" noValidate onSubmit={submit}><FormField id="email" label="البريد الإلكتروني" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.email} direction="ltr" required />
       <button className="button button-primary" disabled={busy || !email}>{busy ? "جارٍ الإرسال…" : "إرسال رابط الاستعادة"}</button></form>
     <p className="auth-footnote"><a className="text-link" href="/login">العودة إلى الدخول</a></p>
   </AuthShell>;

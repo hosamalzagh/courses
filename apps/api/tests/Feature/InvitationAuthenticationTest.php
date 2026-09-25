@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Password;
 use PragmaRX\Google2FA\Google2FA;
 use RuntimeException;
 use Tests\Concerns\CleansCenterDatabases;
@@ -199,6 +200,21 @@ class InvitationAuthenticationTest extends TestCase
             'password_confirmation' => 'new-correct-horse-battery-staple',
         ])->assertOk();
         $this->assertTrue(Hash::check('new-correct-horse-battery-staple', $owner->fresh()->password));
+        $this->postJson('http://alpha.courses.test/api/v1/center/auth/reset-password', [
+            'email' => 'owner@alpha.test', 'token' => $resetToken,
+            'password' => 'another-correct-horse-battery-staple',
+            'password_confirmation' => 'another-correct-horse-battery-staple',
+        ])->assertUnprocessable()->assertJsonPath('code', 'invalid_reset_link');
+        $this->assertTrue(Hash::check('new-correct-horse-battery-staple', $owner->fresh()->password));
+
+        $expiredToken = Password::createToken($owner);
+        $this->travel(61)->minutes();
+        $this->postJson('http://alpha.courses.test/api/v1/center/auth/reset-password', [
+            'email' => 'owner@alpha.test', 'token' => $expiredToken,
+            'password' => 'another-correct-horse-battery-staple',
+            'password_confirmation' => 'another-correct-horse-battery-staple',
+        ])->assertUnprocessable()->assertJsonPath('code', 'invalid_reset_link');
+        $this->travelBack();
 
         $owner->forceFill(['platform_role' => 'platform_owner'])->save();
         $platformSecret = $this->postJson('http://alpha.courses.test/api/v1/center/security/mfa/setup', [

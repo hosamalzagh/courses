@@ -36,7 +36,7 @@ export function ResetPasswordForm({ token, initialEmail }: { token: string; init
   return <AuthShell><span className="eyebrow">استعادة الدخول</span><h1>عيّن كلمة مرور جديدة</h1>
     {done ? <InlineNotice>حُفظت كلمة المرور. يمكنك الدخول الآن.</InlineNotice> : null}
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
-    {!done ? <form className="form-stack" onSubmit={submit}>
+    {!done ? <form className="form-stack" noValidate onSubmit={submit}>
       <FormField id="email" label="البريد الإلكتروني" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.email} direction="ltr" required />
       <FormField id="password" label="كلمة المرور الجديدة" type="password" value={password} onChange={(value) => { setPassword(value); setFieldErrors({}); }} error={fieldErrors.password} autoComplete="new-password" required />
       <FormField id="confirmation" label="تأكيد كلمة المرور" type="password" value={confirmation} onChange={(value) => { setConfirmation(value); setFieldErrors({}); }} error={fieldErrors.password_confirmation} autoComplete="new-password" required />

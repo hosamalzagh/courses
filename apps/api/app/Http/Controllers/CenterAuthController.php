@@ -107,10 +107,12 @@ class CenterAuthController extends Controller
         $center = $request->attributes->get('center');
         $membership = CenterMembership::where('user_id', $user->id)
             ->where('tenant_id', $center->id)
-            ->where('status', 'active')
             ->first();
 
         abort_unless($membership && $user->hasVerifiedEmail(), 403);
+        if ($membership->status !== 'active') {
+            return response()->json(['code' => 'membership_suspended'], 403);
+        }
 
         $request->session()->invalidate();
         $request->session()->regenerateToken();
@@ -189,7 +191,9 @@ class CenterAuthController extends Controller
             $user->save();
         });
 
-        abort_unless($status === Password::PASSWORD_RESET, 422);
+        if ($status !== Password::PASSWORD_RESET) {
+            return response()->json(['code' => 'invalid_reset_link'], 422);
+        }
 
         return response()->json(['status' => 'password_reset']);
     }
