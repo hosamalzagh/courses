@@ -47,10 +47,16 @@ class CenterAuthController extends Controller
 
             abort_unless($invitation && ! $invitation->accepted_at && $invitation->expires_at->isFuture(), 410);
 
-            $user = User::where('email', $invitation->email)->first();
+            $matchingUsers = User::whereRaw('LOWER(email) = ?', [$invitation->email])->limit(2)->get();
+            abort_if($matchingUsers->count() > 1, 409, 'Multiple accounts use this email. Contact platform support.');
+            $user = $matchingUsers->first();
 
             if ($user) {
                 abort_unless(Hash::check($data['password'], $user->password), 422, 'Existing account password is incorrect.');
+                if ($user->email !== $invitation->email) {
+                    $user->email = $invitation->email;
+                    $user->save();
+                }
             } else {
                 $user = User::create([
                     'name' => $data['name'],

@@ -21,6 +21,28 @@ function runFixture(code: string, slug: string, email: string, variables: Record
   }
 }
 
+type MeasuredRequest = { uri: string; queries: number };
+
+function telescopeSequence(slug: string, email: string): number {
+  return Number(runFixture(String.raw`
+    echo \Illuminate\Support\Facades\DB::connection('central')->table('telescope_entries')->max('sequence');
+  `, slug, email));
+}
+
+function telescopeRequestsSince(slug: string, email: string, sequence: number): MeasuredRequest[] {
+  return JSON.parse(runFixture(String.raw`
+    $rows = \Illuminate\Support\Facades\DB::connection('central')->table('telescope_entries')
+      ->where('type', 'request')->where('sequence', '>', (int) getenv('COURSES_TELESCOPE_SEQUENCE'))
+      ->get(['content']);
+    echo json_encode($rows->map(fn ($row) => json_decode($row->content, true))
+      ->filter(fn ($entry) => ($entry['headers']['host'] ?? null) === getenv('COURSES_BROWSER_SLUG').'.courses.test')
+      ->map(fn ($entry) => [
+        'uri' => $entry['uri'],
+        'queries' => (int) ($entry['response_headers']['x-courses-query-count'] ?? -1),
+      ])->values()->all());
+  `, slug, email, { COURSES_TELESCOPE_SEQUENCE: String(sequence) })) as MeasuredRequest[];
+}
+
 function oneTimeCode(secret: string): string {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   const bytes: number[] = [];
@@ -41,12 +63,15 @@ function oneTimeCode(secret: string): string {
   return String((digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
 }
 
-test("first owner accepts, signs in with MFA, sees current roles, and signs out on the center host", async ({ page }) => {
+test("first owner accepts, signs in with MFA, sees current roles, and signs out on the center host", async ({ page, browser }) => {
   test.setTimeout(180_000);
   const slug = `inv-${randomBytes(6).toString("hex")}`;
   const email = `${slug}@courses.test`;
+  const staffEmail = `${slug}-staff@courses.test`;
   const host = `http://${slug}.courses.test`;
   const password = randomBytes(24).toString("base64url");
+  const staffPassword = randomBytes(24).toString("base64url");
+  const staffPage = await browser.newPage();
 
   try {
     runFixture(String.raw`
@@ -122,6 +147,87 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await expect(page.getByRole("heading", { name: "فرع التجربة الشمالي المحدّث" })).toBeVisible();
     await expect(page.getByRole("article").filter({ has: page.getByRole("heading", { name: "فرع التجربة الشمالي المحدّث" }) })).toContainText("شارع التجربة ١");
     await expect(page.getByRole("heading", { name: "فرع التجربة الجنوبي" })).toBeVisible();
+
+    await page.goto(`${host}/admin/members`);
+    await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(staffEmail);
+    const staffInvitationResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/center/members/invitations") && response.request().method() === "POST");
+    await page.getByRole("button", { name: "إرسال الدعوة" }).click();
+    expect((await staffInvitationResponse).status()).toBe(201);
+    await expect(page.getByText(staffEmail)).toBeVisible();
+    await expect(page.getByText("بانتظار القبول")).toBeVisible();
+
+    let staffInvitation = "";
+    await expect.poll(async () => {
+      const inbox = await (await fetch("http://127.0.0.1:8025/api/v1/messages")).json();
+      for (const message of inbox.messages as { ID: string; To: { Address: string }[] }[]) {
+        if (!message.To.some((recipient) => recipient.Address === staffEmail)) continue;
+        const detail = await (await fetch(`http://127.0.0.1:8025/api/v1/message/${message.ID}`)).json();
+        staffInvitation = String(detail.Text ?? "").match(new RegExp(`http:\\/\\/${slug}\\.courses\\.test\\/invitations\\/[^\\s<>"']+`))?.[0] ?? "";
+        if (staffInvitation) break;
+      }
+      return Boolean(staffInvitation);
+    }, { timeout: 10_000 }).toBe(true);
+    await staffPage.goto(staffInvitation);
+    await expect(staffPage.getByText(staffEmail)).toBeVisible();
+    await staffPage.getByRole("textbox", { name: "الاسم" }).fill("Pilot Staff");
+    await staffPage.getByRole("textbox", { name: "كلمة المرور", exact: true }).fill(staffPassword);
+    await staffPage.getByRole("textbox", { name: "تأكيد كلمة المرور" }).fill(staffPassword);
+    await staffPage.getByRole("button", { name: "قبول الدعوة" }).click();
+    await expect(staffPage).toHaveURL(`${host}/login?invitation=accepted`);
+    await staffPage.goto(staffInvitation);
+    await expect(staffPage.getByRole("button", { name: "قبول الدعوة" })).toHaveCount(0);
+    await staffPage.goto(`${host}/login`);
+    await staffPage.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(staffEmail);
+    await staffPage.getByRole("textbox", { name: "كلمة المرور" }).fill(staffPassword);
+    await staffPage.getByRole("button", { name: "دخول المركز" }).click();
+    await expect(staffPage).toHaveURL(`${host}/admin`);
+    await expect(staffPage.getByText(staffEmail)).toBeVisible();
+
+    const memberSequence = telescopeSequence(slug, email);
+    await page.reload();
+    const staffCard = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Pilot Staff" }) });
+    await expect(staffCard).toContainText("نشط");
+    await expect(page.getByText(staffEmail)).toHaveCount(1);
+    let memberRequests: MeasuredRequest[] = [];
+    await expect.poll(() => {
+      memberRequests = telescopeRequestsSince(slug, email, memberSequence);
+      return memberRequests.length;
+    }, { timeout: 10_000 }).toBeGreaterThan(0);
+    expect(memberRequests).toHaveLength(1);
+    expect(memberRequests[0].uri).toBe("/api/v1/center/member-workspace");
+    expect(memberRequests[0].queries).toBeLessThanOrEqual(6);
+
+    await staffCard.getByRole("button", { name: "إيقاف العضوية" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "إيقاف العضوية" }).click();
+    await expect(staffCard).toContainText("موقوف");
+    await staffPage.reload();
+    await expect(staffPage.getByRole("heading", { name: "أُوقفت عضويتك في هذا المركز" })).toBeVisible();
+    await expect(staffPage.getByText(staffEmail)).toHaveCount(0);
+    await staffCard.getByRole("button", { name: "تنشيط العضوية" }).click();
+    await expect(staffCard).toContainText("نشط");
+    await staffPage.reload();
+    await expect(staffPage.getByText(staffEmail)).toBeVisible();
+    const expiredEmail = `${slug}-expired@courses.test`;
+    await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(expiredEmail);
+    await page.getByRole("button", { name: "إرسال الدعوة" }).click();
+    await expect(page.getByText(expiredEmail)).toBeVisible();
+    runFixture(String.raw`
+      $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
+      \App\Models\CenterInvitation::where('tenant_id', $center->id)
+        ->where('email', $center->slug.'-expired@courses.test')
+        ->update(['sent_at' => null]);
+    `, slug, email);
+    await page.reload();
+    await expect(page.locator(".member-card").filter({ hasText: expiredEmail })).toContainText("التسليم غير مؤكد");
+    runFixture(String.raw`
+      $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
+      \App\Models\CenterInvitation::where('tenant_id', $center->id)
+        ->where('email', $center->slug.'-expired@courses.test')
+        ->update(['sent_at' => now(), 'expires_at' => now()->subMinute()]);
+    `, slug, email);
+    await page.reload();
+    await expect(page.locator(".member-card").filter({ hasText: expiredEmail })).toContainText("انتهت صلاحية الدعوة");
+    await page.goto(`${host}/admin`);
     runFixture(String.raw`
       $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
       $user = \App\Models\User::where('email', getenv('COURSES_BROWSER_EMAIL'))->firstOrFail();
@@ -168,25 +274,12 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await page.getByRole("button", { name: "دخول المركز" }).click();
     await expect(page).toHaveURL(`${host}/admin`);
     await expect(page.getByText("مالك المركز")).toBeVisible();
-    const sequence = Number(runFixture(String.raw`
-      echo \Illuminate\Support\Facades\DB::connection('central')->table('telescope_entries')->max('sequence');
-    `, slug, email));
+    const sequence = telescopeSequence(slug, email);
     await page.reload();
     await expect(page.getByText("مالك المركز")).toBeVisible();
-    let pageRequests: { uri: string; queries: number }[] = [];
+    let pageRequests: MeasuredRequest[] = [];
     await expect.poll(() => {
-      pageRequests = JSON.parse(runFixture(String.raw`
-      $rows = \Illuminate\Support\Facades\DB::connection('central')->table('telescope_entries')
-        ->where('type', 'request')->where('sequence', '>', (int) getenv('COURSES_TELESCOPE_SEQUENCE'))
-        ->get(['content']);
-      $requests = $rows->map(fn ($row) => json_decode($row->content, true))
-        ->filter(fn ($entry) => ($entry['headers']['host'] ?? null) === getenv('COURSES_BROWSER_SLUG').'.courses.test')
-        ->map(fn ($entry) => [
-          'uri' => $entry['uri'],
-          'queries' => (int) ($entry['response_headers']['x-courses-query-count'] ?? -1),
-        ])->values()->all();
-      echo json_encode($requests);
-      `, slug, email, { COURSES_TELESCOPE_SEQUENCE: String(sequence) })) as { uri: string; queries: number }[];
+      pageRequests = telescopeRequestsSince(slug, email, sequence);
       return pageRequests.length;
     }, { timeout: 10_000 }).toBeGreaterThan(0);
     expect(pageRequests).toHaveLength(1);
@@ -253,6 +346,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await expect(page).toHaveURL(`${host}/admin`);
     await expect(page.getByText("مالك المركز")).toBeVisible();
   } finally {
+    await staffPage.close();
     runFixture(String.raw`
       $slug = getenv('COURSES_BROWSER_SLUG');
       $email = getenv('COURSES_BROWSER_EMAIL');
@@ -270,6 +364,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
         \Illuminate\Support\Facades\DB::connection('provisioning')->statement('DROP DATABASE IF EXISTS "'.$database.'" WITH (FORCE)');
         \Illuminate\Support\Facades\DB::connection('central')->table('tenants')->where('id', $center->id)->delete();
         \App\Models\User::where('email', $email)->delete();
+        \App\Models\User::where('email', $slug.'-staff@courses.test')->delete();
       }
     `, slug, email);
   }

@@ -40,6 +40,15 @@ export async function responseMessage(response: Response): Promise<string> {
       ? "أُوقفت عضويتك في هذا المركز. تواصل مع مالك المركز أو مسؤوله."
       : "هذه العملية خارج صلاحيتك في هذا المركز.";
   }
+  if (response.status === 409) {
+    const data = await response.clone().json().catch(() => ({}));
+    if (data.code === "invitation_delivery_uncertain") {
+      return "حالة إرسال الدعوة غير مؤكدة. اطلب من دعم المنصة التحقق من البريد قبل إعادة الإرسال.";
+    }
+    if (data.message === "Multiple accounts use this email. Contact platform support.") {
+      return "يوجد أكثر من حساب لهذا البريد. تواصل مع دعم المنصة لحل تعارض الحسابات.";
+    }
+  }
   if (response.status === 410) return "انتهت صلاحية الدعوة أو استُخدمت بالفعل.";
   if (response.status === 429) return "تجاوزت عدد المحاولات المسموح. انتظر قليلًا ثم حاول مرة أخرى.";
   if (response.status === 422) {

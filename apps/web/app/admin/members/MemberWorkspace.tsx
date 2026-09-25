@@ -13,6 +13,13 @@ const branchRoleLabels: Record<string, string> = {
   branch_auditor: "تدقيق الفرع",
 };
 
+const invitationLabels: Record<Invitation["status"], string> = {
+  pending: "بانتظار القبول",
+  expired: "انتهت صلاحية الدعوة",
+  uncertain: "التسليم غير مؤكد",
+  not_sent: "لم تُرسل الدعوة",
+};
+
 export function MemberWorkspace({ context }: { context: MemberContext }) {
   const [members, setMembers] = useState<Member[]>(context.members);
   const [invitations, setInvitations] = useState<Invitation[]>(context.invitations);
@@ -43,11 +50,18 @@ export function MemberWorkspace({ context }: { context: MemberContext }) {
       const response = await centerRequest("members/invitations", "POST", { email, center_role: inviteAsAdmin ? "center_admin" : null });
       if (!response.ok) {
         setFieldErrors(await responseFieldErrors(response));
-        throw new Error(await responseMessage(response));
+        const message = await responseMessage(response);
+        if (response.status === 409) await reload();
+        throw new Error(message);
       }
+      const result: { status: "sent" | "already_sent" | "role_updated" } = await response.json();
       setEmail(""); setInviteAsAdmin(false);
       await reload();
-      setNotice("أُرسلت الدعوة إلى البريد المحدد.");
+      setNotice(result.status === "already_sent"
+        ? "الدعوة السابقة ما زالت صالحة، ولم تُرسل رسالة جديدة."
+        : result.status === "role_updated"
+          ? "حُدّث دور الدعوة السابقة، ولم تُرسل رسالة جديدة."
+          : "أُرسلت الدعوة إلى البريد المحدد.");
     } catch (failure) { setError(failure instanceof Error ? failure.message : "تعذر إرسال الدعوة."); }
     finally { setBusy(false); }
   }
@@ -131,7 +145,7 @@ export function MemberWorkspace({ context }: { context: MemberContext }) {
         {isOwner ? <label className="check-row"><input type="checkbox" checked={inviteAsAdmin} onChange={(event) => setInviteAsAdmin(event.target.checked)} />دعوة بصفة مسؤول مركز</label> : null}
         <button className="button button-primary" disabled={busy || !email}>{busy ? "جارٍ إرسال الدعوة…" : "إرسال الدعوة"}</button>
       </form></section>
-      {invitations.length > 0 ? <section><h2 className="section-heading">دعوات بانتظار القبول</h2><div className="member-list">{invitations.map((invitation) => <div className="member-card" key={invitation.id}><bdi dir="ltr">{invitation.email}</bdi><span className="muted">تنتهي {new Date(invitation.expires_at).toLocaleDateString("ar-EG")}</span></div>)}</div></section> : null}
+      {invitations.length > 0 ? <section><h2 className="section-heading">الدعوات</h2><div className="member-list">{invitations.map((invitation) => <div className="member-card" key={invitation.id}><bdi dir="ltr">{invitation.email}</bdi><span className="role-pill">{invitationLabels[invitation.status]}</span><span className="muted">{invitation.status === "expired" ? "انتهت" : "تنتهي"} {new Date(invitation.expires_at).toLocaleDateString("ar-EG")}</span>{invitation.status === "uncertain" ? <span className="muted">تحقق من تسليم البريد مع دعم المنصة قبل إعادة الدعوة.</span> : null}{invitation.status === "not_sent" ? <span className="muted">يمكنك إعادة إرسال الدعوة من النموذج أعلاه.</span> : null}</div>)}</div></section> : null}
       <section><h2 className="section-heading">العضويات</h2>
         <div className="member-list">{members.map((member) => <article className="member-card" key={member.id}>
           <div className="member-card-head"><div><h3>{member.user.name}</h3><p className="muted"><bdi dir="ltr">{member.user.email}</bdi></p></div><span className="role-pill">{member.status === "active" ? "نشط" : "موقوف"}</span></div>

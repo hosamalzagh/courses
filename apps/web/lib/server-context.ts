@@ -25,7 +25,7 @@ export type Member = {
   center_roles: string[];
   branch_roles: Record<string, string[]>;
 };
-export type Invitation = { id: number; email: string; center_role: string | null; expires_at: string };
+export type Invitation = { id: number; email: string; center_role: string | null; expires_at: string; status: "pending" | "expired" | "uncertain" | "not_sent" };
 export type MemberContext = CenterContext & { members: Member[]; invitations: Invitation[] };
 
 export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable";

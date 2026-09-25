@@ -3,12 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Mail\CenterInvitationMail;
+use App\Models\Center;
 use App\Models\CenterInvitation;
 use App\Models\CenterMembership;
 use App\Support\CenterAuditDelivery;
 use App\Support\CenterPermissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -24,12 +26,13 @@ class CenterMemberController extends Controller
         $center = $request->attributes->get('center');
         $people = DB::connection('central')->select(<<<'SQL'
             SELECT m.id, m.user_id, u.name, u.email, m.status,
-                NULL::bigint AS invitation_id, NULL::varchar AS center_role, NULL::timestamp AS expires_at
+                NULL::bigint AS invitation_id, NULL::varchar AS center_role, NULL::timestamp AS expires_at,
+                NULL::timestamp AS delivery_claimed_at, NULL::timestamp AS sent_at
             FROM center_memberships m JOIN users u ON u.id = m.user_id
             WHERE m.tenant_id = ?
             UNION ALL
             SELECT NULL::bigint, NULL::bigint, NULL::varchar, i.email, 'invited'::varchar,
-                i.id, i.center_role, i.expires_at
+                i.id, i.center_role, i.expires_at, i.delivery_claimed_at, i.sent_at
             FROM center_invitations i
             WHERE i.tenant_id = ? AND i.accepted_at IS NULL
         SQL, [$center->id, $center->id]);
@@ -61,9 +64,15 @@ class CenterMemberController extends Controller
         $invitations = [];
         foreach ($people as $person) {
             if ($person->invitation_id) {
+                $expiresAt = Carbon::parse($person->expires_at);
                 $invitations[] = [
                     'id' => $person->invitation_id, 'email' => $person->email,
-                    'center_role' => $person->center_role, 'expires_at' => $person->expires_at,
+                    'center_role' => $person->center_role, 'expires_at' => $expiresAt->toISOString(),
+                    'status' => $this->invitationStatus(
+                        $expiresAt,
+                        $person->delivery_claimed_at ? Carbon::parse($person->delivery_claimed_at) : null,
+                        $person->sent_at ? Carbon::parse($person->sent_at) : null,
+                    ),
                 ];
             } else {
                 $members[] = [
@@ -102,7 +111,7 @@ class CenterMemberController extends Controller
             ->groupBy('user_id')->map(fn ($rows) => $rows->groupBy('branch_id')
             ->map(fn ($branchRows) => $branchRows->pluck('role')->all()));
         $invitations = CenterInvitation::query()->where('tenant_id', $center->id)
-            ->whereNull('accepted_at')->get(['id', 'email', 'center_role', 'expires_at']);
+            ->whereNull('accepted_at')->get(['id', 'email', 'center_role', 'expires_at', 'delivery_claimed_at', 'sent_at']);
 
         return response()->json([
             'members' => $memberships->map(fn ($membership) => [
@@ -112,41 +121,100 @@ class CenterMemberController extends Controller
                 'center_roles' => $grants[$membership->user_id] ?? [],
                 'branch_roles' => $branches[$membership->user_id] ?? (object) [],
             ]),
-            'invitations' => $invitations,
+            'invitations' => $invitations->map(fn ($invitation) => [
+                ...$invitation->only(['id', 'email', 'center_role', 'expires_at']),
+                'status' => $this->invitationStatus($invitation->expires_at, $invitation->delivery_claimed_at, $invitation->sent_at),
+            ]),
         ])->header('Cache-Control', 'private, no-store');
     }
 
     public function invite(Request $request): JsonResponse
     {
-        $permissions = $this->requireManager($request);
+        $this->requireManager($request);
         $data = $request->validate([
             'email' => ['required', 'email', 'max:255'],
             'center_role' => ['nullable', Rule::in(['center_admin'])],
         ]);
-        abort_if(isset($data['center_role']) && ! $permissions->isOwner(), 403);
 
         $center = $request->attributes->get('center');
         $email = strtolower($data['email']);
         abort_if(CenterMembership::query()->where('tenant_id', $center->id)
-            ->whereHas('user', fn ($query) => $query->where('email', $email))
+            ->whereHas('user', fn ($query) => $query->whereRaw('LOWER(email) = ?', [$email]))
             ->where('status', 'active')->exists(), 409);
 
-        $token = Str::random(64);
-        [$invitation, $auditId] = DB::connection('central')->transaction(function () use ($request, $center, $email, $data, $token): array {
-            $invitation = CenterInvitation::query()->updateOrCreate(
-                ['tenant_id' => $center->id, 'email' => $email],
-                ['token_hash' => hash('sha256', $token), 'token_ciphertext' => $token,
-                    'center_role' => $data['center_role'] ?? null, 'expires_at' => now()->addDays(7), 'accepted_at' => null],
-            );
+        [$invitation, $auditId, $delivery] = DB::connection('central')->transaction(function () use ($request, $center, $email, $data): array {
+            Center::query()->whereKey($center->id)->lockForUpdate()->firstOrFail();
+            $permissions = $this->assertCurrentManager($request);
+            abort_if(isset($data['center_role']) && ! $permissions->isOwner(), 403);
+            abort_if(CenterMembership::query()->where('tenant_id', $center->id)
+                ->whereHas('user', fn ($query) => $query->whereRaw('LOWER(email) = ?', [$email]))
+                ->where('status', 'active')->exists(), 409);
+            $invitation = CenterInvitation::query()->where('tenant_id', $center->id)
+                ->where('email', $email)->lockForUpdate()->first();
+
+            if ($invitation && ! $invitation->accepted_at && $invitation->sent_at && $invitation->expires_at->isFuture()) {
+                if ($invitation->center_role !== ($data['center_role'] ?? null)) {
+                    $invitation->update(['center_role' => $data['center_role'] ?? null]);
+                    $auditId = CenterAuditDelivery::record($center->id, $request->user()->id,
+                        'member.invitation_role_changed', ['email' => $email, 'center_role' => $invitation->center_role]);
+
+                    return [$invitation, $auditId, 'role_updated'];
+                }
+
+                return [$invitation, null, 'sent'];
+            }
+            if ($invitation?->delivery_claimed_at && ! $invitation->sent_at) {
+                return [$invitation, null, 'uncertain'];
+            }
+
+            if (! $invitation || $invitation->accepted_at || $invitation->expires_at->isPast()) {
+                $token = Str::random(64);
+                $attributes = [
+                    'token_hash' => hash('sha256', $token), 'token_ciphertext' => $token,
+                    'expires_at' => now()->addDays(7), 'accepted_at' => null,
+                ];
+                if ($invitation) {
+                    $invitation->update($attributes);
+                } else {
+                    $invitation = CenterInvitation::create([
+                        'tenant_id' => $center->id, 'email' => $email, ...$attributes,
+                    ]);
+                }
+            }
+            $invitation->update([
+                'center_role' => $data['center_role'] ?? null,
+                'delivery_claimed_at' => now(), 'sent_at' => null,
+            ]);
             $auditId = CenterAuditDelivery::record($center->id, $request->user()->id,
                 'member.invited', ['email' => $email, 'center_role' => $invitation->center_role]);
 
-            return [$invitation, $auditId];
+            return [$invitation, $auditId, 'send'];
         });
-        CenterAuditDelivery::tryDeliver($auditId);
-        Mail::to($email)->send(new CenterInvitationMail($center->name, 'http://'.$request->getHost().'/invitations/'.$token));
+        if ($delivery === 'uncertain') {
+            return response()->json(['code' => 'invitation_delivery_uncertain'], 409);
+        }
+        if ($delivery === 'sent') {
+            return response()->json(['status' => 'already_sent', 'invitation' => $this->invitationPayload($invitation)], 200);
+        }
+        if ($delivery === 'role_updated') {
+            CenterAuditDelivery::tryDeliver($auditId);
 
-        return response()->json(['invitation' => $invitation->only(['id', 'email', 'center_role', 'expires_at'])], 201);
+            return response()->json(['status' => 'role_updated', 'invitation' => $this->invitationPayload($invitation)], 200);
+        }
+
+        CenterAuditDelivery::tryDeliver($auditId);
+        try {
+            Mail::to($email)->send(new CenterInvitationMail(
+                $center->name, 'http://'.$request->getHost().'/invitations/'.$invitation->token_ciphertext,
+            ));
+            $invitation->update(['sent_at' => now()]);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return response()->json(['code' => 'invitation_delivery_uncertain'], 409);
+        }
+
+        return response()->json(['status' => 'sent', 'invitation' => $this->invitationPayload($invitation)], 201);
     }
 
     public function updateStatus(Request $request, CenterMembership $membership): JsonResponse
@@ -169,6 +237,26 @@ class CenterMemberController extends Controller
         CenterAuditDelivery::tryDeliver($auditId);
 
         return response()->json(['status' => $membership->status]);
+    }
+
+    private function invitationStatus(Carbon $expiresAt, ?Carbon $deliveryClaimedAt, ?Carbon $sentAt): string
+    {
+        if ($deliveryClaimedAt && ! $sentAt) {
+            return 'uncertain';
+        }
+        if (! $sentAt) {
+            return 'not_sent';
+        }
+
+        return $expiresAt->isPast() ? 'expired' : 'pending';
+    }
+
+    private function invitationPayload(CenterInvitation $invitation): array
+    {
+        return [
+            ...$invitation->only(['id', 'email', 'center_role', 'expires_at']),
+            'status' => $this->invitationStatus($invitation->expires_at, $invitation->delivery_claimed_at, $invitation->sent_at),
+        ];
     }
 
     public function updateGrants(Request $request, CenterMembership $membership): JsonResponse
