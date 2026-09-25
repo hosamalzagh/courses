@@ -15,13 +15,13 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->prefix('api/v1/center')->group(function (): void {
-    Route::get('invitations/{token}', [CenterAuthController::class, 'invitation'])->middleware('throttle:20,1');
-    Route::post('invitations/{token}', [CenterAuthController::class, 'acceptInvitation'])->middleware('throttle:5,1');
-    Route::post('auth/login', [CenterAuthController::class, 'login'])->middleware('throttle:5,1');
-    Route::post('auth/mfa/challenge', [CenterAuthController::class, 'mfaChallenge'])->middleware('throttle:5,1');
+    Route::get('invitations/{token}', [CenterAuthController::class, 'invitation'])->middleware('throttle:center-route');
+    Route::post('invitations/{token}', [CenterAuthController::class, 'acceptInvitation'])->middleware('throttle:center-route');
+    Route::post('auth/login', [CenterAuthController::class, 'login'])->middleware('throttle:center-route');
+    Route::post('auth/mfa/challenge', [CenterAuthController::class, 'mfaChallenge'])->middleware('throttle:center-route');
     Route::post('auth/logout', [CenterAuthController::class, 'logout']);
-    Route::post('auth/forgot-password', [CenterAuthController::class, 'forgotPassword'])->middleware('throttle:3,1');
-    Route::post('auth/reset-password', [CenterAuthController::class, 'resetPassword'])->middleware('throttle:5,1');
+    Route::post('auth/forgot-password', [CenterAuthController::class, 'forgotPassword'])->middleware('throttle:center-route');
+    Route::post('auth/reset-password', [CenterAuthController::class, 'resetPassword'])->middleware('throttle:center-route');
     Route::middleware(RequireCenterMember::class)->group(function (): void {
         Route::get('user', function (Request $request) {
             $permissions = $request->attributes->get('center_permissions');
@@ -71,9 +71,9 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('settings', [CenterSettingsController::class, 'show']);
         Route::patch('settings', [CenterSettingsController::class, 'update']);
         Route::get('audit', [CenterAuditController::class, 'index']);
-        Route::post('security/mfa/setup', [CenterSecurityController::class, 'setup'])->middleware('throttle:5,1');
-        Route::post('security/mfa/confirm', [CenterSecurityController::class, 'confirm'])->middleware('throttle:5,1');
-        Route::post('security/mfa/cancel', [CenterSecurityController::class, 'cancel'])->middleware('throttle:5,1');
-        Route::post('security/mfa/disable', [CenterSecurityController::class, 'disable'])->middleware('throttle:5,1');
+        Route::post('security/mfa/setup', [CenterSecurityController::class, 'setup'])->middleware('throttle:center-route');
+        Route::post('security/mfa/confirm', [CenterSecurityController::class, 'confirm'])->middleware('throttle:center-route');
+        Route::post('security/mfa/cancel', [CenterSecurityController::class, 'cancel'])->middleware('throttle:center-route');
+        Route::post('security/mfa/disable', [CenterSecurityController::class, 'disable'])->middleware('throttle:center-route');
     });
 });

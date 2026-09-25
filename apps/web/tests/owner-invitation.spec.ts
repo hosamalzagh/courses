@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
@@ -6,22 +6,43 @@ import { expect, test } from "@playwright/test";
 const apiDirectory = path.resolve(process.cwd(), "../api");
 const php = process.env.COURSES_PHP_BIN ?? (process.platform === "darwin" ? "php85" : "php");
 
-function runFixture(code: string, slug: string, email: string) {
+function runFixture(code: string, slug: string, email: string, variables: Record<string, string> = {}): string {
   try {
-    execFileSync(php, ["artisan", "tinker", "--no-interaction", `--execute=${code}`], {
+    return execFileSync(php, ["artisan", "tinker", "--no-interaction", `--execute=${code}`], {
       cwd: apiDirectory,
-      env: { ...process.env, COURSES_BROWSER_SLUG: slug, COURSES_BROWSER_EMAIL: email },
+      env: { ...process.env, COURSES_BROWSER_SLUG: slug, COURSES_BROWSER_EMAIL: email, ...variables },
       stdio: "pipe",
       timeout: 30_000,
+      encoding: "utf8",
     });
   } catch (error) {
-    const failure = error as { stderr?: Buffer; stdout?: Buffer };
+    const failure = error as { stderr?: Buffer | string; stdout?: Buffer | string };
     throw new Error(String(failure.stderr?.length ? failure.stderr : failure.stdout ?? error));
   }
 }
 
-test("first owner follows the Mailpit invitation on the center host and accepts once", async ({ page }) => {
-  test.setTimeout(120_000);
+function oneTimeCode(secret: string): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const bytes: number[] = [];
+  let value = 0;
+  let bits = 0;
+  for (const character of secret.toUpperCase()) {
+    value = (value << 5) | alphabet.indexOf(character);
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30_000)));
+  const digest = createHmac("sha1", Buffer.from(bytes)).update(counter).digest();
+  const offset = digest[digest.length - 1] & 15;
+  return String((digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
+test("first owner accepts, signs in with MFA, sees current roles, and signs out on the center host", async ({ page }) => {
+  test.setTimeout(180_000);
   const slug = `inv-${randomBytes(6).toString("hex")}`;
   const email = `${slug}@courses.test`;
   const host = `http://${slug}.courses.test`;
@@ -75,6 +96,89 @@ test("first owner follows the Mailpit invitation on the center host and accepts 
     await page.goto(invitation);
     await expect(page.getByRole("heading", { name: "ابدأ عضويتك" })).toBeVisible();
     await expect(page.getByRole("button", { name: "قبول الدعوة" })).toHaveCount(0);
+
+    await page.goto(`${host}/login`);
+    await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(email);
+    await page.getByRole("textbox", { name: "كلمة المرور" }).fill(password);
+    await page.getByRole("button", { name: "دخول المركز" }).click();
+    await expect(page).toHaveURL(`${host}/admin`);
+    await expect(page.getByText("مالك المركز")).toBeVisible();
+    const sequence = Number(runFixture(String.raw`
+      echo \Illuminate\Support\Facades\DB::connection('central')->table('telescope_entries')->max('sequence');
+    `, slug, email));
+    await page.reload();
+    await expect(page.getByText("مالك المركز")).toBeVisible();
+    let pageRequests: { uri: string; queries: number }[] = [];
+    await expect.poll(() => {
+      pageRequests = JSON.parse(runFixture(String.raw`
+      $rows = \Illuminate\Support\Facades\DB::connection('central')->table('telescope_entries')
+        ->where('type', 'request')->where('sequence', '>', (int) getenv('COURSES_TELESCOPE_SEQUENCE'))
+        ->get(['content']);
+      $requests = $rows->map(fn ($row) => json_decode($row->content, true))
+        ->filter(fn ($entry) => ($entry['headers']['host'] ?? null) === getenv('COURSES_BROWSER_SLUG').'.courses.test')
+        ->map(fn ($entry) => [
+          'uri' => $entry['uri'],
+          'queries' => (int) ($entry['response_headers']['x-courses-query-count'] ?? -1),
+        ])->values()->all();
+      echo json_encode($requests);
+      `, slug, email, { COURSES_TELESCOPE_SEQUENCE: String(sequence) })) as { uri: string; queries: number }[];
+      return pageRequests.length;
+    }, { timeout: 10_000 }).toBeGreaterThan(0);
+    expect(pageRequests).toHaveLength(1);
+    expect(pageRequests[0].uri).toBe("/api/v1/center/user");
+    expect(pageRequests.every(({ queries }) => Number.isInteger(queries) && queries >= 0)).toBe(true);
+    expect(pageRequests.reduce((total, request) => total + request.queries, 0)).toBeLessThanOrEqual(6);
+    const owner = await page.evaluate(async () => {
+      const response = await fetch("/api/v1/center/user", { headers: { Accept: "application/json" } });
+      return { status: response.status, queries: Number(response.headers.get("X-Courses-Query-Count")), data: await response.json() };
+    });
+    expect(owner.status).toBe(200);
+    expect(owner.queries).toBeLessThanOrEqual(6);
+    expect(owner.data.membership.status).toBe("active");
+    expect(owner.data.permissions.center_roles).toEqual(["center_owner"]);
+    const cookies = await page.context().cookies(host);
+    expect(cookies.some((cookie) => cookie.name.includes("session") && cookie.domain === `${slug}.courses.test`)).toBe(true);
+    const platformCookies = await page.context().cookies("http://courses.test");
+    expect(platformCookies.some((cookie) => cookie.name.includes("session"))).toBe(false);
+
+    await page.goto(`${host}/admin/security`);
+    await page.getByRole("textbox", { name: "كلمة المرور الحالية" }).fill(password);
+    await page.getByRole("button", { name: "تفعيل التحقق بخطوتين" }).click();
+    const secret = (await page.getByLabel("مفتاح المصادقة").textContent())?.trim();
+    if (!secret) throw new Error("MFA setup did not show a secret.");
+    await page.getByRole("textbox", { name: "رمز التحقق" }).fill(oneTimeCode(secret));
+    await page.getByRole("button", { name: "تفعيل التحقق", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "التحقق بخطوتين مفعّل" })).toBeVisible();
+
+    await page.goto(`${host}/admin`);
+    await page.getByRole("button", { name: "تسجيل الخروج" }).click();
+    await expect(page).toHaveURL(`${host}/login`);
+    const afterLogout = await page.evaluate(async () => (await fetch("/api/v1/center/user", { headers: { Accept: "application/json" } })).status);
+    expect(afterLogout).toBe(401);
+
+    await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(email);
+    await page.getByRole("textbox", { name: "كلمة المرور" }).fill(password);
+    const loginResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/center/auth/login") && response.request().method() === "POST");
+    await page.getByRole("button", { name: "دخول المركز" }).click();
+    expect((await loginResponse).status()).toBe(202);
+    await expect(page.getByRole("heading", { name: "تحقق من هويتك" })).toBeVisible();
+    let authenticated = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await page.getByRole("textbox", { name: "رمز التحقق" }).fill(oneTimeCode(secret));
+      const challengeResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/center/auth/mfa/challenge") && response.request().method() === "POST");
+      await page.getByRole("button", { name: "تحقق وادخل" }).click();
+      const response = await challengeResponse;
+      if (response.status() === 429) {
+        await page.waitForTimeout((Number(response.headers()["retry-after"] ?? "60") + 1) * 1_000);
+        continue;
+      }
+      expect(response.ok()).toBe(true);
+      authenticated = true;
+      break;
+    }
+    expect(authenticated).toBe(true);
+    await expect(page).toHaveURL(`${host}/admin`);
+    await expect(page.getByText("مالك المركز")).toBeVisible();
   } finally {
     runFixture(String.raw`
       $slug = getenv('COURSES_BROWSER_SLUG');

@@ -7,12 +7,45 @@ use App\Models\CenterMembership;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Tests\Concerns\CleansCenterDatabases;
 use Tests\TestCase;
 
 class CenterAccessTest extends TestCase
 {
     use CleansCenterDatabases, RefreshDatabase;
+
+    public function test_login_rate_limit_does_not_block_a_separate_invitation_operation(): void
+    {
+        Mail::fake();
+        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']))
+            ->postJson('http://courses.test/api/v1/platform/centers', [
+                'name' => 'Alpha', 'slug' => 'alpha', 'subdomain' => 'alpha',
+                'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
+            ])->assertCreated();
+        $this->postJson('http://courses.test/api/v1/platform/centers', [
+            'name' => 'Beta', 'slug' => 'beta', 'subdomain' => 'beta',
+            'plan' => 'starter', 'owner_email' => 'owner@beta.test',
+        ])->assertCreated();
+        $this->postJson('http://alpha.courses.test/api/v1/center/auth/logout')->assertOk();
+        $this->withServerVariables(['REMOTE_ADDR' => sprintf('198.18.%d.%d', random_int(1, 254), random_int(1, 254))]);
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $this->postJson('http://alpha.courses.test/api/v1/center/auth/login', [
+                'email' => 'unknown@alpha.test', 'password' => 'incorrect-password',
+            ])->assertUnprocessable();
+        }
+        $this->postJson('http://alpha.courses.test/api/v1/center/auth/login', [
+            'email' => 'unknown@alpha.test', 'password' => 'incorrect-password',
+        ])->assertStatus(429);
+        $this->postJson('http://beta.courses.test/api/v1/center/auth/login', [
+            'email' => 'unknown@beta.test', 'password' => 'incorrect-password',
+        ])->assertUnprocessable();
+        $this->postJson('http://alpha.courses.test/api/v1/center/invitations/invalid', [
+            'name' => 'No Invitation', 'password' => 'correct-horse-battery-staple',
+            'password_confirmation' => 'correct-horse-battery-staple',
+        ])->assertStatus(410);
+    }
 
     public function test_branch_roles_and_center_host_boundaries_apply_on_every_request(): void
     {
