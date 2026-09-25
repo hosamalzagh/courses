@@ -69,6 +69,24 @@ class PlatformAccessTest extends TestCase
             $this->assertLessThanOrEqual(6, (int) $pageResponse->headers->get('X-Courses-Query-Count'), $page);
         }
 
+        $center->update([
+            'provisioning_status' => 'failed',
+            'database_state' => 'available',
+            'migration_version' => '2026_09_25_180000_create_center_tables',
+            'provisioning_error' => 'تعذر ترحيل قاعدة بيانات المركز. راجع سجل التشغيل وأعد المحاولة.',
+        ]);
+        Auth::forgetGuards();
+        $statusPage = $this->get("http://courses.test/admin/centers/{$center->id}")
+            ->assertOk()
+            ->assertSee('تعذر ترحيل قاعدة بيانات المركز')
+            ->assertSee('failed')
+            ->assertSee('available')
+            ->assertSee('2026_09_25_180000_create_center_tables');
+        $this->assertLessThanOrEqual(6, (int) $statusPage->headers->get('X-Courses-Query-Count'));
+        Auth::forgetGuards();
+        $warmStatusPage = $this->get("http://courses.test/admin/centers/{$center->id}")->assertOk();
+        $this->assertLessThanOrEqual(6, (int) $warmStatusPage->headers->get('X-Courses-Query-Count'));
+
     }
 
     public function test_landlord_center_search_stays_within_query_budget_without_tenant_reads(): void

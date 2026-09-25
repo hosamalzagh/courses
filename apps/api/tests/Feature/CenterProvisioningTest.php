@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Filament\Resources\Centers\Pages\CreateCenter;
+use App\Filament\Resources\Centers\Pages\ViewCenter;
 use App\Jobs\ProvisionCenter;
 use App\Models\Center;
 use App\Models\User;
@@ -125,6 +126,51 @@ class CenterProvisioningTest extends TestCase
             ->assertOk()->assertJsonPath('center.provisioning_status', 'active');
         $this->assertSame(1, Center::where('slug', 'gamma')->count());
         $this->assertSame(1, DB::connection('central')->table('center_invitations')->where('tenant_id', $center->id)->count());
+    }
+
+    public function test_failed_migration_keeps_its_applied_version_and_retry_preserves_the_other_center(): void
+    {
+        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']));
+        $this->postJson('http://courses.test/api/v1/platform/centers', [
+            'name' => 'Alpha Center', 'slug' => 'alpha', 'subdomain' => 'alpha',
+            'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
+        ])->assertCreated();
+        $alpha = Center::where('slug', 'alpha')->firstOrFail();
+        User::factory()->create(['email' => 'owner@beta.test']);
+
+        $beta = Center::create([
+            'name' => 'Beta Center', 'slug' => 'beta', 'plan' => 'starter',
+            'owner_email' => 'owner@beta.test',
+        ]);
+        $beta->domains()->create(['domain' => 'beta.courses.test']);
+        $beta->database()->manager()->createDatabase($beta);
+        $beta->run(fn () => DB::statement('CREATE TABLE center_settings (id smallint PRIMARY KEY)'));
+
+        ProvisionCenter::dispatch($beta->id);
+        $beta->refresh();
+        $this->assertSame('failed', $beta->provisioning_status);
+        $this->assertSame('available', $beta->database_state);
+        $this->assertSame('2026_09_25_180000_create_center_tables', $beta->migration_version);
+        $this->assertStringContainsString('ترحيل قاعدة بيانات المركز', $beta->provisioning_error);
+        $this->assertStringNotContainsString('password', strtolower($beta->provisioning_error));
+        $this->assertSame('active', $alpha->fresh()->provisioning_status);
+        $this->assertSame(0, DB::connection('central')->table('center_invitations')->where('tenant_id', $beta->id)->count());
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        Livewire::test(ViewCenter::class, ['record' => $beta->id])
+            ->assertSee('تعذر ترحيل قاعدة بيانات المركز')
+            ->assertSee('2026_09_25_180000_create_center_tables');
+
+        $beta->run(fn () => DB::statement('DROP TABLE center_settings'));
+        $this->postJson("http://courses.test/api/v1/platform/centers/{$beta->id}/retry")
+            ->assertOk()->assertJsonPath('center.provisioning_status', 'active');
+
+        $this->assertSame(2, Center::count());
+        $this->assertSame(1, DB::connection('central')->table('center_invitations')->where('tenant_id', $beta->id)->count());
+        $this->assertSame(1, User::where('email', 'owner@beta.test')->count());
+        $this->assertSame('active', $alpha->fresh()->provisioning_status);
+        $this->assertSame('owner@beta.test', $beta->run(
+            fn () => DB::table('center_settings')->where('id', 1)->value('contact_email'),
+        ));
     }
 
     public function test_changing_a_center_domain_rejects_the_old_host(): void

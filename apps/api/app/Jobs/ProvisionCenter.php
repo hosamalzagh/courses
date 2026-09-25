@@ -59,10 +59,8 @@ class ProvisionCenter implements ShouldQueue
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
-                $center->update([
-                    'migration_version' => DB::table('migrations')->max('migration'),
-                ]);
             });
+            $center->refreshMigrationVersion();
 
             $step = 'إرسال دعوة المالك الأول';
             $this->inviteFirstOwner($center);
@@ -72,6 +70,14 @@ class ProvisionCenter implements ShouldQueue
                 'provisioned_at' => now(),
             ]);
         } catch (Throwable $exception) {
+            if ($center->database_state === 'available') {
+                try {
+                    $center->refreshMigrationVersion();
+                } catch (Throwable $diagnosticException) {
+                    report($diagnosticException);
+                }
+            }
+
             $center->update([
                 'provisioning_status' => 'failed',
                 'provisioning_error' => "تعذر {$step}. راجع سجل التشغيل وأعد المحاولة.",
