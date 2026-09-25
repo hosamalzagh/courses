@@ -68,10 +68,13 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
   const slug = `inv-${randomBytes(6).toString("hex")}`;
   const email = `${slug}@courses.test`;
   const staffEmail = `${slug}-staff@courses.test`;
+  const secondManagerEmail = `${slug}-manager-two@courses.test`;
   const host = `http://${slug}.courses.test`;
   const password = randomBytes(24).toString("base64url");
   const staffPassword = randomBytes(24).toString("base64url");
+  const secondManagerPassword = randomBytes(24).toString("base64url");
   const staffPage = await browser.newPage();
+  const secondManagerPage = await browser.newPage();
 
   try {
     runFixture(String.raw`
@@ -147,6 +150,11 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await expect(page.getByRole("heading", { name: "فرع التجربة الشمالي المحدّث" })).toBeVisible();
     await expect(page.getByRole("article").filter({ has: page.getByRole("heading", { name: "فرع التجربة الشمالي المحدّث" }) })).toContainText("شارع التجربة ١");
     await expect(page.getByRole("heading", { name: "فرع التجربة الجنوبي" })).toBeVisible();
+    await page.getByRole("button", { name: "إنشاء فرع" }).click();
+    await page.getByRole("textbox", { name: "اسم الفرع" }).fill("فرع التجربة الشرقي");
+    await page.getByRole("textbox", { name: "رمز الفرع" }).fill("pilot-east");
+    await page.getByRole("button", { name: "حفظ الفرع" }).click();
+    await expect(page.getByRole("heading", { name: "فرع التجربة الشرقي" })).toBeVisible();
 
     await page.goto(`${host}/admin/members`);
     await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(staffEmail);
@@ -196,6 +204,60 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     expect(memberRequests).toHaveLength(1);
     expect(memberRequests[0].uri).toBe("/api/v1/center/member-workspace");
     expect(memberRequests[0].queries).toBeLessThanOrEqual(6);
+
+    runFixture(String.raw`
+      $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
+      $manager = \App\Models\User::factory()->create([
+        'name' => 'Second Branch Manager',
+        'email' => getenv('COURSES_MANAGER_TWO_EMAIL'),
+        'password' => getenv('COURSES_MANAGER_TWO_PASSWORD'),
+      ]);
+      $manager->markEmailAsVerified();
+      \App\Models\CenterMembership::create(['tenant_id' => $center->id, 'user_id' => $manager->id, 'status' => 'active']);
+    `, slug, email, { COURSES_MANAGER_TWO_EMAIL: secondManagerEmail, COURSES_MANAGER_TWO_PASSWORD: secondManagerPassword });
+    await page.reload();
+    const firstManagerCard = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Pilot Staff" }) });
+    await firstManagerCard.getByRole("button", { name: "تعديل الأدوار" }).click();
+    await firstManagerCard.getByRole("group", { name: "فرع التجربة الشمالي المحدّث" }).getByRole("checkbox", { name: "مدير الفرع" }).check();
+    await firstManagerCard.getByRole("group", { name: "فرع التجربة الجنوبي" }).getByRole("checkbox", { name: "مدير الفرع" }).check();
+    await firstManagerCard.getByRole("button", { name: "حفظ الأدوار" }).click();
+    await expect(page.getByText("حُفظت أدوار الموظف وإسنادات فروعه.")).toBeVisible();
+    const secondManagerCard = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Second Branch Manager" }) });
+    await secondManagerCard.getByRole("button", { name: "تعديل الأدوار" }).click();
+    await secondManagerCard.getByRole("group", { name: "فرع التجربة الشمالي المحدّث" }).getByRole("checkbox", { name: "مدير الفرع" }).check();
+    await secondManagerCard.getByRole("button", { name: "حفظ الأدوار" }).click();
+    await expect(secondManagerCard.getByRole("button", { name: "تعديل الأدوار" })).toBeVisible();
+
+    const firstManagerSequence = telescopeSequence(slug, email);
+    await staffPage.reload();
+    let firstManagerRequests: MeasuredRequest[] = [];
+    await expect.poll(() => {
+      firstManagerRequests = telescopeRequestsSince(slug, email, firstManagerSequence);
+      return firstManagerRequests.length;
+    }, { timeout: 10_000 }).toBeGreaterThan(0);
+    expect(firstManagerRequests).toHaveLength(1);
+    expect(firstManagerRequests[0].uri).toBe("/api/v1/center/user");
+    expect(firstManagerRequests[0].queries).toBeLessThanOrEqual(6);
+    await expect(staffPage.getByRole("heading", { name: "فرع التجربة الشمالي المحدّث" })).toBeVisible();
+    await expect(staffPage.getByRole("heading", { name: "فرع التجربة الجنوبي" })).toBeVisible();
+    await expect(staffPage.getByRole("heading", { name: "فرع التجربة الشرقي" })).toHaveCount(0);
+
+    await secondManagerPage.goto(`${host}/login`);
+    await secondManagerPage.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(secondManagerEmail);
+    await secondManagerPage.getByRole("textbox", { name: "كلمة المرور" }).fill(secondManagerPassword);
+    await secondManagerPage.getByRole("button", { name: "دخول المركز" }).click();
+    await expect(secondManagerPage).toHaveURL(`${host}/admin`);
+    await expect(secondManagerPage.getByRole("heading", { name: "فرع التجربة الشمالي المحدّث" })).toBeVisible();
+    await expect(secondManagerPage.getByRole("heading", { name: "فرع التجربة الجنوبي" })).toHaveCount(0);
+    const southId = Number(runFixture(String.raw`
+      $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
+      echo $center->run(fn () => \Illuminate\Support\Facades\DB::table('branches')->where('slug', 'pilot-south')->value('id'));
+    `, slug, email));
+    const deniedSouth = await secondManagerPage.evaluate(async (id) => {
+      const response = await fetch(`/api/v1/center/branches/${id}`, { headers: { Accept: "application/json" } });
+      return response.status;
+    }, southId);
+    expect(deniedSouth).toBe(403);
 
     await staffCard.getByRole("button", { name: "إيقاف العضوية" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "إيقاف العضوية" }).click();
@@ -347,6 +409,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await expect(page.getByText("مالك المركز")).toBeVisible();
   } finally {
     await staffPage.close();
+    await secondManagerPage.close();
     runFixture(String.raw`
       $slug = getenv('COURSES_BROWSER_SLUG');
       $email = getenv('COURSES_BROWSER_EMAIL');
@@ -365,6 +428,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
         \Illuminate\Support\Facades\DB::connection('central')->table('tenants')->where('id', $center->id)->delete();
         \App\Models\User::where('email', $email)->delete();
         \App\Models\User::where('email', $slug.'-staff@courses.test')->delete();
+        \App\Models\User::where('email', $slug.'-manager-two@courses.test')->delete();
       }
     `, slug, email);
   }
