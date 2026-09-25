@@ -2,18 +2,21 @@
 
 `MeasureCenterQueries` counts Laravel SQL queries by connection and SQL time for local/test HTTP reads. Responses include `X-Courses-Query-Count` and `X-Courses-Sql-Ms`; reads above six log connection totals and repeated-query patterns without SQL bindings. Telescope stores ordinary HTTP read and query details on the central connection; credential-producing requests and jobs are excluded. Redis session/cache operations are outside the SQL count.
 
-Authenticated browser measurements on 2026-09-25 with local alpha (two branches and two active members). Each Next.js page performs one server-side API fetch on its initial render; the table is the SQL count for that entire page data fetch, not a sum of unrelated endpoints. Two successive no-store reads per route gave the same count:
+Authenticated browser measurements on 2026-09-25 used local alpha (two branches and two active members), beta (one branch and one owner), and Landlord. Before each first navigation, `artisan cache:clear` cleared Laravel's application cache. The warm measurement was a browser reload. Telescope request entries between the navigation boundaries confirmed exactly one Laravel data request per Next.js page; the table sums every Laravel request observed for that page. Next.js uses `cache: "no-store"` for those requests. Telescope's own storage queries are excluded.
 
-| Initial page data | First read | Second read |
-| --- | ---: | ---: |
-| Center `/admin` via `user` | 5 | 5 |
-| Center `/admin/settings` via `user?include=settings` | 6 | 6 |
-| Center `/admin/audit` via `user?include=audit` | 6 | 6 |
-| Center `/admin/members` via `member-workspace` | 6 | 6 |
-| Landlord center list | 3 |
-| Landlord platform-user list | 2 |
-| Landlord platform audit list | 1 |
+| Authenticated page | Cold SQL | Warm SQL | Cold central / center | Warm central / center | Warm SQL ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Alpha `/admin` | 5 | 5 | 3 / 2 | 3 / 2 | 24.90 |
+| Alpha `/admin/settings` | 6 | 6 | 3 / 3 | 3 / 3 | 26.84 |
+| Alpha `/admin/members` | 6 | 6 | 4 / 2 | 4 / 2 | 25.18 |
+| Alpha `/admin/audit` | 6 | 6 | 3 / 3 | 3 / 3 | 22.81 |
+| Alpha `/admin/security` | 5 | 5 | 3 / 2 | 3 / 2 | 22.27 |
+| Beta `/admin/members` | 6 | 6 | 4 / 2 | 4 / 2 | 31.19 |
+| Landlord `/admin` | 1 | 1 | 1 / 0 | 1 / 0 | 9.21 |
+| Landlord `/admin/centers` | 4 | 4 | 4 / 0 | 4 / 0 | 13.35 |
+| Landlord `/admin/users` | 3 | 3 | 3 / 0 | 3 / 0 | 11.34 |
+| Landlord `/admin/platform-audit-logs` | 2 | 2 | 2 / 0 | 2 / 0 | 11.31 |
 
-The platform-owner login integration test completes Filament's MFA challenge, starts a fresh authenticated request, and measures one central query for the Landlord `/admin` dashboard. It fails if that read exceeds six queries. The query meter runs before Filament's authenticated-session middleware so the user lookup is included.
+The platform-owner login integration test completes Filament's MFA challenge, starts a fresh authenticated request, and measures one central query for the Landlord `/admin` dashboard. It fails if that read exceeds six queries. The query meter runs before Filament's authenticated-session middleware so the user lookup is included. Telescope recorded no repeated SQL patterns in the measured warm requests.
 
-The member-workspace integration test also asserts at most six queries with two branches and two members, guarding against N+1 growth. Center grants are loaded with one union query. The member page uses one central union for members/invitations and one center union for branches/grants. The Next.js server fetches are not visible as browser network requests, so counts were read from the corresponding authenticated API responses and the one-fetch page source. These are read-page measurements; writes, provisioning, backup, and restore have separate workloads. Recheck the counts after adding page data or Filament resources.
+The member-workspace integration test also asserts at most six queries with two branches and two members, guarding against N+1 growth. Center grants are loaded with one union query. The member page uses one central union for members/invitations and one center union for branches/grants. The Next.js server fetches are absent from the browser network panel but present as request entries in Telescope; their `X-Courses-Query-Count` and `X-Courses-Sql-Ms` response headers and query entries supplied these counts. These are read-page measurements; writes, provisioning, backup, and restore have separate workloads. Recheck the counts after adding page data or Filament resources.
