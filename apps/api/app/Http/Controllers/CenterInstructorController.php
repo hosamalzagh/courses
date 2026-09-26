@@ -14,9 +14,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use stdClass;
 
-class CenterStudentController extends Controller
+class CenterInstructorController extends Controller
 {
-    public function workspace(Request $request, ?string $studentId = null): JsonResponse
+    public function workspace(Request $request, ?string $instructorId = null): JsonResponse
     {
         $data = $request->validate([
             'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
@@ -31,27 +31,24 @@ class CenterStudentController extends Controller
             $branches->whereIn('id', $this->branchScope($permissions, 'read'));
         }
         $branches = $branches->offset(($branchPage - 1) * 50)->limit(51)->get(['id', 'name', 'slug', 'address']);
-        $query = $this->visibleStudents($permissions);
-        if ($studentId !== null) {
-            abort_unless(Str::isUuid($studentId), 404);
-            $query->where('students.id', $studentId);
+        $query = $this->visibleInstructors($permissions);
+        if ($instructorId !== null) {
+            abort_unless(Str::isUuid($instructorId), 404);
+            $query->where('instructors.id', $instructorId);
         }
         if (isset($data['q']) && trim($data['q']) !== '') {
             $search = $this->normalizeName($data['q']);
             $phone = $this->normalizePhone($data['q']);
-            $query->where(function (Builder $query) use ($search, $phone, $data): void {
+            $query->where(function (Builder $query) use ($search, $phone): void {
                 $query->whereRaw('strpos(name_search, ?) > 0', [$search]);
                 if ($phone !== null) {
                     $query->orWhereRaw('strpos(phone_search, ?) > 0', [$phone]);
                 }
-                if (ctype_digit($data['q']) && strlen($data['q']) <= 18) {
-                    $query->orWhere('student_number', $data['q']);
-                }
             });
         }
-        $students = $query->orderBy('student_number')->offset(($page - 1) * 50)->limit(51)->get();
-        if ($studentId !== null) {
-            abort_if($students->isEmpty(), 404);
+        $instructors = $query->orderBy('name_search')->orderBy('instructors.id')->offset(($page - 1) * 50)->limit(51)->get();
+        if ($instructorId !== null) {
+            abort_if($instructors->isEmpty(), 404);
         }
 
         return response()->json([
@@ -60,46 +57,20 @@ class CenterStudentController extends Controller
             'center' => $request->attributes->get('center')->only(['id', 'name', 'slug']),
             'permissions' => $permissions->toArray(),
             'branches' => $branches->take(50)->values(),
-            'students' => $students->take(50)->map(fn (stdClass $student): array => $this->payload($student, $permissions))->values(),
-            'pagination' => ['page' => $page, 'has_more' => $students->count() > 50, 'branches_page' => $branchPage, 'branches_has_more' => $branches->count() > 50],
+            'instructors' => $instructors->take(50)->map(fn (stdClass $instructor): array => $this->payload($instructor, $permissions))->values(),
+            'pagination' => ['page' => $page, 'has_more' => $instructors->count() > 50, 'branches_page' => $branchPage, 'branches_has_more' => $branches->count() > 50],
         ])->header('Cache-Control', 'private, no-store');
-    }
-
-    public function similar(Request $request): JsonResponse
-    {
-        $data = $request->validate(['name' => ['nullable', 'string', 'max:255'], 'phone' => ['nullable', 'string', 'max:50'], 'exclude' => ['nullable', 'uuid']]);
-        $permissions = $request->attributes->get('center_permissions');
-        $query = $this->visibleStudents($permissions, true);
-        $name = $this->normalizeName($data['name'] ?? '');
-        $phone = $this->normalizePhone($data['phone'] ?? null);
-        if ($name === '' && $phone === null) {
-            return response()->json(['students' => []])->header('Cache-Control', 'private, no-store');
-        }
-        $query->where(function (Builder $query) use ($name, $phone): void {
-            if ($name !== '') {
-                $query->where('name_search', $name);
-            }
-            if ($phone !== null) {
-                $query->orWhere('phone_search', $phone);
-            }
-        })->when(! empty($data['exclude']), fn (Builder $query) => $query->where('students.id', '!=', $data['exclude']));
-
-        return response()->json(['students' => $query->orderBy('student_number')->limit(10)->get()
-            ->map(fn (stdClass $student): array => $student->branch_ids === null
-                ? ['id' => $student->id, 'student_number' => $student->student_number, 'name' => $student->name, 'phone' => $student->phone, 'within_scope' => false]
-                : [...$this->payload($student, $permissions), 'within_scope' => true])])
-            ->header('Cache-Control', 'private, no-store');
     }
 
     public function submission(Request $request, string $requestId): JsonResponse
     {
         abort_unless(Str::isUuid($requestId), 404);
         $permissions = $request->attributes->get('center_permissions');
-        $student = $this->visibleStudents($permissions)->where('request_id', $requestId)
+        $instructor = $this->visibleInstructors($permissions)->where('request_id', $requestId)
             ->where('created_by', $request->user()->id)->first();
-        abort_unless($student, 404);
+        abort_unless($instructor, 404);
 
-        return response()->json(['student' => $this->payload($student, $permissions)])
+        return response()->json(['instructor' => $this->payload($instructor, $permissions)])
             ->header('Cache-Control', 'private, no-store');
     }
 
@@ -111,60 +82,60 @@ class CenterStudentController extends Controller
         return $this->write($request, function (CenterPermissions $permissions) use ($request, $data): JsonResponse {
             $this->authorizeBranches($permissions, $data['branch_ids']);
             $hash = hash('sha256', json_encode($data));
-            $existing = DB::connection('tenant')->table('students')->where('request_id', $request->input('request_id'))->first();
+            $existing = DB::connection('tenant')->table('instructors')->where('request_id', $request->input('request_id'))->first();
             if ($existing) {
                 abort_unless($existing->created_by === $request->user()->id, 403);
                 if ($existing->request_hash !== $hash) {
-                    $this->conflict('student_request_changed');
+                    $this->conflict('instructor_request_changed');
                 }
 
-                return response()->json(['student' => $this->read($existing->id, $permissions)]);
+                return response()->json(['instructor' => $this->read($existing->id, $permissions)]);
             }
             $id = (string) Str::uuid();
-            DB::connection('tenant')->table('students')->insert([
+            DB::connection('tenant')->table('instructors')->insert([
                 'id' => $id, 'name' => $data['name'], 'phone' => $data['phone'],
                 'name_search' => $this->normalizeName($data['name']), 'phone_search' => $this->normalizePhone($data['phone']),
                 'request_id' => $request->input('request_id'), 'request_hash' => $hash, 'created_by' => $request->user()->id,
                 'created_at' => now(), 'updated_at' => now(),
             ]);
             $this->associate($id, $data['branch_ids']);
-            $student = $this->read($id, $permissions);
-            $this->audit($request, 'student.created', $student, null, $data['branch_ids']);
+            $instructor = $this->read($id, $permissions);
+            $this->audit($request, 'instructor.created', $instructor, null, $data['branch_ids']);
 
-            return response()->json(['student' => $student], 201);
+            return response()->json(['instructor' => $instructor], 201);
         });
     }
 
-    public function update(Request $request, string $studentId): JsonResponse
+    public function update(Request $request, string $instructorId): JsonResponse
     {
-        abort_unless(Str::isUuid($studentId), 404);
+        abort_unless(Str::isUuid($instructorId), 404);
         $data = $this->validateProfile($request);
         $request->validate(['revision' => ['required', 'integer', 'min:1']]);
 
-        return $this->write($request, function (CenterPermissions $permissions) use ($request, $data, $studentId): JsonResponse {
-            $row = DB::connection('tenant')->table('students')->where('id', $studentId)->lockForUpdate()->first();
+        return $this->write($request, function (CenterPermissions $permissions) use ($request, $data, $instructorId): JsonResponse {
+            $row = DB::connection('tenant')->table('instructors')->where('id', $instructorId)->lockForUpdate()->first();
             abort_unless($row, 404);
-            $before = $this->read($studentId, $permissions);
+            $before = $this->read($instructorId, $permissions);
             abort_unless($before['can_manage'], 403);
             $this->authorizeBranches($permissions, $data['branch_ids']);
-            $currentBranches = DB::connection('tenant')->table('student_branches')->where('student_id', $studentId)->pluck('branch_id')->all();
+            $currentBranches = DB::connection('tenant')->table('instructor_branches')->where('instructor_id', $instructorId)->pluck('branch_id')->all();
             $added = array_diff($data['branch_ids'], $currentBranches);
             if ($row->name === $data['name'] && $row->phone === $data['phone'] && $added === []) {
-                return response()->json(['student' => $before]);
+                return response()->json(['instructor' => $before]);
             }
             if ($row->revision !== (int) $request->input('revision')) {
-                $this->conflict('student_changed');
+                $this->conflict('instructor_changed');
             }
-            DB::connection('tenant')->table('students')->where('id', $studentId)->update([
+            DB::connection('tenant')->table('instructors')->where('id', $instructorId)->update([
                 'name' => $data['name'], 'phone' => $data['phone'],
                 'name_search' => $this->normalizeName($data['name']), 'phone_search' => $this->normalizePhone($data['phone']),
                 'revision' => $row->revision + 1, 'updated_at' => now(),
             ]);
-            $this->associate($studentId, $added);
-            $student = $this->read($studentId, $permissions);
-            $this->audit($request, 'student.updated', $student, $before, array_unique([...$currentBranches, ...$added]), $currentBranches);
+            $this->associate($instructorId, $added);
+            $instructor = $this->read($instructorId, $permissions);
+            $this->audit($request, 'instructor.updated', $instructor, $before, array_unique([...$currentBranches, ...$added]), $currentBranches);
 
-            return response()->json(['student' => $student]);
+            return response()->json(['instructor' => $instructor]);
         });
     }
 
@@ -186,10 +157,10 @@ class CenterStudentController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'], 'phone' => ['nullable', 'string', 'max:50'],
             'branch_ids' => ['present', 'array', $request->isMethod('POST') ? 'min:1' : 'min:0', 'max:50'], 'branch_ids.*' => ['integer', 'distinct'],
-            'student_number' => ['prohibited'], 'user_id' => ['prohibited'],
-        ], ['name.required' => 'أدخل اسم الطالب.', 'branch_ids.required' => 'اختر فرعًا مصرحًا به على الأقل.']);
+            'user_id' => ['prohibited'],
+        ], ['name.required' => 'أدخل اسم المحاضر.', 'branch_ids.required' => 'اختر فرعًا مصرحًا به على الأقل.']);
         $data['name'] = trim($data['name']);
-        abort_if($data['name'] === '', 422, 'أدخل اسم الطالب.');
+        abort_if($data['name'] === '', 422, 'أدخل اسم المحاضر.');
         $data['phone'] = isset($data['phone']) ? trim($data['phone']) : null;
         $data['branch_ids'] = array_map('intval', $data['branch_ids']);
         sort($data['branch_ids']);
@@ -200,7 +171,7 @@ class CenterStudentController extends Controller
     private function authorizeBranches(CenterPermissions $permissions, array $branchIds): void
     {
         foreach ($branchIds as $branchId) {
-            abort_unless($permissions->can('students.manage', $branchId), 403);
+            abort_unless($permissions->can('instructors.manage', $branchId), 403);
         }
         abort_unless(DB::connection('tenant')->table('branches')->whereIn('id', $branchIds)->count() === count($branchIds), 403);
     }
@@ -210,36 +181,31 @@ class CenterStudentController extends Controller
         return array_keys(array_filter($permissions->branchRoles, fn (array $roles): bool => in_array($action, CenterPermissions::actions($roles), true)));
     }
 
-    private function visibleStudents(CenterPermissions $permissions, bool $includeCenterSearch = false): Builder
+    private function visibleInstructors(CenterPermissions $permissions): Builder
     {
-        $associations = DB::connection('tenant')->table('student_branches')->whereColumn('student_id', 'students.id');
+        $associations = DB::connection('tenant')->table('instructor_branches')->whereColumn('instructor_id', 'instructors.id');
         if (! $permissions->isCenterManager()) {
             $associations->whereIn('branch_id', $this->branchScope($permissions, 'read'));
         }
 
-        return DB::connection('tenant')->table('students')
-            ->select(['students.id', 'student_number', 'name', 'phone', 'revision'])
+        return DB::connection('tenant')->table('instructors')
+            ->select(['instructors.id', 'name', 'phone', 'revision'])
             ->selectSub((clone $associations)->selectRaw('json_agg(branch_id ORDER BY branch_id)'), 'branch_ids')
-            ->where(function (Builder $query) use ($associations, $permissions, $includeCenterSearch): void {
-                $query->whereExists((clone $associations)->selectRaw('1'));
-                if ($includeCenterSearch && CenterStudentSearchController::hasSearchPermission($permissions)) {
-                    $query->orWhereExists(DB::connection('tenant')->table('student_search_policy')->where('id', 1)->where('enabled', true)->selectRaw('1'));
-                }
-            });
+            ->whereExists((clone $associations)->selectRaw('1'));
     }
 
     private function payload(stdClass $row, CenterPermissions $permissions): array
     {
         $branches = json_decode($row->branch_ids, true);
 
-        return ['id' => $row->id, 'student_number' => $row->student_number, 'name' => $row->name, 'phone' => $row->phone,
+        return ['id' => $row->id, 'name' => $row->name, 'phone' => $row->phone,
             'revision' => $row->revision, 'branch_ids' => $branches,
-            'can_manage' => collect($branches)->contains(fn (int $id): bool => $permissions->can('students.manage', $id))];
+            'can_manage' => collect($branches)->contains(fn (int $id): bool => $permissions->can('instructors.manage', $id))];
     }
 
     private function read(string $id, CenterPermissions $permissions): array
     {
-        $row = $this->visibleStudents($permissions)->where('students.id', $id)->first();
+        $row = $this->visibleInstructors($permissions)->where('instructors.id', $id)->first();
         abort_unless($row, 404);
 
         return $this->payload($row, $permissions);
@@ -248,17 +214,17 @@ class CenterStudentController extends Controller
     private function associate(string $id, array $branchIds): void
     {
         foreach ($branchIds as $branchId) {
-            DB::connection('tenant')->table('student_branches')->insertOrIgnore(['student_id' => $id, 'branch_id' => $branchId, 'created_at' => now()]);
+            DB::connection('tenant')->table('instructor_branches')->insertOrIgnore(['instructor_id' => $id, 'branch_id' => $branchId, 'created_at' => now()]);
         }
     }
 
     private function audit(Request $request, string $event, array $after, ?array $before, array $branchIds, array $previousBranchIds = []): void
     {
-        $basic = fn (?array $student): ?array => $student === null ? null : array_intersect_key($student, array_flip(['student_number', 'name', 'phone']));
+        $basic = fn (?array $instructor): ?array => $instructor === null ? null : array_intersect_key($instructor, array_flip(['name', 'phone']));
         foreach ($branchIds as $branchId) {
             DB::connection('tenant')->table('center_audit_logs')->insert([
                 'actor_id' => $request->user()->id, 'branch_id' => $branchId, 'event' => $event,
-                'details' => json_encode(['student_id' => $after['id'], 'before' => $basic($before), 'after' => $basic($after),
+                'details' => json_encode(['instructor_id' => $after['id'], 'before' => $basic($before), 'after' => $basic($after),
                     'associated_before' => in_array($branchId, $previousBranchIds, true), 'associated_after' => true]), 'created_at' => now(),
             ]);
         }

@@ -29,6 +29,9 @@ export function CenterShell({ context, children, title, description, actions }: 
   const links = [
     { href: "/admin", label: "الفروع", icon: "branches", visible: true },
     { href: "/admin/students", label: "الطلاب", icon: "members", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
+    { href: "/admin/student-search", label: "البحث في طلاب المركز", icon: "members", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("students.search_center")) },
+    { href: "/admin/instructors", label: "المحاضرون", icon: "members", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
+    { href: "/admin/curriculum", label: "المناهج والخطط", icon: "audit", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
     { href: "/admin/members", label: "إدارة الموظفين والدعوات", icon: "members", visible: context.permissions.can_manage_center },
     { href: "/admin/audit", label: "سجل التدقيق", icon: "audit", visible: canAudit },
     { href: "/admin/settings", label: "إعدادات المركز", icon: "settings", visible: context.permissions.can_manage_center },

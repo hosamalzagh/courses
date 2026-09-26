@@ -2,6 +2,9 @@
 
 import { GrantAuditDetails } from "@/components/GrantAuditDetails";
 import { StudentAuditDetails } from "@/components/StudentAuditDetails";
+import { InstructorAuditDetails } from "@/components/InstructorAuditDetails";
+import { StudentSearchAuditDetails } from "@/components/StudentSearchAuditDetails";
+import { CurriculumAuditDetails } from "@/components/CurriculumAuditDetails";
 import { CenterShell } from "@/components/CenterShell";
 import { DataTable } from "@/components/DataTable";
 import type { AuditEntry, CenterContext } from "@/lib/server-context";
@@ -14,6 +17,10 @@ const eventNames: Record<string, string> = {
   "member.branch_status_changed": "تغيير حالة موظف الفرع",
   "center.settings_updated": "تعديل إعدادات المركز",
   "student.created": "إنشاء ملف طالب", "student.updated": "تعديل ملف طالب",
+  "instructor.created": "إنشاء ملف محاضر", "instructor.updated": "تعديل ملف محاضر",
+  "center.student_search_changed": "تغيير إتاحة البحث عن طلاب المركز",
+  "curriculum.course_created": "إنشاء كورس", "curriculum.stage_created": "إنشاء مرحلة دراسية",
+  "curriculum.level_created": "إنشاء مستوى", "curriculum.plan_updated": "تعديل الخطة الأولى",
 };
 
 export function AuditWorkspace({ context, initialEntries }: { context: CenterContext; initialEntries: AuditEntry[] }) {
@@ -27,7 +34,7 @@ export function AuditWorkspace({ context, initialEntries }: { context: CenterCon
           { key: "event", label: "التغيير", filterText: (entry) => eventNames[entry.event] ?? entry.event, render: (entry) => <h3>{eventNames[entry.event] ?? entry.event}</h3> },
           { key: "scope", label: "النطاق", filterText: (entry) => entry.branch_id ? `فرع رقم ${entry.branch_id}` : "المركز", render: (entry) => entry.branch_id ? `فرع رقم ${entry.branch_id}` : "المركز" },
           { key: "actor", label: "المنفّذ", filterText: (entry) => entry.actor_id === null ? "غير معروف" : `منفّذ رقم ${entry.actor_id}`, render: (entry) => entry.actor_id === null ? "غير معروف" : `منفّذ رقم ${entry.actor_id}` },
-          { key: "roles", label: "القيم قبل وبعد", render: (entry) => <><GrantAuditDetails entry={entry} /><StudentAuditDetails entry={entry} /></> },
+          { key: "roles", label: "القيم قبل وبعد", render: (entry) => <><GrantAuditDetails entry={entry} /><StudentAuditDetails entry={entry} /><InstructorAuditDetails entry={entry} /><StudentSearchAuditDetails entry={entry} /><CurriculumAuditDetails entry={entry} /></> },
           { key: "time", label: "الوقت · القاهرة", filterText: (entry) => new Date(entry.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" }), render: (entry) => <time className="muted" dateTime={entry.created_at}>{new Date(entry.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</time> },
         ]}
       />

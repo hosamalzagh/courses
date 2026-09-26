@@ -1,0 +1,105 @@
+'use client';
+
+import { useEffect, useRef, useState, useTransition, type FormEvent } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/Button';
+import { CenterShell } from '@/components/CenterShell';
+import { ConfirmationDialog } from '@/components/ConfirmationDialog';
+import { DataTable } from '@/components/DataTable';
+import { FormField } from '@/components/FormField';
+import { InlineNotice } from '@/components/InlineNotice';
+import { centerRequest, responseMessage } from '@/lib/client-api';
+import type { StudentSearchContext, StudentSearchPolicy } from '@/lib/server-context';
+
+export function StudentSearchWorkspace({ context, query }: { context: StudentSearchContext; query: string }) {
+  const router = useRouter();
+  const [search, setSearch] = useState(query);
+  const [policy, setPolicy] = useState(context.policy);
+  const [loadedRevision, setLoadedRevision] = useState(context.policy.revision);
+  const [loadedQuery, setLoadedQuery] = useState(query);
+  if (loadedRevision !== context.policy.revision) { setLoadedRevision(context.policy.revision); setPolicy(context.policy); }
+  if (loadedQuery !== query) { setLoadedQuery(query); setSearch(query); }
+  const [confirmation, setConfirmation] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [conflict, setConflict] = useState(false);
+  const saving = useRef(false);
+  const searchForm = useRef<HTMLFormElement>(null);
+  const policyButton = useRef<HTMLButtonElement>(null);
+  const focusAfterClear = useRef(false);
+  useEffect(() => {
+    if (!pending && focusAfterClear.current) {
+      searchForm.current?.querySelector<HTMLInputElement>('#center-student-search')?.focus();
+      focusAfterClear.current = false;
+    }
+  }, [pending, query]);
+
+  async function savePolicy() {
+    if (saving.current) return;
+    saving.current = true; setConfirmation(false); setBusy(true); setError(''); setNotice('');
+    try {
+      const response = await centerRequest('student-search-policy', 'PATCH', { enabled: !policy.enabled, revision: policy.revision });
+      if (!response.ok) {
+        if (response.status === 409) { setConflict(true); setError('تغيّر إعداد البحث. حمّل أحدث إعداد قبل التعديل.'); }
+        else setError(await responseMessage(response));
+        return;
+      }
+      const data = await response.json() as { policy: StudentSearchPolicy };
+      setPolicy(data.policy); setConflict(false);
+      setNotice(data.policy.enabled ? 'فُعّل البحث في البيانات الأساسية لأصحاب صلاحية البحث المستقلة.' : 'عُطّل البحث بين الفروع. بقيت ملفات الطلاب وتاريخهم محفوظة.');
+      router.refresh();
+    } catch { setError('تعذر التأكد من حفظ الإعداد. حمّل أحدث حالة لمعرفة ما حُفظ قبل التعديل.'); setConflict(true); }
+    finally { saving.current = false; setBusy(false); }
+  }
+
+  async function reloadPolicy() {
+    if (saving.current) return;
+    saving.current = true; setBusy(true);
+    try {
+      const response = await centerRequest('student-search-workspace', 'GET');
+      if (!response.ok) { setError(await responseMessage(response)); return; }
+      const data = await response.json() as StudentSearchContext;
+      setPolicy(data.policy); setConflict(false); setError(''); setNotice('حُمّل أحدث إعداد. راجعه قبل التعديل.');
+      requestAnimationFrame(() => policyButton.current?.focus());
+      router.refresh();
+    } catch { setError('تعذر تحميل أحدث إعداد. تحقق من الاتصال وأعد المحاولة.'); }
+    finally { saving.current = false; setBusy(false); }
+  }
+
+  function navigate(value: string, page = 1) {
+    const params = new URLSearchParams();
+    if (value) params.set('q', value);
+    if (page > 1) params.set('page', String(page));
+    startTransition(() => router.push(`/admin/student-search${params.size ? `?${params}` : ''}`));
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); navigate(search.trim()); }
+
+  return <CenterShell context={context} title='البحث في طلاب المركز' description='الاسم ورقم الطالب ورقم التواصل فقط. لا يمنح هذا البحث قراءة الدراسة أو الحساب المالي أو تعديل الملفات خارج فروعك.'>
+    <main className='members-main'>
+      {notice ? <InlineNotice>{notice}</InlineNotice> : null}
+      {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
+      <section className='context-card form-stack' aria-label='إتاحة البحث بين الفروع'>
+        <h2>إتاحة البحث بين الفروع</h2>
+        <p>الحالة: <strong>{policy.enabled ? 'مفعّل' : 'مغلق'}</strong>. يحتاج الموظف صلاحية البحث المستقلة؛ أدوار التسجيل وحدها لا تكفي.</p>
+        {context.permissions.can_manage_center ? <div className='form-actions'><Button ref={policyButton} busy={busy} disabled={conflict || pending} onClick={() => setConfirmation(true)}>{policy.enabled ? 'تعطيل البحث بين الفروع' : 'تفعيل البحث بين الفروع'}</Button>{conflict ? <Button disabled={busy} onClick={reloadPolicy}>تحميل أحدث إعداد</Button> : null}</div> : <p className='muted'>مالك المركز أو مسؤوله يغيّر هذا الإعداد.</p>}
+      </section>
+      {!policy.enabled ? <InlineNotice tone='warning'>البحث بين الفروع مغلق في هذا المركز. يمكنك العمل في ملفات الطلاب المصرح بها ضمن فروعك.</InlineNotice> : null}
+      <form className='context-card form-stack' aria-label='البحث في البيانات الأساسية لطلاب المركز' noValidate ref={searchForm} onSubmit={submit} aria-busy={pending}>
+        <fieldset disabled={!context.can_search || busy || pending} style={{ border: 0, padding: 0, margin: 0 }}><FormField id='center-student-search' label='الاسم أو رقم الطالب الداخلي أو رقم التواصل' value={search} onChange={setSearch} hint='البحث يشمل كل فروع هذا المركز عند تفعيل الإتاحة. النتائج لا تعرض سجلات الفروع.' /></fieldset>
+        <div className='form-actions'><Button type='submit' variant='primary' busy={pending} disabled={!context.can_search || busy}>بحث في طلاب المركز</Button>{search ? <Button disabled={busy || pending} onClick={() => { setSearch(''); focusAfterClear.current = true; navigate(''); searchForm.current?.querySelector<HTMLInputElement>('#center-student-search')?.focus(); }}>مسح البحث</Button> : null}<Link prefetch={false} href='/admin/students'>ملفات الطلاب ضمن فروعك</Link></div>
+      </form>
+      <DataTable id='center-student-search-results' title='البيانات الأساسية المطابقة' description='حتى ٥٠ نتيجة في الدفعة؛ تصفية الجدول ضمن الدفعة الحالية فقط.' rows={context.students} rowKey={(student) => student.id} searchText={(student) => `${student.student_number} ${student.name} ${student.phone ?? ''}`} emptyMessage={!context.can_search ? 'البحث بين الفروع مغلق.' : query ? 'لا يوجد طالب مطابق في هذا المركز.' : 'أدخل بيانات الطالب لبدء البحث.'} columns={[
+        { key: 'number', label: 'رقم الطالب الداخلي', filterText: (student) => String(student.student_number), render: (student) => <span className='table-code'>{student.student_number.toLocaleString('ar-EG')}</span> },
+        { key: 'name', label: 'الطالب', filterText: (student) => student.name, render: (student) => <h3>{student.name}</h3> },
+        { key: 'phone', label: 'رقم التواصل', filterText: (student) => student.phone ?? '', render: (student) => <bdi dir='ltr'>{student.phone || 'لم يُضف رقم تواصل'}</bdi> },
+        { key: 'scope', label: 'إتاحة الملف', render: (student) => student.within_scope ? <Link prefetch={false} href={`/admin/students/${student.id}`}>عرض الملف ضمن فروعك</Link> : <span className='muted'>بيانات أساسية فقط · خارج فروعك</span> },
+      ]} />
+      <nav className='form-actions' aria-label='دفعات نتائج بحث المركز'>{context.pagination.page > 1 ? <Button disabled={busy || pending} onClick={() => navigate(query, context.pagination.page - 1)}>الدفعة السابقة</Button> : null}<span>دفعة {context.pagination.page.toLocaleString('ar-EG')}</span>{context.pagination.has_more ? <Button disabled={busy || pending} onClick={() => navigate(query, context.pagination.page + 1)}>الدفعة التالية</Button> : null}</nav>
+      {confirmation ? <ConfirmationDialog title={policy.enabled ? 'تعطيل البحث بين الفروع' : 'تفعيل البحث بين الفروع'} description={policy.enabled ? 'سيتوقف البحث خارج الفروع المسندة. تبقى ملفات الطلاب والارتباطات والتاريخ محفوظة.' : 'سيتمكن صاحب صلاحية البحث المستقلة من رؤية الاسم ورقم الطالب ورقم التواصل عبر فروع المركز. لا تُفتح السجلات الدراسية أو المالية ولا صلاحية التعديل.'} confirmLabel={policy.enabled ? 'تعطيل البحث' : 'تفعيل البحث'} onCancel={() => setConfirmation(false)} onConfirm={savePolicy} /> : null}
+    </main>
+  </CenterShell>;
+}

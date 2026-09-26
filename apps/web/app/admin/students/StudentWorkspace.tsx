@@ -3,6 +3,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard';
 import { CenterShell } from '@/components/CenterShell';
 import { DataTable } from '@/components/DataTable';
 import { Button } from '@/components/Button';
@@ -10,6 +11,8 @@ import { FormField } from '@/components/FormField';
 import { InlineNotice } from '@/components/InlineNotice';
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from '@/lib/client-api';
 import type { Student, StudentContext } from '@/lib/server-context';
+
+type SimilarStudent = Pick<Student, 'id' | 'student_number' | 'name' | 'phone'> & { within_scope?: boolean };
 
 export function StudentWorkspace({ context, query, detail = false }: { context: StudentContext; query: string; detail?: boolean }) {
   const router = useRouter();
@@ -25,10 +28,13 @@ export function StudentWorkspace({ context, query, detail = false }: { context: 
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [similar, setSimilar] = useState<Student[]>([]);
+  const [similar, setSimilar] = useState<SimilarStudent[]>([]);
   const [reviewed, setReviewed] = useState('');
   const [conflict, setConflict] = useState(false);
   const manageable = context.branches.filter((branch) => context.permissions.can_manage_center || (context.permissions.branch_actions?.[String(branch.id)] ?? []).includes('students.manage'));
+
+  const initialBranches = editor === 'new' ? manageable.slice(0, 1).map((branch) => branch.id) : editor ? editor.branch_ids.filter((id) => manageable.some((branch) => branch.id === id)) : [];
+  const dirty = editor !== null && (name !== (editor === 'new' ? '' : editor.name) || phone !== (editor === 'new' ? '' : editor.phone ?? '') || JSON.stringify([...branchIds].sort()) !== JSON.stringify([...initialBranches].sort()));
 
   function open(student: Student | 'new', preserveTrigger = false) {
     if (!preserveTrigger) trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -58,7 +64,7 @@ export function StudentWorkspace({ context, query, detail = false }: { context: 
         if (editor !== 'new') params.set('exclude', editor.id);
         const response = await centerRequest(`students/similar?${params}`, 'GET');
         if (!response.ok) { setError(await responseMessage(response)); return; }
-        const matches = (await response.json()).students as Student[];
+        const matches = (await response.json()).students as SimilarStudent[];
         setSimilar(matches); setReviewed(fingerprint);
         if (matches.length) return;
       }
@@ -108,6 +114,7 @@ export function StudentWorkspace({ context, query, detail = false }: { context: 
   }
 
   return <CenterShell context={context} title='ملفات الطلاب' description='ملف واحد داخل المركز، دون حساب دخول. رقم الطالب ثابت ورقم التواصل يمكن مشاركته.' actions={manageable.length && !detail ? <Button variant='primary' disabled={busy} onClick={() => open('new')}>إنشاء ملف طالب</Button> : undefined}>
+    <UnsavedChangesGuard dirty={dirty} />
     <main className='members-main'>
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
       {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
@@ -128,7 +135,7 @@ export function StudentWorkspace({ context, query, detail = false }: { context: 
           })}
           {fieldErrors.branch_ids ? <p id='student-branches-error' className='field-error' role='alert'>{fieldErrors.branch_ids}</p> : null}
         </fieldset>
-        {similar.length ? <InlineNotice tone='warning'><strong>توجد ملفات ببيانات متشابهة ضمن نطاق صلاحيتك.</strong><p>راجع الملف الموجود لإعادة استخدامه، أو احفظ ملفًا مستقلًا إذا كان طالبًا آخر. لا تُدمج الملفات تلقائيًا.</p><ul>{similar.map((student) => <li key={student.id}><a href={`/admin/students/${student.id}`}>{student.name} — رقم {student.student_number.toLocaleString('ar-EG')}</a>{student.phone ? <bdi> · {student.phone}</bdi> : null}</li>)}</ul></InlineNotice> : null}
+        {similar.length ? <InlineNotice tone='warning'><strong>توجد ملفات ببيانات متشابهة ضمن نطاق صلاحيتك.</strong><p>راجع الملف المتاح ضمن فروعك لإعادة استخدامه. البيانات الأساسية خارج فروعك لا تمنح تعديل الملف؛ تواصل مع مسؤول المركز عند الحاجة. يمكنك حفظ ملف مستقل إذا كان طالبًا آخر؛ لا تُدمج الملفات تلقائيًا.</p><ul>{similar.map((student) => <li key={student.id}>{student.within_scope === false ? <span>{student.name} — رقم {student.student_number.toLocaleString('ar-EG')} · بيانات أساسية خارج فروعك</span> : <a href={`/admin/students/${student.id}`}>{student.name} — رقم {student.student_number.toLocaleString('ar-EG')}</a>}{student.phone ? <bdi> · {student.phone}</bdi> : null}</li>)}</ul></InlineNotice> : null}
         {conflict ? <Button disabled={busy} onClick={reloadStudent}>تحميل أحدث بيانات الطالب</Button> : null}
         <div className='form-actions'><Button type='submit' variant='primary' busy={busy} disabled={conflict}>{similar.length && editor === 'new' ? 'إنشاء ملف مستقل' : editor === 'new' ? 'حفظ ملف الطالب' : 'حفظ بيانات الطالب'}</Button><Button disabled={busy} onClick={close}>إلغاء</Button></div>
         </fieldset>

@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
+import type { CurriculumContext } from "./curriculum";
 
 export type Branch = { id: number; name: string; slug: string; address: string | null };
 export type CenterContext = {
@@ -34,6 +35,11 @@ export type Invitation = { id: number; email: string; center_role: string | null
 export type MemberContext = CenterContext & { members: Member[]; invitations: Invitation[]; grant_options: Record<string, GrantOption>; pagination: WorkspacePagination };
 export type Student = { id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
 export type StudentContext = CenterContext & { students: Student[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
+export type Instructor = { id: string; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
+export type InstructorContext = CenterContext & { instructors: Instructor[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
+export type StudentSearchPolicy = { enabled: boolean; revision: number };
+export type StudentSearchResult = { id: string; student_number: number; name: string; phone: string | null; within_scope: boolean };
+export type StudentSearchContext = CenterContext & { policy: StudentSearchPolicy; students: StudentSearchResult[]; pagination: { page: number; has_more: boolean }; can_search: boolean };
 
 export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable";
 
@@ -82,4 +88,16 @@ export function loadMemberWorkspace(query = ""): Promise<MemberContext | CenterA
 
 export function loadStudentWorkspace(query = "", studentId?: string): Promise<StudentContext | CenterAccessFailure> {
   return fetchCenterPayload<StudentContext>(`${studentId ? `students/${encodeURIComponent(studentId)}` : "student-workspace"}${query ? `?${query}` : ""}`);
+}
+
+export function loadInstructorWorkspace(query = "", instructorId?: string): Promise<InstructorContext | CenterAccessFailure> {
+  return fetchCenterPayload<InstructorContext>(`${instructorId ? `instructors/${encodeURIComponent(instructorId)}` : "instructor-workspace"}${query ? `?${query}` : ""}`);
+}
+
+export function loadStudentSearchWorkspace(query = ""): Promise<StudentSearchContext | CenterAccessFailure> {
+  return fetchCenterPayload<StudentSearchContext>(`student-search-workspace${query ? `?${query}` : ""}`);
+}
+
+export function loadCurriculumWorkspace(query = "", levelId?: string): Promise<CurriculumContext | CenterAccessFailure> {
+  return fetchCenterPayload<CurriculumContext>(`${levelId ? `levels/${encodeURIComponent(levelId)}` : "curriculum-workspace"}${query ? `?${query}` : ""}`);
 }
