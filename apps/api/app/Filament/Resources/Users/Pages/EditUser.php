@@ -25,10 +25,24 @@ class EditUser extends EditRecord
             throw ValidationException::withMessages(['data.platform_role' => 'لا يمكن إزالة آخر مالك للمنصة.']);
         }
         $oldRole = $record->platform_role;
-        DB::connection('central')->transaction(function () use ($record, $data, $oldRole): void {
+        $oldValues = $record->only(['name', 'email', 'password']);
+        DB::connection('central')->transaction(function () use ($record, $data, $oldRole, $oldValues): void {
             $record->fill($data);
             $record->platform_role = $data['platform_role'];
             $record->save();
+            $changedFields = [];
+            foreach ($oldValues as $field => $oldValue) {
+                if ($record->{$field} !== $oldValue) {
+                    $changedFields[] = $field;
+                }
+            }
+            if ($changedFields !== []) {
+                DB::connection('central')->table('platform_audit_logs')->insert([
+                    'actor_id' => auth()->id(), 'event' => 'platform_user.updated',
+                    'details' => json_encode(['user_id' => $record->id, 'changed_fields' => $changedFields]),
+                    'created_at' => now(),
+                ]);
+            }
             if ($oldRole !== $record->platform_role) {
                 DB::connection('central')->table('platform_audit_logs')->insert([
                     'actor_id' => auth()->id(), 'event' => 'platform_user.role_changed',

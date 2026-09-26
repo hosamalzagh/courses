@@ -19,7 +19,7 @@ class BranchAssignmentTest extends TestCase
     public function test_two_managers_share_a_branch_while_one_manages_a_second_branch(): void
     {
         Mail::fake();
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']))
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform')
             ->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => 'Alpha', 'slug' => 'alpha', 'subdomain' => 'alpha',
                 'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
@@ -35,7 +35,7 @@ class BranchAssignmentTest extends TestCase
             'user_id' => $owner->id, 'role' => 'center_owner', 'created_at' => now(), 'updated_at' => now(),
         ]));
 
-        $this->actingAs($owner)->withSession(['center_id' => $center->id]);
+        $this->actingAs($owner, 'web')->withSession(['center_id' => $center->id]);
         $base = 'http://alpha.courses.test/api/v1/center';
         $north = $this->postJson("{$base}/branches", ['name' => 'North', 'slug' => 'north'])
             ->assertCreated()->json('branch.id');
@@ -69,7 +69,7 @@ class BranchAssignmentTest extends TestCase
         $ownerPage = $this->getJson("{$base}/user")->assertOk()->assertJsonCount(3, 'branches');
         $this->assertQueryBudget($ownerPage);
 
-        $this->actingAs($firstManager)->withSession(['center_id' => $center->id]);
+        $this->actingAs($firstManager, 'web')->withSession(['center_id' => $center->id]);
         foreach (['user', 'branches'] as $path) {
             $page = $this->getJson("{$base}/{$path}")->assertOk()->assertJsonCount(2, 'branches');
             $this->assertQueryBudget($page);
@@ -82,7 +82,7 @@ class BranchAssignmentTest extends TestCase
         $this->patchJson("{$base}/branches/{$east}", ['name' => 'Denied'])->assertForbidden();
         $this->patchJson("{$base}/branches/{$south}", ['name' => 'South Updated'])->assertOk();
 
-        $this->actingAs($secondManager)->withSession(['center_id' => $center->id]);
+        $this->actingAs($secondManager, 'web')->withSession(['center_id' => $center->id]);
         $page = $this->getJson("{$base}/user")->assertOk()->assertJsonCount(1, 'branches')
             ->assertJsonPath('branches.0.name', 'North');
         $this->assertQueryBudget($page);

@@ -17,7 +17,7 @@ class CenterMigrationCommandTest extends TestCase
 
     public function test_operator_can_migrate_one_or_all_centers_without_a_broken_center_blocking_the_others(): void
     {
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']));
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform');
         foreach (['alpha', 'beta'] as $slug) {
             $this->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => ucfirst($slug).' Center', 'slug' => $slug, 'subdomain' => $slug,
@@ -65,7 +65,7 @@ class CenterMigrationCommandTest extends TestCase
 
     public function test_migration_failure_records_partial_version_and_does_not_block_the_next_center(): void
     {
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']));
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform');
         $alpha = Center::create([
             'name' => 'Alpha Center', 'slug' => 'alpha', 'plan' => 'starter',
             'owner_email' => 'owner@alpha.test',

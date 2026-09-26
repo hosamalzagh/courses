@@ -27,6 +27,7 @@ class AdminPanelProvider extends PanelProvider
         return $panel
             ->default()
             ->id('admin')
+            ->authGuard('platform')
             ->path('admin')
             ->domain(config('courses.platform_host'))
             ->login()

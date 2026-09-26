@@ -20,7 +20,7 @@ class BranchManagementTest extends TestCase
     public function test_owner_manages_two_branches_in_its_database_with_scoped_reads_and_audit(): void
     {
         Mail::fake();
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']));
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform');
         foreach (['alpha', 'beta'] as $slug) {
             $this->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => ucfirst($slug), 'slug' => $slug, 'subdomain' => $slug,
@@ -35,7 +35,7 @@ class BranchManagementTest extends TestCase
         $alpha->run(fn () => DB::table('center_grants')->insert([
             'user_id' => $owner->id, 'role' => 'center_owner', 'created_at' => now(), 'updated_at' => now(),
         ]));
-        $this->actingAs($owner)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($owner, 'web')->withSession(['center_id' => $alpha->id]);
 
         $north = $this->postJson('http://alpha.courses.test/api/v1/center/branches', [
             'name' => 'North', 'slug' => 'north', 'address' => 'First Street',
@@ -69,7 +69,7 @@ class BranchManagementTest extends TestCase
 
         $staff = User::factory()->create(['email_verified_at' => now()]);
         CenterMembership::create(['user_id' => $staff->id, 'tenant_id' => $alpha->id, 'status' => 'active']);
-        $this->actingAs($staff)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($staff, 'web')->withSession(['center_id' => $alpha->id]);
         $this->postJson('http://alpha.courses.test/api/v1/center/branches', [
             'name' => 'Denied', 'slug' => 'denied',
         ])->assertForbidden();
@@ -83,7 +83,7 @@ class BranchManagementTest extends TestCase
         $beta->run(fn () => DB::table('center_grants')->insert([
             'user_id' => $betaOwner->id, 'role' => 'center_owner', 'created_at' => now(), 'updated_at' => now(),
         ]));
-        $this->actingAs($betaOwner)->withSession(['center_id' => $beta->id]);
+        $this->actingAs($betaOwner, 'web')->withSession(['center_id' => $beta->id]);
         $this->postJson('http://beta.courses.test/api/v1/center/branches', [
             'name' => 'Beta Branch', 'slug' => 'beta-branch',
         ])->assertCreated();

@@ -17,6 +17,7 @@ class RequireCenterMember
         $user = $request->user();
 
         abort_unless($user && $request->session()->get('center_id') === $center->id, 401);
+        abort_if(in_array($user->platform_role, ['platform_owner', 'platform_support'], true), 403);
         abort_unless($user->hasVerifiedEmail(), 403, 'Email verification is required.');
 
         $membership = CenterMembership::query()

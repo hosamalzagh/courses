@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\User;
+use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -40,6 +41,22 @@ class UserFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'email_verified_at' => null,
+        ]);
+    }
+
+    public function platformOwner(): static
+    {
+        return $this->state(fn (): array => [
+            'platform_role' => 'platform_owner',
+            'app_authentication_secret' => AppAuthentication::make()->generateSecret(),
+        ]);
+    }
+
+    public function platformSupport(): static
+    {
+        return $this->state(fn (): array => [
+            'platform_role' => 'platform_support',
+            'app_authentication_secret' => AppAuthentication::make()->generateSecret(),
         ]);
     }
 }

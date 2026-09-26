@@ -29,7 +29,7 @@ class InvitationAuthenticationTest extends TestCase
     {
         $this->withoutMiddleware(ThrottleRequests::class);
         Mail::fake();
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']));
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform');
         foreach (['alpha', 'beta'] as $slug) {
             $this->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => ucfirst($slug), 'slug' => $slug, 'subdomain' => $slug,
@@ -63,7 +63,7 @@ class InvitationAuthenticationTest extends TestCase
     {
         $this->withoutMiddleware(ThrottleRequests::class);
         Mail::fake();
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']))
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform')
             ->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => 'Alpha', 'slug' => 'alpha', 'subdomain' => 'alpha',
                 'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
@@ -104,8 +104,8 @@ class InvitationAuthenticationTest extends TestCase
     {
         $this->withoutMiddleware(ThrottleRequests::class);
         Mail::fake();
-        $platformOwner = User::factory()->create(['platform_role' => 'platform_owner']);
-        $this->actingAs($platformOwner)
+        $platformOwner = User::factory()->platformOwner()->create();
+        $this->actingAs($platformOwner, 'platform')
             ->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => 'Alpha', 'slug' => 'alpha', 'subdomain' => 'alpha',
                 'plan' => 'starter', 'owner_email' => 'owner@alpha.test',

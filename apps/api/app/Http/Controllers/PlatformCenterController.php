@@ -24,6 +24,10 @@ class PlatformCenterController extends Controller
             ->orderBy('name')
             ->paginate(20);
 
+        if ($request->user()->platform_role === 'platform_support') {
+            $centers->through(fn (Center $center): array => $this->supportStatus($center));
+        }
+
         return response()->json($centers);
     }
 
@@ -65,7 +69,11 @@ class PlatformCenterController extends Controller
     {
         $this->platformMember($request);
 
-        return response()->json(['center' => $center->load('domains')]);
+        $center->load('domains');
+
+        return response()->json(['center' => $request->user()->platform_role === 'platform_support'
+            ? $this->supportStatus($center)
+            : $center]);
     }
 
     public function retry(Request $request, Center $center): JsonResponse
@@ -120,6 +128,17 @@ class PlatformCenterController extends Controller
     private function platformMember(Request $request): void
     {
         abort_unless(in_array($request->user()?->platform_role, ['platform_owner', 'platform_support'], true), 403);
+    }
+
+    private function supportStatus(Center $center): array
+    {
+        return [
+            ...$center->only([
+                'id', 'name', 'slug', 'plan', 'provisioning_status', 'suspended',
+                'provisioning_error', 'database_state', 'migration_version',
+            ]),
+            'domains' => $center->domains->map->only(['domain'])->all(),
+        ];
     }
 
     private function platformOwner(Request $request): void

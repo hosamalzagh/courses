@@ -110,6 +110,7 @@ class CenterAuthController extends Controller
         }
 
         $user = User::where('email', $email)->firstOrFail();
+        abort_if(in_array($user->platform_role, ['platform_owner', 'platform_support'], true), 403);
         $center = $request->attributes->get('center');
         $membership = CenterMembership::where('user_id', $user->id)
             ->where('tenant_id', $center->id)
@@ -220,7 +221,10 @@ class CenterAuthController extends Controller
         $pending = $request->session()->get('pending_center_login');
         abort_unless($pending && $pending['center_id'] === $request->attributes->get('center')->id, 401);
 
-        return User::findOrFail($pending['user_id']);
+        $user = User::findOrFail($pending['user_id']);
+        abort_if(in_array($user->platform_role, ['platform_owner', 'platform_support'], true), 403);
+
+        return $user;
     }
 
     private function finishLogin(Request $request, User $user): void

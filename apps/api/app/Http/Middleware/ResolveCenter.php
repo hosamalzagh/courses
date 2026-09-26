@@ -5,12 +5,14 @@ namespace App\Http\Middleware;
 use App\Models\Center;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\Response;
 
 class ResolveCenter
 {
     public function handle(Request $request, Closure $next): Response
     {
+        Auth::shouldUse('web');
         $host = strtolower($request->getHost());
         $suffix = '.'.config('courses.base_domain');
 

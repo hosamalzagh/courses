@@ -18,7 +18,7 @@ class CenterAccessTest extends TestCase
     public function test_suspended_membership_denies_existing_session_and_new_login_with_a_clear_state(): void
     {
         Mail::fake();
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']))
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform')
             ->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => 'Alpha', 'slug' => 'alpha', 'subdomain' => 'alpha',
                 'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
@@ -27,7 +27,7 @@ class CenterAccessTest extends TestCase
         $staff = User::factory()->create(['email_verified_at' => now(), 'password' => 'correct-horse-battery-staple']);
         $membership = CenterMembership::create(['user_id' => $staff->id, 'tenant_id' => $alpha->id, 'status' => 'active']);
 
-        $this->actingAs($staff)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($staff, 'web')->withSession(['center_id' => $alpha->id]);
         $this->getJson('http://alpha.courses.test/api/v1/center/user')->assertOk();
         $membership->update(['status' => 'suspended']);
         $denied = $this->getJson('http://alpha.courses.test/api/v1/center/user')
@@ -41,7 +41,7 @@ class CenterAccessTest extends TestCase
     public function test_login_rate_limit_does_not_block_a_separate_invitation_operation(): void
     {
         Mail::fake();
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']))
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform')
             ->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => 'Alpha', 'slug' => 'alpha', 'subdomain' => 'alpha',
                 'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
@@ -72,8 +72,8 @@ class CenterAccessTest extends TestCase
 
     public function test_branch_roles_and_center_host_boundaries_apply_on_every_request(): void
     {
-        $platformOwner = User::factory()->create(['platform_role' => 'platform_owner']);
-        $this->actingAs($platformOwner);
+        $platformOwner = User::factory()->platformOwner()->create();
+        $this->actingAs($platformOwner, 'platform');
         foreach (['alpha', 'beta'] as $slug) {
             $this->withServerVariables(['HTTP_HOST' => 'courses.test'])
                 ->postJson('/api/v1/platform/centers', [
@@ -98,7 +98,7 @@ class CenterAccessTest extends TestCase
             return [$firstBranch, $secondBranch];
         });
 
-        $this->actingAs($staff)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($staff, 'web')->withSession(['center_id' => $alpha->id]);
         $this->patchJson("http://alpha.courses.test/api/v1/center/branches/{$firstBranch}", ['name' => 'First Updated'])
             ->assertOk();
         $this->getJson("http://alpha.courses.test/api/v1/center/branches/{$firstBranch}/audit")
@@ -126,8 +126,8 @@ class CenterAccessTest extends TestCase
 
     public function test_landlord_stays_available_when_a_center_database_is_unavailable(): void
     {
-        $platformOwner = User::factory()->create(['platform_role' => 'platform_owner']);
-        $this->actingAs($platformOwner)->postJson('http://courses.test/api/v1/platform/centers', [
+        $platformOwner = User::factory()->platformOwner()->create();
+        $this->actingAs($platformOwner, 'platform')->postJson('http://courses.test/api/v1/platform/centers', [
             'name' => 'Alpha', 'slug' => 'alpha', 'subdomain' => 'alpha',
             'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
         ])->assertCreated();
@@ -137,8 +137,8 @@ class CenterAccessTest extends TestCase
         DB::purge('tenant');
         DB::connection('provisioning')->statement('DROP DATABASE "'.$center->database()->getName().'" WITH (FORCE)');
 
-        $this->actingAs($member)->withSession(['center_id' => $center->id]);
+        $this->actingAs($member, 'web')->withSession(['center_id' => $center->id]);
         $this->getJson('http://alpha.courses.test/api/v1/center/user')->assertStatus(503);
-        $this->actingAs($platformOwner)->getJson('http://courses.test/api/v1/platform/centers')->assertOk();
+        $this->actingAs($platformOwner, 'platform')->getJson('http://courses.test/api/v1/platform/centers')->assertOk();
     }
 }

@@ -19,7 +19,7 @@ class CenterAdminTest extends TestCase
     public function test_center_admin_manages_operations_without_gaining_platform_or_owner_rights(): void
     {
         Mail::fake();
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']))
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform')
             ->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => 'Alpha', 'slug' => 'alpha', 'subdomain' => 'alpha',
                 'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
@@ -37,7 +37,8 @@ class CenterAdminTest extends TestCase
         });
 
         $base = 'http://alpha.courses.test/api/v1/center';
-        $this->actingAs($admin)->withSession(['center_id' => $center->id]);
+        auth('platform')->logout();
+        $this->actingAs($admin, 'web')->withSession(['center_id' => $center->id]);
         $this->putJson("{$base}/members/{$adminMembership->id}/grants", [
             'center_roles' => ['center_admin'], 'branch_roles' => [], 'platform_role' => 'platform_owner',
         ])->assertUnprocessable();
@@ -49,18 +50,18 @@ class CenterAdminTest extends TestCase
         ])->assertUnprocessable();
         $this->patchJson("{$base}/members/{$ownerMembership->id}/status", ['status' => 'suspended'])
             ->assertStatus(409)->assertJsonPath('code', 'last_active_owner');
-        $this->getJson('http://courses.test/api/v1/platform/centers')->assertForbidden();
+        $this->getJson('http://courses.test/api/v1/platform/centers')->assertUnauthorized();
         $this->assertNull($admin->fresh()->platform_role);
         $this->assertSame('active', $ownerMembership->fresh()->status);
 
-        $this->actingAs($owner)->withSession(['center_id' => $center->id]);
+        $this->actingAs($owner, 'web')->withSession(['center_id' => $center->id]);
         $this->putJson("{$base}/members/{$ownerMembership->id}/grants", [
             'center_roles' => [], 'branch_roles' => [],
         ])->assertStatus(409)->assertJsonPath('code', 'last_active_owner');
         $this->assertSame(1, $center->run(fn () => DB::table('center_grants')
             ->where('role', 'center_owner')->count()));
 
-        $this->actingAs($admin)->withSession(['center_id' => $center->id]);
+        $this->actingAs($admin, 'web')->withSession(['center_id' => $center->id]);
         $north = $this->postJson("{$base}/branches", ['name' => 'North', 'slug' => 'north'])
             ->assertCreated()->json('branch.id');
         $this->postJson("{$base}/branches", ['name' => 'South', 'slug' => 'south'])
@@ -96,7 +97,7 @@ class CenterAdminTest extends TestCase
         $this->assertSame(1, collect($auditPage->json('audit_entries'))
             ->where('event', 'member.status_changed')->count());
 
-        $this->actingAs($owner)->withSession(['center_id' => $center->id]);
+        $this->actingAs($owner, 'web')->withSession(['center_id' => $center->id]);
         $this->putJson("{$base}/members/{$staffMembership->id}/grants", [
             'center_roles' => ['center_owner'], 'branch_roles' => [(string) $north => ['branch_viewer']],
         ])->assertOk();

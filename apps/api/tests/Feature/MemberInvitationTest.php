@@ -22,7 +22,7 @@ class MemberInvitationTest extends TestCase
     public function test_failed_member_mail_keeps_token_and_requires_delivery_resolution_before_retry(): void
     {
         Mail::fake();
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']))
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform')
             ->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => 'Alpha', 'slug' => 'alpha', 'subdomain' => 'alpha',
                 'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
@@ -33,7 +33,7 @@ class MemberInvitationTest extends TestCase
         $alpha->run(fn () => DB::table('center_grants')->insert([
             'user_id' => $manager->id, 'role' => 'center_owner', 'created_at' => now(), 'updated_at' => now(),
         ]));
-        $this->actingAs($manager)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($manager, 'web')->withSession(['center_id' => $alpha->id]);
 
         $mailManager = Mail::getFacadeRoot()->manager;
         Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('Simulated uncertain SMTP delivery'));
@@ -90,7 +90,7 @@ class MemberInvitationTest extends TestCase
     public function test_ambiguous_legacy_email_does_not_attach_invitation_to_an_arbitrary_user(): void
     {
         Mail::fake();
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']))
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform')
             ->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => 'Alpha', 'slug' => 'alpha', 'subdomain' => 'alpha',
                 'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
@@ -106,7 +106,7 @@ class MemberInvitationTest extends TestCase
         DB::connection('central')->table('users')->where('id', $second->id)
             ->update(['email' => 'Duplicate@Courses.Test']);
 
-        $this->actingAs($manager)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($manager, 'web')->withSession(['center_id' => $alpha->id]);
         $this->postJson('http://alpha.courses.test/api/v1/center/members/invitations', [
             'email' => 'duplicate@courses.test',
         ])->assertCreated();
@@ -124,7 +124,7 @@ class MemberInvitationTest extends TestCase
     public function test_existing_user_accepts_one_use_invitations_in_two_centers_and_memberships_remain_independent(): void
     {
         Mail::fake();
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']));
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform');
         foreach (['alpha', 'beta'] as $slug) {
             $this->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => ucfirst($slug), 'slug' => $slug, 'subdomain' => $slug,
@@ -147,7 +147,7 @@ class MemberInvitationTest extends TestCase
             $center->run(fn () => DB::table('center_grants')->insert([
                 'user_id' => $manager->id, 'role' => 'center_owner', 'created_at' => now(), 'updated_at' => now(),
             ]));
-            $this->actingAs($manager)->withSession(['center_id' => $center->id]);
+            $this->actingAs($manager, 'web')->withSession(['center_id' => $center->id]);
             $this->postJson("http://{$slug}.courses.test/api/v1/center/members/invitations", [
                 'email' => $shared->email,
             ])->assertCreated();
@@ -176,30 +176,30 @@ class MemberInvitationTest extends TestCase
         $alpha = $centers['alpha'];
         $beta = $centers['beta'];
         $alphaMembership = CenterMembership::where('tenant_id', $alpha->id)->where('user_id', $shared->id)->firstOrFail();
-        $this->actingAs($shared)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($shared, 'web')->withSession(['center_id' => $alpha->id]);
         $this->getJson('http://alpha.courses.test/api/v1/center/user')->assertOk();
 
         $alphaManager = User::whereKey(CenterMembership::where('tenant_id', $alpha->id)
             ->where('user_id', '!=', $shared->id)->value('user_id'))->firstOrFail();
-        $this->actingAs($alphaManager)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($alphaManager, 'web')->withSession(['center_id' => $alpha->id]);
         $this->patchJson("http://alpha.courses.test/api/v1/center/members/{$alphaMembership->id}/status", [
             'status' => 'suspended',
         ])->assertOk();
-        $this->actingAs($shared)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($shared, 'web')->withSession(['center_id' => $alpha->id]);
         $this->getJson('http://alpha.courses.test/api/v1/center/user')
             ->assertForbidden()->assertJsonPath('code', 'membership_suspended');
         $this->withSession(['center_id' => $beta->id]);
         $this->getJson('http://beta.courses.test/api/v1/center/user')->assertOk();
-        $this->actingAs($alphaManager)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($alphaManager, 'web')->withSession(['center_id' => $alpha->id]);
         $this->patchJson("http://alpha.courses.test/api/v1/center/members/{$alphaMembership->id}/status", [
             'status' => 'active',
         ])->assertOk();
-        $this->actingAs($shared)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($shared, 'web')->withSession(['center_id' => $alpha->id]);
         $this->getJson('http://alpha.courses.test/api/v1/center/user')->assertOk();
         $this->assertSame(2, DB::connection('central')->table('center_audit_outbox')
             ->where('tenant_id', $alpha->id)->where('event', 'member.status_changed')->count());
 
-        $this->actingAs($alphaManager)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($alphaManager, 'web')->withSession(['center_id' => $alpha->id]);
         $this->postJson('http://alpha.courses.test/api/v1/center/members/invitations', [
             'email' => 'expired@courses.test',
         ])->assertCreated();

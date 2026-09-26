@@ -8,6 +8,7 @@ use App\Jobs\ProvisionCenter;
 use App\Mail\CenterInvitationMail;
 use App\Models\Center;
 use App\Models\CenterInvitation;
+use App\Models\CenterMembership;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Database\Events\QueryExecuted;
@@ -29,7 +30,7 @@ class CenterProvisioningTest extends TestCase
     {
         Queue::fake();
         Filament::setCurrentPanel(Filament::getPanel('admin'));
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']));
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform');
 
         Livewire::test(CreateCenter::class)
             ->fillForm([
@@ -66,8 +67,8 @@ class CenterProvisioningTest extends TestCase
     public function test_platform_owner_can_create_and_retry_a_center_without_duplicate_identity(): void
     {
         Mail::fake();
-        $owner = User::factory()->create(['platform_role' => 'platform_owner']);
-        $this->actingAs($owner);
+        $owner = User::factory()->platformOwner()->create();
+        $this->actingAs($owner, 'platform');
 
         $response = $this->withServerVariables(['HTTP_HOST' => 'courses.test'])
             ->postJson('/api/v1/platform/centers', [
@@ -109,8 +110,8 @@ class CenterProvisioningTest extends TestCase
 
     public function test_failed_database_provisioning_can_be_retried_without_duplicate_center_or_invitation(): void
     {
-        $owner = User::factory()->create(['platform_role' => 'platform_owner']);
-        $this->actingAs($owner);
+        $owner = User::factory()->platformOwner()->create();
+        $this->actingAs($owner, 'platform');
         $port = config('database.connections.provisioning.port');
         config()->set('database.connections.provisioning.port', 1);
         DB::purge('provisioning');
@@ -137,7 +138,7 @@ class CenterProvisioningTest extends TestCase
     public function test_retry_does_not_resend_when_mail_was_delivered_but_recording_delivery_failed(): void
     {
         Mail::fake();
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']));
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform');
         $failDeliveryRecord = true;
         DB::connection('central')->beforeExecuting(function (string $query) use (&$failDeliveryRecord): void {
             if ($failDeliveryRecord && str_contains(strtolower($query), 'update "center_invitations"')
@@ -172,7 +173,7 @@ class CenterProvisioningTest extends TestCase
     public function test_confirmed_undelivered_expired_invitation_gets_a_fresh_link_on_retry(): void
     {
         Mail::fake();
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']))
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform')
             ->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => 'Alpha Center', 'slug' => 'alpha', 'subdomain' => 'alpha',
                 'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
@@ -198,7 +199,7 @@ class CenterProvisioningTest extends TestCase
 
     public function test_failed_migration_keeps_its_applied_version_and_retry_preserves_the_other_center(): void
     {
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']));
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform');
         $this->postJson('http://courses.test/api/v1/platform/centers', [
             'name' => 'Alpha Center', 'slug' => 'alpha', 'subdomain' => 'alpha',
             'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
@@ -243,8 +244,8 @@ class CenterProvisioningTest extends TestCase
 
     public function test_changing_a_center_domain_rejects_the_old_host(): void
     {
-        $owner = User::factory()->create(['platform_role' => 'platform_owner']);
-        $this->actingAs($owner)->postJson('http://courses.test/api/v1/platform/centers', [
+        $owner = User::factory()->platformOwner()->create();
+        $this->actingAs($owner, 'platform')->postJson('http://courses.test/api/v1/platform/centers', [
             'name' => 'Alpha Center', 'slug' => 'alpha', 'subdomain' => 'alpha',
             'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
         ])->assertCreated();
@@ -257,25 +258,37 @@ class CenterProvisioningTest extends TestCase
 
     public function test_platform_support_can_read_center_status_but_cannot_create_centers_or_read_tenant_data(): void
     {
-        $owner = User::factory()->create(['platform_role' => 'platform_owner']);
-        $this->actingAs($owner)->postJson('http://courses.test/api/v1/platform/centers', [
+        $owner = User::factory()->platformOwner()->create();
+        $this->actingAs($owner, 'platform')->postJson('http://courses.test/api/v1/platform/centers', [
             'name' => 'Alpha Center', 'slug' => 'alpha', 'subdomain' => 'alpha',
             'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
         ])->assertCreated();
-        $support = User::factory()->create(['platform_role' => 'platform_support']);
-        $this->actingAs($support);
-        $this->getJson('http://courses.test/api/v1/platform/centers')->assertOk();
+        $support = User::factory()->platformSupport()->create();
+        $center = Center::where('slug', 'alpha')->firstOrFail();
+        CenterMembership::create(['user_id' => $support->id, 'tenant_id' => $center->id, 'status' => 'active']);
+        $support->update(['email_verified_at' => now()]);
+        $this->actingAs($support, 'platform');
+        $this->getJson('http://courses.test/api/v1/platform/centers')->assertOk()
+            ->assertJsonMissingPath('data.0.owner_email');
+        $this->getJson("http://courses.test/api/v1/platform/centers/{$center->id}")->assertOk()
+            ->assertJsonMissingPath('center.owner_email');
         $this->postJson('http://courses.test/api/v1/platform/centers', [
             'name' => 'Denied', 'slug' => 'denied', 'subdomain' => 'denied',
             'plan' => 'starter', 'owner_email' => 'owner@denied.test',
         ])->assertForbidden();
         $this->getJson('http://alpha.courses.test/api/v1/center/user')->assertUnauthorized();
+        $this->postJson('http://alpha.courses.test/api/v1/center/auth/login', [
+            'email' => $support->email, 'password' => 'password',
+        ])->assertForbidden();
+        $this->getJson('http://alpha.courses.test/api/v1/center/user')->assertUnauthorized();
+        $this->actingAs($support, 'web')->withSession(['center_id' => $center->id])
+            ->getJson('http://alpha.courses.test/api/v1/center/user')->assertForbidden();
     }
 
     public function test_center_changes_roll_back_when_their_platform_audit_cannot_be_written(): void
     {
-        $owner = User::factory()->create(['platform_role' => 'platform_owner']);
-        $this->actingAs($owner)->postJson('http://courses.test/api/v1/platform/centers', [
+        $owner = User::factory()->platformOwner()->create();
+        $this->actingAs($owner, 'platform')->postJson('http://courses.test/api/v1/platform/centers', [
             'name' => 'Alpha Center', 'slug' => 'alpha', 'subdomain' => 'alpha',
             'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
         ])->assertCreated();

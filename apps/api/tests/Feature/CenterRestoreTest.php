@@ -84,10 +84,10 @@ class CenterRestoreTest extends TestCase
             ->where('source_event_id', $auditId)->count()));
         $this->assertSame(['beta'], $beta->run(fn () => DB::table('branches')->pluck('slug')->all()));
         $this->assertSame(0, $alpha->run(fn () => DB::table('center_grants')->where('user_id', 999999)->count()));
-        $this->actingAs($owner)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($owner, 'web')->withSession(['center_id' => $alpha->id]);
         $this->getJson('http://alpha.courses.test/api/v1/center/user')
             ->assertOk()->assertJsonPath('permissions.center_roles.0', 'center_owner');
-        $this->actingAs($laterOwner)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($laterOwner, 'web')->withSession(['center_id' => $alpha->id]);
         $this->getJson('http://alpha.courses.test/api/v1/center/user')
             ->assertOk()->assertJsonPath('permissions.center_roles.0', 'center_owner');
         unlink($file);

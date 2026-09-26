@@ -22,8 +22,8 @@ class CenterMemberManagementTest extends TestCase
     public function test_member_grants_are_scoped_to_center_and_apply_on_the_next_request(): void
     {
         Mail::fake();
-        $platformOwner = User::factory()->create(['platform_role' => 'platform_owner']);
-        $this->actingAs($platformOwner);
+        $platformOwner = User::factory()->platformOwner()->create();
+        $this->actingAs($platformOwner, 'platform');
         foreach (['alpha', 'beta'] as $slug) {
             $this->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => ucfirst($slug), 'slug' => $slug, 'subdomain' => $slug,
@@ -48,7 +48,7 @@ class CenterMemberManagementTest extends TestCase
             'name' => 'South', 'slug' => 'south', 'created_at' => now(), 'updated_at' => now(),
         ]));
 
-        $this->actingAs($owner)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($owner, 'web')->withSession(['center_id' => $alpha->id]);
         $this->patchJson("http://alpha.courses.test/api/v1/center/members/{$ownerMembership->id}/status", ['status' => 'suspended'])
             ->assertStatus(409);
         $this->putJson("http://alpha.courses.test/api/v1/center/members/{$staffMembership->id}/grants", [
@@ -88,18 +88,18 @@ class CenterMemberManagementTest extends TestCase
         $roles = $alpha->run(fn () => DB::table('branch_grants')->where('user_id', $staff->id)->pluck('role')->all());
         $this->assertEqualsCanonicalizing(['branch_viewer', 'branch_auditor'], $roles);
 
-        $this->actingAs($staff)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($staff, 'web')->withSession(['center_id' => $alpha->id]);
         $this->getJson("http://alpha.courses.test/api/v1/center/branches/{$branchId}")->assertOk();
         $this->patchJson("http://alpha.courses.test/api/v1/center/branches/{$branchId}", ['name' => 'Denied'])->assertForbidden();
         $this->getJson('http://alpha.courses.test/api/v1/center/members')->assertForbidden();
         $this->getJson('http://alpha.courses.test/api/v1/center/member-workspace')->assertForbidden();
         $this->getJson('http://beta.courses.test/api/v1/center/user')->assertUnauthorized();
 
-        $this->actingAs($owner)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($owner, 'web')->withSession(['center_id' => $alpha->id]);
         $this->putJson("http://alpha.courses.test/api/v1/center/members/{$staffMembership->id}/grants", [
             'center_roles' => [], 'branch_roles' => [(string) $branchId => ['branch_manager', 'branch_auditor']],
         ])->assertOk();
-        $this->actingAs($staff)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($staff, 'web')->withSession(['center_id' => $alpha->id]);
         $this->patchJson("http://alpha.courses.test/api/v1/center/branches/{$branchId}", ['name' => 'Allowed'])->assertOk();
         $this->assertSame(0, $beta->run(fn () => DB::table('branch_grants')->count()));
 
@@ -111,7 +111,7 @@ class CenterMemberManagementTest extends TestCase
                 throw new RuntimeException('Simulated tenant audit failure');
             }
         });
-        $this->actingAs($owner)->withSession(['center_id' => $alpha->id]);
+        $this->actingAs($owner, 'web')->withSession(['center_id' => $alpha->id]);
         $failAuditInsert = true;
         $this->postJson('http://alpha.courses.test/api/v1/center/branches', [
             'name' => 'Not Created', 'slug' => 'not-created',

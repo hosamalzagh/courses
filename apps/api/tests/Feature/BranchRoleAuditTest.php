@@ -19,7 +19,7 @@ class BranchRoleAuditTest extends TestCase
     public function test_branch_roles_combine_and_audit_stays_within_the_assigned_branch(): void
     {
         Mail::fake();
-        $this->actingAs(User::factory()->create(['platform_role' => 'platform_owner']))
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform')
             ->postJson('http://courses.test/api/v1/platform/centers', [
                 'name' => 'Alpha', 'slug' => 'alpha', 'subdomain' => 'alpha',
                 'plan' => 'starter', 'owner_email' => 'owner@alpha.test',
@@ -36,7 +36,7 @@ class BranchRoleAuditTest extends TestCase
         ]));
 
         $base = 'http://alpha.courses.test/api/v1/center';
-        $this->actingAs($owner)->withSession(['center_id' => $center->id]);
+        $this->actingAs($owner, 'web')->withSession(['center_id' => $center->id]);
         $north = $this->postJson("{$base}/branches", ['name' => 'North', 'slug' => 'north'])
             ->assertCreated()->json('branch.id');
         $south = $this->postJson("{$base}/branches", ['name' => 'South', 'slug' => 'south'])
@@ -60,7 +60,7 @@ class BranchRoleAuditTest extends TestCase
         $this->assertSame(0, collect($ownerAudit->json('entries'))
             ->where('event', 'member.branch_status_changed')->count());
 
-        $this->actingAs($staff)->withSession(['center_id' => $center->id]);
+        $this->actingAs($staff, 'web')->withSession(['center_id' => $center->id]);
         $user = $this->getJson("{$base}/user")->assertOk()
             ->assertJsonCount(2, 'user.permissions.branch_roles.'.$north)
             ->assertJsonCount(1, 'user.permissions.branch_roles.'.$south);
@@ -77,11 +77,11 @@ class BranchRoleAuditTest extends TestCase
         $this->assertQueryBudget($auditPage);
         $this->assertSame([$north], collect($auditPage->json('audit_entries'))->pluck('branch_id')->unique()->all());
 
-        $this->actingAs($owner)->withSession(['center_id' => $center->id]);
+        $this->actingAs($owner, 'web')->withSession(['center_id' => $center->id]);
         $this->putJson("{$base}/members/{$membership->id}/grants", [
             'center_roles' => [], 'branch_roles' => [(string) $north => ['branch_viewer']],
         ])->assertOk();
-        $this->actingAs($staff)->withSession(['center_id' => $center->id]);
+        $this->actingAs($staff, 'web')->withSession(['center_id' => $center->id]);
         $this->patchJson("{$base}/branches/{$north}", ['name' => 'Denied'])->assertForbidden();
         $this->getJson("{$base}/branches/{$north}/audit")->assertForbidden();
         $this->getJson("{$base}/user?include=audit")->assertForbidden();
