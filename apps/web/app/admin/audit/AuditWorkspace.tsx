@@ -1,5 +1,6 @@
 "use client";
 
+import { GrantAuditDetails } from "@/components/GrantAuditDetails";
 import type { AuditEntry } from "@/lib/server-context";
 
 const eventNames: Record<string, string> = {
@@ -20,6 +21,7 @@ export function AuditWorkspace({ centerName, initialEntries }: { centerName: str
       <div className="member-list">{initialEntries.map((entry) => <article className="member-card" key={entry.id}>
         <div className="member-card-head"><h3>{eventNames[entry.event] ?? entry.event}</h3><time className="muted" dateTime={entry.created_at}>{new Date(entry.created_at).toLocaleString("ar-EG")}</time></div>
         <p className="muted">{entry.branch_id ? `فرع رقم ${entry.branch_id}` : "المركز"} · منفّذ رقم {entry.actor_id ?? "غير معروف"}</p>
+        <GrantAuditDetails entry={entry} />
       </article>)}</div>
     </main>
   </div>;

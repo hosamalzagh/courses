@@ -149,7 +149,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await page.getByRole("textbox", { name: "كلمة المرور" }).fill(password);
     await page.getByRole("button", { name: "دخول المركز" }).click();
     await expect(page).toHaveURL(`${host}/admin`);
-    await expect(page.getByText("مالك المركز")).toBeVisible();
+    await expect(page.getByRole("button", { name: "إنشاء فرع" })).toBeVisible();
     for (const [name, branchSlug] of [["فرع التجربة الشمالي", "pilot-north"], ["فرع التجربة الجنوبي", "pilot-south"]]) {
       await page.getByRole("button", { name: "إنشاء فرع" }).click();
       await page.getByRole("textbox", { name: "اسم الفرع" }).fill(name);
@@ -181,7 +181,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await page.getByRole("button", { name: "إرسال الدعوة" }).click();
     expect((await staffInvitationResponse).status()).toBe(201);
     await expect(page.getByText(staffEmail)).toBeVisible();
-    await expect(page.getByText("بانتظار القبول")).toBeVisible();
+    await expect(page.getByText("بانتظار القبول").filter({ visible: true })).toBeVisible();
 
     let staffInvitation = "";
     await expect.poll(async () => {
@@ -208,7 +208,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await staffPage.getByRole("textbox", { name: "كلمة المرور" }).fill(staffPassword);
     await staffPage.getByRole("button", { name: "دخول المركز" }).click();
     await expect(staffPage).toHaveURL(`${host}/admin`);
-    await expect(staffPage.getByText(staffEmail)).toBeVisible();
+    await expect(staffPage.getByText("Pilot Staff", { exact: true })).toBeVisible();
 
     const memberSequence = telescopeSequence(slug, email);
     await page.reload();
@@ -326,7 +326,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await staffCard.getByRole("button", { name: "تنشيط العضوية" }).click();
     await expect(staffCard).toContainText("نشط");
     await staffPage.reload();
-    await expect(staffPage.getByText(staffEmail)).toBeVisible();
+    await expect(staffPage.getByText("Pilot Staff", { exact: true })).toBeVisible();
     const expiredEmail = `${slug}-expired@courses.test`;
     await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(expiredEmail);
     await page.getByRole("button", { name: "إرسال الدعوة" }).click();
@@ -393,10 +393,10 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await page.getByRole("textbox", { name: "كلمة المرور" }).fill(password);
     await page.getByRole("button", { name: "دخول المركز" }).click();
     await expect(page).toHaveURL(`${host}/admin`);
-    await expect(page.getByText("مالك المركز")).toBeVisible();
+    await expect(page.getByRole("button", { name: "إنشاء فرع" })).toBeVisible();
     const sequence = telescopeSequence(slug, email);
     await page.reload();
-    await expect(page.getByText("مالك المركز")).toBeVisible();
+    await expect(page.getByRole("button", { name: "إنشاء فرع" })).toBeVisible();
     let pageRequests: MeasuredRequest[] = [];
     await expect.poll(() => {
       pageRequests = telescopeRequestsSince(slug, email, sequence);
@@ -464,7 +464,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     }
     expect(authenticated).toBe(true);
     await expect(page).toHaveURL(`${host}/admin`);
-    await expect(page.getByText("مالك المركز")).toBeVisible();
+    await expect(page.getByRole("button", { name: "إنشاء فرع" })).toBeVisible();
   } finally {
     await staffPage.close();
     await secondManagerPage.close();

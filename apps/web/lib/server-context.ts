@@ -18,15 +18,19 @@ export type CenterContext = {
 
 export type AuditEntry = { id: number; actor_id: number | null; branch_id: number | null; event: string; details: unknown; created_at: string };
 
+export type GrantOption = { label: string; description: string; actions: string[]; additional?: boolean; owner_only?: boolean };
+export type WorkspacePagination = Record<"members" | "invitations" | "branches", { page: number; has_more: boolean }>;
+
 export type Member = {
   id: number;
   user: { id: number; name: string; email: string };
   status: "active" | "suspended";
+  grant_revision: string;
   center_roles: string[];
   branch_roles: Record<string, string[]>;
 };
 export type Invitation = { id: number; email: string; center_role: string | null; expires_at: string; status: "pending" | "expired" | "uncertain" | "not_sent" };
-export type MemberContext = CenterContext & { members: Member[]; invitations: Invitation[] };
+export type MemberContext = CenterContext & { members: Member[]; invitations: Invitation[]; grant_options: Record<string, GrantOption>; pagination: WorkspacePagination };
 
 export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable";
 
@@ -69,6 +73,6 @@ export function loadCenterContext(include?: "settings" | "audit"): Promise<Cente
   return fetchCenterPayload<CenterContext>(`user${include ? `?include=${include}` : ""}`);
 }
 
-export function loadMemberWorkspace(): Promise<MemberContext | CenterAccessFailure> {
-  return fetchCenterPayload<MemberContext>("member-workspace");
+export function loadMemberWorkspace(query = ""): Promise<MemberContext | CenterAccessFailure> {
+  return fetchCenterPayload<MemberContext>(`member-workspace${query ? `?${query}` : ""}`);
 }

@@ -25,29 +25,41 @@ class CenterMemberController extends Controller
     {
         $permissions = $this->requireManager($request);
         $center = $request->attributes->get('center');
-        $people = DB::connection('central')->select(<<<'SQL'
-            SELECT m.id, m.user_id, u.name, u.email, m.status,
+        $pages = [];
+        foreach (['members', 'invitations', 'branches'] as $section) {
+            $pages[$section] = max(1, min(100000, (int) $request->query($section.'_page', 1)));
+        }
+        $people = collect(DB::connection('central')->select(<<<'SQL'
+            (SELECT m.id, m.user_id, u.name, u.email, m.status,
                 NULL::bigint AS invitation_id, NULL::varchar AS center_role, NULL::timestamp AS expires_at,
                 NULL::timestamp AS delivery_claimed_at, NULL::timestamp AS sent_at
             FROM center_memberships m JOIN users u ON u.id = m.user_id
-            WHERE m.tenant_id = ?
+            WHERE m.tenant_id = ? ORDER BY m.id LIMIT 51 OFFSET ?)
             UNION ALL
-            SELECT NULL::bigint, NULL::bigint, NULL::varchar, i.email, 'invited'::varchar,
+            (SELECT NULL::bigint, NULL::bigint, NULL::varchar, i.email, 'invited'::varchar,
                 i.id, i.center_role, i.expires_at, i.delivery_claimed_at, i.sent_at
             FROM center_invitations i
-            WHERE i.tenant_id = ? AND i.accepted_at IS NULL
-        SQL, [$center->id, $center->id]);
-        $tenantRows = DB::connection('tenant')->select(<<<'SQL'
+            WHERE i.tenant_id = ? AND i.accepted_at IS NULL ORDER BY i.id LIMIT 51 OFFSET ?)
+        SQL, [$center->id, ($pages['members'] - 1) * 50, $center->id, ($pages['invitations'] - 1) * 50]));
+        $memberRows = $people->whereNull('invitation_id');
+        $invitationRows = $people->whereNotNull('invitation_id');
+        $hasMoreMembers = $memberRows->count() > 50;
+        $hasMoreInvitations = $invitationRows->count() > 50;
+        $people = $memberRows->take(50)->concat($invitationRows->take(50));
+        $userIds = $memberRows->take(50)->pluck('user_id')->map(fn ($id) => (int) $id)->implode(',') ?: 'NULL';
+        $tenantRows = DB::connection('tenant')->select(<<<SQL
+            WITH visible_branches AS (SELECT id, name, slug, address FROM branches ORDER BY name COLLATE "C", id LIMIT 51 OFFSET ?),
+                 editable_branches AS (SELECT id FROM visible_branches ORDER BY name COLLATE "C", id LIMIT 50)
             SELECT 'branch'::text AS kind, b.id AS branch_id, NULL::bigint AS user_id,
                 NULL::text AS role, b.name::text AS name, b.slug::text AS slug, b.address::text AS address
-            FROM branches b
+            FROM visible_branches b
             UNION ALL
             SELECT 'center_grant', NULL::bigint, user_id, role, NULL::text, NULL::text, NULL::text
-            FROM center_grants
+            FROM center_grants WHERE user_id IN ({$userIds})
             UNION ALL
             SELECT 'branch_grant', branch_id, user_id, role, NULL::text, NULL::text, NULL::text
-            FROM branch_grants
-        SQL);
+            FROM branch_grants WHERE user_id IN ({$userIds}) AND branch_id IN (SELECT id FROM editable_branches)
+        SQL, [($pages['branches'] - 1) * 50]);
         $branches = [];
         $centerRoles = [];
         $branchRoles = [];
@@ -60,7 +72,9 @@ class CenterMemberController extends Controller
                 $branchRoles[$row->user_id][$row->branch_id][] = $row->role;
             }
         }
-        usort($branches, fn ($a, $b) => strcmp($a['name'], $b['name']));
+        usort($branches, fn ($a, $b) => strcmp($a['name'], $b['name']) ?: $a['id'] <=> $b['id']);
+        $hasMoreBranches = count($branches) > 50;
+        $branches = array_slice($branches, 0, 50);
         $members = [];
         $invitations = [];
         foreach ($people as $person) {
@@ -82,6 +96,7 @@ class CenterMemberController extends Controller
                     'status' => $person->status,
                     'center_roles' => $centerRoles[$person->user_id] ?? [],
                     'branch_roles' => $branchRoles[$person->user_id] ?? (object) [],
+                    'grant_revision' => CenterPermissions::revision($centerRoles[$person->user_id] ?? [], $branchRoles[$person->user_id] ?? []),
                 ];
             }
         }
@@ -97,36 +112,18 @@ class CenterMemberController extends Controller
             'branches' => $branches,
             'members' => $members,
             'invitations' => $invitations,
+            'grant_options' => CenterPermissions::GRANTS,
+            'pagination' => [
+                'members' => ['page' => $pages['members'], 'has_more' => $hasMoreMembers],
+                'invitations' => ['page' => $pages['invitations'], 'has_more' => $hasMoreInvitations],
+                'branches' => ['page' => $pages['branches'], 'has_more' => $hasMoreBranches],
+            ],
         ])->header('Cache-Control', 'private, no-store');
     }
 
     public function index(Request $request): JsonResponse
     {
-        $this->requireManager($request);
-        $center = $request->attributes->get('center');
-        $memberships = CenterMembership::query()->with('user:id,name,email')
-            ->where('tenant_id', $center->id)->orderBy('id')->get();
-        $grants = DB::connection('tenant')->table('center_grants')->get(['user_id', 'role'])
-            ->groupBy('user_id')->map(fn ($rows) => $rows->pluck('role')->all());
-        $branches = DB::connection('tenant')->table('branch_grants')->get(['user_id', 'branch_id', 'role'])
-            ->groupBy('user_id')->map(fn ($rows) => $rows->groupBy('branch_id')
-            ->map(fn ($branchRows) => $branchRows->pluck('role')->all()));
-        $invitations = CenterInvitation::query()->where('tenant_id', $center->id)
-            ->whereNull('accepted_at')->get(['id', 'email', 'center_role', 'expires_at', 'delivery_claimed_at', 'sent_at']);
-
-        return response()->json([
-            'members' => $memberships->map(fn ($membership) => [
-                'id' => $membership->id,
-                'user' => $membership->user->only(['id', 'name', 'email']),
-                'status' => $membership->status,
-                'center_roles' => $grants[$membership->user_id] ?? [],
-                'branch_roles' => $branches[$membership->user_id] ?? (object) [],
-            ]),
-            'invitations' => $invitations->map(fn ($invitation) => [
-                ...$invitation->only(['id', 'email', 'center_role', 'expires_at']),
-                'status' => $this->invitationStatus($invitation->expires_at, $invitation->delivery_claimed_at, $invitation->sent_at),
-            ]),
-        ])->header('Cache-Control', 'private, no-store');
+        return $this->workspace($request);
     }
 
     public function invite(Request $request): JsonResponse
@@ -281,8 +278,11 @@ class CenterMemberController extends Controller
             'center_roles.*' => [Rule::in(['center_owner', 'center_admin'])],
             'branch_roles' => ['present', 'array'],
             'branch_roles.*' => ['array'],
-            'branch_roles.*.*' => [Rule::in(['branch_manager', 'branch_viewer', 'branch_auditor'])],
+            'branch_roles.*.*' => [Rule::in(array_keys(CenterPermissions::GRANTS))],
             'platform_role' => ['prohibited'],
+            'grant_revision' => ['sometimes', 'string', 'size:64'],
+            'branch_scope' => ['sometimes', 'array', 'max:50'],
+            'branch_scope.*' => ['integer', 'distinct'],
         ]);
         // Keep the center row locked until the tenant grants commit. Otherwise two
         // owners can concurrently remove themselves after each sees the other.
@@ -314,8 +314,36 @@ class CenterMemberController extends Controller
                         ->where('user_id', $membership->user_id)->get(['branch_id', 'role'])
                         ->groupBy('branch_id')->map(fn ($grants) => $grants->pluck('role')->all())->all();
 
+                    $scope = $data['branch_scope'] ?? null;
+                    if ($scope !== null) {
+                        abort_unless(array_diff($branchIds, $scope) === [], 422);
+                        $previousBranchRoles = array_intersect_key($previousBranchRoles, array_flip($scope));
+                    }
+                    $nextBranchRoles = array_filter(array_map(
+                        fn (array $roles): array => array_values(array_unique($roles)), $data['branch_roles'],
+                    ));
+                    foreach ($nextBranchRoles as $roles) {
+                        abort_unless(in_array('read', CenterPermissions::actions($roles), true), 422);
+                    }
+                    $beforeRevision = CenterPermissions::revision($currentCenterRoles, $previousBranchRoles);
+                    $afterRevision = CenterPermissions::revision($centerRoles, $nextBranchRoles);
+                    if ($beforeRevision === $afterRevision) {
+                        return;
+                    }
+                    if (isset($data['grant_revision']) && $data['grant_revision'] !== $beforeRevision) {
+                        throw new HttpResponseException(response()->json(['code' => 'grants_changed'], 409));
+                    }
+                    if (! $permissions->isOwner()) {
+                        foreach (array_unique([...array_keys($previousBranchRoles), ...$branchIds]) as $branchId) {
+                            $beforeApproval = in_array('financial_approval', $previousBranchRoles[$branchId] ?? [], true);
+                            $afterApproval = in_array('financial_approval', $nextBranchRoles[$branchId] ?? [], true);
+                            abort_if($beforeApproval !== $afterApproval, 403);
+                        }
+                    }
+
                     DB::connection('tenant')->table('center_grants')->where('user_id', $membership->user_id)->delete();
-                    DB::connection('tenant')->table('branch_grants')->where('user_id', $membership->user_id)->delete();
+                    DB::connection('tenant')->table('branch_grants')->where('user_id', $membership->user_id)
+                        ->when($scope !== null, fn ($query) => $query->whereIn('branch_id', $scope))->delete();
                     foreach ($centerRoles as $role) {
                         DB::connection('tenant')->table('center_grants')->insert([
                             'user_id' => $membership->user_id, 'role' => $role,
@@ -332,6 +360,9 @@ class CenterMemberController extends Controller
                     }
                     $this->audit($request, 'member.grants_changed', [
                         'user_id' => $membership->user_id, 'center_roles' => $centerRoles, 'branch_roles' => $data['branch_roles'],
+                        'center_roles_before' => $currentCenterRoles, 'center_roles_after' => $centerRoles,
+                        'branch_roles_before' => $previousBranchRoles, 'branch_roles_after' => $nextBranchRoles,
+                        'role_labels' => CenterPermissions::labels(),
                     ]);
                     foreach (array_unique([...array_keys($previousBranchRoles), ...$branchIds]) as $branchId) {
                         $before = $previousBranchRoles[$branchId] ?? [];
@@ -341,6 +372,7 @@ class CenterMemberController extends Controller
                         if ($before !== $after) {
                             $this->audit($request, 'member.branch_grants_changed', [
                                 'user_id' => $membership->user_id, 'roles_before' => $before, 'roles_after' => $after,
+                                'role_labels' => CenterPermissions::labels(),
                             ], (int) $branchId);
                         }
                     }
