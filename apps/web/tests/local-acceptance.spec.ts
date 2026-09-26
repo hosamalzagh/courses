@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
-import { credentials, ensureLocalFixtures, signIn } from "./local-fixtures";
+import { credentials, ensureLocalFixtures, setLocalCenterSuspended, signIn } from "./local-fixtures";
+import { platform, platformAuditCount, platformOwnerCredentials, signInToPlatform } from "./platform-fixtures";
 
 const alpha = "http://alpha.courses.test";
 const beta = "http://beta.courses.test";
@@ -57,6 +58,56 @@ test("alpha and beta keep pages, sessions, and cached data separate", async ({ b
     await alphaPage.close();
     await betaPage.close();
   }
+});
+
+test("Landlord suspension is audited and blocks private Next.js pages until reactivation", async ({ browser }) => {
+  test.setTimeout(90_000);
+  const betaOwner = credentials("beta");
+  const platformOwner = platformOwnerCredentials();
+  const page = await browser.newPage();
+  const landlord = await browser.newPage();
+  await signIn(page, beta, betaOwner.email, betaOwner.password);
+  await expect(page.getByRole("heading", { name: "beta-stable" })).toBeVisible();
+
+  try {
+    await signInToPlatform(landlord, platformOwner.email, platformOwner.password);
+    const centers = await (await landlord.request.get(`${platform}/api/v1/platform/centers?search=beta`)).json();
+    const center = centers.data.find((record: { slug: string }) => record.slug === "beta");
+    if (!center) throw new Error("The local beta center is missing. Run courses:bootstrap-local.");
+    const auditBefore = platformAuditCount(center.id, "center.updated");
+    await landlord.goto(`${platform}/admin/centers/${center.id}/edit`);
+    await landlord.getByRole("switch", { name: "المركز موقوف" }).click();
+    await landlord.getByRole("button", { name: "Save changes" }).click();
+    await expect.poll(async () => {
+      const response = await landlord.request.get(`${platform}/api/v1/platform/centers/${center.id}`);
+      return (await response.json()).center.suspended;
+    }).toBe(true);
+    expect(platformAuditCount(center.id, "center.updated")).toBeGreaterThan(auditBefore);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "المركز غير متاح الآن" })).toBeVisible();
+    await expect(page.getByText("beta-stable")).toHaveCount(0);
+    const denied = await page.request.get(`${beta}/api/v1/center/user`);
+    expect(denied.status()).toBe(423);
+    expect(Number(denied.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+    await landlord.goto(`${platform}/admin/centers/${center.id}/edit`);
+    await landlord.getByRole("switch", { name: "المركز موقوف" }).click();
+    await landlord.getByRole("button", { name: "Save changes" }).click();
+    await expect.poll(async () => {
+      const response = await landlord.request.get(`${platform}/api/v1/platform/centers/${center.id}`);
+      return (await response.json()).center.suspended;
+    }).toBe(false);
+    expect(platformAuditCount(center.id, "center.updated")).toBeGreaterThan(auditBefore + 1);
+  } finally {
+    setLocalCenterSuspended("beta", false);
+    await landlord.close();
+  }
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "beta-stable" })).toBeVisible();
+  const restored = await page.request.get(`${beta}/api/v1/center/user`);
+  expect(restored.status()).toBe(200);
+  expect(Number(restored.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+  await page.close();
 });
 
 test("Mailpit password reset changes the local staff password and permits login", async ({ page }) => {

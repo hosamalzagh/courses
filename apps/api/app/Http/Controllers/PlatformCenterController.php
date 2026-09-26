@@ -5,9 +5,11 @@ namespace App\Http\Controllers;
 use App\Jobs\ProvisionCenter;
 use App\Models\Center;
 use App\Support\CenterDomain;
+use App\Support\CenterPlans;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class PlatformCenterController extends Controller
 {
@@ -39,7 +41,7 @@ class PlatformCenterController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'slug' => ['required', 'regex:/^[a-z][a-z0-9-]{1,62}$/', 'unique:tenants,slug'],
             'subdomain' => CenterDomain::subdomainRules(),
-            'plan' => ['required', 'string', 'max:80'],
+            'plan' => ['required', Rule::in(array_keys(CenterPlans::OPTIONS))],
             'owner_email' => ['required', 'email', 'max:255'],
         ]);
 
@@ -94,7 +96,7 @@ class PlatformCenterController extends Controller
 
         $data = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
-            'plan' => ['sometimes', 'required', 'string', 'max:80'],
+            'plan' => ['sometimes', 'required', Rule::in(array_keys(CenterPlans::OPTIONS))],
             'suspended' => ['sometimes', 'required', 'boolean'],
         ]);
 

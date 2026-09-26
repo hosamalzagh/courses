@@ -1,52 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
-
-const platform = "http://courses.test";
-const apiDirectory = path.resolve(process.cwd(), "../api");
-const php = process.env.COURSES_PHP_BIN ?? (process.platform === "darwin" ? "php85" : "php");
-
-function platformOwnerCredentials() {
-  const text = readFileSync(path.join(apiDirectory, "storage/app/private/local-platform-credentials.txt"), "utf8");
-  const value = (key: string) => text.match(new RegExp(`^${key}: (.+)$`, "m"))?.[1];
-  const email = value("Email");
-  const password = value("Password");
-  if (!email || !password) throw new Error("Missing local platform owner credentials. Run courses:bootstrap-local.");
-  return { email, password };
-}
-
-function currentPlatformCode(email: string) {
-  return execFileSync(php, [
-    "artisan", "tinker", "--execute",
-    String.raw`$user = \App\Models\User::where('email', getenv('COURSES_TEST_EMAIL'))->firstOrFail(); echo \Filament\Auth\MultiFactor\App\AppAuthentication::make()->getCurrentCode($user);`,
-    "--no-interaction",
-  ], { cwd: apiDirectory, env: { ...process.env, COURSES_TEST_EMAIL: email } }).toString().trim();
-}
-
-async function signInToPlatform(page: Page, email: string, password: string) {
-  await page.goto(`${platform}/admin/login`);
-  await page.locator("#form\\.email").fill(email);
-  await page.locator("#form\\.password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  const firstCode = currentPlatformCode(email);
-  await page.locator("#multiFactorChallengeForm\\.app\\.code").fill(firstCode);
-  await page.getByRole("button", { name: "Confirm sign in" }).click();
-  await page.waitForTimeout(500);
-  if (await page.getByText("The code you entered is invalid.").isVisible()) {
-    const start = Date.now();
-    let freshCode = firstCode;
-    while (freshCode === firstCode && Date.now() - start < 35_000) {
-      await page.waitForTimeout(1_000);
-      freshCode = currentPlatformCode(email);
-    }
-    if (freshCode === firstCode) throw new Error("A new authenticator code did not become available.");
-    await page.locator("#multiFactorChallengeForm\\.app\\.code").fill(freshCode);
-    await page.getByRole("button", { name: "Confirm sign in" }).click();
-  }
-  await expect(page).toHaveURL(`${platform}/admin`);
-}
+import { expect, test } from "@playwright/test";
+import { apiDirectory, php, platform, platformOwnerCredentials, signInToPlatform } from "./platform-fixtures";
 
 test("platform support sees central status but cannot manage platform or enter a center", async ({ browser }) => {
   test.setTimeout(90_000);

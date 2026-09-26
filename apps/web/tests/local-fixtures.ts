@@ -1,9 +1,29 @@
 import { randomBytes } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, type Browser, type Page } from "@playwright/test";
 
 const credentialsDir = path.resolve(process.cwd(), "../api/storage/app/private");
+const php = process.env.COURSES_PHP_BIN ?? (process.platform === "darwin" ? "php85" : "php");
+
+export function setLocalCenterSuspended(slug: "alpha" | "beta", suspended: boolean) {
+  execFileSync(php, ["artisan", "tinker", "--no-interaction", "--execute=" + String.raw`
+    if (config('database.connections.central.database') !== 'courses_central') {
+      throw new \RuntimeException('Local browser tests require courses_central');
+    }
+    $slug = getenv('COURSES_TEST_SLUG');
+    if (!in_array($slug, ['alpha', 'beta'], true)) {
+      throw new \RuntimeException('Unexpected local center slug');
+    }
+    \App\Models\Center::where('slug', $slug)->firstOrFail()
+      ->update(['suspended' => getenv('COURSES_TEST_SUSPENDED') === '1']);
+  `], {
+    cwd: path.resolve(process.cwd(), "../api"),
+    env: { ...process.env, COURSES_TEST_SLUG: slug, COURSES_TEST_SUSPENDED: suspended ? "1" : "0" },
+    stdio: "pipe",
+  });
+}
 
 export function credentials(name: "alpha" | "beta" | "staff") {
   const file = path.join(credentialsDir, `local-${name}-credentials.txt`);
