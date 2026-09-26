@@ -75,6 +75,7 @@ return [
 
         'platform' => [
             'driver' => env('PLATFORM_QUEUE_DRIVER', 'redis'),
+            'central' => true,
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => 'platform',
             'retry_after' => 600,

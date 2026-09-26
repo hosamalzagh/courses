@@ -54,6 +54,8 @@ cd apps/api
 
 The LaunchAgents start the built Next.js UI, Horizon with separate Redis supervisors for platform provisioning and default jobs, and `schedule:run` after Mac login. Rebuild `apps/web` and rerun `install-web-launch-agent.py` after UI changes. Herd remains responsible for PHP-FPM and Nginx. The routing script backs up Herd's original `courses.test` Nginx file before editing and checks Nginx syntax before restart.
 
+Without the worker LaunchAgent, run `cd apps/api && php85 artisan horizon` in a terminal. Horizon's `platform:platform` supervisor handles center provisioning; `redis:default` handles tenant-aware jobs. Platform queue payloads stay central even when dispatched during a center context. To verify that one Redis worker handles alpha, a failing alpha job, beta, and alpha again without carrying over tenant database, cache, or audit state, run `php85 artisan test --compact tests/Feature/WorkerIsolationTest.php` from `apps/api`. The test starts temporary workers on unique queues, checks their process IDs, and runs both owner invitations after a deliberate failure through one platform worker. It uses `courses_test_central` and temporary center databases.
+
 After pulling code changes into an existing local installation, run `php85 artisan migrate --database=central --force` and `php85 artisan courses:migrate-centers` before testing center writes. The scheduler retries center audit entries that could not be delivered during a temporary center database outage; `php85 artisan courses:deliver-center-audit` runs the same retry on demand.
 
 ## Verify and maintain
