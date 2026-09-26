@@ -2,18 +2,13 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { CenterShell } from "@/components/CenterShell";
+import { DataTable } from "@/components/DataTable";
+import { Button } from "@/components/Button";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
 import { centerRequest, responseFieldErrors, responseMessage } from "@/lib/client-api";
 import type { Branch, CenterContext } from "@/lib/server-context";
-
-const roleNames: Record<string, string> = {
-  center_owner: "مالك المركز",
-  center_admin: "مسؤول المركز",
-  branch_manager: "مدير فرع",
-  branch_viewer: "قارئ الفرع",
-  branch_auditor: "مدقق الفرع",
-};
 
 export function BranchWorkspace({ context }: { context: CenterContext }) {
   const router = useRouter();
@@ -32,9 +27,6 @@ export function BranchWorkspace({ context }: { context: CenterContext }) {
   function canEdit(branch: Branch) {
     return context.permissions.can_manage_center || (context.permissions.branch_roles[String(branch.id)] ?? []).includes("branch_manager");
   }
-
-  const canAudit = context.permissions.can_manage_center || Object.values(context.permissions.branch_roles)
-    .some((roles) => roles.includes("branch_auditor"));
 
   async function createBranch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -91,60 +83,32 @@ export function BranchWorkspace({ context }: { context: CenterContext }) {
     }
   }
 
-  async function signOut() {
-    setBusy(true);
-    try {
-      const response = await centerRequest("auth/logout", "POST");
-      if (!response.ok) {
-        setError(await responseMessage(response));
-        return;
-      }
-      window.location.replace("/login");
-    } catch {
-      setError("تعذر تسجيل الخروج. حاول مرة أخرى.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="workspace">
-      <header className="workspace-header"><div className="workspace-header-inner">
-        <div className="brand"><span className="brand-mark" aria-hidden="true">C</span><span>Courses</span></div>
-        <div className="workspace-header-actions"><span className="muted">{context.center.name} · عضويتك نشطة · {context.user.name}</span><a className="text-link" href="/admin/security">أمان الحساب</a><button className="button button-secondary" type="button" onClick={signOut} disabled={busy}>{busy ? "جارٍ تسجيل الخروج…" : "تسجيل الخروج"}</button></div>
-      </div></header>
-      <main className="workspace-main">
-        <section>
-          <div className="page-heading"><div><span className="eyebrow">لوحة المركز</span><h1>{context.center.name}</h1><p className="muted">فروع المركز التي يمكنك الوصول إليها الآن.</p></div></div>
-          {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
-          {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-          <div className="page-heading"><h2 className="section-heading">الفروع</h2>{context.permissions.can_manage_center ? <button className="button button-primary" type="button" onClick={() => { setShowCreate(!showCreate); setError(""); }}> {showCreate ? "إلغاء" : "إنشاء فرع"}</button> : null}</div>
-          {context.permissions.can_manage_center || canAudit ? <nav className="workspace-links" aria-label="إدارة المركز">
-            {context.permissions.can_manage_center ? <><a className="text-link" href="/admin/members">إدارة الموظفين والدعوات</a><a className="text-link" href="/admin/settings">إعدادات المركز</a></> : null}
-            {canAudit ? <a className="text-link" href="/admin/audit">سجل التدقيق</a> : null}
-          </nav> : null}
-
-          {showCreate ? <form className="context-card form-stack" noValidate onSubmit={createBranch}>
-            <h3>فرع جديد</h3>
-            <FormField id="branch-name" label="اسم الفرع" value={newName} onChange={(value) => { setNewName(value); setFieldErrors({}); }} error={fieldErrors.name} required />
-            <FormField id="branch-slug" label="رمز الفرع" value={newSlug} onChange={(value) => { setNewSlug(value); setFieldErrors({}); }} direction="ltr" hint="حروف إنجليزية صغيرة وأرقام وشرطة فقط" error={fieldErrors.slug} required />
-            <FormField id="branch-address" label="العنوان" value={newAddress} onChange={(value) => { setNewAddress(value); setFieldErrors({}); }} error={fieldErrors.address} />
-            <button className="button button-primary" type="submit" disabled={busy || !newName || !newSlug}>{busy ? "جارٍ الحفظ…" : "حفظ الفرع"}</button>
-          </form> : null}
-
-          {context.branches.length === 0 ? <div className="empty-state"><h3>لا توجد فروع متاحة لك</h3><p className="muted">{context.permissions.can_manage_center ? "أنشئ الفرع الأول ليظهر هنا." : "اطلب من مسؤول المركز إسنادك إلى فرع."}</p></div> :
-            <div className="branch-list">{context.branches.map((branch) => <article className="branch-card" key={branch.id}>
-              <h3>{branch.name}</h3><p>{branch.address || "لم يُضف عنوان بعد"}</p>
-              <div className="branch-card-actions">{canEdit(branch) ? <button className="button button-secondary" type="button" onClick={() => startEdit(branch)}>تعديل بيانات الفرع</button> : <span className="muted">صلاحية عرض فقط</span>}</div>
-              {editing === branch.id ? <form className="edit-panel form-stack" noValidate onSubmit={(event) => saveBranch(event, branch.id)}>
-                <FormField id={`name-${branch.id}`} label="اسم الفرع" value={editName} onChange={(value) => { setEditName(value); setFieldErrors({}); }} error={fieldErrors.name} required />
-                <FormField id={`address-${branch.id}`} label="العنوان" value={editAddress} onChange={(value) => { setEditAddress(value); setFieldErrors({}); }} error={fieldErrors.address} />
-                <div className="branch-card-actions"><button className="button button-primary" type="submit" disabled={busy || !editName}>{busy ? "جارٍ الحفظ…" : "حفظ التعديل"}</button><button className="button button-secondary" type="button" onClick={() => setEditing(null)} disabled={busy}>إلغاء</button></div>
-              </form> : null}
-            </article>)}</div>}
-        </section>
-        <aside className="context-card"><span className="eyebrow">عضويتك الحالية</span><h2>{context.user.name}</h2><p><bdi dir="ltr">{context.user.email}</bdi></p><p className="muted">الحالة: {context.membership.status === "active" ? "نشطة" : "غير نشطة"}</p><div className="role-list">{context.permissions.center_roles.map((role) => <span className="role-pill" key={role}>{roleNames[role] || role}</span>)}</div><p className="muted">تُراجع صلاحياتك مع كل طلب محمي، لذلك يسري أي تغيير في دورك من الطلب التالي.</p></aside>
-      </main>
-    </div>
-  );
+  return <CenterShell context={context} title="الفروع" description="فروع المركز التي يمكنك الوصول إليها." actions={context.permissions.can_manage_center ? <Button variant="primary" disabled={busy} onClick={() => { setShowCreate(true); setEditing(null); setError(""); setFieldErrors({}); }}>إنشاء فرع</Button> : null}>
+    <main className="members-main">
+      {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+      {notice ? <InlineNotice>{notice}</InlineNotice> : null}
+      {showCreate ? <form className="context-card form-stack" noValidate onSubmit={createBranch} aria-label="فرع جديد">
+        <h2>فرع جديد</h2>
+        <FormField id="branch-name" focusOnMount label="اسم الفرع" value={newName} onChange={(value) => { setNewName(value); setFieldErrors({}); }} error={fieldErrors.name} required />
+        <FormField id="branch-slug" label="رمز الفرع" value={newSlug} onChange={(value) => { setNewSlug(value); setFieldErrors({}); }} direction="ltr" hint="حروف إنجليزية صغيرة وأرقام وشرطة فقط" error={fieldErrors.slug} required />
+        <FormField id="branch-address" label="العنوان" value={newAddress} onChange={(value) => { setNewAddress(value); setFieldErrors({}); }} error={fieldErrors.address} />
+        <div className="form-actions"><Button variant="primary" type="submit" busy={busy} disabled={!newName || !newSlug}>حفظ الفرع</Button><Button disabled={busy} onClick={() => setShowCreate(false)}>إلغاء</Button></div>
+      </form> : null}
+      <DataTable id="branches" title="الفروع" rows={context.branches} rowKey={(branch) => branch.id} searchText={(branch) => `${branch.name} ${branch.slug} ${branch.address ?? ""}`} rowClassName="branch-row"
+        emptyMessage={context.permissions.can_manage_center ? "أنشئ الفرع الأول ليظهر هنا." : "لا توجد فروع متاحة لك. اطلب من مسؤول المركز إسنادك إلى فرع."}
+        columns={[
+          { key: "name", label: "الفرع", filterText: (branch) => branch.name, render: (branch) => <h3>{branch.name}</h3> },
+          { key: "slug", label: "رمز الفرع", filterText: (branch) => branch.slug, render: (branch) => <bdi dir="ltr" className="table-code">{branch.slug}</bdi> },
+          { key: "address", label: "العنوان", filterText: (branch) => branch.address ?? "", render: (branch) => <span className="muted">{branch.address || "لم يُضف عنوان بعد"}</span> },
+          { key: "actions", label: "الإجراءات", actions: true, render: (branch) => canEdit(branch) ? <Button disabled={busy} onClick={() => { startEdit(branch); setShowCreate(false); }}>تعديل بيانات الفرع</Button> : <span className="muted">صلاحية عرض فقط</span> },
+        ]}
+        expanded={(branch) => editing === branch.id ? <form className="edit-panel form-stack" noValidate aria-label={`تعديل ${branch.name}`} onSubmit={(event) => saveBranch(event, branch.id)}>
+          <h3>تعديل {branch.name}</h3>
+          <FormField id={`name-${branch.id}`} focusOnMount label="اسم الفرع" value={editName} onChange={(value) => { setEditName(value); setFieldErrors({}); }} error={fieldErrors.name} required />
+          <FormField id={`address-${branch.id}`} label="العنوان" value={editAddress} onChange={(value) => { setEditAddress(value); setFieldErrors({}); }} error={fieldErrors.address} />
+          <div className="form-actions"><Button variant="primary" type="submit" busy={busy} disabled={!editName}>حفظ التعديل</Button><Button onClick={() => setEditing(null)} disabled={busy}>إلغاء</Button></div>
+        </form> : null}
+      />
+    </main>
+  </CenterShell>;
 }

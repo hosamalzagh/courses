@@ -31,10 +31,10 @@ async function accept(page: Page, host: string, email: string, password: string)
 
 async function grant(page: Page, host: string, email: string, branch: string, role: string) {
   await page.goto(`${host}/admin/members`);
-  const card = page.getByRole("article").filter({ hasText: email });
+  const card = page.getByRole("row").filter({ hasText: email });
   await card.getByRole("button", { name: "تعديل الأدوار" }).click();
-  await card.getByRole("group", { name: branch }).getByRole("checkbox", { name: role }).check();
-  await card.getByRole("button", { name: "حفظ الأدوار" }).click();
+  await card.locator("xpath=following-sibling::tr[1]").getByRole("group", { name: branch }).getByRole("checkbox", { name: role }).check();
+  await card.locator("xpath=following-sibling::tr[1]").getByRole("button", { name: "حفظ الأدوار" }).click();
   await expect(card).toContainText("نشط");
 }
 

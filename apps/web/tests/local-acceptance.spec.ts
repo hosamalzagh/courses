@@ -28,7 +28,7 @@ test("alpha and beta keep pages, sessions, and cached data separate", async ({ b
     await expect(alphaPage.getByRole("textbox", { name: "رمز الفرع" })).toHaveAttribute("aria-invalid", "true");
     await expect(alphaPage.locator("#branch-slug-error")).toBeVisible();
     await alphaPage.goto(`${alpha}/admin/members`);
-    const staffCard = alphaPage.getByRole("article").filter({ has: alphaPage.getByRole("heading", { name: "Staff Demo" }) });
+    const staffCard = alphaPage.getByRole("row").filter({ has: alphaPage.getByRole("heading", { name: "Staff Demo" }) });
     await staffCard.getByRole("button", { name: "إيقاف العضوية" }).click();
     await expect(alphaPage.getByRole("dialog")).toContainText("سيفقد هذا الموظف الوصول");
     await alphaPage.getByRole("dialog").getByRole("button", { name: "إلغاء" }).click();

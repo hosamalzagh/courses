@@ -2,6 +2,9 @@
 
 import styles from "./MemberWorkspace.module.css";
 import { useState, useEffect, useRef, type FormEvent } from "react";
+import { CenterShell } from "@/components/CenterShell";
+import { DataTable } from "@/components/DataTable";
+import { Button } from "@/components/Button";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
@@ -148,9 +151,9 @@ export function MemberWorkspace({ context }: { context: MemberContext }) {
   function pagination(section: "members" | "invitations" | "branches") {
     const state = workspace.pagination[section];
     return <div className="form-actions" aria-label={`صفحات ${section === "members" ? "الموظفين" : section === "invitations" ? "الدعوات" : "الفروع"}`}>
-      <button type="button" className="button button-secondary" disabled={busy || state.page === 1} onClick={() => requestPageChange(section, state.page - 1)}>الدفعة السابقة</button>
+      <Button disabled={busy || state.page === 1} onClick={() => requestPageChange(section, state.page - 1)}>الدفعة السابقة</Button>
       <span>دفعة {state.page} · حتى ٥٠ سجلًا؛ البحث داخل الدفعة المعروضة</span>
-      <button type="button" className="button button-secondary" disabled={busy || !state.has_more} onClick={() => requestPageChange(section, state.page + 1)}>الدفعة التالية</button>
+      <Button disabled={busy || !state.has_more} onClick={() => requestPageChange(section, state.page + 1)}>الدفعة التالية</Button>
     </div>;
   }
 
@@ -170,10 +173,8 @@ export function MemberWorkspace({ context }: { context: MemberContext }) {
     finally { setBusy(false); }
   }
 
-  return <div className="workspace">
-    <header className="workspace-header"><div className="workspace-header-inner"><a className="brand" href="/admin"><span className="brand-mark">C</span>Courses</a><span className="muted">{context.center.name} · عضويتك نشطة</span><a className="text-link" href="/admin">العودة إلى الفروع</a></div></header>
+  return <CenterShell context={workspace} title="موظفو المركز" description="الدعوات والعضويات وأدوار كل فرع." actions={<Button variant="primary" form="invite-member" disabled={busy || !email} type="submit" busy={busy} busyLabel="جارٍ إرسال الدعوة…">إرسال الدعوة</Button>}>
     <main className={`members-main ${styles.workspace}`}>
-      <div><span className="eyebrow">{context.center.name}</span><h1>موظفو المركز</h1><p className="muted">الدعوات والعضويات وأدوار كل فرع.</p></div>
       <details className="context-card"><summary>مصفوفة الأدوار والإجراءات</summary>
         <p>مالك المركز ومسؤوله يحتفظان بصلاحياتهما على جميع الفروع. الأدوار التالية تُجمع لكل فرع، ومنح الاعتماد المالي للمالك فقط.</p>
         <dl>{Object.entries(workspace.grant_options).map(([role, option]) => <div key={role}><dt><strong>{option.label}</strong></dt><dd>{option.description}</dd></div>)}</dl>
@@ -181,19 +182,30 @@ export function MemberWorkspace({ context }: { context: MemberContext }) {
 
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-      <section className="context-card"><h2>دعوة موظف</h2><form className="member-invite-form" noValidate onSubmit={invite}>
+      <section className="context-card"><h2>دعوة موظف</h2><form id="invite-member" className="member-invite-form" noValidate onSubmit={invite}>
         <FormField id="invite-email" label="البريد الإلكتروني" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.email} direction="ltr" required />
         {isOwner ? <label className="check-row"><input type="checkbox" checked={inviteAsAdmin} onChange={(event) => setInviteAsAdmin(event.target.checked)} />دعوة بصفة مسؤول مركز</label> : null}
-        <button className="button button-primary" disabled={busy || !email}>{busy ? "جارٍ إرسال الدعوة…" : "إرسال الدعوة"}</button>
+
       </form></section>
-      {invitations.length > 0 ? <section><h2 className="section-heading">الدعوات</h2><div className="member-list">{invitations.map((invitation) => <div className="member-card" key={invitation.id}><bdi dir="ltr">{invitation.email}</bdi><span className="role-pill">{invitationLabels[invitation.status]}</span><span className="muted">{invitation.status === "expired" ? "انتهت" : "تنتهي"} {new Date(invitation.expires_at).toLocaleDateString("ar-EG")}</span>{invitation.status === "uncertain" ? <span className="muted">تحقق من تسليم البريد مع دعم المنصة قبل إعادة الدعوة.</span> : null}{invitation.status === "not_sent" ? <span className="muted">يمكنك إعادة إرسال الدعوة من النموذج أعلاه.</span> : null}</div>)}</div></section> : null}
+      <DataTable id="invitations" title="الدعوات" rows={invitations} rowKey={(invitation) => invitation.id} searchText={(invitation) => invitation.email} emptyMessage="لا توجد دعوات حاليًا."
+        filters={Object.entries(invitationLabels).map(([value, label]) => ({ value, label, matches: (invitation: Invitation) => invitation.status === value }))}
+        columns={[
+          { key: "email", label: "البريد الإلكتروني", filterText: (invitation) => invitation.email, render: (invitation) => <bdi dir="ltr">{invitation.email}</bdi> },
+          { key: "status", label: "الحالة", render: (invitation) => <span className={`role-pill ${invitation.status === "pending" ? "" : "status-warning"}`}>{invitationLabels[invitation.status]}</span> },
+          { key: "expires", label: "صلاحية الدعوة", filterText: (invitation) => new Date(invitation.expires_at).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" }), render: (invitation) => <span className="muted">{invitation.status === "expired" ? "انتهت" : "تنتهي"} {new Date(invitation.expires_at).toLocaleDateString("ar-EG", { timeZone: "Africa/Cairo" })}</span> },
+          { key: "note", label: "ملاحظات", render: (invitation) => <span className="muted">{invitation.status === "uncertain" ? "تحقق من تسليم البريد مع دعم المنصة قبل إعادة الدعوة." : invitation.status === "not_sent" ? "يمكنك إعادة إرسال الدعوة من النموذج أعلاه." : "—"}</span> },
+        ]}
+      />
       {pagination("invitations")}
-      <section><h2 className="section-heading">العضويات</h2>
-        <div className="member-list">{members.map((member) => <article className="member-card" key={member.id}>
-          <div className="member-card-head"><div><h3>{member.user.name}</h3><p className="muted"><bdi dir="ltr">{member.user.email}</bdi></p></div><span className="role-pill">{member.status === "active" ? "نشط" : "موقوف"}</span></div>
-          <p className="muted">{member.center_roles.includes("center_owner") ? "مالك المركز" : member.center_roles.includes("center_admin") ? "مسؤول المركز" : "موظف المركز"}</p>
-          <div className="member-actions">{isOwner || !member.center_roles.includes("center_owner") ? <button className="button button-secondary" type="button" onClick={(event) => edit(member, event.currentTarget)} disabled={busy}>تعديل الأدوار</button> : null}<button className="button button-secondary" type="button" onClick={() => requestStatusChange(member)} disabled={busy || (member.user.id === context.user.id && member.center_roles.includes("center_owner"))}>{busy ? "جارٍ التحديث…" : member.status === "active" ? "إيقاف العضوية" : "تنشيط العضوية"}</button></div>
-          { editing === member.id ? <div ref={editor} className="grant-editor" role="region" aria-label={`أدوار ${member.user.name}`}><fieldset disabled={busy}><legend>أدوار المركز</legend>
+      <DataTable id="members" title="العضويات" rows={members} rowKey={(member) => member.id} searchText={(member) => `${member.user.name} ${member.user.email}`} emptyMessage="لا توجد عضويات متاحة."
+        filters={[{ value: "active", label: "نشط", matches: (member) => member.status === "active" }, { value: "suspended", label: "موقوف", matches: (member) => member.status === "suspended" }]}
+        columns={[
+          { key: "user", label: "الموظف", filterText: (member) => `${member.user.name} ${member.user.email}`, render: (member) => <><h3>{member.user.name}</h3><p className="muted"><bdi dir="ltr">{member.user.email}</bdi></p></> },
+          { key: "role", label: "دور المركز", filterText: (member) => member.center_roles.includes("center_owner") ? "مالك المركز" : member.center_roles.includes("center_admin") ? "مسؤول المركز" : "موظف المركز", render: (member) => <span>{member.center_roles.includes("center_owner") ? "مالك المركز" : member.center_roles.includes("center_admin") ? "مسؤول المركز" : "موظف المركز"}</span> },
+          { key: "status", label: "الحالة", render: (member) => <span className={`role-pill ${member.status === "active" ? "" : "status-warning"}`}>{member.status === "active" ? "نشط" : "موقوف"}</span> },
+          { key: "actions", label: "الإجراءات", actions: true, render: (member) => <div className="row-actions">{isOwner || !member.center_roles.includes("center_owner") ? <Button onClick={(event) => edit(member, event.currentTarget)} disabled={busy}>تعديل الأدوار</Button> : null}<Button variant={member.status === "active" ? "danger" : "secondary"} onClick={() => requestStatusChange(member)} disabled={busy || (member.user.id === context.user.id && member.center_roles.includes("center_owner"))}>{member.status === "active" ? "إيقاف العضوية" : "تنشيط العضوية"}</Button></div> },
+        ]}
+        expanded={(member) => editing === member.id ? <div ref={editor} className="grant-editor" role="region" aria-label={`أدوار ${member.user.name}`}><fieldset disabled={busy}><legend>أدوار المركز</legend>
             {isOwner ? <label className="check-row"><input type="checkbox" checked={centerRoles.includes("center_owner")} onChange={() => toggleCenter("center_owner")} />مالك المركز</label> : null}
             {isOwner ? <label className="check-row"><input type="checkbox" checked={centerRoles.includes("center_admin")} onChange={() => toggleCenter("center_admin")} />مسؤول المركز</label> : null}
             <h4>إسنادات الفروع</h4>{workspace.branches.map((branch) => <fieldset key={branch.id} className="branch-grant"><legend>{branch.name}</legend>
@@ -204,13 +216,12 @@ export function MemberWorkspace({ context }: { context: MemberContext }) {
               </div>)}
             </fieldset>)}
             {pagination("branches")}
-            <div className="form-actions"><button className="button button-primary" type="button" onClick={() => requestSaveGrants(member)} disabled={busy}>{busy ? "جارٍ حفظ الأدوار…" : "حفظ الأدوار"}</button><button className="button button-secondary" type="button" onClick={() => setEditing(null)} disabled={busy}>إلغاء</button></div>
+            <div className="form-actions"><Button variant="primary" onClick={() => requestSaveGrants(member)} busy={busy} busyLabel="جارٍ الحفظ…">حفظ الأدوار</Button><Button onClick={() => setEditing(null)} disabled={busy}>إلغاء</Button></div>
           </fieldset></div> : null}
-        </article>)}</div>
-      </section>
+      />
       {pagination("members")}
     </main>
     {confirmation ? <ConfirmationDialog title={confirmation.title} description={confirmation.description} confirmLabel={confirmation.confirmLabel}
       onCancel={() => setConfirmation(null)} onConfirm={() => { const action = confirmation.action; setConfirmation(null); action(); }} /> : null}
-  </div>;
+  </CenterShell>;
 }

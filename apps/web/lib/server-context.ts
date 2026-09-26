@@ -9,6 +9,7 @@ export type CenterContext = {
   permissions: {
     center_roles: string[];
     branch_roles: Record<string, string[]>;
+    branch_actions?: Record<string, string[]>;
     can_manage_center: boolean;
   };
   branches: Branch[];
@@ -31,6 +32,8 @@ export type Member = {
 };
 export type Invitation = { id: number; email: string; center_role: string | null; expires_at: string; status: "pending" | "expired" | "uncertain" | "not_sent" };
 export type MemberContext = CenterContext & { members: Member[]; invitations: Invitation[]; grant_options: Record<string, GrantOption>; pagination: WorkspacePagination };
+export type Student = { id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
+export type StudentContext = CenterContext & { students: Student[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 
 export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable";
 
@@ -75,4 +78,8 @@ export function loadCenterContext(include?: "settings" | "audit"): Promise<Cente
 
 export function loadMemberWorkspace(query = ""): Promise<MemberContext | CenterAccessFailure> {
   return fetchCenterPayload<MemberContext>(`member-workspace${query ? `?${query}` : ""}`);
+}
+
+export function loadStudentWorkspace(query = "", studentId?: string): Promise<StudentContext | CenterAccessFailure> {
+  return fetchCenterPayload<StudentContext>(`${studentId ? `students/${encodeURIComponent(studentId)}` : "student-workspace"}${query ? `?${query}` : ""}`);
 }

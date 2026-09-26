@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/Button";
 import { useEffect, useRef } from "react";
 
 type Props = {
@@ -19,8 +20,11 @@ export function ConfirmationDialog({ title, description, confirmLabel, onConfirm
     const dialog = dialogRef.current;
     dialog?.showModal();
     cancelRef.current?.focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     return () => {
       dialog?.close();
+      document.body.style.overflow = previousOverflow;
       previousFocus?.focus();
     };
   }, []);
@@ -29,8 +33,8 @@ export function ConfirmationDialog({ title, description, confirmLabel, onConfirm
     <h2 id="confirmation-title">{title}</h2>
     <p id="confirmation-description">{description}</p>
     <div className="member-actions">
-      <button ref={cancelRef} className="button button-secondary" type="button" onClick={onCancel}>إلغاء</button>
-      <button className="button button-primary" type="button" onClick={onConfirm}>{confirmLabel}</button>
+      <Button ref={cancelRef} variant="secondary" type="button" onClick={onCancel}>إلغاء</Button>
+      <Button variant="danger" type="button" onClick={onConfirm}>{confirmLabel}</Button>
     </div>
   </dialog>;
 }

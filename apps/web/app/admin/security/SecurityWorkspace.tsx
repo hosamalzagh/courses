@@ -1,14 +1,17 @@
 "use client";
 
+import { Button } from "@/components/Button";
 import { useState, type FormEvent } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { CenterShell } from "@/components/CenterShell";
+import type { CenterContext } from "@/lib/server-context";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { centerRequest, responseFieldErrors, responseMessage } from "@/lib/client-api";
 
-export function SecurityWorkspace({ centerName, email, initialEnabled, requiredForPlatform }: {
-  centerName: string;
+export function SecurityWorkspace({ context, email, initialEnabled, requiredForPlatform }: {
+  context: CenterContext;
   email: string;
   initialEnabled: boolean;
   requiredForPlatform: boolean;
@@ -88,10 +91,9 @@ export function SecurityWorkspace({ centerName, email, initialEnabled, requiredF
     finally { setBusy(false); }
   }
 
-  return <div className="workspace">
-    <header className="workspace-header"><div className="workspace-header-inner"><a className="brand" href="/admin"><span className="brand-mark">C</span>Courses</a><span className="muted">{centerName} · عضويتك نشطة</span><a className="text-link" href="/admin">العودة إلى الفروع</a></div></header>
+  return <CenterShell context={context} title="التحقق بخطوتين" description={<>حسابك <bdi dir="ltr">{email}</bdi> مشترك بين المراكز. التفعيل اختياري ويطبق على دخولك إلى جميعها.</>}>
     <main className="members-main">
-      <div><span className="eyebrow">أمان الحساب</span><h1>التحقق بخطوتين</h1><p className="muted">حسابك <bdi dir="ltr">{email}</bdi> مشترك بين المراكز التي لديك عضوية فيها. التفعيل اختياري ويطبق على دخولك إلى جميعها.</p></div>
+
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
       <section className="context-card form-stack">
@@ -101,7 +103,7 @@ export function SecurityWorkspace({ centerName, email, initialEnabled, requiredF
             <h3>احفظ رموز الاستعادة الآن</h3>
             <p className="muted">تظهر هذه الرموز مرة واحدة فقط. احفظها في مكان آمن؛ كل رمز يعمل مرة واحدة إذا فقدت تطبيق المصادقة.</p>
             <div className="role-list">{recoveryCodes.map((item) => <code className="role-pill" dir="ltr" key={item}>{item}</code>)}</div>
-            <button className="button button-secondary" type="button" onClick={() => setRecoveryCodes([])}>حفظت الرموز</button>
+            <Button variant="secondary" type="button" onClick={() => setRecoveryCodes([])}>حفظت الرموز</Button>
           </div> : null}
           <p className="muted">عند تسجيل الدخول سيُطلب رمز من تطبيق المصادقة بعد كلمة المرور.</p>
           {requiredForPlatform ? <p className="muted">هذا الحساب يدخل لوحة المنصة، لذلك يبقى التحقق مطلوبًا لها ولا يمكن إيقافه من المركز.</p> :
@@ -110,7 +112,7 @@ export function SecurityWorkspace({ centerName, email, initialEnabled, requiredF
               {useRecovery ? <FormField id="disable-recovery" label="رمز الاستعادة" value={recoveryCode} onChange={(value) => { setRecoveryCode(value); setFieldErrors({}); }} error={fieldErrors.recovery_code} direction="ltr" required /> :
                 <FormField id="disable-code" label="رمز المصادقة الحالي" value={code} onChange={(value) => { setCode(value); setFieldErrors({}); }} error={fieldErrors.code} autoComplete="one-time-code" direction="ltr" required />}
               <button className="text-link" type="button" onClick={() => { setUseRecovery(!useRecovery); setCode(""); setRecoveryCode(""); }}>{useRecovery ? "استخدام تطبيق المصادقة" : "استخدام رمز استعادة"}</button>
-              <button className="button button-secondary" disabled={busy || !disablePassword || (useRecovery ? !recoveryCode : !/^\d{6}$/.test(code))}>{busy ? "جارٍ الإيقاف…" : "إيقاف التحقق بخطوتين"}</button>
+              <div className="form-actions"><Button variant="danger" disabled={busy || !disablePassword || (useRecovery ? !recoveryCode : !/^\d{6}$/.test(code))} type="submit" busy={busy} busyLabel="جارٍ الإيقاف…">إيقاف التحقق بخطوتين</Button></div>
             </form>}
         </> : secret ? <>
           <p className="muted">امسح الرمز بتطبيق المصادقة، ثم أدخل الرقم الظاهر فيه. تنتهي مهلة الإعداد بعد 10 دقائق.</p>
@@ -119,19 +121,18 @@ export function SecurityWorkspace({ centerName, email, initialEnabled, requiredF
           <div className="mfa-secret" aria-label="مفتاح المصادقة">{secret}</div>
           <form className="form-stack" noValidate onSubmit={confirmSetup}>
             <FormField id="setup-code" label="رمز التحقق" value={code} onChange={(value) => { setCode(value); setFieldErrors({}); }} error={fieldErrors.code} autoComplete="one-time-code" direction="ltr" required />
-            <button className="button button-primary" disabled={busy || !/^\d{6}$/.test(code)}>{busy ? "جارٍ التفعيل…" : "تفعيل التحقق"}</button>
+            <div className="form-actions"><Button variant="primary" disabled={busy || !/^\d{6}$/.test(code)} type="submit" busy={busy} busyLabel="جارٍ التفعيل…">تفعيل التحقق</Button><Button type="button" onClick={cancelSetup} disabled={busy}>إلغاء الإعداد</Button></div>
           </form>
-          <button className="button button-secondary" type="button" onClick={cancelSetup} disabled={busy}>إلغاء الإعداد</button>
         </> : <>
           <p className="muted">تدخل الآن بكلمة المرور فقط. يمكنك إضافة رمز المصادقة لحماية حسابك.</p>
           <form className="form-stack" noValidate onSubmit={startSetup}>
             <FormField id="setup-password" label="كلمة المرور الحالية" type="password" value={setupPassword} onChange={(value) => { setSetupPassword(value); setFieldErrors({}); }} error={fieldErrors.password} autoComplete="current-password" required />
-            <button className="button button-primary" disabled={busy || !setupPassword}>{busy ? "جارٍ إعداد الحماية…" : "تفعيل التحقق بخطوتين"}</button>
+            <div className="form-actions"><Button variant="primary" disabled={busy || !setupPassword} type="submit" busy={busy} busyLabel="جارٍ إعداد الحماية…">تفعيل التحقق بخطوتين</Button></div>
           </form>
         </>}
       </section>
     </main>
     {confirmDisable ? <ConfirmationDialog title="إيقاف التحقق بخطوتين؟" description="سيُلغى طلب رمز المصادقة عند دخولك إلى أي مركز." confirmLabel="إيقاف التحقق"
       onCancel={() => setConfirmDisable(false)} onConfirm={() => { setConfirmDisable(false); void disable(); }} /> : null}
-  </div>;
+  </CenterShell>;
 }

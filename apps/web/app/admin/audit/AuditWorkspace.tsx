@@ -1,7 +1,10 @@
 "use client";
 
 import { GrantAuditDetails } from "@/components/GrantAuditDetails";
-import type { AuditEntry } from "@/lib/server-context";
+import { StudentAuditDetails } from "@/components/StudentAuditDetails";
+import { CenterShell } from "@/components/CenterShell";
+import { DataTable } from "@/components/DataTable";
+import type { AuditEntry, CenterContext } from "@/lib/server-context";
 
 const eventNames: Record<string, string> = {
   "branch.created": "إنشاء فرع", "branch.updated": "تعديل فرع",
@@ -10,19 +13,24 @@ const eventNames: Record<string, string> = {
   "member.branch_grants_changed": "تغيير أدوار الفرع",
   "member.branch_status_changed": "تغيير حالة موظف الفرع",
   "center.settings_updated": "تعديل إعدادات المركز",
+  "student.created": "إنشاء ملف طالب", "student.updated": "تعديل ملف طالب",
 };
 
-export function AuditWorkspace({ centerName, initialEntries }: { centerName: string; initialEntries: AuditEntry[] }) {
+export function AuditWorkspace({ context, initialEntries }: { context: CenterContext; initialEntries: AuditEntry[] }) {
+  return <CenterShell context={context} title="سجل التدقيق" description="آخر 50 تغييرًا ضمن نطاق صلاحيتك. التوقيت بتوقيت القاهرة.">
+    <main className="members-main">
 
-  return <div className="workspace">
-    <header className="workspace-header"><div className="workspace-header-inner"><a className="brand" href="/admin"><span className="brand-mark">C</span>Courses</a><span className="muted">{centerName} · عضويتك نشطة</span><a className="text-link" href="/admin">العودة إلى الفروع</a></div></header>
-    <main className="members-main"><div><span className="eyebrow">{centerName}</span><h1>سجل التدقيق</h1><p className="muted">آخر 50 تغييرًا ضمن نطاق صلاحيتك.</p></div>
-      {initialEntries.length === 0 ? <div className="empty-state">لا توجد أحداث بعد.</div> : null}
-      <div className="member-list">{initialEntries.map((entry) => <article className="member-card" key={entry.id}>
-        <div className="member-card-head"><h3>{eventNames[entry.event] ?? entry.event}</h3><time className="muted" dateTime={entry.created_at}>{new Date(entry.created_at).toLocaleString("ar-EG")}</time></div>
-        <p className="muted">{entry.branch_id ? `فرع رقم ${entry.branch_id}` : "المركز"} · منفّذ رقم {entry.actor_id ?? "غير معروف"}</p>
-        <GrantAuditDetails entry={entry} />
-      </article>)}</div>
+      <DataTable id="audit" title="الأحداث" description="البحث والتصفية ضمن آخر 50 تغييرًا فقط." rows={initialEntries} rowKey={(entry) => entry.id}
+        searchText={(entry) => `${eventNames[entry.event] ?? entry.event} ${entry.branch_id ?? ""} ${entry.actor_id ?? ""}`} emptyMessage="لا توجد أحداث بعد."
+        filters={[{ value: "center", label: "المركز", matches: (entry) => entry.branch_id === null }, { value: "branch", label: "الفروع", matches: (entry) => entry.branch_id !== null }]}
+        columns={[
+          { key: "event", label: "التغيير", filterText: (entry) => eventNames[entry.event] ?? entry.event, render: (entry) => <h3>{eventNames[entry.event] ?? entry.event}</h3> },
+          { key: "scope", label: "النطاق", filterText: (entry) => entry.branch_id ? `فرع رقم ${entry.branch_id}` : "المركز", render: (entry) => entry.branch_id ? `فرع رقم ${entry.branch_id}` : "المركز" },
+          { key: "actor", label: "المنفّذ", filterText: (entry) => entry.actor_id === null ? "غير معروف" : `منفّذ رقم ${entry.actor_id}`, render: (entry) => entry.actor_id === null ? "غير معروف" : `منفّذ رقم ${entry.actor_id}` },
+          { key: "roles", label: "القيم قبل وبعد", render: (entry) => <><GrantAuditDetails entry={entry} /><StudentAuditDetails entry={entry} /></> },
+          { key: "time", label: "الوقت · القاهرة", filterText: (entry) => new Date(entry.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" }), render: (entry) => <time className="muted" dateTime={entry.created_at}>{new Date(entry.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</time> },
+        ]}
+      />
     </main>
-  </div>;
+  </CenterShell>;
 }

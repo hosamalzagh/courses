@@ -6,6 +6,7 @@ use App\Http\Controllers\CenterBranchController;
 use App\Http\Controllers\CenterMemberController;
 use App\Http\Controllers\CenterSecurityController;
 use App\Http\Controllers\CenterSettingsController;
+use App\Http\Controllers\CenterStudentController;
 use App\Http\Middleware\MeasureCenterQueries;
 use App\Http\Middleware\RequireCenterMember;
 use App\Http\Middleware\ResolveCenter;
@@ -59,6 +60,12 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         });
 
         Route::get('branches', [CenterBranchController::class, 'index']);
+        Route::get('student-workspace', [CenterStudentController::class, 'workspace']);
+        Route::get('students/similar', [CenterStudentController::class, 'similar']);
+        Route::get('students/submissions/{requestId}', [CenterStudentController::class, 'submission']);
+        Route::get('students/{studentId}', [CenterStudentController::class, 'workspace']);
+        Route::post('students', [CenterStudentController::class, 'store']);
+        Route::patch('students/{studentId}', [CenterStudentController::class, 'update']);
         Route::post('branches', [CenterBranchController::class, 'store']);
         Route::get('branches/{branchId}', [CenterBranchController::class, 'show']);
         Route::patch('branches/{branchId}', [CenterBranchController::class, 'update']);

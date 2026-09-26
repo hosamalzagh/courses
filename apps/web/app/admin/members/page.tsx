@@ -1,9 +1,11 @@
+import type { Metadata } from "next";
 import { loadMemberWorkspace } from "@/lib/server-context";
 import { notFound, redirect } from "next/navigation";
 import { MemberWorkspace } from "./MemberWorkspace";
 import { CenterAccessState } from "@/components/CenterAccessState";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = { title: "موظفو المركز | Courses" };
 
 export default async function MembersPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;

@@ -139,10 +139,10 @@ export async function ensureLocalFixtures(browser: Browser) {
       await expect(alphaPage.getByRole("status")).toContainText("أُرسلت الدعوة");
       await acceptInvitation(browser, "staff", "staff@courses.test", "Staff Demo", "alpha.courses.test");
       await alphaPage.reload();
-      const staffCard = alphaPage.getByRole("article").filter({ has: alphaPage.getByRole("heading", { name: "Staff Demo" }) });
+      const staffCard = alphaPage.getByRole("row").filter({ has: alphaPage.getByRole("heading", { name: "Staff Demo" }) });
       await staffCard.getByRole("button", { name: "تعديل الأدوار" }).click();
-      await staffCard.getByRole("group", { name: "الفرع الشمالي" }).getByRole("checkbox", { name: "عرض الفرع" }).check();
-      await staffCard.getByRole("button", { name: "حفظ الأدوار" }).click();
+      await staffCard.locator("xpath=following-sibling::tr[1]").getByRole("group", { name: "الفرع الشمالي" }).getByRole("checkbox", { name: "عرض الفرع" }).check();
+      await staffCard.locator("xpath=following-sibling::tr[1]").getByRole("button", { name: "حفظ الأدوار" }).click();
       await expect(staffCard).toContainText("نشط");
     }
   } finally {
