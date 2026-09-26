@@ -8,6 +8,7 @@ use App\Models\CenterInvitation;
 use App\Models\CenterMembership;
 use App\Support\CenterAuditDelivery;
 use App\Support\CenterPermissions;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -134,6 +135,7 @@ class CenterMemberController extends Controller
         $data = $request->validate([
             'email' => ['required', 'email', 'max:255'],
             'center_role' => ['nullable', Rule::in(['center_admin'])],
+            'platform_role' => ['prohibited'],
         ]);
 
         $center = $request->attributes->get('center');
@@ -280,6 +282,7 @@ class CenterMemberController extends Controller
             'branch_roles' => ['present', 'array'],
             'branch_roles.*' => ['array'],
             'branch_roles.*.*' => [Rule::in(['branch_manager', 'branch_viewer', 'branch_auditor'])],
+            'platform_role' => ['prohibited'],
         ]);
         // Keep the center row locked until the tenant grants commit. Otherwise two
         // owners can concurrently remove themselves after each sees the other.
@@ -291,10 +294,14 @@ class CenterMemberController extends Controller
                 DB::connection('tenant')->transaction(function () use ($membership, $data, $permissions, $request): void {
                     $membership->refresh();
                     $centerRoles = array_values(array_unique($data['center_roles']));
-                    $targetIsOwner = DB::connection('tenant')->table('center_grants')
-                        ->where('user_id', $membership->user_id)->where('role', 'center_owner')->exists();
+                    $currentCenterRoles = DB::connection('tenant')->table('center_grants')
+                        ->where('user_id', $membership->user_id)->pluck('role')->all();
+                    $targetIsOwner = in_array('center_owner', $currentCenterRoles, true);
                     abort_if($targetIsOwner && ! $permissions->isOwner(), 403);
                     abort_if(in_array('center_owner', $centerRoles, true) && ! $permissions->isOwner(), 403);
+                    $adminRoleChanges = in_array('center_admin', $currentCenterRoles, true)
+                        !== in_array('center_admin', $centerRoles, true);
+                    abort_if($adminRoleChanges && ! $permissions->isOwner(), 403);
                     if (! in_array('center_owner', $centerRoles, true)) {
                         $this->protectLastOwner($membership);
                     }
@@ -403,7 +410,9 @@ class CenterMemberController extends Controller
             ->where('role', 'center_owner')->pluck('user_id');
         $activeOwners = CenterMembership::query()->where('tenant_id', $membership->tenant_id)
             ->where('status', 'active')->whereIn('user_id', $ownerIds)->count();
-        abort_if($activeOwners <= 1, 409, 'The last active owner cannot be removed.');
+        if ($activeOwners <= 1) {
+            throw new HttpResponseException(response()->json(['code' => 'last_active_owner'], 409));
+        }
     }
 
     private function lockCenter(CenterMembership $membership): void

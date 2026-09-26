@@ -273,6 +273,26 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     }, southId);
     expect(deniedSouth).toBe(403);
     await expect(staffPage.getByText(`فرع رقم ${southId}`)).toHaveCount(0);
+    await firstManagerCard.getByRole("button", { name: "تعديل الأدوار" }).click();
+    await firstManagerCard.getByRole("checkbox", { name: "مسؤول المركز" }).check();
+    const adminGrant = page.waitForResponse((response) => response.url().includes("/api/v1/center/members/") && response.url().endsWith("/grants") && response.request().method() === "PUT");
+    await firstManagerCard.getByRole("button", { name: "حفظ الأدوار" }).click();
+    expect((await adminGrant).status()).toBe(200);
+    await expect(firstManagerCard).toContainText("مسؤول المركز");
+    await staffPage.goto(`${host}/admin`);
+    await expect(staffPage.getByRole("heading", { name: "فرع التجربة الشرقي" })).toBeVisible();
+    await staffPage.goto(`${host}/admin/settings`);
+    await staffPage.getByRole("textbox", { name: "بريد التواصل" }).fill("office@alpha.test");
+    await staffPage.getByRole("button", { name: "حفظ الإعدادات" }).click();
+    await expect(staffPage.getByText("حُفظت إعدادات المركز.")).toBeVisible();
+    await staffPage.goto(`${host}/admin/members`);
+    const ownerCard = staffPage.getByRole("article").filter({ has: staffPage.getByRole("heading", { name: "Browser Owner" }) });
+    await expect(ownerCard).toBeVisible();
+    await expect(ownerCard.getByRole("button", { name: "تعديل الأدوار" })).toHaveCount(0);
+    await ownerCard.getByRole("button", { name: "إيقاف العضوية" }).click();
+    await staffPage.getByRole("dialog").getByRole("button", { name: "إيقاف العضوية" }).click();
+    await expect(staffPage.locator(".notice[role=alert]")).toContainText("لا يمكن إيقاف آخر مالك نشط للمركز");
+    await expect(ownerCard).toContainText("نشط");
     await staffPage.goto(`${host}/admin`);
 
     await staffCard.getByRole("button", { name: "إيقاف العضوية" }).click();

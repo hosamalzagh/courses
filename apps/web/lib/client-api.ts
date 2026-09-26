@@ -45,6 +45,9 @@ export async function responseMessage(response: Response): Promise<string> {
     if (data.code === "invitation_delivery_uncertain") {
       return "حالة إرسال الدعوة غير مؤكدة. اطلب من دعم المنصة التحقق من البريد قبل إعادة الإرسال.";
     }
+    if (data.code === "last_active_owner") {
+      return "لا يمكن إيقاف آخر مالك نشط للمركز أو إزالة دوره. أضف مالكًا آخر أولًا.";
+    }
     if (data.message === "Multiple accounts use this email. Contact platform support.") {
       return "يوجد أكثر من حساب لهذا البريد. تواصل مع دعم المنصة لحل تعارض الحسابات.";
     }
