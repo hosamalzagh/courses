@@ -24,11 +24,34 @@ function currentPlatformCode(email: string) {
   ], { cwd: apiDirectory, env: { ...process.env, COURSES_TEST_EMAIL: email } }).toString().trim();
 }
 
+export async function enrollPlatformMfa(page: Page, password: string) {
+  await expect(page).toHaveURL(/multi-factor-authentication\/set-up/);
+  await page.getByRole("button", { name: "Set up" }).click();
+  await expect(page.locator("#mountedActionSchema0\\.code")).toBeAttached();
+  const secret = (await page.locator("[role=dialog] [role=button]").allTextContents())
+    .map((value) => value.trim()).find((value) => /^[A-Z2-7]{16,}$/.test(value));
+  if (!secret) throw new Error("The authenticator setup secret is missing.");
+  const code = execFileSync(php, ["-r", String.raw`require 'vendor/autoload.php'; echo (new \PragmaRX\Google2FA\Google2FA)->getCurrentOtp(getenv('COURSES_TEST_SECRET'));`],
+    { cwd: apiDirectory, env: { ...process.env, COURSES_TEST_SECRET: secret } }).toString().trim();
+  await page.locator("#mountedActionSchema0\\.code").fill(code);
+  await page.locator("#mountedActionSchema0\\.password").fill(password);
+  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Enable authenticator app" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page).toHaveURL(`${platform}/admin`);
+}
+
 export async function signInToPlatform(page: Page, email: string, password: string) {
   await page.goto(`${platform}/admin/login`);
   await page.locator("#form\\.email").fill(email);
   await page.locator("#form\\.password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
+  await expect.poll(async () => page.url().includes("multi-factor-authentication/set-up")
+    || await page.locator("#multiFactorChallengeForm\\.app\\.code").isVisible()).toBe(true);
+  if (page.url().includes("multi-factor-authentication/set-up")) {
+    await enrollPlatformMfa(page, password);
+    return;
+  }
   let previousCode = "";
   for (let attempt = 0; attempt < 3; attempt++) {
     let code = currentPlatformCode(email);

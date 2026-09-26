@@ -19,3 +19,7 @@ Only platform owners can create centers, retry provisioning, change the accepted
 Central membership status and invitation changes write an audit outbox entry in the same central transaction. Delivery into the center audit log is idempotent; a failed delivery stays pending and is retried after five minutes by the scheduler or `courses:deliver-center-audit`. Later entries for other centers remain eligible. Branch, settings, and grant changes write their audit records in the same center transaction as the change.
 
 Future instructor and student portals require separate record policies: an instructor sees only assigned groups, and a student sees only their own records. Neither portal is implemented in this foundation.
+
+Educational records are deferred: each branch will own `Course → Stage → Level → Group → Session`, with independent groups and one-time copies of Course/Stage/Level into another branch. Attendance, exams, certificates, finance, registrations and their specialized roles are outside this pilot. No placeholder permissions or screens grant access to these future units.
+
+User file uploads are also deferred. Development uses local storage; Cloudflare R2 remains an option when a real file feature is added. At that point, storage keys and signed access must be scoped to the center and prove that another center cannot read the file. No R2 credentials or upload interface are part of this pilot. The [README](../README.md) contains migration, isolated backup/restore and reconciliation commands.

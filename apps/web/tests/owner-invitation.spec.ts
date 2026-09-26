@@ -2,13 +2,17 @@ import { createHmac, randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { platform, platformOwnerCredentials, signInToPlatform } from "./platform-fixtures";
 
 const apiDirectory = path.resolve(process.cwd(), "../api");
 const php = process.env.COURSES_PHP_BIN ?? (process.platform === "darwin" ? "php85" : "php");
 
 function runFixture(code: string, slug: string, email: string, variables: Record<string, string> = {}): string {
   try {
-    return execFileSync(php, ["artisan", "tinker", "--no-interaction", `--execute=${code}`], {
+    const guardedCode = String.raw`if (config('database.connections.central.database') !== 'courses_central') {
+      throw new \RuntimeException('Browser fixtures require courses_central');
+    }` + code;
+    return execFileSync(php, ["artisan", "tinker", "--no-interaction", `--execute=${guardedCode}`], {
       cwd: apiDirectory,
       env: { ...process.env, COURSES_BROWSER_SLUG: slug, COURSES_BROWSER_EMAIL: email, ...variables },
       stdio: "pipe",
@@ -75,23 +79,38 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
   const secondManagerPassword = randomBytes(24).toString("base64url");
   const staffPage = await browser.newPage();
   const secondManagerPage = await browser.newPage();
+  const landlordPage = await browser.newPage();
+  landlordPage.setDefaultTimeout(10_000);
 
   try {
+    const platformOwner = platformOwnerCredentials();
+    await signInToPlatform(landlordPage, platformOwner.email, platformOwner.password);
+    await landlordPage.goto(`${platform}/admin/centers/create`);
+    await landlordPage.getByRole("textbox", { name: "اسم المركز" }).fill("Invitation Browser Center");
+    await landlordPage.getByRole("textbox", { name: "الرمز" }).fill(slug);
+    await landlordPage.getByRole("textbox", { name: "النطاق الفرعي" }).fill(slug);
+    await landlordPage.getByRole("combobox", { name: "الخطة" }).selectOption("starter");
+    await landlordPage.getByRole("textbox", { name: "بريد المالك الأول" }).fill(email);
+    await landlordPage.getByRole("button", { name: "Create", exact: true }).click();
+    await expect(landlordPage).toHaveURL(/\/admin\/centers\/[^/]+(?:\/edit)?$/);
+    let centerId = "";
+    await expect.poll(async () => {
+      const response = await landlordPage.request.get(`${platform}/api/v1/platform/centers?search=${slug}`);
+      const center = (await response.json()).data.find((record: { slug: string }) => record.slug === slug);
+      centerId = center?.id ?? "";
+      return center?.provisioning_status;
+    }, { timeout: 30_000 }).toBe("active");
     runFixture(String.raw`
-      $slug = getenv('COURSES_BROWSER_SLUG');
-      $email = getenv('COURSES_BROWSER_EMAIL');
-      $center = \App\Models\Center::create(['name' => 'Invitation Browser Center', 'slug' => $slug, 'plan' => 'starter', 'owner_email' => $email]);
-      $center->domains()->create(['domain' => $slug.'.courses.test']);
-      \App\Jobs\ProvisionCenter::dispatchSync($center->id);
-      if ($center->fresh()->provisioning_status !== 'active') {
-        throw new \RuntimeException('Browser center provisioning failed');
-      }
-      $center->update(['provisioning_status' => 'failed']);
-      \App\Jobs\ProvisionCenter::dispatchSync($center->id);
-      if ($center->fresh()->provisioning_status !== 'active') {
-        throw new \RuntimeException('Browser center retry failed');
-      }
+      \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail()
+        ->update(['provisioning_status' => 'failed']);
     `, slug, email);
+    await landlordPage.goto(`${platform}/admin/centers/${centerId}`);
+    await landlordPage.getByRole("button", { name: "إعادة التجهيز" }).click();
+    await landlordPage.getByRole("alertdialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect.poll(async () => {
+      const response = await landlordPage.request.get(`${platform}/api/v1/platform/centers/${centerId}`);
+      return (await response.json()).center.provisioning_status;
+    }, { timeout: 30_000 }).toBe("active");
 
     let invitation = "";
     let messageCount = 0;
@@ -449,6 +468,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
   } finally {
     await staffPage.close();
     await secondManagerPage.close();
+    await landlordPage.close();
     runFixture(String.raw`
       $slug = getenv('COURSES_BROWSER_SLUG');
       $email = getenv('COURSES_BROWSER_EMAIL');

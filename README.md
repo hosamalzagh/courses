@@ -17,7 +17,7 @@ Herd routes the platform host to Laravel. On a center host, Herd routes `/api` a
 
 ## Start on a Mac
 
-Install Laravel Herd with PHP 8.5, Composer, Node/npm, and DBngin PostgreSQL 18 plus Redis. Start Mailpit on SMTP port 1025. The local DBngin PostgreSQL tools used here are in `/Users/Shared/DBngin/postgresql/18.4_arm/bin`; change `PG_TOOLS_BIN` if your installation differs.
+Install Laravel Herd with PHP 8.5, Composer, Node.js 20.9 or newer/npm, and DBngin PostgreSQL 18 plus Redis. Enable Herd's command-line tools in your shell so `php85` and `herd` resolve. Start Mailpit on SMTP port 1025 and its inbox on port 8025. The local DBngin PostgreSQL tools used here are in `/Users/Shared/DBngin/postgresql/18.4_arm/bin`; change `PG_TOOLS_BIN` if your installation differs.
 
 Create a restricted application role and two **empty** central databases in local PostgreSQL. Use a unique local password and put it only in `apps/api/.env` and `apps/api/.env.testing`:
 
@@ -33,24 +33,28 @@ The provisioning connection uses the local PostgreSQL administrator only to crea
 cd apps/api
 cp .env.example .env
 cp .env.example .env.testing
-/Users/hosamalzagh/Library/'Application Support'/Herd/bin/php85 '/Users/hosamalzagh/Library/Application Support/Herd/bin/composer' install
-/Users/hosamalzagh/Library/'Application Support'/Herd/bin/php85 artisan key:generate --no-interaction
-# Set DB_PASSWORD in both env files, and APP_ENV=testing plus DB_DATABASE=courses_test_central in .env.testing.
-/Users/hosamalzagh/Library/'Application Support'/Herd/bin/php85 artisan key:generate --env=testing --no-interaction
-/Users/hosamalzagh/Library/'Application Support'/Herd/bin/php85 artisan migrate --database=central --force --no-interaction
+php85 "$HOME/Library/Application Support/Herd/bin/composer" install
+php85 artisan key:generate --no-interaction
+# Set DB_PASSWORD, PROVISION_DB_* and PG_TOOLS_BIN in both env files.
+# Set APP_ENV=testing and DB_DATABASE=courses_test_central in .env.testing.
+php85 artisan key:generate --env=testing --no-interaction
+php85 artisan migrate --database=central --force --no-interaction
 herd link courses --isolate=8.5 --no-interaction
 cd ../web
 npm ci
+npx playwright install chromium
 npm run build
 cd ../..
 python3 infra/mac/install-herd-routing.py
 python3 infra/mac/install-web-launch-agent.py
 python3 infra/mac/install-worker-launch-agent.py
 cd apps/api
-/Users/hosamalzagh/Library/'Application Support'/Herd/bin/php85 artisan courses:bootstrap-local --no-interaction
+php85 artisan courses:bootstrap-local --no-interaction
 ```
 
 `courses:bootstrap-local` creates a platform owner and provisions alpha and beta. Add `--without-centers` to create only the first platform owner. It writes the platform owner's initial local password to `apps/api/storage/app/private/local-platform-credentials.txt` with mode `0600`; it never prints the password or replaces credentials for an existing account. The two center-owner invitations are sent to Mailpit. Accept each invitation once, then sign in with the password. Center MFA is off by default and can be enabled from **أمان الحساب** on the center dashboard. Once enabled, it applies to that central identity in every center where they are a member. Platform MFA remains required. The local bootstrap command is idempotent and is restricted to the `courses_central` database.
+
+On the platform owner's first sign-in, complete **Set up** with an authenticator app, the current password and its six-digit code, then save the recovery codes and continue. The browser suite performs this enrollment for a fresh platform account. To create further centers from Landlord, open **المراكز → Create**, enter the unique slug/subdomain, plan and first-owner email, then wait for **active**; Horizon sends the one-use Mailpit invitation.
 
 The LaunchAgents start the built Next.js UI, Horizon with separate Redis supervisors for platform provisioning and default jobs, and `schedule:run` after Mac login. Rebuild `apps/web` and rerun `install-web-launch-agent.py` after UI changes. Herd remains responsible for PHP-FPM and Nginx. The routing script backs up Herd's original `courses.test` Nginx file before editing and checks Nginx syntax before restart.
 
@@ -65,7 +69,7 @@ curl -I http://courses.test/admin/login
 curl -I http://alpha.courses.test/login
 curl -H 'Accept: application/json' -i http://alpha.courses.test/api/v1/center/user
 cd apps/api
-/Users/hosamalzagh/Library/'Application Support'/Herd/bin/php85 artisan test --compact
+php85 artisan test --compact
 cd ../web
 npm run lint
 npx tsc --noEmit
@@ -75,11 +79,11 @@ npm run test:browser
 
 An unauthenticated center `user` response is `401`. Unknown or retired center hosts return `404` from the API. Suspended centers return `423` before center data is read. The tests use `courses_test_central`, temporary center databases, and Redis. Never point the test environment at `courses_central`.
 
-The browser suite runs against the local Herd, Next.js, and Mailpit services after `courses:bootstrap-local`. On a fresh install it accepts the alpha/beta invitations from Mailpit, creates sample branches, invites a staff account, and stores passwords only in ignored mode-0600 local credential files. It then verifies the two hosts, CSRF, inline validation, a nonblocking confirmation, cache isolation, and a Mailpit password reset. The reset test updates the ignored staff credential file to the new password so the suite can run again. If you reset the local databases, remove the three ignored `local-{alpha,beta,staff}-credentials.txt` files before running bootstrap and the browser suite again. If a sample invitation was already used but its credential file was removed, restore that password or reset the local sample databases. For a sample account with MFA enabled, disable it from **أمان الحساب** using its authenticator before running the automated suite. See `docs/local-acceptance.md` for the manual provisioning and suspended-center browser checks.
+The browser suite runs against the local Herd, Next.js, and Mailpit services after `courses:bootstrap-local`. On a fresh install it accepts the alpha/beta invitations from Mailpit, creates sample branches, invites a staff account, and stores passwords only in ignored mode-0600 local credential files. It then verifies host and cache isolation, CSRF, inline validation, a nonblocking confirmation, and a Mailpit password reset. Additional journeys create and retry a center through Landlord and Horizon, accept its owner invitation, exercise MFA and role changes, enroll a support account and prove its restrictions, suspend/reactivate a center through Landlord, and give one identity different grants in alpha and beta. The page-budget journey measures all 19 ordinary pages after clearing the application cache and again on reload. The reset test updates the ignored staff credential file to the new password so the suite can run again. If you reset the local databases, remove the three ignored `local-{alpha,beta,staff}-credentials.txt` files before running bootstrap and the browser suite again. If a sample invitation was already used but its credential file was removed, restore that password or reset the local sample databases. For a sample account with MFA enabled, disable it from **أمان الحساب** using its authenticator before running the automated suite. See `docs/local-acceptance.md` for the automated coverage and final verification results.
 
 To migrate all existing center databases independently, run `php85 artisan courses:migrate-centers --no-interaction`; to migrate one, run `php85 artisan courses:migrate-centers --center=alpha --no-interaction` using its slug. The command reports success or failure for each center and returns a nonzero exit code if any failed, while continuing to the other centers. A missing database is marked `not_created`; a migration failure leaves the last applied migration version visible. Check the center's Landlord status and server log, then use **إعادة التجهيز** after fixing the cause. That action resumes creation/migrations and does not create another center or invitation. The command updates migrations only and does not activate a failed center; use the retry action to complete provisioning. Horizon consumes provisioning jobs from the Redis `platform` queue. Telescope is available only locally at `/telescope` to platform owners; authentication, invitation, MFA, and credential-producing jobs are excluded from recording, and mail, event, and Redis watchers are disabled to avoid retaining secrets. It still records ordinary page reads and their queries. The scheduler prunes entries older than 48 hours.
 
-In the maintenance commands below, `php85` denotes `/Users/hosamalzagh/Library/'Application Support'/Herd/bin/php85`.
+The commands use Herd's PHP 8.5 CLI (`php85`).
 
 For an isolated backup/restore acceptance run, use `php85 artisan test --compact tests/Feature/CenterRestoreTest.php` from `apps/api`. The test requires `courses_test_central`, creates two temporary center databases, restores only its alpha snapshot, checks real owner logins and beta isolation, and removes the temporary dump and databases. It does not restore the development alpha or beta databases.
 
@@ -95,3 +99,9 @@ php85 artisan courses:reconcile-grants alpha --apply --invalidate-versions # aft
 Restore accepts only a backup file whose name contains that center's exact UUID. It restores that center's database, reapplies current center migrations, removes grants without active central membership, retains current active owners and repairs the first accepted owner's role if necessary, and replays centrally recorded audit entries missing from the snapshot. Central user identities and membership statuses remain unchanged; only the restored center's migration metadata and grant versions are refreshed. Other center databases and metadata remain unchanged. These commands are restricted to local/testing environments.
 
 See [permission matrix](docs/permissions.md) and [query measurements](docs/query-budget.md). The domain vocabulary and data boundaries are in [CONTEXT.md](CONTEXT.md) and `docs/adr/`.
+
+## Production routing design
+
+This is a routing design for a future deployment. A managed base domain and its wildcard TLS certificate reach one trusted ingress. The platform host sends Landlord and platform API paths to Laravel; each accepted center subdomain sends `/api/v1/center/*` and `/sanctum/*` to Laravel and all center UI paths to the same Next.js service. The ingress preserves the original host, and Laravel resolves only domains registered centrally. Sessions remain host-only with secure cookies. PostgreSQL and Redis stay on private networks, with separate platform and tenant queue supervisors.
+
+Before deploying, replace the local domain allowlists in Laravel's bootstrap and Next.js server context, configure HTTPS/session settings and trusted ingress proxies, and supply production database/mail credentials outside Git. Custom center domains, production deployment and the database hosting choice are deferred.

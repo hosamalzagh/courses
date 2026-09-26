@@ -20,25 +20,7 @@ test("platform support sees central status but cannot manage platform or enter a
     await ownerPage.getByRole("button", { name: "Create", exact: true }).click();
     await expect(ownerPage).toHaveURL(/\/admin\/users\/\d+\/edit$/);
 
-    await supportPage.goto(`${platform}/admin/login`);
-    await supportPage.locator("#form\\.email").fill(supportEmail);
-    await supportPage.locator("#form\\.password").fill(supportPassword);
-    await supportPage.getByRole("button", { name: "Sign in" }).click();
-    await expect(supportPage).toHaveURL(/multi-factor-authentication\/set-up/);
-    await supportPage.getByRole("button", { name: "Set up" }).click();
-    await expect(supportPage.getByRole("dialog")).toBeAttached();
-    await expect(supportPage.locator("#mountedActionSchema0\\.code")).toBeAttached();
-    const secret = (await supportPage.locator("[role=dialog] [role=button]").allTextContents())
-      .map((value) => value.trim()).find((value) => /^[A-Z2-7]{16,}$/.test(value));
-    if (!secret) throw new Error("The authenticator setup secret is missing.");
-    const setupCode = execFileSync(php, ["-r", String.raw`require 'vendor/autoload.php'; echo (new \PragmaRX\Google2FA\Google2FA)->getCurrentOtp(getenv('COURSES_TEST_SECRET'));`],
-      { cwd: apiDirectory, env: { ...process.env, COURSES_TEST_SECRET: secret } }).toString().trim();
-    await supportPage.locator("#mountedActionSchema0\\.code").fill(setupCode);
-    await supportPage.locator("#mountedActionSchema0\\.password").fill(supportPassword);
-    await supportPage.getByRole("button", { name: "Next" }).click();
-    await supportPage.getByRole("button", { name: "Enable authenticator app" }).click();
-    await supportPage.getByRole("button", { name: "Continue" }).click();
-    await expect(supportPage).toHaveURL(`${platform}/admin`);
+    await signInToPlatform(supportPage, supportEmail, supportPassword);
     await expect(supportPage.getByRole("link", { name: "المراكز" })).toBeVisible();
     await expect(supportPage.getByRole("link", { name: "موظفو المنصة" })).toHaveCount(0);
     await expect(supportPage.getByRole("link", { name: "سجل المنصة" })).toHaveCount(0);

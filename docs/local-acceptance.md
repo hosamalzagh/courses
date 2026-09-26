@@ -1,27 +1,57 @@
-# Local browser acceptance, 2026-09-25
+# Local acceptance results — 2026-09-26
 
-Tested with Playwright against the running Herd/DBngin services, not only Laravel's HTTP test client. The local sample accounts and passwords are in ignored, mode-0600 files under `apps/api/storage/app/private/`.
+The pilot uses real local Herd/Laravel, Next.js, PostgreSQL, Redis, Horizon and Mailpit services. Follow [README](../README.md) for fresh installation, bootstrap, hosts, credentials and commands. Local credentials are ignored, mode-0600 files; no production deployment was performed.
 
-1. Platform owner signed in at `courses.test/admin` with Filament MFA, saw the center list and audit screens, and provisioned alpha and beta with separate PostgreSQL databases.
-2. Alpha owner accepted the emailed invitation in a browser, signed in, created north and south branches, and invited `staff@courses.test`. MFA was mandatory when this initial acceptance run was recorded; it is now optional for center accounts and controlled from **أمان الحساب**.
-3. Staff accepted the invitation through its center host and signed in. With no grants, the dashboard showed no branches.
-4. Alpha owner granted north `branch_manager` and `branch_auditor`, and south `branch_viewer`. On refresh, staff saw both branches, with edit available only for north. Authenticated requests for center settings, center members, and south audit returned 403; north audit returned 200.
-5. Alpha owner removed north manager and added north viewer. The browser showed an explicit confirmation. On staff's next refresh, neither branch offered edit; a CSRF-authenticated PATCH to north returned 403.
-6. Staff's beta dashboard redirected to beta login. Logging into beta with the valid central credentials was denied because no beta membership exists. The unknown center API host returned 404.
-7. An alpha backup was restored; beta data and central identity remained unchanged, while alpha's post-backup branch was removed as expected. The alpha owner could still enter. Automated restoration coverage also verifies a later owner remains able to enter after an older snapshot is restored.
-8. Staff requested a password reset from `alpha.courses.test/forgot-password`, received the link in Mailpit, set a new password in the browser, and signed in with it. A browser PATCH to center settings without a CSRF token returned 419.
-9. A temporary platform-support account signed in to Landlord after enrolling in mandatory MFA. Its attempt to sign in to alpha showed the center permission error. The account was removed after the check.
-10. Beta's owner accepted the one-use Mailpit invitation and signed in. Beta showed only `beta-stable`; alpha showed only its north and south branches. Navigating the same browser between hosts sent it to the other center's login page. Returning to its own host restored only its own data, including after reloads.
-11. With beta temporarily suspended in the local central database, its authenticated browser page showed **المركز غير متاح الآن**. Beta was immediately reactivated, and a reload restored its branch view.
+## Repeatable coverage
 
-See `docs/query-budget.md` for the corresponding page read counts and the API query-count headers.
+Run `cd apps/web && npm run test:browser` after bootstrap. The suite uses one worker, prepares missing alpha/beta invitations and sample branches, and cleans up the temporary centers/users it creates. Alpha/beta are created by the idempotent CLI bootstrap; the Landlord browser journey separately creates and retries a temporary center. This is combined bootstrap and UI evidence rather than a recording of both alpha/beta being created through the UI. Platform MFA enrollment is automated on a fresh bootstrap; center MFA is optional by default and exercised on a temporary account.
 
-## Optional center MFA follow-up
+| Test | Verified behavior |
+| --- | --- |
+| `local-acceptance.spec.ts` (3 tests) | Alpha/beta session, page and cache isolation; Landlord suspension/reactivation with audit events and 423/200 responses; CSRF and inline validation; confirmation cancellation; Mailpit password reset and subsequent login. |
+| `owner-invitation.spec.ts` | Create a center in Landlord, provision through Horizon, retry failed provisioning through Landlord, receive one owner invitation, accept/sign in, enroll/challenge/disable center MFA, invite staff, grant/change unioned branch roles, center administration and protected ownership, denial after revocation. |
+| `platform-support.spec.ts` | Enroll mandatory platform MFA, access permitted support pages, redact restricted details, deny owner-only platform actions and center login. |
+| `shared-identity.spec.ts` | One central user accepts alpha/beta invitations, has different branch grants and sees different data; copied host session fails; the actual Next.js page reloads remain within the SQL budget. |
+| `page-query-budget.spec.ts` | All 19 ordinary authenticated pages on alpha, beta and Landlord, cold/warm totals, central/tenant split, repeated-query patterns and SQL time. |
 
-After changing center MFA to opt-in, a fresh browser session signed in as the alpha owner with email/password alone and reached `/admin`. The **أمان الحساب** link opened `/admin/security`, which reported MFA off. Starting enrollment displayed a QR code; cancelling it returned to the off state. The authenticated `user` response still used five SQL queries. The backend feature test covers enabling MFA, the next login challenge, one-use recovery codes, disabling MFA, and refusal to disable MFA for an account with a platform role.
+Backend integration tests use an isolated `courses_test_central` and temporary real PostgreSQL center databases. They verify idempotent fresh bootstrap, authorization and role unions, selectors/host rejection, lifecycle and migrations, password reset/MFA, platform scoping, single-center restore, and Redis job isolation. The Redis isolation tests run alternating alpha/beta jobs including a deliberate failure on one worker PID, then run real provisioning jobs on the central platform connection. Restore tests dump/restore a dedicated test center and prove both owners can enter while beta and central identities remain intact. Application migration/grant/audit metadata is refreshed as documented in README.
 
-Beta's newly invited owner also enabled MFA in the browser, signed out, saw the six-digit challenge on the next password login, and entered successfully with a current authenticator code. MFA was then disabled from the security page and the page returned to the off state. This leaves the local beta sample account at the requested default.
+## Final verification
 
-The temporary platform-support browser run also confirmed that MFA remains required for Landlord accounts. A later browser read of Landlord's center list, user list, and audit list and each Next.js center page was measured at first load after clearing Laravel's application cache and again on reload. Telescope recorded one Laravel data request per center page; the counts are in `docs/query-budget.md`.
+| Gate | Result |
+| --- | --- |
+| `php85 artisan test --compact` | 43 passed, 845 assertions |
+| `php85 vendor/bin/pint --dirty --format agent` | Passed |
+| `npm run lint` | Passed |
+| `npx tsc --noEmit` | Passed |
+| `npm run build` | Passed, optimized Next.js build |
+| `npx playwright test --reporter=line` | 7 passed (2.0 minutes); expanded 19-page budget rerun passed (32.7 seconds) |
+| Strict frontend project audit | Passed, zero findings |
 
-The repeatable local Playwright suite is `cd apps/web && npm run test:browser`. After the documented local bootstrap, its setup accepts any still-pending alpha/beta owner invitations, creates the sample branches, and invites/assigns staff if those fixtures are missing. It covers the alpha/beta host boundary and cached page content, CSRF rejection, inline branch validation, cancellation of the staff suspension dialog, and the Mailpit reset/login path. The manual checks above additionally cover provisioning, support MFA and denial, center suspension, and center MFA enable/challenge/disable.
+See [query-budget.md](query-budget.md) for the measured page totals and the definition of cold/warm. No SQL-budget exception was necessary. No remaining test, lint, typecheck, build or audit failure was observed. Horizon was running after verification.
+
+## Ticket results
+
+The specification is #1. Execution tickets #2–#18 cover the following delivered slices; each ticket contains its own implementation and verification evidence on GitHub.
+
+| Ticket | Result |
+| --- | --- |
+| #2 | Platform-owner Landlord login and measurement tools |
+| #3 | Center creation and provisioning from Landlord |
+| #4 | Provisioning diagnostics, retry and tenant migrations |
+| #5 | First-owner invitation acceptance and central identity |
+| #6 | Owner center login and permissions |
+| #7 | Access recovery and session states |
+| #8 | Center branch creation and management |
+| #9 | Staff invitations and memberships |
+| #10 | Branch assignments and branch-manager capabilities |
+| #11 | Unioned branch roles and change audit |
+| #12 | Center administrator and owner protection |
+| #13 | Scoped platform support |
+| #14 | Center suspension, domain and plan changes |
+| #15 | Two-center isolation with one user identity |
+| #16 | Alpha/beta Redis isolation on one worker |
+| #17 | Independent single-center backup and restore |
+| #18 | Fresh setup instructions, complete local acceptance and page query measurements |
+
+Educational modules, specialized portals, file uploads/R2, custom domains and production rollout remain deferred by the pilot specification; their boundaries are in [permissions.md](permissions.md) and README.
