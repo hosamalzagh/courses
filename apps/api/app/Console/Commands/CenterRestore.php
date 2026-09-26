@@ -49,6 +49,7 @@ class CenterRestore extends Command
         if (Artisan::call('tenants:migrate', ['--tenants' => [$center->id], '--force' => true]) !== 0) {
             throw new RuntimeException('Restored center migrations failed.');
         }
+        $center->refreshMigrationVersion();
         if (Artisan::call('courses:reconcile-grants', [
             'slug' => $center->slug, '--apply' => true, '--retain-owner' => $currentOwnerIds,
             '--invalidate-versions' => true,

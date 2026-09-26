@@ -81,7 +81,9 @@ To migrate all existing center databases independently, run `php85 artisan cours
 
 In the maintenance commands below, `php85` denotes `/Users/hosamalzagh/Library/'Application Support'/Herd/bin/php85`.
 
-Back up and restore one local center with:
+For an isolated backup/restore acceptance run, use `php85 artisan test --compact tests/Feature/CenterRestoreTest.php` from `apps/api`. The test requires `courses_test_central`, creates two temporary center databases, restores only its alpha snapshot, checks real owner logins and beta isolation, and removes the temporary dump and databases. It does not restore the development alpha or beta databases.
+
+To back up and restore an operator-selected local center, use:
 
 ```bash
 php85 artisan courses:backup alpha
@@ -90,6 +92,6 @@ php85 artisan courses:reconcile-grants alpha --apply
 php85 artisan courses:reconcile-grants alpha --apply --invalidate-versions # after a rare central commit failure
 ```
 
-Restore accepts only a backup file whose name contains that center's exact UUID. It restores that center's database, reapplies current center migrations, removes grants without active central membership, repairs the first accepted owner's role if necessary, and replays centrally recorded audit entries missing from the snapshot. The central database and other center databases are untouched. These commands are restricted to local/testing environments.
+Restore accepts only a backup file whose name contains that center's exact UUID. It restores that center's database, reapplies current center migrations, removes grants without active central membership, retains current active owners and repairs the first accepted owner's role if necessary, and replays centrally recorded audit entries missing from the snapshot. Central user identities and membership statuses remain unchanged; only the restored center's migration metadata and grant versions are refreshed. Other center databases and metadata remain unchanged. These commands are restricted to local/testing environments.
 
 See [permission matrix](docs/permissions.md) and [query measurements](docs/query-budget.md). The domain vocabulary and data boundaries are in [CONTEXT.md](CONTEXT.md) and `docs/adr/`.
