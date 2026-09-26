@@ -19,7 +19,9 @@ class CenterAuditController extends Controller
     {
         $permissions = $request->attributes->get('center_permissions');
         $query = DB::connection('tenant')->table('center_audit_logs');
-        if (! $permissions->isCenterManager()) {
+        if ($permissions->isCenterManager()) {
+            $query->whereNotIn('event', ['member.branch_grants_changed', 'member.branch_status_changed']);
+        } else {
             $auditableBranches = array_keys(array_filter($permissions->branchRoles,
                 fn ($roles) => in_array('branch_auditor', $roles, true)));
             abort_if($auditableBranches === [], 403);

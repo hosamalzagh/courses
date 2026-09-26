@@ -219,12 +219,14 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     const firstManagerCard = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Pilot Staff" }) });
     await firstManagerCard.getByRole("button", { name: "تعديل الأدوار" }).click();
     await firstManagerCard.getByRole("group", { name: "فرع التجربة الشمالي المحدّث" }).getByRole("checkbox", { name: "مدير الفرع" }).check();
+    await firstManagerCard.getByRole("group", { name: "فرع التجربة الشمالي المحدّث" }).getByRole("checkbox", { name: "تدقيق الفرع" }).check();
     await firstManagerCard.getByRole("group", { name: "فرع التجربة الجنوبي" }).getByRole("checkbox", { name: "مدير الفرع" }).check();
     await firstManagerCard.getByRole("button", { name: "حفظ الأدوار" }).click();
     await expect(page.getByText("حُفظت أدوار الموظف وإسنادات فروعه.")).toBeVisible();
     const secondManagerCard = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Second Branch Manager" }) });
     await secondManagerCard.getByRole("button", { name: "تعديل الأدوار" }).click();
     await secondManagerCard.getByRole("group", { name: "فرع التجربة الشمالي المحدّث" }).getByRole("checkbox", { name: "مدير الفرع" }).check();
+    await secondManagerCard.getByRole("group", { name: "فرع التجربة الشمالي المحدّث" }).getByRole("checkbox", { name: "تدقيق الفرع" }).check();
     await secondManagerCard.getByRole("button", { name: "حفظ الأدوار" }).click();
     await expect(secondManagerCard.getByRole("button", { name: "تعديل الأدوار" })).toBeVisible();
 
@@ -241,6 +243,18 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await expect(staffPage.getByRole("heading", { name: "فرع التجربة الشمالي المحدّث" })).toBeVisible();
     await expect(staffPage.getByRole("heading", { name: "فرع التجربة الجنوبي" })).toBeVisible();
     await expect(staffPage.getByRole("heading", { name: "فرع التجربة الشرقي" })).toHaveCount(0);
+    const auditSequence = telescopeSequence(slug, email);
+    await staffPage.goto(`${host}/admin/audit`);
+    await expect(staffPage.getByRole("heading", { name: "سجل التدقيق" })).toBeVisible();
+    await expect(staffPage.getByRole("heading", { name: "تغيير أدوار الفرع" }).first()).toBeVisible();
+    let auditRequests: MeasuredRequest[] = [];
+    await expect.poll(() => {
+      auditRequests = telescopeRequestsSince(slug, email, auditSequence);
+      return auditRequests.length;
+    }, { timeout: 10_000 }).toBeGreaterThan(0);
+    expect(auditRequests).toHaveLength(1);
+    expect(auditRequests[0].uri).toContain("/api/v1/center/user");
+    expect(auditRequests[0].queries).toBeLessThanOrEqual(6);
 
     await secondManagerPage.goto(`${host}/login`);
     await secondManagerPage.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(secondManagerEmail);
@@ -258,10 +272,15 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
       return response.status;
     }, southId);
     expect(deniedSouth).toBe(403);
+    await expect(staffPage.getByText(`فرع رقم ${southId}`)).toHaveCount(0);
+    await staffPage.goto(`${host}/admin`);
 
     await staffCard.getByRole("button", { name: "إيقاف العضوية" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "إيقاف العضوية" }).click();
     await expect(staffCard).toContainText("موقوف");
+    await secondManagerPage.goto(`${host}/admin/audit`);
+    await expect(secondManagerPage.getByRole("heading", { name: "تغيير حالة موظف الفرع" })).toBeVisible();
+    await expect(secondManagerPage.getByText(`فرع رقم ${southId}`)).toHaveCount(0);
     await staffPage.reload();
     await expect(staffPage.getByRole("heading", { name: "أُوقفت عضويتك في هذا المركز" })).toBeVisible();
     await expect(staffPage.getByText(staffEmail)).toHaveCount(0);
@@ -377,8 +396,8 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await expect(page).toHaveURL(`${host}/login`);
     await page.goBack();
     await expect(page.getByText(email)).toHaveCount(0);
-    const afterLogout = await page.evaluate(async () => (await fetch("/api/v1/center/user", { headers: { Accept: "application/json" } })).status);
-    expect(afterLogout).toBe(401);
+    const afterLogout = await page.request.get(`${host}/api/v1/center/user`, { headers: { Accept: "application/json" } });
+    expect(afterLogout.status()).toBe(401);
     await page.context().addCookies([expiredSession]);
     await page.goto(`${host}/admin`);
     await expect(page).toHaveURL(`${host}/login?expired=1`);

@@ -222,7 +222,7 @@ class CenterMemberController extends Controller
         $this->requireManager($request);
         $this->assertSameCenter($request, $membership);
         $data = $request->validate(['status' => ['required', Rule::in(['active', 'suspended'])]]);
-        $auditId = DB::connection('central')->transaction(function () use ($membership, $data, $request): int {
+        $auditIds = DB::connection('central')->transaction(function () use ($membership, $data, $request): array {
             $this->lockCenter($membership);
             $this->assertCurrentManager($request);
             $membership->refresh();
@@ -231,10 +231,21 @@ class CenterMemberController extends Controller
             }
             $membership->update(['status' => $data['status']]);
 
-            return CenterAuditDelivery::record($membership->tenant_id, $request->user()->id,
-                'member.status_changed', ['user_id' => $membership->user_id, 'status' => $data['status']]);
+            $details = ['user_id' => $membership->user_id, 'status' => $data['status']];
+            $auditIds = [CenterAuditDelivery::record($membership->tenant_id, $request->user()->id,
+                'member.status_changed', $details)];
+            $branchIds = DB::connection('tenant')->table('branch_grants')
+                ->where('user_id', $membership->user_id)->distinct()->pluck('branch_id');
+            foreach ($branchIds as $branchId) {
+                $auditIds[] = CenterAuditDelivery::record($membership->tenant_id, $request->user()->id,
+                    'member.branch_status_changed', $details, (int) $branchId);
+            }
+
+            return $auditIds;
         });
-        CenterAuditDelivery::tryDeliver($auditId);
+        foreach ($auditIds as $auditId) {
+            CenterAuditDelivery::tryDeliver($auditId);
+        }
 
         return response()->json(['status' => $membership->status]);
     }
@@ -292,6 +303,10 @@ class CenterMemberController extends Controller
                     $validIds = DB::connection('tenant')->table('branches')->whereIn('id', $branchIds)->pluck('id')->all();
                     abort_unless(count($validIds) === count($branchIds), 422);
 
+                    $previousBranchRoles = DB::connection('tenant')->table('branch_grants')
+                        ->where('user_id', $membership->user_id)->get(['branch_id', 'role'])
+                        ->groupBy('branch_id')->map(fn ($grants) => $grants->pluck('role')->all())->all();
+
                     DB::connection('tenant')->table('center_grants')->where('user_id', $membership->user_id)->delete();
                     DB::connection('tenant')->table('branch_grants')->where('user_id', $membership->user_id)->delete();
                     foreach ($centerRoles as $role) {
@@ -311,6 +326,17 @@ class CenterMemberController extends Controller
                     $this->audit($request, 'member.grants_changed', [
                         'user_id' => $membership->user_id, 'center_roles' => $centerRoles, 'branch_roles' => $data['branch_roles'],
                     ]);
+                    foreach (array_unique([...array_keys($previousBranchRoles), ...$branchIds]) as $branchId) {
+                        $before = $previousBranchRoles[$branchId] ?? [];
+                        $after = array_values(array_unique($data['branch_roles'][(string) $branchId] ?? []));
+                        sort($before);
+                        sort($after);
+                        if ($before !== $after) {
+                            $this->audit($request, 'member.branch_grants_changed', [
+                                'user_id' => $membership->user_id, 'roles_before' => $before, 'roles_after' => $after,
+                            ], (int) $branchId);
+                        }
+                    }
                     $membership->increment('grants_version');
                 });
                 $tenantCommitted = true;
@@ -386,10 +412,10 @@ class CenterMemberController extends Controller
             ->lockForUpdate()->first(['id']);
     }
 
-    private function audit(Request $request, string $event, array $details): void
+    private function audit(Request $request, string $event, array $details, ?int $branchId = null): void
     {
         DB::connection('tenant')->table('center_audit_logs')->insert([
-            'actor_id' => $request->user()->id, 'event' => $event,
+            'actor_id' => $request->user()->id, 'branch_id' => $branchId, 'event' => $event,
             'details' => json_encode($details), 'created_at' => now(),
         ]);
     }

@@ -6,6 +6,8 @@ const eventNames: Record<string, string> = {
   "branch.created": "إنشاء فرع", "branch.updated": "تعديل فرع",
   "member.invited": "دعوة موظف", "member.status_changed": "تغيير حالة عضو",
   "member.grants_changed": "تغيير الأدوار والإسنادات", "invitation.accepted": "قبول دعوة",
+  "member.branch_grants_changed": "تغيير أدوار الفرع",
+  "member.branch_status_changed": "تغيير حالة موظف الفرع",
   "center.settings_updated": "تعديل إعدادات المركز",
 };
 

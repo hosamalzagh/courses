@@ -8,11 +8,12 @@ use Throwable;
 
 class CenterAuditDelivery
 {
-    public static function record(string $centerId, ?int $actorId, string $event, array $details): int
+    public static function record(string $centerId, ?int $actorId, string $event, array $details, ?int $branchId = null): int
     {
         return DB::connection('central')->table('center_audit_outbox')->insertGetId([
             'tenant_id' => $centerId,
             'actor_id' => $actorId,
+            'branch_id' => $branchId,
             'event' => $event,
             'details' => json_encode($details),
             'created_at' => now(),
@@ -34,6 +35,7 @@ class CenterAuditDelivery
                 DB::connection('tenant')->table('center_audit_logs')->insertOrIgnore([
                     'source_event_id' => $entry->id,
                     'actor_id' => $entry->actor_id,
+                    'branch_id' => $entry->branch_id,
                     'event' => $entry->event,
                     'details' => $entry->details,
                     'created_at' => $entry->created_at,
