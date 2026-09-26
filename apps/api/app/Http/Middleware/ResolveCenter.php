@@ -21,6 +21,10 @@ class ResolveCenter
 
         $subdomain = substr($host, 0, -strlen($suffix));
         abort_unless(preg_match('/^[a-z][a-z0-9-]{1,62}$/', $subdomain), 404);
+        abort_if($request->hasAny(['tenant_id', 'database', 'database_name', 'dbname', 'db_name'])
+            || $request->headers->has('X-Tenant-ID')
+            || $request->headers->has('X-Database-Name')
+            || $request->headers->has('X-DB-Name'), 400, 'Client-selected center context is not allowed.');
 
         $center = Center::query()
             ->join('domains', 'domains.tenant_id', '=', 'tenants.id')

@@ -114,7 +114,7 @@ class CenterAccessTest extends TestCase
         $this->getJson('http://alpha.courses.test/api/v1/center/user')
             ->assertOk()->assertJsonCount(2, 'user.permissions.branch_roles.'.$firstBranch);
         $this->getJson('http://beta.courses.test/api/v1/center/user?tenant_id='.$alpha->id)
-            ->assertUnauthorized();
+            ->assertBadRequest();
         $this->getJson('http://unknown.courses.test/api/v1/center/user')
             ->assertNotFound();
         $alpha->update(['suspended' => true]);
@@ -140,5 +140,72 @@ class CenterAccessTest extends TestCase
         $this->actingAs($member, 'web')->withSession(['center_id' => $center->id]);
         $this->getJson('http://alpha.courses.test/api/v1/center/user')->assertStatus(503);
         $this->actingAs($platformOwner, 'platform')->getJson('http://courses.test/api/v1/platform/centers')->assertOk();
+    }
+
+    public function test_shared_identity_keeps_distinct_grants_and_rejects_client_selected_tenant_context(): void
+    {
+        Mail::fake();
+        $owner = User::factory()->platformOwner()->create();
+        $this->actingAs($owner, 'platform');
+        foreach (['alpha', 'beta'] as $slug) {
+            $this->postJson('http://courses.test/api/v1/platform/centers', [
+                'name' => ucfirst($slug), 'slug' => $slug, 'subdomain' => $slug,
+                'plan' => 'starter', 'owner_email' => "owner@{$slug}.test",
+            ])->assertCreated();
+        }
+
+        $alpha = Center::where('slug', 'alpha')->firstOrFail();
+        $beta = Center::where('slug', 'beta')->firstOrFail();
+        $shared = User::factory()->create(['email_verified_at' => now()]);
+        foreach ([$alpha, $beta] as $center) {
+            CenterMembership::create(['tenant_id' => $center->id, 'user_id' => $shared->id, 'status' => 'active']);
+        }
+        $alphaBranch = $alpha->run(function () use ($shared): int {
+            $id = DB::table('branches')->insertGetId(['name' => 'Alpha Secret', 'slug' => 'alpha-secret', 'created_at' => now(), 'updated_at' => now()]);
+            DB::table('branch_grants')->insert(['user_id' => $shared->id, 'branch_id' => $id, 'role' => 'branch_viewer', 'created_at' => now(), 'updated_at' => now()]);
+
+            return $id;
+        });
+        $betaBranch = $beta->run(function () use ($shared): int {
+            $id = DB::table('branches')->insertGetId(['name' => 'Beta Secret', 'slug' => 'beta-secret', 'created_at' => now(), 'updated_at' => now()]);
+            DB::table('branch_grants')->insert(['user_id' => $shared->id, 'branch_id' => $id, 'role' => 'branch_manager', 'created_at' => now(), 'updated_at' => now()]);
+
+            return $id;
+        });
+
+        $this->actingAs($shared, 'web')->withSession(['center_id' => $alpha->id]);
+        $alphaPage = $this->getJson('http://alpha.courses.test/api/v1/center/user')
+            ->assertOk()->assertJsonPath('center.id', $alpha->id)
+            ->assertJsonPath('branches.0.name', 'Alpha Secret')
+            ->assertJsonPath('user.permissions.branch_roles.'.$alphaBranch.'.0', 'branch_viewer')
+            ->assertDontSee('Beta Secret');
+        $this->assertNotNull($alphaPage->headers->get('X-Courses-Query-Count'));
+        $this->assertLessThanOrEqual(6, (int) $alphaPage->headers->get('X-Courses-Query-Count'));
+        $this->getJson('http://alpha.courses.test/api/v1/center/user?tenant_id='.$beta->id)->assertBadRequest();
+        $this->getJson('http://alpha.courses.test/api/v1/center/user?database='.$beta->database()->getName())->assertBadRequest();
+        $this->withHeaders(['X-Tenant-ID' => $beta->id, 'X-Database-Name' => $beta->database()->getName()])
+            ->getJson('http://alpha.courses.test/api/v1/center/user')->assertBadRequest();
+        $this->flushHeaders();
+        $this->patchJson("http://alpha.courses.test/api/v1/center/branches/{$alphaBranch}", ['name' => 'Denied'])
+            ->assertForbidden();
+        $this->getJson('http://beta.courses.test/api/v1/center/user')->assertUnauthorized();
+        $this->getJson('http://unknown.courses.test/api/v1/center/user')->assertNotFound();
+        $this->withServerVariables([
+            'HTTP_HOST' => 'unknown.courses.test', 'HTTP_X_FORWARDED_HOST' => 'alpha.courses.test',
+        ])->getJson('/api/v1/center/user')->assertNotFound();
+
+        $this->withSession(['center_id' => $beta->id]);
+        $betaPage = $this->getJson('http://beta.courses.test/api/v1/center/user')->assertOk()
+            ->assertJsonPath('center.id', $beta->id)
+            ->assertJsonPath('branches.0.name', 'Beta Secret')
+            ->assertJsonPath('user.permissions.branch_roles.'.$betaBranch.'.0', 'branch_manager')
+            ->assertDontSee('Alpha Secret');
+        $this->assertNotNull($betaPage->headers->get('X-Courses-Query-Count'));
+        $this->assertLessThanOrEqual(6, (int) $betaPage->headers->get('X-Courses-Query-Count'));
+        $this->patchJson("http://beta.courses.test/api/v1/center/branches/{$betaBranch}", [
+            'name' => 'Denied', 'tenant_id' => $alpha->id, 'database' => $alpha->database()->getName(),
+        ])->assertBadRequest();
+        $this->patchJson("http://beta.courses.test/api/v1/center/branches/{$betaBranch}", ['name' => 'Beta Updated'])->assertOk();
+        $this->assertSame(2, CenterMembership::where('user_id', $shared->id)->count());
     }
 }

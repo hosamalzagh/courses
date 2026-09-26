@@ -64,7 +64,7 @@ export async function signIn(page: Page, host: string, email: string, password: 
   await expect(page).toHaveURL(`${host}/admin`);
 }
 
-async function invitationUrl(email: string, host: string): Promise<string> {
+export async function invitationUrl(email: string, host: string): Promise<string> {
   let url = "";
   await expect.poll(async () => {
     const response = await fetch("http://127.0.0.1:8025/api/v1/messages");
