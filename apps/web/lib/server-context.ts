@@ -34,10 +34,14 @@ export type Member = {
 };
 export type Invitation = { id: number; email: string; center_role: string | null; expires_at: string; status: "pending" | "expired" | "uncertain" | "not_sent" };
 export type MemberContext = CenterContext & { members: Member[]; invitations: Invitation[]; grant_options: Record<string, GrantOption>; pagination: WorkspacePagination };
-export type StudentGeneralData = { date_of_birth: string | null; gender: 'male' | 'female' | null; address: string | null; email: string | null; school: string | null; employer: string | null; specialization: string | null };
-export type Student = StudentGeneralData & { age: number | null; created_by: number; created_at: string; id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean; sharing_enabled: boolean; status: 'active' | 'suspended'; status_revision: number; can_change_status: boolean };
+export type StudentChoiceKind = 'city' | 'qualification' | 'profession' | 'collection_method' | 'discovery_source';
+export type StudentProfileChoice = { id: string; kind: StudentChoiceKind; label: string; position: number; active: boolean; revision: number };
+export type StudentChoiceList = { choices: StudentProfileChoice[]; page: number; has_more: boolean };
+export type StudentChoiceContext = CenterContext & { choices: StudentProfileChoice[]; pagination: { page: number; has_more: boolean } };
+export type StudentGeneralData = Record<`${StudentChoiceKind}_id`, string | null> & { date_of_birth: string | null; gender: 'male' | 'female' | null; address: string | null; email: string | null; school: string | null; employer: string | null; specialization: string | null };
+export type Student = StudentGeneralData & { profile_choices: Partial<Record<StudentChoiceKind, StudentProfileChoice>>; age: number | null; created_by: number; created_at: string; id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean; sharing_enabled: boolean; status: 'active' | 'suspended'; status_revision: number; can_change_status: boolean };
 export type StudentSuspension = { id: string; suspended_by: number; suspended_by_name: string; suspended_reason: string; suspended_at: string; lifted_by: number | null; lifted_by_name: string | null; lifted_reason: string | null; lifted_at: string | null };
-export type StudentContext = CenterContext & { students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
+export type StudentContext = CenterContext & { profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type Instructor = { id: string; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
 export type InstructorContext = CenterContext & { instructors: Instructor[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type StudentSearchPolicy = { enabled: boolean; revision: number; default_sharing_enabled: boolean };
@@ -92,6 +96,10 @@ export function loadMemberWorkspace(query = ""): Promise<MemberContext | CenterA
   return fetchCenterPayload<MemberContext>(`member-workspace${query ? `?${query}` : ""}`);
 }
 
+export function loadStudentChoiceWorkspace(kind = "city", page = "1", q = ""): Promise<StudentChoiceContext | CenterAccessFailure> {
+  return fetchCenterPayload<StudentChoiceContext>(`student-profile-choices?${new URLSearchParams({ kind, page, q, manage: "1" })}`);
+}
+
 export function loadStudentWorkspace(query = "", studentId?: string): Promise<StudentContext | CenterAccessFailure> {
   return fetchCenterPayload<StudentContext>(`${studentId ? `students/${encodeURIComponent(studentId)}` : "student-workspace"}${query ? `?${query}` : ""}`);
 }
@@ -123,6 +131,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
     return result.toString();
   }
   if (path === "/admin" || path === "/admin/security") return loadCenterContext();
+  if (path === "/admin/student-profile-choices") return loadStudentChoiceWorkspace(url.searchParams.get("kind") ?? "city", url.searchParams.get("page") ?? "1", url.searchParams.get("q") ?? "");
   if (path === "/admin/settings") return loadCenterContext("settings");
   if (path === "/admin/audit") return loadCenterContext("audit");
   if (path === "/admin/members") return loadMemberWorkspace(query(["members_page", "invitations_page", "branches_page"]));

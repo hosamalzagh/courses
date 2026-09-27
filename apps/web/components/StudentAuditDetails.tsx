@@ -1,6 +1,15 @@
+import { studentChoiceLabels } from '@/lib/student-profile-choices';
 import type { AuditEntry } from '@/lib/server-context';
 
 export function StudentAuditDetails({ entry }: { entry: AuditEntry }) {
+  if (entry.event === 'center.student_profile_choice_changed') {
+    let details = entry.details;
+    if (typeof details === 'string') { try { details = JSON.parse(details); } catch { return null; } }
+    if (!details || typeof details !== 'object' || Array.isArray(details) || !('after' in details) || !details.after) return null;
+    const data = details as { before: { label: string; active: boolean; position: number } | null; after: { label: string; active: boolean; position: number; kind: keyof typeof studentChoiceLabels } };
+    const value = (choice: typeof data.before) => choice ? `${choice.label} · ترتيب ${choice.position} · ${choice.active ? 'متاح' : 'معطل'}` : 'اختيار جديد';
+    return <details><summary>عرض تغيير قائمة الطالب</summary><p>{studentChoiceLabels[data.after.kind]}</p><p>قبل التغيير: {value(data.before)}</p><p>بعد التغيير: {value(data.after)}</p></details>;
+  }
   if (entry.event === 'student.sharing_changed') {
     let details = entry.details;
     if (typeof details === 'string') { try { details = JSON.parse(details); } catch { return null; } }
@@ -21,7 +30,7 @@ export function StudentAuditDetails({ entry }: { entry: AuditEntry }) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return 'لم يكن الملف موجودًا';
     const record = value as Record<string, unknown>;
     const labels: Record<string, string> = { date_of_birth: 'تاريخ الميلاد', gender: 'النوع', address: 'العنوان', email: 'البريد', school: 'المدرسة / جهة الدراسة', employer: 'جهة العمل', specialization: 'التخصص' };
-    return <>{typeof record.name === 'string' ? record.name : 'غير مسجل'} · رقم {typeof record.student_number === 'number' ? record.student_number.toLocaleString('ar-EG') : 'غير مسجل'} · التواصل: <bdi>{typeof record.phone === 'string' ? record.phone : 'غير مسجل'}</bdi>{Object.entries(labels).filter(([key]) => key in record).map(([key, label]) => <span key={key}> · {label}: {typeof record[key] === 'string' ? (key === 'gender' ? record[key] === 'male' ? 'ذكر' : 'أنثى' : record[key]) : 'لم يُضف'}</span>)}</>;
+    return <>{typeof record.name === 'string' ? record.name : 'غير مسجل'} · رقم {typeof record.student_number === 'number' ? record.student_number.toLocaleString('ar-EG') : 'غير مسجل'} · التواصل: <bdi>{typeof record.phone === 'string' ? record.phone : 'غير مسجل'}</bdi>{record.profile_choices && typeof record.profile_choices === 'object' ? Object.entries(record.profile_choices).map(([kind, choice]) => <span key={kind}> · {studentChoiceLabels[kind as keyof typeof studentChoiceLabels]}: {(choice as { label: string }).label}</span>) : null}{Object.entries(labels).filter(([key]) => key in record).map(([key, label]) => <span key={key}> · {label}: {typeof record[key] === 'string' ? (key === 'gender' ? record[key] === 'male' ? 'ذكر' : 'أنثى' : record[key]) : 'لم يُضف'}</span>)}</>;
   }
   return <details><summary>عرض تغيير ملف الطالب</summary><p>قبل التغيير: {basic(data.before)}</p><p>بعد التغيير: {basic(data.after)}</p><p>ارتباط الطالب بهذا الفرع: {data.associated_before === true ? 'كان مرتبطًا بالفعل' : 'ارتباط جديد'}</p></details>;
 }

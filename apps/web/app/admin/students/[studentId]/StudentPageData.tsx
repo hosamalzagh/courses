@@ -1,4 +1,6 @@
 import 'server-only';
+import { studentChoiceLabels } from '@/lib/student-profile-choices';
+import type { StudentChoiceKind } from '@/lib/server-context';
 import { loadStudentWorkspace } from '@/lib/server-context';
 import { CenterAccessState } from '@/components/CenterAccessState';
 import { CenterPage } from '@/components/CenterPage';
@@ -38,6 +40,7 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
         <div><dt>المدرسة / جهة الدراسة</dt><dd>{value(student.school)}</dd></div>
         <div><dt>جهة العمل</dt><dd>{value(student.employer)}</dd></div>
         <div><dt>التخصص</dt><dd>{value(student.specialization)}</dd></div>
+        {(Object.keys(studentChoiceLabels) as StudentChoiceKind[]).map(kind => <div key={kind}><dt>{studentChoiceLabels[kind]}</dt><dd>{student.profile_choices[kind] ? `${student.profile_choices[kind]!.label}${student.profile_choices[kind]!.active ? '' : ' — معطل'}` : 'لم يُضف بعد'}</dd></div>)}
         <div><dt>أدخل الملف</dt><dd>موظف رقم {student.created_by.toLocaleString('ar-EG')}</dd></div>
         <div><dt>تاريخ الإنشاء</dt><dd>{new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' }).format(new Date(student.created_at.replace(' ', 'T') + 'Z'))}</dd></div>
       </dl>

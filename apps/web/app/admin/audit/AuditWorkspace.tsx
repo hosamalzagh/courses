@@ -9,6 +9,7 @@ import type { AuditEntry, CenterContext } from "@/lib/server-context";
 import { AuditControls, type AuditRow } from "./AuditControls";
 
 const eventNames: Record<string, string> = {
+  "center.student_profile_choice_changed": "تغيير قائمة بيانات الطالب",
   "branch.created": "إنشاء فرع", "branch.updated": "تعديل فرع",
   "member.invited": "دعوة موظف", "member.status_changed": "تغيير حالة عضو",
   "member.grants_changed": "تغيير الأدوار والإسنادات", "invitation.accepted": "قبول دعوة",

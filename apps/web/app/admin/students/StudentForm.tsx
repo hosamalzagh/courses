@@ -15,6 +15,7 @@ import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard';
 import { buttonVariants } from "@/components/ui/button";
 import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
 import { Button } from '@/components/Button';
+import { StudentChoiceFields } from '@/components/StudentChoiceFields';
 import { FormField } from '@/components/FormField';
 import { InlineNotice } from '@/components/InlineNotice';
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from '@/lib/client-api';
@@ -162,6 +163,8 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         </div><h2>خلفية الدراسة والعمل</h2><div className='student-fields'>
         {([['school', 'المدرسة / جهة الدراسة'], ['employer', 'جهة العمل'], ['specialization', 'التخصص']] as const).map(([key, label]) => <FormField key={key} id={`student-${key}`} label={label} value={general[key] ?? ''} onChange={(value) => changeGeneral(key, value)} error={fieldErrors[key]} />)}
         </div>
+        <h2>اختيارات المركز والمصدر</h2><p className='muted'>طريقة جمع البيانات مستقلة عن مصدر المعرفة بالمركز. يُسجل الموظف وتاريخ الإنشاء تلقائيًا.</p>
+        <StudentChoiceFields prefix={formPrefix} context={context} student={editor === 'new' ? undefined : editor} data={general} onChange={changeGeneral} errors={fieldErrors} disabled={busy} />
         <FieldSet data-invalid={Boolean(fieldErrors.branch_ids)} aria-describedby={fieldErrors.branch_ids ? 'student-branches-error' : 'student-branches-hint'}><FieldLegend>الفروع المرتبطة بالطالب</FieldLegend>
           <p id='student-branches-hint' className='muted'>اختر فروع التسجيل المصرح بها. تبقى ارتباطات الملف السابقة محفوظة.</p>
           {manageable.map((branch) => {
@@ -181,5 +184,5 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
 
 function profileData(student?: Student): StudentGeneralData {
   return { date_of_birth: student?.date_of_birth ?? null, gender: student?.gender ?? null, address: student?.address ?? null,
-    email: student?.email ?? null, school: student?.school ?? null, employer: student?.employer ?? null, specialization: student?.specialization ?? null };
+    email: student?.email ?? null, school: student?.school ?? null, employer: student?.employer ?? null, specialization: student?.specialization ?? null, city_id: student?.city_id ?? null, qualification_id: student?.qualification_id ?? null, profession_id: student?.profession_id ?? null, collection_method_id: student?.collection_method_id ?? null, discovery_source_id: student?.discovery_source_id ?? null };
 }
