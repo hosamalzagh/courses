@@ -15,7 +15,9 @@ import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
 import { centerRequest, responseFieldErrors, responseMessage } from "@/lib/client-api";
 
-type Settings = { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number };
+type Settings = import('@/lib/server-context').CenterSettings;
+
+import { StudentCodeControls } from './StudentCodeControls';
 
 export function SettingsControls({ context, initialSettings }: { context: CenterContext; initialSettings: Settings }) {
   const formPrefix = useId();
@@ -56,6 +58,7 @@ export function SettingsControls({ context, initialSettings }: { context: Center
 
       </FieldGroup>
 </form>
+      <StudentCodeControls settings={initialSettings} />
       <StudentNumberingControls start={initialSettings.student_number_start ?? 1} revision={initialSettings.student_number_revision ?? 1} />
   </>;
 }

@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import type { CurriculumContext } from "./curriculum";
 
 export type Branch = { id: number; name: string; slug: string; address: string | null };
+export type CenterSettings = { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number; student_code_enabled?: boolean; student_code_label?: string; student_code_revision?: number };
 export type CenterContext = {
   user: { id: number; name: string; email: string; mfa_enabled?: boolean; mfa_required_for_platform?: boolean };
   membership: { status: string; grants_version: number };
@@ -15,7 +16,7 @@ export type CenterContext = {
     can_manage_center: boolean;
   };
   branches: Branch[];
-  settings?: { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number };
+  settings?: CenterSettings;
   audit_entries?: AuditEntry[];
 };
 
@@ -42,9 +43,9 @@ export type StudentGeneralData = Record<`${StudentChoiceKind}_id`, string | null
 export type StudentChannelKind = 'primary' | 'alternative' | 'whatsapp' | 'sinjapp';
 export type StudentContact = { id: string; name: string; relationship: string; phone: string; primary: boolean };
 export type StudentContactsData = { contacts: StudentContact[]; channels: Record<StudentChannelKind, { contact_id: string; phone: string } | null> };
-export type Student = StudentGeneralData & StudentContactsData & { legacy_phone: string | null } & { profile_choices: Partial<Record<StudentChoiceKind, StudentProfileChoice>>; age: number | null; created_by: number; created_at: string; id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean; sharing_enabled: boolean; status: 'active' | 'suspended'; status_revision: number; can_change_status: boolean };
+export type Student = StudentGeneralData & StudentContactsData & { legacy_phone: string | null; manual_code: string | null } & { profile_choices: Partial<Record<StudentChoiceKind, StudentProfileChoice>>; age: number | null; created_by: number; created_at: string; id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean; sharing_enabled: boolean; status: 'active' | 'suspended'; status_revision: number; can_change_status: boolean };
 export type StudentSuspension = { id: string; suspended_by: number; suspended_by_name: string; suspended_reason: string; suspended_at: string; lifted_by: number | null; lifted_by_name: string | null; lifted_reason: string | null; lifted_at: string | null };
-export type StudentContext = CenterContext & { profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
+export type StudentContext = CenterContext & { student_code_settings: {enabled:boolean;label:string;revision:number}; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type Instructor = { id: string; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
 export type InstructorContext = CenterContext & { instructors: Instructor[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type StudentSearchPolicy = { enabled: boolean; revision: number; default_sharing_enabled: boolean };
@@ -138,11 +139,11 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   if (path === "/admin/settings") return loadCenterContext("settings");
   if (path === "/admin/audit") return loadCenterContext("audit");
   if (path === "/admin/members") return loadMemberWorkspace(query(["members_page", "invitations_page", "branches_page"]));
-  if (path === "/admin/students") return loadStudentWorkspace(query(["page", "branches_page", "q"]));
+  if (path === "/admin/students") return loadStudentWorkspace(query(["page", "branches_page", "q", "identifier"]));
   if (path === "/admin/students/new") return loadStudentWorkspace();
   const studentEdit = path.match(/^\/admin\/students\/([^/]+)\/edit$/);
   if (studentEdit) return loadStudentWorkspace("", decodeURIComponent(studentEdit[1]));
-  if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q"]));
+  if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q", "identifier"]));
   if (path === "/admin/curriculum") return loadCurriculumWorkspace(query(["courses_page", "stages_page", "levels_page", "branches_page"]));
   if (path === "/admin/student-search") return loadStudentSearchWorkspace(query(["q", "page"]));
   const detail = path.match(/^\/admin\/(students|instructors|curriculum)\/([^/]+)$/);
