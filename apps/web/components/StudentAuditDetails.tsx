@@ -1,9 +1,18 @@
+import { customFieldTypeLabels } from '@/lib/student-custom-fields';
+import type { StudentCustomField } from '@/lib/server-context';
 import { StudentContactSummary } from './StudentContactSummary';
 import type { StudentContactsData } from '@/lib/server-context';
 import { studentChoiceLabels } from '@/lib/student-profile-choices';
 import type { AuditEntry } from '@/lib/server-context';
 
 export function StudentAuditDetails({ entry }: { entry: AuditEntry }) {
+  if (entry.event === 'center.student_custom_field_changed') {
+    let details=entry.details;if(typeof details === 'string') {try{details=JSON.parse(details);}catch{return null;}}
+    if(!details || typeof details !== 'object' || Array.isArray(details) || !('after' in details) || !details.after)return null;
+    const data=details as {before:StudentCustomField|null;after:StudentCustomField};
+    const label=(field:StudentCustomField|null)=>field ? `${field.label} · ${customFieldTypeLabels[field.type]} · ترتيب ${field.position} · ${field.required ? 'مطلوب' : 'اختياري'}` : 'حقل جديد';
+    return <details><summary>عرض تغيير الحقل الإضافي</summary><p>قبل: {label(data.before)}</p><p>بعد: {label(data.after)}</p></details>;
+  }
   if (entry.event === 'center.student_code_settings_changed') {
     let details = entry.details;
     if (typeof details === 'string') {try {details=JSON.parse(details);} catch {return null;}}
@@ -43,5 +52,5 @@ export function StudentAuditDetails({ entry }: { entry: AuditEntry }) {
   }
   const contacts = (value: unknown) => value && typeof value === 'object' && 'contacts' in value && 'channels' in value ? <StudentContactSummary data={value as StudentContactsData} legacyPhone={'legacy_phone' in value && typeof value.legacy_phone === 'string' ? value.legacy_phone : null} /> : null;
   const changedIdentity = Array.isArray(data.identity_changed) ? data.identity_changed.filter(field => field === 'national_id' || field === 'passport_number') : [];
-  return <details><summary>عرض تغيير ملف الطالب</summary>{changedIdentity.length ? <p>تغيرت بيانات الهوية: {changedIdentity.map(field => field === 'national_id' ? 'الرقم القومي' : 'الجواز').join('، ')}. القيم مقيدة ولا تعرض في السجل العام.</p> : null}<p>قبل التغيير: {basic(data.before)}</p>{contacts(data.before)}<p>بعد التغيير: {basic(data.after)}</p>{contacts(data.after)}<p>ارتباط الطالب بهذا الفرع: {data.associated_before === true ? 'كان مرتبطًا بالفعل' : 'ارتباط جديد'}</p></details>;
+  return <details><summary>عرض تغيير ملف الطالب</summary>{changedIdentity.length ? <p>تغيرت بيانات الهوية: {changedIdentity.map(field => field === 'national_id' ? 'الرقم القومي' : 'الجواز').join('، ')}. القيم مقيدة ولا تعرض في السجل العام.</p> : null}{Array.isArray(data.custom_fields_changed) && data.custom_fields_changed.length ? <p>تغيرت قيم {data.custom_fields_changed.length.toLocaleString('ar-EG')} من الحقول الإضافية. القيم تعرض داخل الملف المصرح به.</p> : null}<p>قبل التغيير: {basic(data.before)}</p>{contacts(data.before)}<p>بعد التغيير: {basic(data.after)}</p>{contacts(data.after)}<p>ارتباط الطالب بهذا الفرع: {data.associated_before === true ? 'كان مرتبطًا بالفعل' : 'ارتباط جديد'}</p></details>;
 }

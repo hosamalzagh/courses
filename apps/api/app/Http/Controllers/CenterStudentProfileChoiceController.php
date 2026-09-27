@@ -2,9 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Center;
-use App\Models\CenterMembership;
 use App\Support\CenterPermissions;
+use App\Support\CenterWrites;
 use App\Support\StudentProfileChoices;
 use Closure;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -110,19 +109,10 @@ class CenterStudentProfileChoiceController extends Controller
 
     private function write(Request $request, Closure $operation): JsonResponse
     {
-        // The central lock also serializes student selection and definition writes.
-        return DB::connection('central')->transaction(function () use ($request, $operation): JsonResponse {
-            $centerId = $request->attributes->get('center')->id;
-            $center = Center::query()->whereKey($centerId)->lockForUpdate()->firstOrFail();
-            abort_if($center->suspended, 423);
-            abort_unless($center->provisioning_status === 'active', 503);
-            abort_unless(CenterMembership::query()->where('tenant_id', $centerId)->where('user_id', $request->user()->id)->value('status') === 'active', 403);
+        return CenterWrites::run($request, function (CenterPermissions $permissions) use ($operation): JsonResponse {
+            abort_unless($permissions->isCenterManager(), 403);
 
-            return DB::connection('tenant')->transaction(function () use ($request, $operation): JsonResponse {
-                abort_unless(CenterPermissions::forUser($request->user()->id)->isCenterManager(), 403);
-
-                return $operation();
-            });
+            return $operation();
         });
     }
 

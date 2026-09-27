@@ -1,4 +1,6 @@
 import 'server-only';
+import { StudentCustomFieldSummary } from '@/components/StudentCustomFields';
+import { InlineNotice } from '@/components/InlineNotice';
 import { StudentContactSummary } from '@/components/StudentContactSummary';
 import { studentChoiceLabels } from '@/lib/student-profile-choices';
 import type { StudentChoiceKind } from '@/lib/server-context';
@@ -31,6 +33,7 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
       <p>رقم التواصل: <bdi dir='ltr'>{value(student.phone)}</bdi>{primaryContact ? ` — ${primaryContact.name} (${primaryContact.relationship})` : student.phone ? ' — صاحبه غير محدد' : ''}</p>
       <p>الفروع المصرح بها: {student.branch_ids.map((id) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join('، ')}</p>
     </section>
+    {student.missing_custom_fields > 0 ? <InlineNotice tone='warning'>الملف ينقصه {student.missing_custom_fields.toLocaleString('ar-EG')} من الحقول المطلوبة. أكملها عند تعديل البيانات؛ المشاركة والإيقاف مستقلان.</InlineNotice> : null}
     <nav className='form-actions' aria-label='أقسام ملف الطالب'><a href='#student-personal' aria-current='page'>البيانات الشخصية</a>{context.permissions.can_manage_center || Object.values(context.permissions.branch_roles).some((roles) => roles.includes('branch_auditor')) ? <Link href='/admin/audit'>سجل التغييرات</Link> : null}</nav>
     <section id='student-personal' className='context-card form-stack' aria-labelledby='student-personal-title'>
       <h2 id='student-personal-title'>البيانات الشخصية</h2>
@@ -49,6 +52,7 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
       </dl>
     </section>
     {student.identity ? <section className='context-card form-stack' aria-label='بيانات الهوية'><h2>بيانات الهوية</h2><dl className='student-fields student-data'><div><dt>الرقم القومي المصري</dt><dd><bdi dir='ltr'>{value(student.identity.national_id)}</bdi></dd></div><div><dt>رقم جواز السفر</dt><dd><bdi dir='ltr'>{value(student.identity.passport_number)}</bdi></dd></div></dl></section> : null}
+    <section className='context-card form-stack' aria-label='حقول الطالب الإضافية'><StudentCustomFieldSummary initial={context.custom_fields} initialValues={student.custom_values ?? {}} studentId={student.id} prefix={`profile-${student.id}`} /></section>
     <section className='context-card form-stack' aria-label='جهات التواصل وقنوات المتابعة'><h2>جهات التواصل وقنوات المتابعة</h2><StudentContactSummary data={student} legacyPhone={student.legacy_phone} /></section>
   </CenterPage>;
 }
