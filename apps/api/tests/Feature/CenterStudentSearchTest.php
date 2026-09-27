@@ -81,6 +81,19 @@ class CenterStudentSearchTest extends TestCase
         $this->getJson("{$this->base}/student-workspace")->assertOk()->assertJsonCount(2, 'students');
     }
 
+    public function test_settings_hint_skips_manager_search_but_preserves_search_for_non_managers(): void
+    {
+        $student = $this->createStudent('Settings retained', [$this->north]);
+        $this->patchJson("{$this->base}/student-search-policy", ['enabled' => true, 'revision' => 1])->assertOk();
+        $this->getJson("{$this->base}/student-search-workspace?q=Settings%20retained&page=2&view=settings")
+            ->assertOk()->assertJsonCount(0, 'students')->assertJsonPath('pagination.page', 1);
+
+        $this->grant([$this->north => ['registration', 'center_student_search']]);
+        $this->asUser($this->staff);
+        $this->getJson("{$this->base}/student-search-workspace?q=Settings%20retained&page=1&view=settings")
+            ->assertOk()->assertJsonPath('students.0.id', $student['id'])->assertJsonPath('pagination.page', 1);
+    }
+
     public function test_policy_retries_are_safe_stale_changes_conflict_and_audit_is_manager_only(): void
     {
         $this->patchJson("{$this->base}/student-search-policy", ['enabled' => true, 'revision' => 1])->assertOk()->assertJsonPath('policy.revision', 2);

@@ -348,18 +348,19 @@ test('successful creation and committed recovery retain destination batch state'
 });
 
 
-test('settings skip retained student queries and browser history dismisses policy confirmations', async ({page}) => {
+test('settings skip retained student queries and browser history dismisses policy confirmations', async ({page,browser}) => {
   await login(page);
   const original = (await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy;
   try {
     if (!original.enabled) expect((await write(page,'student-search-policy','PATCH',{enabled:true,revision:original.revision})).status).toBe(200);
-    const student = (await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json()).students[0];
+    const studentContext = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+    const student = studentContext.students[0];
     const value = String(student.student_number);
     await page.mouse.move(0, 0);
     const start = cursor(); await page.goto(`${origin}/admin/student-search?tab=settings&q=${value}&page=2`);
     await expect(page.getByRole('tab',{name:'إعدادات المشاركة والبحث',exact:true})).toHaveAttribute('aria-selected','true');
     const rows = metrics(start); expect(rows).toHaveLength(1);
-    expect(rows[0].path).toBe('/api/v1/center/student-search-workspace');
+    expect(rows[0].path).toBe(`/api/v1/center/student-search-workspace?q=${value}&page=2&view=settings`);
     expect(rows.every(row => typeof row.count === 'number' && row.count > 0)).toBe(true);
     const sql = rows.reduce((sum,row) => sum + row.count,0); expect(sql).toBeLessThanOrEqual(5);
     console.log(JSON.stringify({route:'student-search settings with retained query',sql}));
@@ -378,6 +379,23 @@ test('settings skip retained student queries and browser history dismisses polic
     await page.goBack(); await expect(page.getByRole('tab',{name:'البحث عن طالب',exact:true})).toHaveAttribute('aria-selected','true');
     await expect(page.getByRole('alertdialog')).toHaveCount(0);
     expect((await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy.revision).toBe(current.revision);
+
+    const memberContext = await (await page.request.get(`${origin}/api/v1/center/member-workspace`)).json();
+    const member = memberContext.members.find((row:{user:{email:string}}) => row.user.email === credentials.staff.email);
+    const north = studentContext.branches.find((row:{slug:string}) => row.slug === 'north');
+    expect(member).toBeTruthy(); expect(north).toBeTruthy();
+    try {
+      expect((await write(page,`members/${member.id}/grants`,'PUT',{center_roles:[],branch_roles:{[north.id]:['registration','center_student_search']}})).status).toBe(200);
+      const staff = await browser.newPage();
+      try {
+        await login(staff,'staff'); await staff.goto(`${origin}/admin/student-search?tab=settings&q=${value}`);
+        await expect(staff.getByRole('tab',{name:'البحث عن طالب',exact:true})).toHaveAttribute('aria-selected','true');
+        await expect(staff.getByRole('textbox',{name:'الاسم أو رقم الطالب الداخلي أو رقم التواصل',exact:true})).toHaveValue(value);
+        await expect(staff.getByRole('table')).toContainText(student.name);
+      } finally { await staff.close(); }
+    } finally {
+      expect((await write(page,`members/${member.id}/grants`,'PUT',{center_roles:member.center_roles,branch_roles:member.branch_roles})).status).toBe(200);
+    }
   } finally {
     const current = (await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy;
     expect((await write(page,'student-search-policy','PATCH',{enabled:original.enabled,default_sharing_enabled:original.default_sharing_enabled,revision:current.revision})).status).toBe(200);
