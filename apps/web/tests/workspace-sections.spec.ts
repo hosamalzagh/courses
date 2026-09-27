@@ -281,3 +281,36 @@ test('abandoned instructor recovery cannot replace the search view or its header
     await expect(page.getByRole('alert').filter({hasText:'تغيّرت بيانات الملف'})).toHaveCount(0);
   } finally {release();}
 });
+
+
+test('lost hierarchy creations recover into the tab owning the committed record', async ({page}) => {
+  await login(page); await page.goto(`${origin}/admin/curriculum?tab=levels`);
+  const name = `000 استعادة أقسام ${Date.now()}`;
+  async function loseAndRecover(path: string, field: string, tab: string, search: string) {
+    await page.route(path, async route => {
+      const response = await route.fetch(); expect(response.status()).toBe(201);
+      await route.abort('connectionfailed');
+    }, {times:1});
+    await page.getByRole('button',{name:'حفظ المنهج',exact:true}).click();
+    await expect(page.getByRole('alert').filter({hasText:'تعذر تأكيد الحفظ'})).toBeVisible();
+    await page.getByRole('textbox',{name:field,exact:true}).fill(`${name} محاولة مختلفة`);
+    await page.getByRole('button',{name:'حفظ المنهج',exact:true}).click();
+    await expect(page.getByRole('alert').filter({hasText:'تغيّرت الخطة أو حُفظ الطلب'})).toBeVisible();
+    await page.getByRole('button',{name:'تحميل البيانات الحالية للمنهج',exact:true}).click();
+    await expect(page).toHaveURL(new RegExp(`tab=${tab}$`));
+    await expect(page.getByRole('form',{name:'إدارة منهج الفرع',exact:true})).toHaveCount(0);
+    await page.getByRole('searchbox',{name:search,exact:true}).fill(name);
+    await expect(page.getByRole('table')).toContainText(name);
+    await expect(page.getByRole('table')).not.toContainText('محاولة مختلفة');
+  }
+  await page.getByRole('button',{name:'إنشاء كورس',exact:true}).click();
+  await page.getByRole('textbox',{name:'اسم الكورس',exact:true}).fill(name);
+  await loseAndRecover('**/api/v1/center/courses','اسم الكورس','courses','بحث في الكورسات');
+  await page.getByRole('button',{name:'إضافة مرحلة دراسية',exact:true}).click();
+  await page.getByRole('textbox',{name:'اسم المرحلة الدراسية',exact:true}).fill(name);
+  await loseAndRecover('**/api/v1/center/courses/*/stages','اسم المرحلة الدراسية','stages','بحث في المراحل الدراسية');
+  await page.getByRole('button',{name:'إضافة مستوى وخطته',exact:true}).click();
+  await page.getByRole('textbox',{name:'اسم المستوى',exact:true}).fill(name);
+  await page.getByRole('textbox',{name:'محتوى المحاضرة 1',exact:true}).fill('محتوى استعادة المستوى');
+  await loseAndRecover('**/api/v1/center/stages/*/levels','اسم المستوى','levels','بحث في المستويات وخططها');
+});

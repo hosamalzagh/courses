@@ -145,8 +145,10 @@ export function CurriculumControls({ context, detail = false, section = 'courses
       const data = await response.json() as CurriculumContext & { kind: string; record: Course | Stage | Level };
       if (workspaceRead.current !== load) return;
       if (editor.kind === 'plan') open({ kind: 'plan', level: data.levels[0] }, true);
-      else if (data.kind === 'levels') { open({ kind: 'plan', level: data.record as Level }, true); setNotice('المستوى حُفظ سابقًا. راجع خطته قبل تعديلها؛ لن يُنشأ مستوى آخر.'); }
-      else { close(); setNotice('السجل حُفظ سابقًا. راجع السجل في الجدول؛ لن يُنشأ سجل آخر.'); }
+      else {
+        close(); setNotice('السجل حُفظ سابقًا. راجع السجل في الجدول؛ لن يُنشأ سجل آخر.');
+        if (!detail) router.push(`/admin/curriculum?tab=${data.kind === 'stages' ? 'stages' : data.kind === 'levels' ? 'levels' : 'courses'}`);
+      }
       router.refresh();
     } catch { if (workspaceRead.current === load) setError('تعذر تحميل البيانات الحالية. حاول مرة أخرى.'); }
     finally {
