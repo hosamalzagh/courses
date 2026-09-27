@@ -325,3 +325,14 @@ button, a, input { touch-action: manipulation; }
 .header-action-group { display: contents; }
 .topbar-actions { flex-wrap: wrap; gap: var(--space-2); }
 @media (min-width: 901px) { .topbar-actions { max-width: min(55vw, 48rem); } }
+
+/* Peer workspace sections retain natural document scrolling. */
+.workspace-sections { min-width: 0; gap: var(--space-4); }
+.workspace-sections-scroll { max-width: 100%; overflow-x: auto; padding-block: 4px 8px; border-bottom: 1px solid var(--border); }
+.workspace-sections-scroll [data-slot="tabs-list"] { min-height: 44px; height: auto; justify-content: flex-start; gap: var(--space-2); }
+.workspace-sections-scroll [data-slot="tabs-trigger"] { min-height: 40px; padding-inline: var(--space-3); flex: none; cursor: pointer; }
+.workspace-section-content { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; font-size: inherit; }
+.workspace-section-content[hidden] { display: none; }
+.student-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+.workspace-register { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.workspace-register[hidden] { display: none; }

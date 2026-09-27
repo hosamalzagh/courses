@@ -9,5 +9,5 @@ export async function StudentSearchPageData({ searchParams }: { searchParams: Pr
   for (const key of ['q', 'page']) if (typeof params[key] === 'string') query.set(key, params[key]);
   const context = await loadStudentSearchWorkspace(query.toString());
   if (typeof context === 'string') return <CenterAccessState state={context} />;
-  return <StudentSearchWorkspace context={context} query={typeof params.q === 'string' ? params.q : ''} />;
+  return <StudentSearchWorkspace context={context} query={typeof params.q === 'string' ? params.q : ''} section={params.tab === 'settings' && context.permissions.can_manage_center ? 'settings' : 'search'} />;
 }

@@ -8,5 +8,5 @@ export async function CurriculumPageData({ searchParams }: { searchParams: Promi
   for (const key of ['courses_page', 'stages_page', 'levels_page', 'branches_page']) if (typeof params[key] === 'string') query.set(key, params[key]);
   const context = await loadCurriculumWorkspace(query.toString());
   if (typeof context === 'string') return <CenterAccessState state={context} />;
-  return <CurriculumWorkspace context={context} />;
+  return <CurriculumWorkspace context={context} section={params.tab === "stages" || params.tab === "levels" ? params.tab : "courses"} />;
 }

@@ -11,5 +11,5 @@ export async function InstructorsPageData({ searchParams }: { searchParams: Prom
   }
   const context = await loadInstructorWorkspace(query.toString());
   if (typeof context === 'string') return <CenterAccessState state={context} />;
-  return <InstructorWorkspace context={context} query={typeof params.q === 'string' ? params.q : ''} />;
+  return <InstructorWorkspace context={context} query={typeof params.q === 'string' ? params.q : ''} section={params.tab === 'search' || (!params.tab && params.q) ? 'search' : 'register'} />;
 }

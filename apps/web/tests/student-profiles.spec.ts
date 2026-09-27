@@ -63,6 +63,7 @@ test('cached student editors keep unique native submit ownership', async ({ page
   const first = await create(page, `${prefix} أ`);
   const second = await create(page, `${prefix} ب`);
   await page.getByRole('link', { name: 'العودة إلى ملفات الطلاب', exact: true }).click();
+  await page.getByRole('tab', { name: 'البحث عن طالب', exact: true }).click();
   await page.getByRole('textbox', { name: 'البحث في جميع الملفات المصرح بها', exact: true }).fill(prefix);
   await page.getByRole('button', { name: 'بحث عن طالب', exact: true }).click();
   await page.locator(`a[href="/admin/students/${first.id}"]`).first().click();
@@ -71,6 +72,7 @@ test('cached student editors keep unique native submit ownership', async ({ page
   const firstFormId = await page.locator('.center-topbar').getByRole('button', { name: 'حفظ بيانات الطالب', exact: true }).getAttribute('form');
   await page.locator('.center-topbar').getByRole('link', { name: 'إلغاء', exact: true }).click();
   await page.getByRole('link', { name: 'العودة إلى ملفات الطلاب', exact: true }).click();
+  await page.getByRole('tab', { name: 'البحث عن طالب', exact: true }).click();
   await page.getByRole('textbox', { name: 'البحث في جميع الملفات المصرح بها', exact: true }).fill(prefix);
   await page.getByRole('button', { name: 'بحث عن طالب', exact: true }).click();
   await page.locator(`a[href="/admin/students/${second.id}"]`).first().click();

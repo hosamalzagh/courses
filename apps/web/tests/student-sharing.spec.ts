@@ -59,6 +59,7 @@ test('owner configures new defaults and audited sharing separately in RTL and na
   expect((await write(page, 'student-search-policy', 'PATCH', { default_sharing_enabled: true, enabled: false, revision: policy.policy.revision })).status).toBe(200);
   const first = await write(page, 'students', 'POST', { name: `Earlier sharing ${suffix}`, branch_ids: [branch.body.branch.id], request_id: crypto.randomUUID() }); expect(first.status).toBe(201);
   await budget(page, () => page.goto(`${host}/admin/student-search`), true);
+  await page.getByRole('tab', { name: 'إعدادات المشاركة والبحث', exact: true }).click();
   await page.getByRole('button', { name: 'تغيير افتراضي المشاركة', exact: true }).click();
   await expect(page.getByRole('alertdialog')).toContainText('تبقى اختيارات الطلاب الموجودين محفوظة');
   await page.getByRole('alertdialog').getByRole('button', { name: 'غلق المشاركة للملفات الجديدة', exact: true }).click();

@@ -11,13 +11,14 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/Button';
 import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
 import { ConfirmationDialog } from '@/components/ConfirmationDialog';
+import { WorkspaceSections } from '@/components/WorkspaceSections';
 import { DataTable } from '@/components/DataTable';
 import { FormField } from '@/components/FormField';
 import { InlineNotice } from '@/components/InlineNotice';
 import { centerRequest, responseMessage } from '@/lib/client-api';
 import type { StudentSearchContext, StudentSearchPolicy } from '@/lib/server-context';
 
-export function StudentSearchControls({ context, query }: { context: StudentSearchContext; query: string }) {
+export function StudentSearchControls({ context, query, section = 'search' }: { context: StudentSearchContext; query: string; section?: 'search' | 'settings' }) {
   const formPrefix = useId();
   const router = useRouter();
   const [search, setSearch] = useState(query);
@@ -76,7 +77,7 @@ export function StudentSearchControls({ context, query }: { context: StudentSear
   }
 
   function navigate(value: string, page = 1) {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ tab: 'search' });
     if (value) params.set('q', value);
     if (page > 1) params.set('page', String(page));
     startTransition(() => router.push(`/admin/student-search${params.size ? `?${params}` : ''}`));
@@ -84,10 +85,7 @@ export function StudentSearchControls({ context, query }: { context: StudentSear
 
   function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); navigate(search.trim()); }
 
-  return <>
-    <CenterPageActions context={context} />
-      {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-      {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
+  const settings = <>
       <section className='context-card form-stack' aria-label='إتاحة البحث بين الفروع'>
         <h2>إتاحة البحث بين الفروع</h2>
         <p>الحالة: <strong>{policy.enabled ? 'مفعّل' : 'مغلق'}</strong>. يحتاج الموظف صلاحية البحث المستقلة؛ أدوار التسجيل وحدها لا تكفي.</p>
@@ -96,8 +94,10 @@ export function StudentSearchControls({ context, query }: { context: StudentSear
       {context.permissions.can_manage_center ? <section className='context-card form-stack' aria-label='افتراضي مشاركة الملفات الجديدة'>
         <h2>افتراضي مشاركة الملفات الجديدة</h2>
         <p>المشاركة عند الإنشاء: <strong>{policy.default_sharing_enabled ? 'مسموحة' : 'مغلقة'}</strong>. تغيير الافتراضي لا يغيّر اختيارات الطلاب الموجودين، ولا يفتح البحث العام.</p>
-        <CenterHeaderActions><Button busy={busy} disabled={conflict || pending} onClick={() => setConfirmation('default')}>تغيير افتراضي المشاركة</Button>{conflict ? <Button disabled={busy} onClick={reloadPolicy}>تحميل أحدث إعداد</Button> : null}</CenterHeaderActions>
+        <CenterHeaderActions><Button busy={busy} disabled={conflict || pending} onClick={() => setConfirmation('default')}>تغيير افتراضي المشاركة</Button></CenterHeaderActions>
       </section> : null}
+  </>;
+  const searchView = <>
       {!policy.enabled ? <InlineNotice tone='warning'>البحث بين الفروع مغلق في هذا المركز. يمكنك العمل في ملفات الطلاب المصرح بها ضمن فروعك.</InlineNotice> : null}
       <form id={`${formPrefix}-0`} className='context-card form-stack' aria-label='البحث في البيانات الأساسية لطلاب المركز' noValidate ref={searchForm} onSubmit={submit} aria-busy={pending}>
 <FieldGroup>
@@ -112,6 +112,15 @@ export function StudentSearchControls({ context, query }: { context: StudentSear
         { key: 'scope', label: 'إتاحة الملف', render: (student) => student.within_scope ? <Link href={`/admin/students/${student.id}`}>عرض الملف ضمن فروعك</Link> : <span className='muted'>بيانات أساسية فقط · خارج فروعك</span> },
       ]} />
       <nav className='form-actions' aria-label='دفعات نتائج بحث المركز'>{context.pagination.page > 1 ? <Button disabled={busy || pending} onClick={() => navigate(query, context.pagination.page - 1)}>الدفعة السابقة</Button> : null}<span>دفعة {context.pagination.page.toLocaleString('ar-EG')}</span>{context.pagination.has_more ? <Button disabled={busy || pending} onClick={() => navigate(query, context.pagination.page + 1)}>الدفعة التالية</Button> : null}</nav>
+  </>;
+  return <>
+    <CenterPageActions context={context} />
+    {notice ? <InlineNotice>{notice}</InlineNotice> : null}
+    {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
+    <WorkspaceSections value={section} label='أقسام بحث طلاب المركز' path='/admin/student-search' sections={[
+      { value: 'search', label: 'البحث عن طالب', content: searchView },
+      ...(context.permissions.can_manage_center ? [{ value: 'settings', label: 'إعدادات المشاركة والبحث', content: settings }] : []),
+    ]} />
       {confirmation ? <ConfirmationDialog title={confirmation === 'default' ? 'تغيير افتراضي مشاركة الملفات الجديدة' : policy.enabled ? 'تعطيل البحث بين الفروع' : 'تفعيل البحث بين الفروع'} description={confirmation === 'default' ? 'سيطبق الاختيار الجديد عند إنشاء ملفات جديدة فقط. تبقى اختيارات الطلاب الموجودين محفوظة، والبحث خارج الفروع يحتاج إعداد البحث ومنحة الموظف ومشاركة الطالب معًا.' : policy.enabled ? 'سيتوقف البحث خارج الفروع المسندة. تبقى ملفات الطلاب والارتباطات والتاريخ محفوظة.' : 'سيتمكن صاحب صلاحية البحث المستقلة من رؤية الاسم ورقم الطالب ورقم التواصل للطلاب الذين يسمحون بالمشاركة عبر فروع المركز. لا تُفتح السجلات الدراسية أو المالية ولا صلاحية التعديل.'} confirmLabel={confirmation === 'default' ? (policy.default_sharing_enabled ? 'غلق المشاركة للملفات الجديدة' : 'السماح بالمشاركة للملفات الجديدة') : policy.enabled ? 'تعطيل البحث' : 'تفعيل البحث'} onCancel={() => setConfirmation(null)} onConfirm={savePolicy} /> : null}
   </>;
 }

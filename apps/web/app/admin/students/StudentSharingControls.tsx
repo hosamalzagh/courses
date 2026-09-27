@@ -9,7 +9,7 @@ import { InlineNotice } from '@/components/InlineNotice';
 import { centerRequest, responseMessage } from '@/lib/client-api';
 import type { Student, StudentContext } from '@/lib/server-context';
 
-export function StudentSharingControls({ student, inHeader = false }: { student: Student; inHeader?: boolean }) {
+export function StudentSharingControls({ student, inHeader = false, compact = false }: { student: Student; inHeader?: boolean; compact?: boolean }) {
   const router = useRouter();
   const [current, setCurrent] = useState(student);
   const [loadedStudent, setLoadedStudent] = useState(student);
@@ -51,11 +51,11 @@ export function StudentSharingControls({ student, inHeader = false }: { student:
     finally { saving.current = false; setBusy(false); }
   }
 
-  return <div className='form-stack'>
-    <span>المشاركة بين الفروع: {current.sharing_enabled ? 'مسموحة' : 'مغلقة'}</span>
-    {inHeader ? <CenterHeaderActions>    {current.can_manage ? <Button ref={actionButton} busy={busy} disabled={conflict} onClick={() => setConfirmation(true)}>تغيير مشاركة الطالب</Button> : null}
+  return <div className={compact ? 'student-row-actions' : 'form-stack'}>
+    {!compact || !current.can_manage ? <span>المشاركة بين الفروع: {current.sharing_enabled ? 'مسموحة' : 'مغلقة'}</span> : null}
+    {inHeader ? <CenterHeaderActions>    {current.can_manage ? <Button ref={actionButton} busy={busy} disabled={conflict} onClick={() => setConfirmation(true)} aria-label='تغيير مشاركة الطالب'>{compact ? `المشاركة: ${current.sharing_enabled ? 'مسموحة' : 'مغلقة'}` : 'تغيير مشاركة الطالب'}</Button> : null}
     {conflict ? <Button disabled={busy} onClick={reloadStudent}>تحميل أحدث بيانات المشاركة</Button> : null}
-</CenterHeaderActions> : <>    {current.can_manage ? <Button ref={actionButton} busy={busy} disabled={conflict} onClick={() => setConfirmation(true)}>تغيير مشاركة الطالب</Button> : null}
+</CenterHeaderActions> : <>    {current.can_manage ? <Button ref={actionButton} busy={busy} disabled={conflict} onClick={() => setConfirmation(true)} aria-label='تغيير مشاركة الطالب'>{compact ? `المشاركة: ${current.sharing_enabled ? 'مسموحة' : 'مغلقة'}` : 'تغيير مشاركة الطالب'}</Button> : null}
     {conflict ? <Button disabled={busy} onClick={reloadStudent}>تحميل أحدث بيانات المشاركة</Button> : null}
 </>}
     {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
