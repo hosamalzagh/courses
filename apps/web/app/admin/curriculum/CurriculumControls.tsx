@@ -7,7 +7,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 import { FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/field";
 
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
@@ -38,6 +38,11 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [conflict, setConflict] = useState(false);
   const saving = useRef(false);
+  const planView = useRef<object>({});
+  useEffect(() => {
+    planView.current = {};
+    return () => { planView.current = {}; };
+  }, [section]);
   const [baseline, setBaseline] = useState('');
   const dirty = editor !== null && baseline !== JSON.stringify([name, branchId, lectures]);
   const trigger = useRef<HTMLElement | null>(null);
@@ -54,15 +59,21 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   }
   async function editPlan(level: Level) {
     if (saving.current) return;
+    const originView = planView.current;
     const action = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     saving.current = true; setBusy(true); setError('');
     try {
       const response = await centerRequest(`levels/${level.id}`, 'GET');
-      if (!response.ok) { setError(await responseMessage(response)); return; }
+      if (!response.ok) {
+        const message = await responseMessage(response);
+        if (planView.current === originView) setError(message);
+        return;
+      }
       const data = await response.json() as CurriculumContext;
+      if (planView.current !== originView) return;
       trigger.current = action;
       open({ kind: 'plan', level: data.levels[0] }, true);
-    } catch { setError('تعذر تحميل خطة المستوى. حاول مرة أخرى.'); }
+    } catch { if (planView.current === originView) setError('تعذر تحميل خطة المستوى. حاول مرة أخرى.'); }
     finally { saving.current = false; setBusy(false); }
   }
   function close() {

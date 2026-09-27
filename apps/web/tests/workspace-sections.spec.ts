@@ -186,3 +186,28 @@ test('search settings register only their actions and recover current policy bef
     expect((await write(page,'student-search-policy','PATCH',{enabled:original.enabled,default_sharing_enabled:original.default_sharing_enabled,revision:current.revision})).status).toBe(200);
   }
 });
+
+
+test('a delayed plan read cannot open an editor after switching sections', async ({page}) => {
+  await login(page); await page.goto(`${origin}/admin/curriculum?tab=levels`);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let started!: () => void;
+  const requestStarted = new Promise<void>(resolve => { started = resolve; });
+  await page.route('**/api/v1/center/levels/*', async route => {
+    const response = await route.fetch(); started(); await held; await route.fulfill({response});
+  }, {times:1});
+  const loaded = page.waitForResponse(response => /\/api\/v1\/center\/levels\/[^/]+$/.test(response.url()));
+  try {
+    await page.getByRole('button',{name:'تعديل الخطة الأولى',exact:true}).first().click();
+    await requestStarted;
+    await page.getByRole('tab',{name:'الكورسات',exact:true}).click(); await expect(page).toHaveURL(/tab=courses/);
+    await page.getByRole('tab',{name:'المستويات وخططها',exact:true}).click(); await expect(page).toHaveURL(/tab=levels/);
+    release(); await loaded;
+    await expect(page.getByText('جارٍ تحميل خطة المستوى الحالية…', {exact:true})).toHaveCount(0);
+    await expect(page.getByRole('form',{name:'إدارة منهج الفرع',exact:true})).toHaveCount(0);
+    await expect(page.getByRole('table')).toHaveCount(1);
+    await page.getByRole('button',{name:'تعديل الخطة الأولى',exact:true}).first().click();
+    await expect(page.getByRole('form',{name:'إدارة منهج الفرع',exact:true})).toBeVisible();
+  } finally { release(); }
+});
