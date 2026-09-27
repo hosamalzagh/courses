@@ -276,7 +276,9 @@ test("all custom types validate in the real form, old missing fields warn, and i
         .getByRole("button", { name: "حفظ الحقل", exact: true })
         .click();
       fields.push((await (await response).json()).field);
-      await page.getByRole("searchbox",{name:"بحث في حقول المركز",exact:true}).fill(label);
+      await page
+        .getByRole("searchbox", { name: "بحث في حقول المركز", exact: true })
+        .fill(label);
       await expect(
         page.getByRole("cell", { name: label, exact: true }),
       ).toBeVisible();
@@ -578,7 +580,9 @@ test("definition and profile conflicts keep drafts, owner revocation blocks the 
     await staff.close();
   }
   await page.goto(`${origin}/admin/student-custom-fields`);
-  await page.getByRole("searchbox",{name:"بحث في حقول المركز",exact:true}).fill(field.label);
+  await page
+    .getByRole("searchbox", { name: "بحث في حقول المركز", exact: true })
+    .fill(field.label);
   await page
     .getByRole("row")
     .filter({ hasText: field.label })
@@ -614,7 +618,9 @@ test("definition and profile conflicts keep drafts, owner revocation blocks the 
     .getByRole("textbox", { name: "اسم الحقل", exact: true })
     .fill(`CUSTOM62 final ${stamp}`);
   await page.getByRole("button", { name: "حفظ الحقل", exact: true }).click();
-  await page.getByRole("searchbox",{name:"بحث في حقول المركز",exact:true}).fill(`CUSTOM62 final ${stamp}`);
+  await page
+    .getByRole("searchbox", { name: "بحث في حقول المركز", exact: true })
+    .fill(`CUSTOM62 final ${stamp}`);
   await expect(
     page.getByRole("cell", { name: `CUSTOM62 final ${stamp}`, exact: true }),
   ).toBeVisible();
@@ -771,4 +777,116 @@ test("custom field SSR and warm navigation keep six measured SQL reads and a per
   expect(
     reads(warm).reduce((sum, row) => sum + (row.count ?? Number.NaN), 0),
   ).toBeLessThanOrEqual(6);
+});
+
+test("profile recovery resets paged definitions and restores stored later-page values at the current template revision", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
+  const stamp = Date.now();
+  const label = `CUSTOM62 recovery ${stamp}`;
+  const result = await write(page, "student-custom-fields", "POST", {
+    id: crypto.randomUUID(),
+    label,
+    type: "text",
+    required: true,
+    position: 1000000,
+    options: [],
+  });
+  expect(result.status).toBe(201);
+  const field = result.body.field;
+  try {
+    const workspace = await (
+      await page.request.get(`${origin}/api/v1/center/student-workspace`)
+    ).json();
+    const created = await write(page, "students", "POST", {
+      name: `CUSTOM62 recovery student ${stamp}`,
+      branch_ids: [workspace.branches[0].id],
+      request_id: crypto.randomUUID(),
+      custom_values: { [field.id]: "SAVED-LATER-PAGE" },
+    });
+    expect(created.status).toBe(201);
+    const student = created.body.student;
+    await page.goto(`${origin}/admin/students/${student.id}/edit`);
+    const loadUntil = async (label: string) => {
+      while (
+        !(await page.getByRole("textbox", { name: label, exact: true }).count())
+      ) {
+        const before = await page.getByRole("textbox").count();
+        await page
+          .getByRole("button", { name: "تحميل المزيد من الحقول", exact: true })
+          .click({ timeout: 5000 });
+        await expect
+          .poll(() => page.getByRole("textbox").count())
+          .toBeGreaterThan(before);
+      }
+    };
+    await loadUntil(label);
+    await expect(
+      page.getByRole("textbox", { name: label, exact: true }),
+    ).toHaveValue("SAVED-LATER-PAGE");
+    await page
+      .getByRole("textbox", { name: "اسم الطالب", exact: true })
+      .fill(`CUSTOM62 recovery draft ${stamp}`);
+    expect(
+      (
+        await write(page, `students/${student.id}`, "PATCH", {
+          name: `CUSTOM62 colleague ${stamp}`,
+          branch_ids: [],
+          revision: student.revision,
+        })
+      ).status,
+    ).toBe(200);
+    const currentLabel = `CUSTOM62 recovered label ${stamp}`;
+    expect(
+      (
+        await write(page, `student-custom-fields/${field.id}`, "PATCH", {
+          label: currentLabel,
+          position: field.position,
+          required: true,
+          revision: field.revision,
+        })
+      ).status,
+    ).toBe(200);
+    await page
+      .getByRole("button", { name: "حفظ بيانات الطالب", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "تحميل أحدث بيانات الطالب", exact: true })
+      .click();
+    await expect(
+      page.getByRole("textbox", { name: "اسم الطالب", exact: true }),
+    ).toHaveValue(`CUSTOM62 colleague ${stamp}`);
+    await expect(
+      page.getByRole("textbox", { name: label, exact: true }),
+    ).toHaveCount(0);
+    await loadUntil(currentLabel);
+    await expect(
+      page.getByRole("textbox", { name: currentLabel, exact: true }),
+    ).toHaveValue("SAVED-LATER-PAGE");
+    await page
+      .getByRole("textbox", { name: "اسم الطالب", exact: true })
+      .fill(`CUSTOM62 recovered student ${stamp}`);
+    await page
+      .getByRole("button", { name: "حفظ بيانات الطالب", exact: true })
+      .click();
+    await expect(page).toHaveURL(
+      new RegExp(`/students/${student.id}\\?focus=edit$`),
+    );
+  } finally {
+    test.setTimeout(65000);
+    const latest = (
+      await (
+        await page.request.get(
+          `${origin}/api/v1/center/student-custom-fields/${field.id}`,
+        )
+      ).json()
+    ).field;
+    await write(page, `student-custom-fields/${field.id}`, "PATCH", {
+      label: latest.label,
+      position: latest.position,
+      required: false,
+      revision: latest.revision,
+    });
+  }
 });

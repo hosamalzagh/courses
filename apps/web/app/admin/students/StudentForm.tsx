@@ -146,9 +146,18 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
     try {
       const response = await centerRequest(editor === 'new' ? `students/submissions/${requestId}` : `students/${editor.id}`, 'GET');
       if (!response.ok) { setError(await responseMessage(response)); return; }
-      const data = await response.json() as StudentContext & { student?: Student };
       const wasNew = editor === 'new';
-      open(wasNew ? data.student! : data.students[0]);
+      let data: StudentContext;
+      if (wasNew) {
+        const submission = await response.json() as { student: Student };
+        const detail = await centerRequest(`students/${submission.student.id}`, 'GET');
+        if (!detail.ok) { setError(await responseMessage(detail)); return; }
+        data = await detail.json() as StudentContext;
+      } else {
+        data = await response.json() as StudentContext;
+      }
+      setCustomFields(data.custom_fields);
+      open(data.students[0]);
       if (wasNew) setNotice('الملف حُفظ سابقًا. راجع بياناته قبل تعديلها؛ لن يُنشأ ملف آخر.');
       requestAnimationFrame(() => document.getElementById('student-name')?.focus());
     } catch { setError('تعذر تحميل أحدث البيانات. حاول مرة أخرى.'); }

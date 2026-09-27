@@ -423,7 +423,7 @@ class CenterStudentController extends Controller
         return array_keys(array_filter($permissions->branchRoles, fn (array $roles): bool => in_array($action, CenterPermissions::actions($roles), true)));
     }
 
-    private function visibleStudents(CenterPermissions $permissions, bool $includeCenterSearch = false, bool $includeIdentity = false): Builder
+    private function visibleStudents(CenterPermissions $permissions, bool $includeCenterSearch = false, bool $includeProfileDetails = false): Builder
     {
         $associations = DB::connection('tenant')->table('student_branches')->whereColumn('student_id', 'students.id');
         if (! $permissions->isCenterManager()) {
@@ -434,11 +434,11 @@ class CenterStudentController extends Controller
         $identityScope = $permissions->isCenterManager() ? 'true' : 'EXISTS (SELECT 1 FROM student_branches identity_branches WHERE identity_branches.student_id = students.id AND identity_branches.branch_id IN ('.(implode(',', array_map('intval', $identityBranches)) ?: 'NULL').'))';
 
         return DB::connection('tenant')->table('students')
-            ->when($includeIdentity, fn (Builder $query) => $query->selectRaw("CASE WHEN {$identityScope} THEN json_build_object('national_id', national_id, 'passport_number', passport_number) ELSE NULL END AS identity"))
+            ->when($includeProfileDetails, fn (Builder $query) => $query->selectRaw("CASE WHEN {$identityScope} THEN json_build_object('national_id', national_id, 'passport_number', passport_number) ELSE NULL END AS identity"))
             ->addSelect(['students.id', 'student_number', 'manual_code', 'name', 'students.phone as legacy_phone', 'contacts', 'channels', 'revision', 'created_by', 'created_at', 'sharing_enabled', 'status', 'status_revision', ...self::GENERAL_FIELDS])
             ->selectRaw(StudentContacts::phoneSql().' as phone')
             ->selectSub(StudentProfileChoices::selectedQuery(), 'profile_choices')
-            ->when($includeIdentity, fn (Builder $query) => $query->selectSub(StudentCustomFields::valuesQuery(), 'custom_values'))
+            ->when($includeProfileDetails, fn (Builder $query) => $query->selectSub(StudentCustomFields::valuesQuery(), 'custom_values'))
             ->selectSub(StudentCustomFields::missingQuery(), 'missing_custom_fields')
             ->selectSub((clone $associations)->selectRaw('json_agg(branch_id ORDER BY branch_id)'), 'branch_ids')
             ->where(function (Builder $query) use ($associations, $permissions, $includeCenterSearch): void {
