@@ -9,6 +9,7 @@ use App\Support\StudentContacts;
 use App\Support\StudentCustomFields;
 use App\Support\StudentIdentity;
 use App\Support\StudentManualCodes;
+use App\Support\StudentPhotos;
 use App\Support\StudentProfileChoices;
 use Carbon\CarbonImmutable;
 use Closure;
@@ -445,10 +446,10 @@ class CenterStudentController extends Controller
 
         return DB::connection('tenant')->table('students')
             ->when($includeProfileDetails, fn (Builder $query) => $query->selectRaw("CASE WHEN {$identityScope} THEN json_build_object('national_id', national_id, 'passport_number', passport_number) ELSE NULL END AS identity"))
-            ->addSelect(['students.id', 'student_number', 'manual_code', 'name', 'students.phone as legacy_phone', 'contacts', 'channels', 'revision', 'created_by', 'created_at', 'sharing_enabled', 'status', 'status_revision', ...self::GENERAL_FIELDS])
+            ->addSelect(['students.id', 'student_number', 'manual_code', 'name', 'students.phone as legacy_phone', 'contacts', 'channels', 'revision', 'created_by', 'created_at', 'sharing_enabled', 'status', 'status_revision', 'photo_revision', ...self::GENERAL_FIELDS])
             ->selectRaw(StudentContacts::phoneSql().' as phone')
             ->selectSub(StudentProfileChoices::selectedQuery(), 'profile_choices')
-            ->when($includeProfileDetails, fn (Builder $query) => $query->selectSub(StudentCustomFields::valuesQuery($permissions), 'custom_values'))
+            ->when($includeProfileDetails, fn (Builder $query) => $query->selectSub(StudentCustomFields::valuesQuery($permissions), 'custom_values')->selectSub(StudentPhotos::summaryQuery(), 'photo'))
             ->selectSub(StudentCustomFields::missingQuery(), 'missing_custom_fields')
             ->selectSub((clone $associations)->selectRaw('json_agg(branch_id ORDER BY branch_id)'), 'branch_ids')
             ->where(function (Builder $query) use ($associations, $permissions, $includeCenterSearch): void {
@@ -476,6 +477,7 @@ class CenterStudentController extends Controller
             'age' => $row->date_of_birth === null ? null : (int) CarbonImmutable::parse($row->date_of_birth)->diffInYears(CarbonImmutable::today()),
             'status' => $row->status, 'status_revision' => $row->status_revision, 'can_change_status' => $permissions->isCenterManager(),
             'created_by' => $row->created_by, 'created_at' => $row->created_at,
+            'photo' => isset($row->photo) ? json_decode($row->photo, true) : null, 'photo_revision' => $row->photo_revision,
             'manual_code' => $row->manual_code,
             'id' => $row->id, 'student_number' => $row->student_number, 'name' => $row->name, 'phone' => $row->phone,
             'revision' => $row->revision, 'branch_ids' => $branches, 'sharing_enabled' => (bool) $row->sharing_enabled,

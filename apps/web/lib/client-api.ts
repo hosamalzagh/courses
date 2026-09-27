@@ -19,10 +19,10 @@ export async function centerRequest(path: string, method: "GET" | "POST" | "PATC
     cache: "no-store",
     headers: {
       Accept: "application/json",
-      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...(body && !(body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
       ...(xsrf ? { "X-XSRF-TOKEN": decodeURIComponent(xsrf) } : {}),
     },
-    ...(body ? { body: JSON.stringify(body) } : {}),
+    ...(body ? { body: body instanceof FormData ? body : JSON.stringify(body) } : {}),
   });
 
   if (response.status === 401 && !path.startsWith("auth/")) {

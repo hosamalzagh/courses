@@ -11,6 +11,7 @@ use App\Http\Controllers\CenterSettingsController;
 use App\Http\Controllers\CenterStudentController;
 use App\Http\Controllers\CenterStudentCustomFieldController;
 use App\Http\Controllers\CenterStudentNumberingController;
+use App\Http\Controllers\CenterStudentPhotoController;
 use App\Http\Controllers\CenterStudentProfileChoiceController;
 use App\Http\Controllers\CenterStudentSearchController;
 use App\Http\Controllers\CenterStudentStatusController;
@@ -82,6 +83,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::post('students/identity-preview', [CenterStudentController::class, 'identityPreview']);
         Route::get('students/submissions/{requestId}', [CenterStudentController::class, 'submission']);
         Route::get('students/{studentId}/barcode', [CenterStudentController::class, 'barcode']);
+        Route::post('students/{studentId}/photo', [CenterStudentPhotoController::class, 'store']);
+        Route::get('students/{studentId}/photo/{photoId}', [CenterStudentPhotoController::class, 'show']);
         Route::get('students/{studentId}', [CenterStudentController::class, 'workspace']);
         Route::post('students/{studentId}/status', [CenterStudentStatusController::class, 'store']);
         Route::post('students', [CenterStudentController::class, 'store']);

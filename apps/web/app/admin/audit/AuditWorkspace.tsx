@@ -19,7 +19,7 @@ const eventNames: Record<string, string> = {
   "center.student_numbering_changed": "تغيير بداية ترقيم الطلاب",
   "center.settings_updated": "تعديل إعدادات المركز",
   "student.sharing_changed": "تغيير مشاركة الطالب", "center.student_sharing_default_changed": "تغيير افتراضي مشاركة الملفات الجديدة",
-  "student.created": "إنشاء ملف طالب", "student.updated": "تعديل ملف طالب", "student.suspended": "إيقاف ملف طالب", "student.reactivated": "فك إيقاف ملف طالب",
+  "student.photo_changed": "تغيير صورة الطالب", "student.created": "إنشاء ملف طالب", "student.updated": "تعديل ملف طالب", "student.suspended": "إيقاف ملف طالب", "student.reactivated": "فك إيقاف ملف طالب",
   "instructor.created": "إنشاء ملف محاضر", "instructor.updated": "تعديل ملف محاضر",
   "center.student_search_changed": "تغيير إتاحة البحث عن طلاب المركز",
   "curriculum.course_created": "إنشاء كورس", "curriculum.stage_created": "إنشاء مرحلة دراسية",
