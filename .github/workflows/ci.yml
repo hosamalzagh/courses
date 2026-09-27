@@ -101,7 +101,7 @@ jobs:
           php artisan config:clear --no-interaction
 
       - name: Run unit and feature tests
-        run: php artisan test --compact --no-interaction
+        run: vendor/bin/phpunit --no-progress
 
   web:
     name: Next.js checks and build
