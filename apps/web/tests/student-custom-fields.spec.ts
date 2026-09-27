@@ -104,10 +104,32 @@ test("manager defines a required skillcard and registration form preserves input
   );
   await page.getByRole("button", { name: "حفظ الحقل", exact: true }).click();
   const field = (await (await created).json()).field;
+  for (let batch = 1; ; batch++) {
+    await page.goto(`${origin}/admin/student-custom-fields?page=${batch}`);
+    await page
+      .getByRole("searchbox", { name: "بحث في حقول المركز", exact: true })
+      .fill(label);
+    if (await page.getByRole("cell", { name: label, exact: true }).count())
+      break;
+    await expect(
+      page.getByRole("link", { name: "الدفعة التالية", exact: true }),
+    ).toBeVisible();
+  }
   await expect(
     page.getByRole("cell", { name: label, exact: true }),
   ).toBeVisible();
   await page.goto(`${origin}/admin/students/new`);
+  while (
+    !(await page.getByRole("textbox", { name: label, exact: true }).count())
+  ) {
+    const before = await page.getByRole("textbox").count();
+    await page
+      .getByRole("button", { name: "تحميل المزيد من الحقول", exact: true })
+      .click();
+    await expect
+      .poll(() => page.getByRole("textbox").count())
+      .toBeGreaterThan(before);
+  }
   const name = `طالب حقول عامة ${Date.now()}`;
   await page
     .getByRole("textbox", { name: "اسم الطالب", exact: true })
@@ -131,6 +153,13 @@ test("manager defines a required skillcard and registration form preserves input
     .getByRole("button", { name: "حفظ ملف الطالب", exact: true })
     .click();
   await expect(page).toHaveURL(/\/students\/[0-9a-f-]+\?focus=edit$/);
+  while (!(await page.getByText("000SKILL", { exact: true }).count())) {
+    const before = await page.locator("dt").count();
+    await page
+      .getByRole("button", { name: "تحميل المزيد من الحقول", exact: true })
+      .click();
+    await expect.poll(() => page.locator("dt").count()).toBeGreaterThan(before);
+  }
   await expect(page.getByText("000SKILL", { exact: true })).toBeVisible();
   expect(
     (
