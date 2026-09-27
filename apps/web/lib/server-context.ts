@@ -158,7 +158,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   if (studentEdit) return loadStudentWorkspace("", decodeURIComponent(studentEdit[1]));
   if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q", "identifier"]));
   if (path === "/admin/curriculum") return loadCurriculumWorkspace(query(["courses_page", "stages_page", "levels_page", "branches_page"]));
-  if (path === "/admin/student-search") return loadStudentSearchWorkspace(query(["q", "page"]));
+  if (path === "/admin/student-search") return loadStudentSearchWorkspace(url.searchParams.get("tab") === "settings" ? "" : query(["q", "page"]));
   const detail = path.match(/^\/admin\/(students|instructors|curriculum)\/([^/]+)$/);
   if (detail) {
     const id = decodeURIComponent(detail[2]);

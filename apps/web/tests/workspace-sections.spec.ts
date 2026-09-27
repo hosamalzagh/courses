@@ -349,9 +349,11 @@ test('settings skip retained student queries and browser history dismisses polic
     if (!original.enabled) expect((await write(page,'student-search-policy','PATCH',{enabled:true,revision:original.revision})).status).toBe(200);
     const student = (await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json()).students[0];
     const value = String(student.student_number);
+    await page.mouse.move(0, 0);
     const start = cursor(); await page.goto(`${origin}/admin/student-search?tab=settings&q=${value}&page=2`);
     await expect(page.getByRole('tab',{name:'إعدادات المشاركة والبحث',exact:true})).toHaveAttribute('aria-selected','true');
-    const rows = metrics(start); expect(rows.length).toBeGreaterThan(0);
+    const rows = metrics(start); expect(rows).toHaveLength(1);
+    expect(rows[0].path).toBe('/api/v1/center/student-search-workspace');
     expect(rows.every(row => typeof row.count === 'number' && row.count > 0)).toBe(true);
     const sql = rows.reduce((sum,row) => sum + row.count,0); expect(sql).toBeLessThanOrEqual(5);
     console.log(JSON.stringify({route:'student-search settings with retained query',sql}));
