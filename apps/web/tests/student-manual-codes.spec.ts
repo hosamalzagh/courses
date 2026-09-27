@@ -151,10 +151,15 @@ test('disabled codes retain values; code search and writes enforce current branc
 });
 
 test('settings conflict recovers through the correct header form and RTL themes work on mobile', async ({page}) => {
-  await signIn(page); await page.goto(`${origin}/admin/settings`);
+  await signIn(page); await page.getByRole('link',{name:'إعدادات المركز',exact:true}).click();
   const label=page.getByRole('textbox',{name:'اسم الباركود الإضافي',exact:true});
   await label.fill(''); await page.getByRole('button',{name:'حفظ إعداد الباركود الإضافي',exact:true}).click(); await expect(label).toBeFocused();
   await label.fill('مسودة الكارت');
+  await page.goBack();
+  await expect(page.getByRole('alertdialog')).toContainText('مغادرة دون حفظ');
+  await page.getByRole('alertdialog').getByRole('button',{name:'إلغاء',exact:true}).click();
+  await expect(page).toHaveURL(`${origin}/admin/settings`);
+  await expect(label).toHaveValue('مسودة الكارت');
   const current=(await (await page.request.get(`${origin}/api/v1/center/settings`)).json()).settings;
   expect((await write(page,'student-code-settings','PATCH',{enabled:true,label:'إعداد أحدث',revision:current.student_code_revision})).status).toBe(200);
   await page.getByRole('button',{name:'حفظ إعداد الباركود الإضافي',exact:true}).click();

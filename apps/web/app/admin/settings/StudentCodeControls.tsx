@@ -39,7 +39,7 @@ export function StudentCodeControls({ settings }: { settings: CenterSettings }) 
     finally { saving.current=false; setBusy(false); }
   }
   return <form id={`${prefix}-code-settings`} className='context-card form-stack' aria-label='إعداد الباركود الإضافي' noValidate onSubmit={submit}>
-    <FieldGroup><UnsavedChangesGuard dirty={JSON.stringify(draft) !== JSON.stringify(saved)} />
+    <FieldGroup><UnsavedChangesGuard guardHistory dirty={JSON.stringify(draft) !== JSON.stringify(saved)} />
       <h2>الباركود الإضافي</h2><p>رمز يدوي إضافي باسم يختاره المركز. تعطيله يحفظ القيم السابقة ويوقف استخدامها للبحث؛ لا تتغير أرقام الطلاب الداخلية.</p>
       {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}{notice ? <InlineNotice>{notice}</InlineNotice> : null}
       <FieldSet disabled={busy}>

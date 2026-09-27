@@ -16,6 +16,7 @@ The register's explicit “الرقم الداخلي / الباركود” searc
 - That integration run exposed deferred contact focus stealing focus from the next field. The shared component now moves focus only if the user has not already moved it; the existing shared-phone journey asserts both name and relationship remain correct.
 - Actual ordinary SSR settings/new/profile/edit/identifier search each measure 6 SQL queries including server fetches. Intent-prefetched warm navigation stays within 6, preserves the header and sends no extra document request. Missing or nonnumeric measurements fail acceptance.
 - Lint, TypeScript, production build, Pint and diff whitespace checks pass. Desktop light/dark and mobile dark screenshots were inspected; theme screenshots disable transitions to capture the settled state.
+- Standards review found missing history protection on the barcode settings form. A failing browser Back test preceded enabling the shared history guard; cancellation now retains the draft, and the complete five-journey barcode suite passes again. The independent settings forms keep their existing guards and native form ownership.
 
 ## Repeatable local acceptance
 
