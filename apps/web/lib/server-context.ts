@@ -34,7 +34,8 @@ export type Member = {
 };
 export type Invitation = { id: number; email: string; center_role: string | null; expires_at: string; status: "pending" | "expired" | "uncertain" | "not_sent" };
 export type MemberContext = CenterContext & { members: Member[]; invitations: Invitation[]; grant_options: Record<string, GrantOption>; pagination: WorkspacePagination };
-export type Student = { id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
+export type StudentGeneralData = { date_of_birth: string | null; gender: 'male' | 'female' | null; address: string | null; email: string | null; school: string | null; employer: string | null; specialization: string | null };
+export type Student = StudentGeneralData & { age: number | null; created_by: number; created_at: string; id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
 export type StudentContext = CenterContext & { students: Student[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type Instructor = { id: string; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
 export type InstructorContext = CenterContext & { instructors: Instructor[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
@@ -42,7 +43,7 @@ export type StudentSearchPolicy = { enabled: boolean; revision: number };
 export type StudentSearchResult = { id: string; student_number: number; name: string; phone: string | null; within_scope: boolean };
 export type StudentSearchContext = CenterContext & { policy: StudentSearchPolicy; students: StudentSearchResult[]; pagination: { page: number; has_more: boolean }; can_search: boolean };
 
-export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable";
+export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable" | "student_unavailable";
 
 const fetchCenterPayload = cache(async function fetchCenterPayload<T>(path: string): Promise<T | CenterAccessFailure> {
   const incoming = await headers();
@@ -52,7 +53,7 @@ const fetchCenterPayload = cache(async function fetchCenterPayload<T>(path: stri
 
   let response: Response;
   try {
-    response = await fetch(`http://${host}/api/v1/center/${path}`, {
+    response = await fetch(`${process.env.COURSES_INTERNAL_API_ORIGIN?.replace('{host}', host) ?? `http://${host}`}/api/v1/center/${path}`, {
       headers: {
         Cookie: incoming.get("cookie") ?? "",
         Accept: "application/json",
@@ -72,7 +73,10 @@ const fetchCenterPayload = cache(async function fetchCenterPayload<T>(path: stri
     const data = await response.json().catch(() => ({}));
     return data.code === "membership_suspended" ? "suspended" : "forbidden";
   }
-  if (response.status === 404) notFound();
+  if (response.status === 404) {
+    if (path.startsWith('students/')) return 'student_unavailable';
+    notFound();
+  }
   if (response.status === 423 || response.status === 503) return "unavailable";
   if (!response.ok) return "unavailable";
 
@@ -122,6 +126,9 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   if (path === "/admin/audit") return loadCenterContext("audit");
   if (path === "/admin/members") return loadMemberWorkspace(query(["members_page", "invitations_page", "branches_page"]));
   if (path === "/admin/students") return loadStudentWorkspace(query(["page", "branches_page", "q"]));
+  if (path === "/admin/students/new") return loadStudentWorkspace();
+  const studentEdit = path.match(/^\/admin\/students\/([^/]+)\/edit$/);
+  if (studentEdit) return loadStudentWorkspace("", decodeURIComponent(studentEdit[1]));
   if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q"]));
   if (path === "/admin/curriculum") return loadCurriculumWorkspace(query(["courses_page", "stages_page", "levels_page", "branches_page"]));
   if (path === "/admin/student-search") return loadStudentSearchWorkspace(query(["q", "page"]));

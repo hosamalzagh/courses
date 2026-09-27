@@ -15,7 +15,8 @@ export function getAdminHeader(path: string, context: CenterContext): { title: s
     "/admin/members": { title: "موظفو المركز", description: "الدعوات والعضويات وأدوار كل فرع." },
   };
   if (path.startsWith("/admin/curriculum/")) return { ...headers["/admin/curriculum"], title: "خطة المستوى" };
-  if (path.startsWith("/admin/students/")) return headers["/admin/students"];
+  if (path === "/admin/students/new") return { title: 'إنشاء ملف طالب', description: 'ابدأ بالاسم وفرع مصرح به، ثم استكمل البيانات الاختيارية.' };
+  if (path.startsWith("/admin/students/")) return { title: path.endsWith('/edit') ? 'تعديل بيانات الطالب' : 'ملف الطالب', description: headers["/admin/students"].description };
   if (path.startsWith("/admin/instructors/")) return headers["/admin/instructors"];
   return headers[path] ?? headers["/admin"];
 }

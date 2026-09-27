@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Center;
 use App\Models\CenterMembership;
 use App\Support\CenterPermissions;
+use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -16,6 +17,8 @@ use stdClass;
 
 class CenterStudentController extends Controller
 {
+    private const GENERAL_FIELDS = ['date_of_birth', 'gender', 'address', 'email', 'school', 'employer', 'specialization'];
+
     public function workspace(Request $request, ?string $studentId = null): JsonResponse
     {
         $data = $request->validate([
@@ -122,6 +125,7 @@ class CenterStudentController extends Controller
             }
             $id = (string) Str::uuid();
             DB::connection('tenant')->table('students')->insert([
+                ...array_intersect_key($data, array_flip(self::GENERAL_FIELDS)),
                 'id' => $id, 'name' => $data['name'], 'phone' => $data['phone'],
                 'name_search' => $this->normalizeName($data['name']), 'phone_search' => $this->normalizePhone($data['phone']),
                 'request_id' => $request->input('request_id'), 'request_hash' => $hash, 'created_by' => $request->user()->id,
@@ -149,13 +153,16 @@ class CenterStudentController extends Controller
             $this->authorizeBranches($permissions, $data['branch_ids']);
             $currentBranches = DB::connection('tenant')->table('student_branches')->where('student_id', $studentId)->pluck('branch_id')->all();
             $added = array_diff($data['branch_ids'], $currentBranches);
-            if ($row->name === $data['name'] && $row->phone === $data['phone'] && $added === []) {
+            $general = array_intersect_key($data, array_flip(self::GENERAL_FIELDS));
+            $generalChanged = collect($general)->contains(fn ($value, $field): bool => $row->{$field} !== $value);
+            if (! $generalChanged && $row->name === $data['name'] && $row->phone === $data['phone'] && $added === []) {
                 return response()->json(['student' => $before]);
             }
             if ($row->revision !== (int) $request->input('revision')) {
                 $this->conflict('student_changed');
             }
             DB::connection('tenant')->table('students')->where('id', $studentId)->update([
+                ...$general,
                 'name' => $data['name'], 'phone' => $data['phone'],
                 'name_search' => $this->normalizeName($data['name']), 'phone_search' => $this->normalizePhone($data['phone']),
                 'revision' => $row->revision + 1, 'updated_at' => now(),
@@ -187,10 +194,24 @@ class CenterStudentController extends Controller
             'name' => ['required', 'string', 'max:255'], 'phone' => ['nullable', 'string', 'max:50'],
             'branch_ids' => ['present', 'array', $request->isMethod('POST') ? 'min:1' : 'min:0', 'max:50'], 'branch_ids.*' => ['integer', 'distinct'],
             'student_number' => ['prohibited'], 'user_id' => ['prohibited'],
-        ], ['name.required' => 'أدخل اسم الطالب.', 'branch_ids.required' => 'اختر فرعًا مصرحًا به على الأقل.']);
+            'date_of_birth' => ['sometimes', 'nullable', 'date_format:Y-m-d', 'after_or_equal:0001-01-01', 'before_or_equal:today'],
+            'gender' => ['sometimes', 'nullable', 'in:male,female'],
+            'address' => ['sometimes', 'nullable', 'string', 'max:1000'],
+            'email' => ['sometimes', 'nullable', 'email', 'max:255'],
+            'school' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'employer' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'specialization' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ], ['name.required' => 'أدخل اسم الطالب.', 'branch_ids.required' => 'اختر فرعًا مصرحًا به على الأقل.',
+            'date_of_birth.*' => 'أدخل تاريخ ميلاد صحيحًا بصيغة YYYY-MM-DD لا يتجاوز اليوم.',
+            'email.*' => 'أدخل بريدًا إلكترونيًا صحيحًا.', 'gender.*' => 'اختر ذكر أو أنثى.']);
         $data['name'] = trim($data['name']);
         abort_if($data['name'] === '', 422, 'أدخل اسم الطالب.');
         $data['phone'] = isset($data['phone']) ? trim($data['phone']) : null;
+        foreach (self::GENERAL_FIELDS as $field) {
+            if (array_key_exists($field, $data) && is_string($data[$field])) {
+                $data[$field] = trim($data[$field]) ?: null;
+            }
+        }
         $data['branch_ids'] = array_map('intval', $data['branch_ids']);
         sort($data['branch_ids']);
 
@@ -218,7 +239,7 @@ class CenterStudentController extends Controller
         }
 
         return DB::connection('tenant')->table('students')
-            ->select(['students.id', 'student_number', 'name', 'phone', 'revision'])
+            ->select(['students.id', 'student_number', 'name', 'phone', 'revision', 'created_by', 'created_at', ...self::GENERAL_FIELDS])
             ->selectSub((clone $associations)->selectRaw('json_agg(branch_id ORDER BY branch_id)'), 'branch_ids')
             ->where(function (Builder $query) use ($associations, $permissions, $includeCenterSearch): void {
                 $query->whereExists((clone $associations)->selectRaw('1'));
@@ -232,7 +253,10 @@ class CenterStudentController extends Controller
     {
         $branches = json_decode($row->branch_ids, true);
 
-        return ['id' => $row->id, 'student_number' => $row->student_number, 'name' => $row->name, 'phone' => $row->phone,
+        return [...array_intersect_key((array) $row, array_flip(self::GENERAL_FIELDS)),
+            'age' => $row->date_of_birth === null ? null : (int) CarbonImmutable::parse($row->date_of_birth)->diffInYears(CarbonImmutable::today()),
+            'created_by' => $row->created_by, 'created_at' => $row->created_at,
+            'id' => $row->id, 'student_number' => $row->student_number, 'name' => $row->name, 'phone' => $row->phone,
             'revision' => $row->revision, 'branch_ids' => $branches,
             'can_manage' => collect($branches)->contains(fn (int $id): bool => $permissions->can('students.manage', $id))];
     }
@@ -254,7 +278,7 @@ class CenterStudentController extends Controller
 
     private function audit(Request $request, string $event, array $after, ?array $before, array $branchIds, array $previousBranchIds = []): void
     {
-        $basic = fn (?array $student): ?array => $student === null ? null : array_intersect_key($student, array_flip(['student_number', 'name', 'phone']));
+        $basic = fn (?array $student): ?array => $student === null ? null : array_intersect_key($student, array_flip(['student_number', 'name', 'phone', ...self::GENERAL_FIELDS]));
         foreach ($branchIds as $branchId) {
             DB::connection('tenant')->table('center_audit_logs')->insert([
                 'actor_id' => $request->user()->id, 'branch_id' => $branchId, 'event' => $event,
