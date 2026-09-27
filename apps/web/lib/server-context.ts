@@ -35,10 +35,12 @@ export type Member = {
 };
 export type Invitation = { id: number; email: string; center_role: string | null; expires_at: string; status: "pending" | "expired" | "uncertain" | "not_sent" };
 export type MemberContext = CenterContext & { members: Member[]; invitations: Invitation[]; grant_options: Record<string, GrantOption>; pagination: WorkspacePagination };
-export type StudentCustomField = {id:string;label:string;type:'text'|'number'|'date'|'select'|'boolean';required:boolean;position:number;options:string[];revision:number};
+export type StudentCustomField = {id:string;label:string;type:'text'|'number'|'date'|'select'|'boolean';required:boolean;position:number;options:string[];revision:number;active:boolean;classification:'general'|'identity';disabled_options:string[];used:boolean};
 export type StudentCustomValues = Record<string, string | boolean | null>;
 export type StudentCustomFieldList = {fields:StudentCustomField[];revision:number;page:number;has_more:boolean};
 export type StudentCustomFieldContext = CenterContext & {fields:StudentCustomField[];values:StudentCustomValues;revision:number;pagination:{page:number;has_more:boolean}};
+export type StudentCustomHistoryEntry = {id:number;field_id:string;profile_revision:number;label:string;type:StudentCustomField['type'];value:string|boolean|null;actor_id:number|null;actor_name:string|null;imported:boolean;created_at:string;active:boolean};
+export type StudentCustomHistory = {entries:StudentCustomHistoryEntry[];pagination:{page:number;has_more:boolean}};
 export type StudentChoiceKind = 'city' | 'qualification' | 'profession' | 'collection_method' | 'discovery_source';
 export type StudentProfileChoice = { id: string; kind: StudentChoiceKind; label: string; position: number; active: boolean; revision: number };
 export type StudentChoiceList = { choices: StudentProfileChoice[]; page: number; has_more: boolean };
@@ -50,7 +52,7 @@ export type StudentContactsData = { contacts: StudentContact[]; channels: Record
 export type StudentIdentityData = { national_id: string | null; passport_number: string | null };
 export type Student = {custom_values?:StudentCustomValues;missing_custom_fields:number; identity?: StudentIdentityData; can_read_identity: boolean; can_manage_identity: boolean } & StudentGeneralData & StudentContactsData & { legacy_phone: string | null; manual_code: string | null } & { profile_choices: Partial<Record<StudentChoiceKind, StudentProfileChoice>>; age: number | null; created_by: number; created_at: string; id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean; sharing_enabled: boolean; status: 'active' | 'suspended'; status_revision: number; can_change_status: boolean };
 export type StudentSuspension = { id: string; suspended_by: number; suspended_by_name: string; suspended_reason: string; suspended_at: string; lifted_by: number | null; lifted_by_name: string | null; lifted_reason: string | null; lifted_at: string | null };
-export type StudentContext = CenterContext & {custom_fields:StudentCustomFieldList; student_code_settings: {enabled:boolean;label:string;revision:number}; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
+export type StudentContext = CenterContext & {custom_history?:StudentCustomHistory;custom_fields:StudentCustomFieldList; student_code_settings: {enabled:boolean;label:string;revision:number}; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type Instructor = { id: string; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
 export type InstructorContext = CenterContext & { instructors: Instructor[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type StudentSearchPolicy = { enabled: boolean; revision: number; default_sharing_enabled: boolean };
@@ -159,7 +161,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   const detail = path.match(/^\/admin\/(students|instructors|curriculum)\/([^/]+)$/);
   if (detail) {
     const id = decodeURIComponent(detail[2]);
-    if (detail[1] === "students") return loadStudentWorkspace(query(["status_page"]), id);
+    if (detail[1] === "students") return loadStudentWorkspace(query(["status_page", "tab", "custom_history_page"]), id);
     if (detail[1] === "instructors") return loadInstructorWorkspace("", id);
     return loadCurriculumWorkspace("", id);
   }

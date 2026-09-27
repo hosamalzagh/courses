@@ -256,6 +256,7 @@ test.afterEach(() => {
         foreach ($rows as $row) if (!preg_match('/^(طالب قبول|طالب آخر|محجوب|مصرح|إعادة|متزامن أول|متزامن ثان|استعادة) [0-9]{13}/u', $row->name)) throw new \RuntimeException('Unexpected student fixture');
         \Illuminate\Support\Facades\DB::table('center_audit_logs')->whereIn(\Illuminate\Support\Facades\DB::raw("details->>'student_id'"), $ids)->delete();
         \Illuminate\Support\Facades\DB::table('student_suspensions')->whereIn('student_id', $ids)->delete();
+        \Illuminate\Support\Facades\DB::table('student_custom_field_history')->whereIn('student_id', $ids)->delete();
         \Illuminate\Support\Facades\DB::table('student_custom_field_values')->whereIn('student_id', $ids)->delete();
         \Illuminate\Support\Facades\DB::table('student_branches')->whereIn('student_id', $ids)->delete();
         \Illuminate\Support\Facades\DB::table('students')->whereIn('id', $ids)->delete();

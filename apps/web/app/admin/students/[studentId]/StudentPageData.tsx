@@ -1,4 +1,5 @@
 import 'server-only';
+import { StudentCustomFieldHistory } from '@/components/StudentCustomFieldHistory';
 import { StudentCustomFieldSummary } from '@/components/StudentCustomFields';
 import { InlineNotice } from '@/components/InlineNotice';
 import { StudentContactSummary } from '@/components/StudentContactSummary';
@@ -12,10 +13,10 @@ import { StudentStatusPanel } from '../StudentStatusPanel';
 import { StudentSharingControls } from '../StudentSharingControls';
 import { StudentProfileActions } from '../StudentProfileActions';
 
-export async function StudentPageData({ params, searchParams }: { params: Promise<{ studentId: string }>; searchParams: Promise<{ status_page?: string }> }) {
+export async function StudentPageData({ params, searchParams }: { params: Promise<{ studentId: string }>; searchParams: Promise<{ status_page?: string; tab?:string; custom_history_page?:string }> }) {
   const { studentId } = await params;
-  const { status_page } = await searchParams;
-  const query = new URLSearchParams(status_page ? { status_page } : {}).toString();
+  const { status_page, tab, custom_history_page } = await searchParams;
+  const query = new URLSearchParams({...status_page ? {status_page} : {}, ...tab === 'custom-history' ? {tab,...custom_history_page ? {custom_history_page} : {}} : {}}).toString();
   const context = await loadStudentWorkspace(query, studentId);
   if (typeof context === 'string') return <CenterAccessState state={context} />;
   const student = context.students[0];
@@ -34,7 +35,8 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
       <p>الفروع المصرح بها: {student.branch_ids.map((id) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join('، ')}</p>
     </section>
     {student.missing_custom_fields > 0 ? <InlineNotice tone='warning'>الملف ينقصه {student.missing_custom_fields.toLocaleString('ar-EG')} من الحقول المطلوبة. أكملها عند تعديل البيانات؛ المشاركة والإيقاف مستقلان.</InlineNotice> : null}
-    <nav className='form-actions' aria-label='أقسام ملف الطالب'><a href='#student-personal' aria-current='page'>البيانات الشخصية</a>{context.permissions.can_manage_center || Object.values(context.permissions.branch_roles).some((roles) => roles.includes('branch_auditor')) ? <Link href='/admin/audit'>سجل التغييرات</Link> : null}</nav>
+    <nav className='form-actions' aria-label='أقسام ملف الطالب'><Link href={`/admin/students/${student.id}`} aria-current={tab === 'custom-history' ? undefined : 'page'}>البيانات الشخصية</Link><Link href={`/admin/students/${student.id}?tab=custom-history`} aria-current={tab === 'custom-history' ? 'page' : undefined}>تاريخ الحقول الإضافية</Link>{context.permissions.can_manage_center || Object.values(context.permissions.branch_roles).some((roles) => roles.includes('branch_auditor')) ? <Link href='/admin/audit'>سجل التغييرات</Link> : null}</nav>
+    {context.custom_history ? <StudentCustomFieldHistory history={context.custom_history} studentId={student.id} /> : <>
     <section id='student-personal' className='context-card form-stack' aria-labelledby='student-personal-title'>
       <h2 id='student-personal-title'>البيانات الشخصية</h2>
       <dl className='student-fields student-data'>
@@ -54,5 +56,6 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
     {student.identity ? <section className='context-card form-stack' aria-label='بيانات الهوية'><h2>بيانات الهوية</h2><dl className='student-fields student-data'><div><dt>الرقم القومي المصري</dt><dd><bdi dir='ltr'>{value(student.identity.national_id)}</bdi></dd></div><div><dt>رقم جواز السفر</dt><dd><bdi dir='ltr'>{value(student.identity.passport_number)}</bdi></dd></div></dl></section> : null}
     <section className='context-card form-stack' aria-label='حقول الطالب الإضافية'><StudentCustomFieldSummary initial={context.custom_fields} initialValues={student.custom_values ?? {}} studentId={student.id} prefix={`profile-${student.id}`} /></section>
     <section className='context-card form-stack' aria-label='جهات التواصل وقنوات المتابعة'><h2>جهات التواصل وقنوات المتابعة</h2><StudentContactSummary data={student} legacyPhone={student.legacy_phone} /></section>
+    </>}
   </CenterPage>;
 }

@@ -10,7 +10,7 @@ export function StudentAuditDetails({ entry }: { entry: AuditEntry }) {
     let details=entry.details;if(typeof details === 'string') {try{details=JSON.parse(details);}catch{return null;}}
     if(!details || typeof details !== 'object' || Array.isArray(details) || !('after' in details) || !details.after)return null;
     const data=details as {before:StudentCustomField|null;after:StudentCustomField};
-    const label=(field:StudentCustomField|null)=>field ? `${field.label} · ${customFieldTypeLabels[field.type]} · ترتيب ${field.position} · ${field.required ? 'مطلوب' : 'اختياري'}` : 'حقل جديد';
+    const label=(field:StudentCustomField|null)=>field ? `${field.label} · ${customFieldTypeLabels[field.type]} · ترتيب ${field.position} · ${field.required ? 'مطلوب' : 'اختياري'} · ${field.classification === 'identity' ? 'هوية مقيدة' : 'عام'} · ${field.active === false ? 'معطل' : 'فعال'}${field.disabled_options?.length ? ` · اختيارات معطلة: ${field.disabled_options.join('، ')}` : ''}` : 'حقل جديد';
     return <details><summary>عرض تغيير الحقل الإضافي</summary><p>قبل: {label(data.before)}</p><p>بعد: {label(data.after)}</p></details>;
   }
   if (entry.event === 'center.student_code_settings_changed') {

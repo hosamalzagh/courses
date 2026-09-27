@@ -25,7 +25,9 @@ export function StudentCustomFields({
   disabled = false,
   onBusyChange,
   onLoadedValues,
+  canReadIdentity = true,
 }: {
+  canReadIdentity?: boolean;
   prefix: string;
   list: StudentCustomFieldList;
   onListChange: (list: StudentCustomFieldList) => void;
@@ -90,6 +92,9 @@ export function StudentCustomFields({
     }
   }
   const edit = Boolean(onValuesChange);
+  const visibleFields = list.fields.filter(
+    (field) => field.classification !== "identity" || canReadIdentity,
+  );
   return (
     <FieldSet aria-label="الحقول الإضافية">
       <FieldLegend>الحقول الإضافية</FieldLegend>
@@ -97,18 +102,27 @@ export function StudentCustomFields({
       {errors.custom_values ? (
         <InlineNotice tone="error">{errors.custom_values}</InlineNotice>
       ) : null}
-      {!list.fields.length ? (
+      {!visibleFields.length ? (
         <p className="muted">لم يعرّف المركز حقولًا إضافية بعد.</p>
       ) : null}
       {edit ? (
         <FieldGroup>
-          {list.fields.map((field) => {
+          {visibleFields.map((field) => {
             const value = values[field.id];
             const label = field.label;
             const id = `${prefix}-custom-${field.id}`;
             const error = errors[`custom_values.${field.id}`];
             const update = (value: string | boolean | null) =>
               onValuesChange?.({ ...values, [field.id]: value });
+            if (!field.active)
+              return (
+                <div key={field.id}>
+                  <p>{label} — معطل</p>
+                  <p>
+                    <bdi>{customFieldValue(value)}</bdi>
+                  </p>
+                </div>
+              );
             return field.type === "select" || field.type === "boolean" ? (
               <ChoiceField
                 key={field.id}
@@ -137,7 +151,10 @@ export function StudentCustomFields({
                       ]
                     : field.options.map((option) => ({
                         value: option,
-                        label: option,
+                        label: field.disabled_options.includes(option)
+                          ? `${option} — معطل`
+                          : option,
+                        disabled: field.disabled_options.includes(option),
                       }))),
                 ]}
               />
@@ -166,10 +183,11 @@ export function StudentCustomFields({
         </FieldGroup>
       ) : (
         <dl className="student-fields student-data">
-          {list.fields.map((field) => (
+          {visibleFields.map((field) => (
             <div key={field.id}>
               <dt>
                 {field.label}
+                {field.active ? "" : " — معطل"}
                 {field.required ? " (مطلوب)" : ""}
               </dt>
               <dd>
