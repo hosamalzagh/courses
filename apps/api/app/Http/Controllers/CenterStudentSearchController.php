@@ -17,12 +17,13 @@ class CenterStudentSearchController extends Controller
 {
     public function workspace(Request $request): JsonResponse
     {
-        $data = $request->validate(['q' => ['nullable', 'string', 'max:255'], 'page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
+        $data = $request->validate(['q' => ['nullable', 'string', 'max:255'], 'page' => ['sometimes', 'integer', 'min:1', 'max:100000'], 'view' => ['sometimes', 'in:settings']]);
         $permissions = $request->attributes->get('center_permissions');
         abort_unless(self::hasSearchPermission($permissions), 403);
         $policy = DB::connection('tenant')->table('student_search_policy')->where('id', 1)->first(['enabled', 'revision', 'default_sharing_enabled']);
-        $page = (int) ($data['page'] ?? 1);
-        $query = trim($data['q'] ?? '');
+        $showSettings = ($data['view'] ?? null) === 'settings' && $permissions->isCenterManager();
+        $page = $showSettings ? 1 : (int) ($data['page'] ?? 1);
+        $query = $showSettings ? '' : trim($data['q'] ?? '');
         $students = collect();
         if ($policy->enabled && $query !== '') {
             $search = self::normalizeName($query);

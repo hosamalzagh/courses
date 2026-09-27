@@ -124,6 +124,7 @@ test('instructor profiles are created without accounts, reused across branches a
   const first = (await (await createdResponse).json()).instructor;
   createdInstructorIds.add(first.id);
   await expect(page.getByRole('status').filter({ hasText: 'أُنشئ ملف المحاضر' })).toBeVisible();
+  await page.getByRole('tab', { name: 'البحث عن محاضر', exact: true }).click();
   await page.getByRole('textbox', { name: 'البحث في جميع الملفات المصرح بها' }).fill(firstName);
   await page.getByRole('button', { name: 'بحث عن محاضر', exact: true }).click();
   await expect(page.getByRole('row').filter({ hasText: firstName })).toBeVisible();

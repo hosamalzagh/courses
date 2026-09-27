@@ -6,10 +6,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/field";
 
 
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
+import { WorkspaceSections } from '@/components/WorkspaceSections';
 import { DataTable } from '@/components/DataTable';
 import { Button } from '@/components/Button';
 import { FormField } from '@/components/FormField';
@@ -18,23 +19,34 @@ import { InlineNotice } from '@/components/InlineNotice';
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from '@/lib/client-api';
 import type { Instructor, InstructorContext } from '@/lib/server-context';
 
-export function InstructorControls({ context, query, detail = false }: { context: InstructorContext; query: string; detail?: boolean }) {
+export function InstructorControls({ context, query, detail = false, section = 'register' }: { context: InstructorContext; query: string; detail?: boolean; section?: 'register' | 'search' }) {
   const formPrefix = useId();
   const router = useRouter();
   const [editor, setEditor] = useState<Instructor | 'new' | null>(null);
+  const [loadedSection, setLoadedSection] = useState(section);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [branchIds, setBranchIds] = useState<number[]>([]);
   const [search, setSearch] = useState(query);
+  const [loadedQuery, setLoadedQuery] = useState(query);
+  if (loadedQuery !== query) { setLoadedQuery(query); setSearch(query); }
   const [requestId, setRequestId] = useState('');
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
+  const workspaceRead = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    const abandoned = workspaceRead.current;
+    if (abandoned) {
+      workspaceRead.current = null; abandoned.abort(); saving.current = false; setBusy(false);
+    }
+  }, [section]);
   const trigger = useRef<HTMLElement | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [conflict, setConflict] = useState(false);
   const [initialValues, setInitialValues] = useState('');
+  if (loadedSection !== section) { setLoadedSection(section); setEditor(null); setError(''); setConflict(false); setFieldErrors({}); }
   const dirty = editor !== null && JSON.stringify([name, phone, [...branchIds].sort((a, b) => a - b)]) !== initialValues;
   const manageable = context.branches.filter((branch) => context.permissions.can_manage_center || (context.permissions.branch_actions?.[String(branch.id)] ?? []).includes('instructors.manage'));
 
@@ -49,7 +61,10 @@ export function InstructorControls({ context, query, detail = false }: { context
 
   function close() {
     setEditor(null); setError('');
-    requestAnimationFrame(() => trigger.current?.isConnected && trigger.current.focus());
+    requestAnimationFrame(() => {
+      if (trigger.current?.isConnected) trigger.current.focus();
+      else if (editor && editor !== 'new') document.querySelector<HTMLElement>(`[data-instructor-edit="${editor.id}"]`)?.focus();
+    });
   }
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -89,40 +104,43 @@ export function InstructorControls({ context, query, detail = false }: { context
   }
 
   async function reloadInstructor() {
-    if (!editor) return;
-    setBusy(true);
+    if (!editor || saving.current) return;
+    const load = new AbortController(); workspaceRead.current = load;
+    saving.current = true; setBusy(true);
     try {
-      const response = await centerRequest(editor === 'new' ? `instructors/submissions/${requestId}` : `instructors/${editor.id}`, 'GET');
-      if (!response.ok) { setError(await responseMessage(response)); return; }
+      const response = await centerRequest(editor === 'new' ? `instructors/submissions/${requestId}` : `instructors/${editor.id}`, 'GET', undefined, load.signal);
+      if (!response.ok) {
+        const message = await responseMessage(response);
+        if (workspaceRead.current === load) setError(message);
+        return;
+      }
       const data = await response.json() as InstructorContext & { instructor?: Instructor };
+      if (workspaceRead.current !== load) return;
       const wasNew = editor === 'new';
       open(wasNew ? data.instructor! : data.instructors[0], true);
       if (wasNew) setNotice('الملف حُفظ سابقًا. راجع بياناته قبل تعديلها؛ لن يُنشأ ملف آخر.');
       router.refresh();
-    } catch { setError('تعذر تحميل أحدث البيانات. حاول مرة أخرى.'); }
-    finally { setBusy(false); }
+    } catch { if (workspaceRead.current === load) setError('تعذر تحميل أحدث البيانات. حاول مرة أخرى.'); }
+    finally {
+      if (workspaceRead.current === load) { workspaceRead.current = null; saving.current = false; setBusy(false); }
+    }
   }
 
   function pageLink(page: number, branchesPage = context.pagination.branches_page) {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ tab: section });
     if (query) params.set('q', query);
     if (page > 1) params.set('page', String(page));
     if (branchesPage > 1) params.set('branches_page', String(branchesPage));
     return `/admin/instructors${params.size ? `?${params}` : ''}`;
   }
 
-  return <>
-    <CenterPageActions context={context} actions={manageable.length && !detail ? <Button hidden={editor !== null} variant='primary' disabled={busy} onClick={() => open('new')}>إنشاء ملف محاضر</Button> : undefined} />
-    <UnsavedChangesGuard dirty={dirty} />
-      {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-      {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
-      {detail ? <Link href='/admin/instructors'>العودة إلى ملفات المحاضرين</Link> : <form id={`${formPrefix}-0`} className='context-card form-stack' noValidate onSubmit={(event) => { event.preventDefault(); router.push(`/admin/instructors?${new URLSearchParams({ q: search })}`); }} aria-label='البحث في جميع ملفات المحاضرين'>
+  const searchForm = <form id={`${formPrefix}-0`} className='context-card form-stack' noValidate onSubmit={(event) => { event.preventDefault(); router.push(`/admin/instructors?${new URLSearchParams({ tab: 'search', q: search })}`); }} aria-label='البحث في جميع ملفات المحاضرين'>
 <FieldGroup>
         <FormField id='instructor-global-search' label='البحث في جميع الملفات المصرح بها' value={search} onChange={setSearch} hint='الاسم أو رقم التواصل. لا يشمل الفروع المحجوبة.' />
-        <CenterHeaderActions><Button form={`${formPrefix}-0`} type='submit' variant='primary' disabled={busy}>بحث عن محاضر</Button>{search || query ? <Button disabled={busy} onClick={() => { setSearch(''); router.push('/admin/instructors'); document.getElementById('instructor-global-search')?.focus(); }}>مسح البحث</Button> : null}</CenterHeaderActions>
+        <CenterHeaderActions><Button form={`${formPrefix}-0`} type='submit' variant='primary' disabled={busy}>بحث عن محاضر</Button>{search || query ? <Button disabled={busy} onClick={() => { setSearch(''); router.push('/admin/instructors?tab=search'); document.getElementById('instructor-global-search')?.focus(); }}>مسح البحث</Button> : null}</CenterHeaderActions>
       </FieldGroup>
-</form>}
-      {editor ? <form id={`${formPrefix}-1`} className='context-card form-stack' aria-label={editor === 'new' ? 'ملف محاضر جديد' : `تعديل ملف ${editor.name}`} noValidate onSubmit={save}>
+</form>;
+  const editorForm = editor ? <form id={`${formPrefix}-1`} className='context-card form-stack' aria-label={editor === 'new' ? 'ملف محاضر جديد' : `تعديل ملف ${editor.name}`} noValidate onSubmit={save}>
 <FieldGroup>
         <h2>{editor === 'new' ? 'ملف محاضر جديد' : `تعديل ملف ${editor.name}`}</h2>
         <FieldSet disabled={busy} className="form-stack" style={{ border: 0, padding: 0, margin: 0 }}>
@@ -139,15 +157,25 @@ export function InstructorControls({ context, query, detail = false }: { context
 <CenterHeaderActions>{conflict ? <Button disabled={busy} onClick={reloadInstructor}>تحميل أحدث بيانات المحاضر</Button> : null}<Button form={`${formPrefix}-1`} type='submit' variant='primary' busy={busy} disabled={conflict}>{editor === 'new' ? 'حفظ ملف المحاضر' : 'حفظ بيانات المحاضر'}</Button><Button disabled={busy} onClick={close}>إلغاء</Button></CenterHeaderActions>
         </FieldSet>
       </FieldGroup>
-</form> : null}
-      {!editor && (context.pagination.branches_has_more || context.pagination.branches_page > 1) ? <nav className='form-actions' aria-label='صفحات فروع المحاضرين'>{context.pagination.branches_page > 1 ? <Link href={pageLink(context.pagination.page, context.pagination.branches_page - 1)}>الفروع السابقة</Link> : null}<span>صفحة الفروع {context.pagination.branches_page.toLocaleString('ar-EG')}</span>{context.pagination.branches_has_more ? <Link href={pageLink(context.pagination.page, context.pagination.branches_page + 1)}>الفروع التالية</Link> : null}</nav> : null}
-      <DataTable id='instructors' title='سجل المحاضرين' description={detail ? 'البيانات الأساسية للملف ضمن الفروع المصرح بها.' : 'تصفية الجدول ضمن هذه الدفعة (حتى ٥٠ ملفًا). استخدم البحث أعلاه للبحث في جميع الملفات المصرح بها.'} rows={context.instructors} rowKey={(instructor) => instructor.id} searchText={(instructor) => `${instructor.name} ${instructor.phone ?? ''}`} emptyMessage={query ? 'لا يوجد محاضر مطابق ضمن نطاق صلاحيتك.' : 'لا توجد ملفات محاضرين متاحة. أنشئ ملفًا إذا كانت لديك صلاحية الإدارة الأكاديمية.'}
+</form> : null;
+  const register = <>      {(context.pagination.branches_has_more || context.pagination.branches_page > 1) ? <nav className='form-actions' aria-label='صفحات فروع المحاضرين'>{context.pagination.branches_page > 1 ? <Link href={pageLink(context.pagination.page, context.pagination.branches_page - 1)}>الفروع السابقة</Link> : null}<span>صفحة الفروع {context.pagination.branches_page.toLocaleString('ar-EG')}</span>{context.pagination.branches_has_more ? <Link href={pageLink(context.pagination.page, context.pagination.branches_page + 1)}>الفروع التالية</Link> : null}</nav> : null}
+      <DataTable id='instructors' title='سجل المحاضرين' description={detail ? 'البيانات الأساسية للملف ضمن الفروع المصرح بها.' : 'حتى ٥٠ ملفًا في الدفعة. للبحث عبر جميع الملفات استخدم تبويب البحث.'} rows={context.instructors} rowKey={(instructor) => instructor.id} searchText={(instructor) => `${instructor.name} ${instructor.phone ?? ''}`} emptyMessage={query ? 'لا يوجد محاضر مطابق ضمن نطاق صلاحيتك.' : 'لا توجد ملفات محاضرين متاحة. أنشئ ملفًا إذا كانت لديك صلاحية الإدارة الأكاديمية.'}
         columns={[
           { key: 'name', label: 'المحاضر', filterText: (instructor) => instructor.name, render: (instructor) => <Link href={`/admin/instructors/${instructor.id}`}>{instructor.name}</Link> },
           { key: 'phone', label: 'رقم التواصل', filterText: (instructor) => instructor.phone ?? '', render: (instructor) => <bdi dir='ltr'>{instructor.phone || 'لم يُضف رقم تواصل'}</bdi> },
           { key: 'branches', label: 'الفروع المصرح بها', filterText: (instructor) => instructor.branch_ids.map((id) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join('، '), render: (instructor) => instructor.branch_ids.map((id) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join('، ') },
-          { key: 'actions', label: 'الإجراءات', actions: true, render: (instructor) => instructor.can_manage ? <Button disabled={busy} onClick={() => open(instructor)}>تعديل ملف المحاضر</Button> : <span className='muted'>صلاحية عرض فقط</span> },
+          { key: 'actions', label: 'الإجراءات', actions: true, render: (instructor) => instructor.can_manage ? <Button data-instructor-edit={instructor.id} disabled={busy} onClick={() => open(instructor)}>تعديل ملف المحاضر</Button> : <span className='muted'>صلاحية عرض فقط</span> },
         ]} />
       {!detail ? <nav className='form-actions' aria-label='دفعات ملفات المحاضرين'>{context.pagination.page > 1 ? <Link href={pageLink(context.pagination.page - 1)}>دفعة الملفات السابقة</Link> : null}<span>دفعة {context.pagination.page.toLocaleString('ar-EG')}</span>{context.pagination.has_more ? <Link href={pageLink(context.pagination.page + 1)}>دفعة الملفات التالية</Link> : null}</nav> : null}
+</>;
+  return <>
+    <CenterPageActions context={context} actions={manageable.length && !detail ? <Button hidden={editor !== null} variant='primary' disabled={busy} onClick={() => open('new')}>إنشاء ملف محاضر</Button> : undefined} />
+    <UnsavedChangesGuard dirty={dirty} guardHistory />
+      {notice ? <InlineNotice>{notice}</InlineNotice> : null}
+      {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
+      {detail ? <><Link href='/admin/instructors'>العودة إلى ملفات المحاضرين</Link>{editorForm}<div hidden={Boolean(editor)} className='workspace-register'>{register}</div></> : <WorkspaceSections value={section} label='أقسام ملفات المحاضرين' path='/admin/instructors' sections={[
+        { value: 'register', label: 'سجل المحاضرين', resetParams: ['q', 'page'], content: <>{editorForm}<div hidden={Boolean(editor)} className='workspace-register'>{register}</div></> },
+        { value: 'search', label: 'البحث عن محاضر', content: <>{editorForm}{!editor ? searchForm : null}<div hidden={Boolean(editor)} className='workspace-register'>{register}</div></> },
+      ]} />}
   </>;
 }

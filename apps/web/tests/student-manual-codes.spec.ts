@@ -41,6 +41,7 @@ test('enable a named card, preserve leading zeros, and scan one authorized profi
   const student = (await (await response).json()).student; expect(student.manual_code).toBe(code); expect(student.city_id).toBe(cityId); expect(student.contacts[0].phone).toBe(phone);
   await expect(page.getByText(code,{exact:true})).toBeVisible();
   await page.getByRole('link',{name:'العودة إلى ملفات الطلاب',exact:true}).click();
+  await page.getByRole('tab',{name:'البحث عن طالب',exact:true}).click();
   await select(page,'طريقة البحث','الرقم الداخلي / الباركود');
   await page.getByRole('textbox',{name:'البحث في جميع الملفات المصرح بها',exact:true}).fill(code);
   await page.getByRole('button',{name:'بحث عن طالب',exact:true}).click();

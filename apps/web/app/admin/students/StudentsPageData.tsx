@@ -11,5 +11,5 @@ export async function StudentsPageData({ searchParams }: { searchParams: Promise
   }
   const context = await loadStudentWorkspace(query.toString());
   if (typeof context === 'string') return <CenterAccessState state={context} />;
-  return <StudentWorkspace context={context} query={typeof params.q === 'string' ? params.q : ''} identifier={typeof params.identifier === 'string' ? params.identifier : ''} />;
+  return <StudentWorkspace context={context} query={typeof params.q === 'string' ? params.q : ''} identifier={typeof params.identifier === 'string' ? params.identifier : ''} section={params.tab === 'search' || (!params.tab && (params.q || params.identifier)) ? 'search' : 'register'} />;
 }
