@@ -26,8 +26,10 @@ export function StudentCustomFields({
   onBusyChange,
   onLoadedValues,
   canReadIdentity = true,
+  canManageIdentity = true,
 }: {
   canReadIdentity?: boolean;
+  canManageIdentity?: boolean;
   prefix: string;
   list: StudentCustomFieldList;
   onListChange: (list: StudentCustomFieldList) => void;
@@ -114,10 +116,14 @@ export function StudentCustomFields({
             const error = errors[`custom_values.${field.id}`];
             const update = (value: string | boolean | null) =>
               onValuesChange?.({ ...values, [field.id]: value });
-            if (!field.active)
+            const readOnlyIdentity =
+              field.classification === "identity" && !canManageIdentity;
+            if (!field.active || readOnlyIdentity)
               return (
                 <div key={field.id}>
-                  <p>{label} — معطل</p>
+                  <p>
+                    {label} — {!field.active ? "معطل" : "للقراءة فقط"}
+                  </p>
                   <p>
                     <bdi>{customFieldValue(value)}</bdi>
                   </p>

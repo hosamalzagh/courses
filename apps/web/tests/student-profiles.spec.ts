@@ -128,7 +128,11 @@ test('combined profile keeps number and sharing through suspension, general edit
   expect(current.sharing_enabled).toBe(false); expect(current.status).toBe('suspended');
   expect(current.manual_code).toBe(manualCode);
   expect(current.identity.passport_number).toBe('000-INTEGRATION-PASSPORT');
-  expect(current.custom_values[customField.body.field.id]).toBe('000-INTEGRATION-CUSTOM');
+  for (let batch=1; ; batch++) {
+    const data=await (await page.request.get(`${host}/api/v1/center/student-custom-fields?student_id=${student.id}&page=${batch}`)).json();
+    if (Object.hasOwn(data.values,customField.body.field.id)) {expect(data.values[customField.body.field.id]).toBe('000-INTEGRATION-CUSTOM');break;}
+    expect(data.pagination.has_more).toBe(true);
+  }
   expect(current.contacts[0].phone).toBe(integrationPhone); expect(current.contacts[0].name).toBe('صاحب الرقم المشترك');
   const barcode = await page.request.get(`${host}/api/v1/center/students/${student.id}/barcode`);
   expect(barcode.status()).toBe(200); expect(await barcode.text()).toContain(String(start));
@@ -220,7 +224,14 @@ async function create(page: Page, name: string, code?: {label:string;value:strin
   await expect(page.getByRole('textbox', { name: 'اسم الطالب', exact: true })).toBeFocused();
   await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name);
   if (code) await page.getByRole('textbox',{name:code.label,exact:true}).fill(code.value);
-  if (custom) await page.getByRole('textbox',{name:custom.label,exact:true}).fill(custom.value);
+  if (custom) {
+    while (!(await page.getByRole('textbox',{name:custom.label,exact:true}).count())) {
+      const before=await page.locator('[data-slot="field"]').count();
+      await page.getByRole('button',{name:'تحميل المزيد من الحقول',exact:true}).click();
+      await expect.poll(()=>page.locator('[data-slot="field"]').count()).toBeGreaterThan(before);
+    }
+    await page.getByRole('textbox',{name:custom.label,exact:true}).fill(custom.value);
+  }
   if (passport) await page.getByRole('textbox',{name:'رقم جواز السفر',exact:true}).fill(passport);
   const response = page.waitForResponse((response) => response.url().endsWith('/api/v1/center/students') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click();

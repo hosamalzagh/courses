@@ -97,7 +97,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
     event.preventDefault();
     if (!editor || saving.current) return;
     setError(''); setFieldErrors({}); setNotice('');
-    const errors: Record<string, string> = {...contactValidation(contactData),...customFieldErrors(customFields.fields.filter(field=>field.classification !== 'identity' || canReadIdentity),customValues)};
+    const errors: Record<string, string> = {...contactValidation(contactData),...customFieldErrors(customFields.fields.filter(field=>field.classification !== 'identity' || canManageIdentity),customValues)};
     if (!name.trim()) errors.name = 'أدخل اسم الطالب.';
     if (editor === 'new' && !branchIds.length) errors.branch_ids = 'اختر فرعًا مصرحًا به على الأقل.';
     if (Object.keys(errors).length) { setFieldErrors(errors); return; }
@@ -196,7 +196,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         </div>
         <h2>اختيارات المركز والمصدر</h2><p className='muted'>طريقة جمع البيانات مستقلة عن مصدر المعرفة بالمركز. يُسجل الموظف وتاريخ الإنشاء تلقائيًا.</p>
         <StudentChoiceFields prefix={formPrefix} context={context} student={editor === 'new' ? undefined : editor} data={general} onChange={changeGeneral} errors={fieldErrors} disabled={busy} />
-        <StudentCustomFields canReadIdentity={canReadIdentity} prefix={formPrefix} list={customFields} onListChange={setCustomFields} values={customValues} onValuesChange={values=>{setSaved(false);setCustomValues(values);}} studentId={editor === 'new' ? undefined : editor.id} onLoadedValues={loaded=>{setCustomValues(current=>({...loaded,...current}));setCustomBaseline(current=>({...loaded,...current}));}} errors={fieldErrors} disabled={busy} onBusyChange={value=>{saving.current=value;setBusy(value);}} />
+        <StudentCustomFields canReadIdentity={canReadIdentity} canManageIdentity={canManageIdentity} prefix={formPrefix} list={customFields} onListChange={setCustomFields} values={customValues} onValuesChange={values=>{setSaved(false);setCustomValues(values);}} studentId={editor === 'new' ? undefined : editor.id} onLoadedValues={loaded=>{setCustomValues(current=>({...loaded,...current}));setCustomBaseline(current=>({...loaded,...current}));}} errors={fieldErrors} disabled={busy} onBusyChange={value=>{saving.current=value;setBusy(value);}} />
         <FieldSet data-invalid={Boolean(fieldErrors.branch_ids)} aria-describedby={fieldErrors.branch_ids ? 'student-branches-error' : 'student-branches-hint'}><FieldLegend>الفروع المرتبطة بالطالب</FieldLegend>
           <p id='student-branches-hint' className='muted'>اختر فروع التسجيل المصرح بها. تبقى ارتباطات الملف السابقة محفوظة.</p>
           {manageable.map((branch) => {

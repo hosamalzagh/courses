@@ -528,6 +528,125 @@ test("manager classification and owner identity grants control the next open-edi
   }
 });
 
+test("mixed branch authority exposes identity values read-only while general profile edits remain available", async ({
+  browser,
+}) => {
+  const owner = await browser.newPage();
+  const staff = await browser.newPage();
+  let member: Member | undefined;
+  try {
+    await signIn(owner);
+    await signIn(staff, "staff");
+    const workspace = await (
+      await owner.request.get(`${origin}/api/v1/center/student-workspace`)
+    ).json();
+    const [north, south] = workspace.branches;
+    const members = (
+      await (
+        await owner.request.get(`${origin}/api/v1/center/member-workspace`)
+      ).json()
+    ).members;
+    member = members.find(
+      (item: Member) => item.user.email === credentials.staff.email,
+    );
+    if (!member) throw new Error("Staff membership is missing");
+    expect(
+      (
+        await write(owner, `members/${member.id}/grants`, "PUT", {
+          center_roles: [],
+          branch_roles: {
+            [north.id]: ["registration"],
+            [south.id]: ["branch_viewer", "student_identity"],
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const label = `CUSTOM63 readonly ${Date.now()}`;
+    const field = (
+      await write(owner, "student-custom-fields", "POST", {
+        id: crypto.randomUUID(),
+        label,
+        type: "text",
+        required: false,
+        position: 0,
+        options: [],
+        classification: "identity",
+      })
+    ).body.field;
+    const value = `READONLY-CUSTOM63-${Date.now()}`;
+    const student = (
+      await write(owner, "students", "POST", {
+        name: `CUSTOM63 mixed branches ${Date.now()}`,
+        branch_ids: [north.id, south.id],
+        request_id: crypto.randomUUID(),
+        custom_values: { [field.id]: value },
+      })
+    ).body.student;
+    const data = await (
+      await staff.request.get(`${origin}/api/v1/center/students/${student.id}`)
+    ).json();
+    expect(data.students[0]).toMatchObject({
+      can_manage: true,
+      can_read_identity: true,
+      can_manage_identity: false,
+    });
+    await staff.goto(`${origin}/admin/students/${student.id}/edit`);
+    while (!(await staff.getByText(value, { exact: true }).count())) {
+      if (
+        await staff.getByRole("textbox", { name: label, exact: true }).count()
+      )
+        break;
+      await staff
+        .getByRole("button", { name: "تحميل المزيد من الحقول", exact: true })
+        .click();
+      await expect(
+        staff.getByRole("button", {
+          name: "تحميل المزيد من الحقول",
+          exact: true,
+        }),
+      ).toBeEnabled();
+    }
+    await expect(
+      staff.getByRole("textbox", { name: label, exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      staff.getByText(`${label} — للقراءة فقط`, { exact: true }),
+    ).toBeVisible();
+    await expect(staff.getByText(value, { exact: true })).toBeVisible();
+    await staff
+      .getByRole("textbox", { name: "جهة العمل", exact: true })
+      .fill("تعديل عام بصلاحية قراءة الهوية فقط");
+    await staff
+      .getByRole("button", { name: "حفظ بيانات الطالب", exact: true })
+      .click();
+    await expect(staff).toHaveURL(
+      new RegExp(`/students/${student.id}\\?focus=edit$`),
+    );
+    const current = await (
+      await owner.request.get(
+        `${origin}/api/v1/center/students/${student.id}?tab=custom-history`,
+      )
+    ).json();
+    expect(current.students[0].employer).toBe(
+      "تعديل عام بصلاحية قراءة الهوية فقط",
+    );
+    expect(current.students[0].custom_values[field.id]).toBe(value);
+    expect(
+      current.custom_history.entries.filter(
+        (entry: { field_id: string }) => entry.field_id === field.id,
+      ),
+    ).toHaveLength(1);
+  } finally {
+    if (member)
+      await write(owner, `members/${member.id}/grants`, "PUT", {
+        center_roles: member.center_roles,
+        branch_roles: member.branch_roles,
+      });
+    await owner.close();
+    await staff.close();
+  }
+});
+
 test("history is bounded and the shared header remains usable in RTL themes with measured cold and warm reads", async ({
   page,
 }) => {
