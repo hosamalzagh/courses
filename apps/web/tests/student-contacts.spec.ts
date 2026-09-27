@@ -138,7 +138,11 @@ test('contact validation, cancel focus and RTL themes stay usable on desktop and
   await expect(phone).toHaveAttribute('aria-invalid','true'); await expect(phone).toBeFocused();
   await phone.fill('000555');
   await page.getByRole('combobox',{name:'صاحب قناة واتساب',exact:true}).focus();
-  await page.keyboard.press('ArrowDown'); await page.keyboard.press('End'); await page.keyboard.press('Enter');
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('option').first()).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(page.getByRole('option').last()).toBeFocused();
+  await page.keyboard.press('Enter');
   await expect(page.getByRole('textbox',{name:'رقم قناة واتساب',exact:true})).toHaveValue('000555');
   await page.screenshot({path:'/tmp/courses-issue57/contacts-desktop-light.png',fullPage:true});
   await page.getByRole('button',{name:'تفعيل الوضع الداكن'}).click();

@@ -94,12 +94,15 @@ test('combined profile keeps number and sharing through suspension, general edit
   await signIn(page);
   const settings = (await (await page.request.get(`${host}/api/v1/center/settings`)).json()).settings;
   expect((await write(page,'student-code-settings','PATCH',{enabled:true,label:'كارت التكامل',revision:settings.student_code_revision})).status).toBe(200);
+  const integrationPhone=`000${Date.now()}`;
   const manualCode=`000-INTEGRATION-${Date.now()}`;
+  const customLabel=`CUSTOM62 integration ${Date.now()}`;
+  const customField=await write(page,'student-custom-fields','POST',{id:crypto.randomUUID(),label:customLabel,type:'text',required:false,position:0,options:[]});expect(customField.status).toBe(201);
   const start = Date.now() * 100;
   expect((await write(page, 'student-numbering', 'PATCH', { start, revision: settings.student_number_revision })).status).toBe(200);
   const policy = (await (await page.request.get(`${host}/api/v1/center/student-search-workspace`)).json()).policy;
   expect((await write(page, 'student-search-policy', 'PATCH', { enabled: true, default_sharing_enabled: true, revision: policy.revision })).status).toBe(200);
-  const student = await create(page, `طالب قبول ${Date.now()} تكامل`, {label:'كارت التكامل',value:manualCode}, '000-INTEGRATION-PASSPORT');
+  const student = await create(page, `طالب قبول ${Date.now()} تكامل`, {label:'كارت التكامل',value:manualCode}, '000-INTEGRATION-PASSPORT', {label:customLabel,value:'000-INTEGRATION-CUSTOM'});
   expect(student.student_number).toBe(start);
   await expect(page.getByText('المشاركة بين الفروع: مسموحة', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click();
@@ -111,7 +114,7 @@ test('combined profile keeps number and sharing through suspension, general edit
   await page.getByRole('alertdialog').getByRole('button', { name: 'إيقاف ملف الطالب', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'حالة ملف الطالب: موقوف' })).toBeVisible();
   await page.getByRole('link', { name: 'تعديل ملف الطالب', exact: true }).click();
-  await enterContact(page, '00012345678');
+  await enterContact(page, integrationPhone);
   await page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true }).fill('مدرسة التكامل');
   await page.goBack();
   await expect(page.getByRole('alertdialog')).toContainText('مغادرة دون حفظ');
@@ -125,7 +128,8 @@ test('combined profile keeps number and sharing through suspension, general edit
   expect(current.sharing_enabled).toBe(false); expect(current.status).toBe('suspended');
   expect(current.manual_code).toBe(manualCode);
   expect(current.identity.passport_number).toBe('000-INTEGRATION-PASSPORT');
-  expect(current.contacts[0].phone).toBe('00012345678'); expect(current.contacts[0].name).toBe('صاحب الرقم المشترك');
+  expect(current.custom_values[customField.body.field.id]).toBe('000-INTEGRATION-CUSTOM');
+  expect(current.contacts[0].phone).toBe(integrationPhone); expect(current.contacts[0].name).toBe('صاحب الرقم المشترك');
   const barcode = await page.request.get(`${host}/api/v1/center/students/${student.id}/barcode`);
   expect(barcode.status()).toBe(200); expect(await barcode.text()).toContain(String(start));
   expect(await barcode.text()).not.toContain('مدرسة التكامل');
@@ -211,11 +215,12 @@ async function write(page: Page, route: string, method: string, payload: object)
   return result;
 }
 
-async function create(page: Page, name: string, code?: {label:string;value:string}, passport?: string) {
+async function create(page: Page, name: string, code?: {label:string;value:string}, passport?: string, custom?: {label:string;value:string}) {
   await page.goto(`${host}/admin/students/new`);
   await expect(page.getByRole('textbox', { name: 'اسم الطالب', exact: true })).toBeFocused();
   await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name);
   if (code) await page.getByRole('textbox',{name:code.label,exact:true}).fill(code.value);
+  if (custom) await page.getByRole('textbox',{name:custom.label,exact:true}).fill(custom.value);
   if (passport) await page.getByRole('textbox',{name:'رقم جواز السفر',exact:true}).fill(passport);
   const response = page.waitForResponse((response) => response.url().endsWith('/api/v1/center/students') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click();
@@ -251,6 +256,7 @@ test.afterEach(() => {
         foreach ($rows as $row) if (!preg_match('/^(طالب قبول|طالب آخر|محجوب|مصرح|إعادة|متزامن أول|متزامن ثان|استعادة) [0-9]{13}/u', $row->name)) throw new \RuntimeException('Unexpected student fixture');
         \Illuminate\Support\Facades\DB::table('center_audit_logs')->whereIn(\Illuminate\Support\Facades\DB::raw("details->>'student_id'"), $ids)->delete();
         \Illuminate\Support\Facades\DB::table('student_suspensions')->whereIn('student_id', $ids)->delete();
+        \Illuminate\Support\Facades\DB::table('student_custom_field_values')->whereIn('student_id', $ids)->delete();
         \Illuminate\Support\Facades\DB::table('student_branches')->whereIn('student_id', $ids)->delete();
         \Illuminate\Support\Facades\DB::table('students')->whereIn('id', $ids)->delete();
       });

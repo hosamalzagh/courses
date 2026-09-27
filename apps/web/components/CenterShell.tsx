@@ -94,6 +94,7 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
     { href: "/admin/curriculum", label: "المناهج والخطط", icon: "audit", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
     { href: "/admin/members", label: "إدارة الموظفين والدعوات", icon: "members", visible: context.permissions.can_manage_center },
     { href: "/admin/audit", label: "سجل التدقيق", icon: "audit", visible: canAudit },
+    { href: "/admin/student-custom-fields", label: "الحقول الإضافية للطالب", icon: "settings", visible: context.permissions.can_manage_center },
     { href: "/admin/student-profile-choices", label: "قوائم بيانات الطالب", icon: "settings", visible: context.permissions.can_manage_center },
     { href: "/admin/settings", label: "إعدادات المركز", icon: "settings", visible: context.permissions.can_manage_center },
     { href: "/admin/security", label: "أمان الحساب", icon: "security", visible: true },

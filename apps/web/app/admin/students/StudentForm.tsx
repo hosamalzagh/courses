@@ -15,6 +15,8 @@ import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard';
 import { buttonVariants } from "@/components/ui/button";
 import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
 import { Button } from '@/components/Button';
+import { StudentCustomFields } from '@/components/StudentCustomFields';
+import { customFieldErrors } from '@/lib/student-custom-fields';
 import { StudentIdentityFields } from '@/components/StudentIdentityFields';
 import { StudentContactFields } from '@/components/StudentContactFields';
 import { studentContactsData, contactValidation } from '@/lib/student-contacts';
@@ -22,7 +24,7 @@ import { StudentChoiceFields } from '@/components/StudentChoiceFields';
 import { FormField } from '@/components/FormField';
 import { InlineNotice } from '@/components/InlineNotice';
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from '@/lib/client-api';
-import type { Student, StudentContext, StudentGeneralData, StudentIdentityData } from '@/lib/server-context';
+import type { Student, StudentContext, StudentGeneralData, StudentIdentityData, StudentCustomValues } from '@/lib/server-context';
 
 type SimilarStudent = Pick<Student, 'id' | 'student_number' | 'name' | 'phone'> & { within_scope?: boolean };
 
@@ -44,6 +46,9 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
   const [general, setGeneral] = useState<StudentGeneralData>(profileData(student));
   const [contactData, setContactData] = useState(() => studentContactsData(student));
   const [identity, setIdentity] = useState<StudentIdentityData>(student?.identity ?? {national_id:null,passport_number:null});
+  const [customFields,setCustomFields]=useState(context.custom_fields);
+  const [customValues,setCustomValues]=useState<StudentCustomValues>(student?.custom_values ?? {});
+  const [customBaseline,setCustomBaseline]=useState<StudentCustomValues>(student?.custom_values ?? {});
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
@@ -57,11 +62,12 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
   const initialBranches = editor === 'new' ? manageable.slice(0, 1).map((branch) => branch.id) : editor ? editor.branch_ids.filter((id) => manageable.some((branch) => branch.id === id)) : [];
   const canManageIdentity = editor === 'new' ? branchIds.some(id => context.permissions.can_manage_center || (context.permissions.branch_actions?.[String(id)] ?? []).includes('students.identity')) : editor.can_manage_identity;
   const canReadIdentity = editor === 'new' ? canManageIdentity : editor.can_read_identity;
-  const dirty = !saved && (JSON.stringify(identity) !== JSON.stringify(editor === 'new' ? {national_id:null,passport_number:null} : editor.identity ?? {national_id:null,passport_number:null}) || manualCode !== (editor === 'new' ? '' : editor.manual_code ?? '') || name !== (editor === 'new' ? '' : editor.name) || phone !== (editor === 'new' ? '' : editor.legacy_phone ?? '') || JSON.stringify([...branchIds].sort()) !== JSON.stringify([...initialBranches].sort()) || JSON.stringify(general) !== JSON.stringify(profileData(editor === 'new' ? undefined : editor)) || JSON.stringify(contactData) !== JSON.stringify(studentContactsData(editor === 'new' ? undefined : editor)));
+  const dirty = !saved && (Object.keys(customValues).some(id=>(customValues[id] ?? null) !== (customBaseline[id] ?? null)) || JSON.stringify(identity) !== JSON.stringify(editor === 'new' ? {national_id:null,passport_number:null} : editor.identity ?? {national_id:null,passport_number:null}) || manualCode !== (editor === 'new' ? '' : editor.manual_code ?? '') || name !== (editor === 'new' ? '' : editor.name) || phone !== (editor === 'new' ? '' : editor.legacy_phone ?? '') || JSON.stringify([...branchIds].sort()) !== JSON.stringify([...initialBranches].sort()) || JSON.stringify(general) !== JSON.stringify(profileData(editor === 'new' ? undefined : editor)) || JSON.stringify(contactData) !== JSON.stringify(studentContactsData(editor === 'new' ? undefined : editor)));
 
   function open(student: Student) {
     setSaved(false);
     setGeneral(profileData(student));
+    setCustomValues(student.custom_values ?? {});setCustomBaseline(student.custom_values ?? {});
     setIdentity(student.identity ?? {national_id:null,passport_number:null});
     setManualCode(student.manual_code ?? '');
     setContactData(studentContactsData(student));
@@ -91,7 +97,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
     event.preventDefault();
     if (!editor || saving.current) return;
     setError(''); setFieldErrors({}); setNotice('');
-    const errors: Record<string, string> = contactValidation(contactData);
+    const errors: Record<string, string> = {...contactValidation(contactData),...customFieldErrors(customFields.fields,customValues)};
     if (!name.trim()) errors.name = 'أدخل اسم الطالب.';
     if (editor === 'new' && !branchIds.length) errors.branch_ids = 'اختر فرعًا مصرحًا به على الأقل.';
     if (Object.keys(errors).length) { setFieldErrors(errors); return; }
@@ -110,11 +116,12 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         if (matches.length) return;
       }
       const response = await centerRequest(editor === 'new' ? 'students' : `students/${editor.id}`, editor === 'new' ? 'POST' : 'PATCH', {
-        name: name.trim(), phone: phone.trim() || null, branch_ids: editor === 'new' ? branchIds : branchIds.filter((id) => !editor.branch_ids.includes(id)), ...general, ...contactData, ...(canManageIdentity ? identity : {}), ...(context.student_code_settings.enabled ? {manual_code:manualCode.trim() || null} : {}),
+        custom_values:customValues, custom_fields_revision:customFields.revision, name: name.trim(), phone: phone.trim() || null, branch_ids: editor === 'new' ? branchIds : branchIds.filter((id) => !editor.branch_ids.includes(id)), ...general, ...contactData, ...(canManageIdentity ? identity : {}), ...(context.student_code_settings.enabled ? {manual_code:manualCode.trim() || null} : {}),
         ...(editor === 'new' ? { request_id: requestId } : { revision: editor.revision }),
       });
       if (!response.ok) {
         if (response.status === 409 && !['student_numbering_exhausted','student_number_code_collision'].includes((await response.clone().json().catch(() => ({}))).code)) {
+          if ((await response.clone().json().catch(()=>({}))).code === 'student_custom_fields_changed') {setError('تغيرت تعريفات الحقول. حمّل التعريفات الحالية من الهيدر؛ مدخلاتك محفوظة.');return;}
           setConflict(true);
           setError('تغيّرت بيانات الملف أو الطلب. راجع أحدث بيانات الطالب قبل إعادة الحفظ.');
         } else if (response.status === 404) {
@@ -139,9 +146,18 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
     try {
       const response = await centerRequest(editor === 'new' ? `students/submissions/${requestId}` : `students/${editor.id}`, 'GET');
       if (!response.ok) { setError(await responseMessage(response)); return; }
-      const data = await response.json() as StudentContext & { student?: Student };
       const wasNew = editor === 'new';
-      open(wasNew ? data.student! : data.students[0]);
+      let data: StudentContext;
+      if (wasNew) {
+        const submission = await response.json() as { student: Student };
+        const detail = await centerRequest(`students/${submission.student.id}`, 'GET');
+        if (!detail.ok) { setError(await responseMessage(detail)); return; }
+        data = await detail.json() as StudentContext;
+      } else {
+        data = await response.json() as StudentContext;
+      }
+      setCustomFields(data.custom_fields);
+      open(data.students[0]);
       if (wasNew) setNotice('الملف حُفظ سابقًا. راجع بياناته قبل تعديلها؛ لن يُنشأ ملف آخر.');
       requestAnimationFrame(() => document.getElementById('student-name')?.focus());
     } catch { setError('تعذر تحميل أحدث البيانات. حاول مرة أخرى.'); }
@@ -180,6 +196,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         </div>
         <h2>اختيارات المركز والمصدر</h2><p className='muted'>طريقة جمع البيانات مستقلة عن مصدر المعرفة بالمركز. يُسجل الموظف وتاريخ الإنشاء تلقائيًا.</p>
         <StudentChoiceFields prefix={formPrefix} context={context} student={editor === 'new' ? undefined : editor} data={general} onChange={changeGeneral} errors={fieldErrors} disabled={busy} />
+        <StudentCustomFields prefix={formPrefix} list={customFields} onListChange={setCustomFields} values={customValues} onValuesChange={values=>{setSaved(false);setCustomValues(values);}} studentId={editor === 'new' ? undefined : editor.id} onLoadedValues={loaded=>{setCustomValues(current=>({...loaded,...current}));setCustomBaseline(current=>({...loaded,...current}));}} errors={fieldErrors} disabled={busy} onBusyChange={value=>{saving.current=value;setBusy(value);}} />
         <FieldSet data-invalid={Boolean(fieldErrors.branch_ids)} aria-describedby={fieldErrors.branch_ids ? 'student-branches-error' : 'student-branches-hint'}><FieldLegend>الفروع المرتبطة بالطالب</FieldLegend>
           <p id='student-branches-hint' className='muted'>اختر فروع التسجيل المصرح بها. تبقى ارتباطات الملف السابقة محفوظة.</p>
           {manageable.map((branch) => {

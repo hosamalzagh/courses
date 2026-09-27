@@ -9,6 +9,7 @@ use App\Http\Controllers\CenterMemberController;
 use App\Http\Controllers\CenterSecurityController;
 use App\Http\Controllers\CenterSettingsController;
 use App\Http\Controllers\CenterStudentController;
+use App\Http\Controllers\CenterStudentCustomFieldController;
 use App\Http\Controllers\CenterStudentNumberingController;
 use App\Http\Controllers\CenterStudentProfileChoiceController;
 use App\Http\Controllers\CenterStudentSearchController;
@@ -66,6 +67,10 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         });
 
         Route::get('branches', [CenterBranchController::class, 'index']);
+        Route::get('student-custom-fields', [CenterStudentCustomFieldController::class, 'workspace']);
+        Route::get('student-custom-fields/{fieldId}', [CenterStudentCustomFieldController::class, 'show']);
+        Route::post('student-custom-fields', [CenterStudentCustomFieldController::class, 'store']);
+        Route::patch('student-custom-fields/{fieldId}', [CenterStudentCustomFieldController::class, 'update']);
         Route::get('student-profile-choices', [CenterStudentProfileChoiceController::class, 'workspace']);
         Route::get('student-profile-choices/{choiceId}', [CenterStudentProfileChoiceController::class, 'show']);
         Route::post('student-profile-choices', [CenterStudentProfileChoiceController::class, 'store']);
