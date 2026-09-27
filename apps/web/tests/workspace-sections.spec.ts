@@ -313,6 +313,12 @@ test('lost hierarchy creations recover into the tab owning the committed record'
   await page.getByRole('textbox',{name:'اسم المستوى',exact:true}).fill(name);
   await page.getByRole('textbox',{name:'محتوى المحاضرة 1',exact:true}).fill('محتوى استعادة المستوى');
   await loseAndRecover('**/api/v1/center/stages/*/levels','اسم المستوى','levels','بحث في المستويات وخططها');
+  await page.goto(`${origin}/admin/curriculum?tab=levels&courses_page=2&levels_page=1`);
+  await page.getByRole('link',{name,exact:true}).click();
+  await expect(page).toHaveURL(url => url.pathname.startsWith('/admin/curriculum/') && url.searchParams.get('courses_page') === '2' && url.searchParams.get('levels_page') === '1');
+  await page.getByRole('link',{name:'العودة إلى المستويات وخططها',exact:true}).click();
+  await expect(page).toHaveURL(url => url.pathname === '/admin/curriculum' && url.searchParams.get('tab') === 'levels' && url.searchParams.get('courses_page') === '2' && url.searchParams.get('levels_page') === '1');
+  await expect(page.getByRole('table')).toContainText(name);
 });
 
 

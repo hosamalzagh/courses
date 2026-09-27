@@ -26,6 +26,14 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   const formPrefix = useId();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const levelListParams = () => {
+    const params = new URLSearchParams({ tab: 'levels' });
+    for (const key of ['courses_page', 'stages_page', 'levels_page', 'branches_page']) {
+      const value = searchParams.get(key);
+      if (value && /^\d+$/.test(value)) params.set(key, value);
+    }
+    return params;
+  };
   function openSection(next: 'courses' | 'stages' | 'levels') {
     const params = new URLSearchParams(searchParams.toString());
     params.set('tab', next); router.push(`/admin/curriculum?${params}`);
@@ -200,7 +208,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
         ]} />{batch('stages')}
 </>;
   const levels = <>      <DataTable id='curriculum-levels' title='المستويات وخططها' rows={context.levels} rowKey={(row) => row.id} searchText={(row) => `${row.name} ${row.stage_name} ${row.course_name}`} emptyMessage='لا توجد مستويات متاحة. أضف مستوى وخطته من المرحلة الدراسية.' columns={[
-        { key: 'name', label: 'المستوى', filterText: (row) => row.name, render: (row) => <Link href={`/admin/curriculum/${row.id}`}>{row.name}</Link> },
+        { key: 'name', label: 'المستوى', filterText: (row) => row.name, render: (row) => <Link href={`/admin/curriculum/${row.id}?${levelListParams()}`}>{row.name}</Link> },
         { key: 'sequence', label: 'الكورس والمرحلة والفرع', filterText: (row) => `${row.course_name} ${row.stage_name} ${branchName(row.branch_id)}`, render: (row) => `${row.course_name} ← ${row.stage_name} · ${branchName(row.branch_id)}` },
         { key: 'plan', label: 'الخطة الأولى', render: (row) => `${row.plan.lecture_count.toLocaleString('ar-EG')} محاضرة مطلوبة · ${row.plan.planned_hours.toLocaleString('ar-EG')} ساعة مخططة` },
         { key: 'status', label: 'حالة الخطة', render: (row) => row.plan.used_at ? 'مستخدمة — محتوى ثابت' : 'لم تستخدم بعد' },
@@ -214,7 +222,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
       <UnsavedChangesGuard dirty={dirty} guardHistory />
       {busy && !editor ? <InlineNotice>جارٍ تحميل خطة المستوى الحالية…</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}{error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
-      {detail ? <Link href='/admin/curriculum'>العودة إلى منهج الفرع</Link> : null}
+      {detail ? <Link href={`/admin/curriculum?${levelListParams()}`}>العودة إلى المستويات وخططها</Link> : null}
       {detail ? editorForm : null}
       {detail ? levels : <WorkspaceSections value={section} label='أقسام منهج الفرع' path='/admin/curriculum' sections={[
         { value: 'courses', label: 'الكورسات', content: <>{editorForm}<div hidden={Boolean(editor)} className='workspace-register'>{courses}{branchChoices}</div></> },
