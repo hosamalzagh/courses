@@ -1,9 +1,15 @@
 'use client';
 
+import { useId } from "react";
+
+import { Checkbox } from "@/components/ui/checkbox";
+import { FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/field";
+
+
 import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
-import { CenterPageActions } from '@/components/CenterShell';
+import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
 import { DataTable } from '@/components/DataTable';
 import { Button } from '@/components/Button';
 import { FormField } from '@/components/FormField';
@@ -13,6 +19,7 @@ import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } 
 import type { Instructor, InstructorContext } from '@/lib/server-context';
 
 export function InstructorControls({ context, query, detail = false }: { context: InstructorContext; query: string; detail?: boolean }) {
+  const formPrefix = useId();
   const router = useRouter();
   const [editor, setEditor] = useState<Instructor | 'new' | null>(null);
   const [name, setName] = useState('');
@@ -105,31 +112,34 @@ export function InstructorControls({ context, query, detail = false }: { context
   }
 
   return <>
-    <CenterPageActions context={context} actions={manageable.length && !detail ? <Button variant='primary' disabled={busy} onClick={() => open('new')}>إنشاء ملف محاضر</Button> : undefined} />
+    <CenterPageActions context={context} actions={manageable.length && !detail ? <Button hidden={editor !== null} variant='primary' disabled={busy} onClick={() => open('new')}>إنشاء ملف محاضر</Button> : undefined} />
     <UnsavedChangesGuard dirty={dirty} />
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
       {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
-      {detail ? <Link href='/admin/instructors'>العودة إلى ملفات المحاضرين</Link> : <form className='context-card form-stack' noValidate onSubmit={(event) => { event.preventDefault(); router.push(`/admin/instructors?${new URLSearchParams({ q: search })}`); }} aria-label='البحث في جميع ملفات المحاضرين'>
+      {detail ? <Link href='/admin/instructors'>العودة إلى ملفات المحاضرين</Link> : <form id={`${formPrefix}-0`} className='context-card form-stack' noValidate onSubmit={(event) => { event.preventDefault(); router.push(`/admin/instructors?${new URLSearchParams({ q: search })}`); }} aria-label='البحث في جميع ملفات المحاضرين'>
+<FieldGroup>
         <FormField id='instructor-global-search' label='البحث في جميع الملفات المصرح بها' value={search} onChange={setSearch} hint='الاسم أو رقم التواصل. لا يشمل الفروع المحجوبة.' />
-        <div className='form-actions'><Button type='submit' variant='primary' disabled={busy}>بحث عن محاضر</Button>{search || query ? <Button disabled={busy} onClick={() => { setSearch(''); router.push('/admin/instructors'); document.getElementById('instructor-global-search')?.focus(); }}>مسح البحث</Button> : null}</div>
-      </form>}
-      {editor ? <form className='context-card form-stack' aria-label={editor === 'new' ? 'ملف محاضر جديد' : `تعديل ملف ${editor.name}`} noValidate onSubmit={save}>
+        <CenterHeaderActions><Button form={`${formPrefix}-0`} type='submit' variant='primary' disabled={busy}>بحث عن محاضر</Button>{search || query ? <Button disabled={busy} onClick={() => { setSearch(''); router.push('/admin/instructors'); document.getElementById('instructor-global-search')?.focus(); }}>مسح البحث</Button> : null}</CenterHeaderActions>
+      </FieldGroup>
+</form>}
+      {editor ? <form id={`${formPrefix}-1`} className='context-card form-stack' aria-label={editor === 'new' ? 'ملف محاضر جديد' : `تعديل ملف ${editor.name}`} noValidate onSubmit={save}>
+<FieldGroup>
         <h2>{editor === 'new' ? 'ملف محاضر جديد' : `تعديل ملف ${editor.name}`}</h2>
-        <fieldset disabled={busy} className='form-stack' style={{ border: 0, padding: 0, margin: 0 }}>
+        <FieldSet disabled={busy} className="form-stack" style={{ border: 0, padding: 0, margin: 0 }}>
         <FormField id='instructor-name' label='اسم المحاضر' focusOnMount value={name} onChange={(value) => { setName(value); setFieldErrors({}); }} error={fieldErrors.name} required autoComplete='off' />
         <FormField id='instructor-phone' label='رقم التواصل' value={phone} onChange={(value) => { setPhone(value); setFieldErrors({}); }} error={fieldErrors.phone} type='tel' direction='ltr' autoComplete='off' hint='اختياري، ويمكن لأكثر من محاضر استخدام نفس الرقم.' />
-        <fieldset id='instructor-branches' className='branch-grants' aria-describedby={fieldErrors.branch_ids ? 'instructor-branches-error' : 'instructor-branches-hint'}><legend>الفروع المرتبطة بالمحاضر</legend>
+        <FieldSet id='instructor-branches' data-invalid={Boolean(fieldErrors.branch_ids)} aria-describedby={fieldErrors.branch_ids ? 'instructor-branches-error' : 'instructor-branches-hint'}><FieldLegend>الفروع المرتبطة بالمحاضر</FieldLegend>
           <p id='instructor-branches-hint' className='muted'>اختر الفروع المصرح بها للإسناد. تبقى ارتباطات الملف السابقة محفوظة.</p>
           {manageable.map((branch) => {
             const associated = editor !== 'new' && editor.branch_ids.includes(branch.id);
-            return <label key={branch.id} className='check-row'><input type='checkbox' checked={branchIds.includes(branch.id)} disabled={busy || associated} onChange={(event) => { setBranchIds((ids) => event.target.checked ? [...ids, branch.id] : ids.filter((id) => id !== branch.id)); setFieldErrors({}); }} />{branch.name}{associated ? ' — مرتبط بالفعل' : ''}</label>;
+            return <FieldLabel key={branch.id} className="flex items-center gap-2"><Checkbox aria-invalid={Boolean(fieldErrors.branch_ids)} checked={branchIds.includes(branch.id)} disabled={busy || associated} onCheckedChange={(checked) => { setBranchIds((ids) => checked ? [...ids, branch.id] : ids.filter((id) => id !== branch.id)); setFieldErrors({}); }} />{branch.name}{associated ? ' — مرتبط بالفعل' : ''}</FieldLabel>;
           })}
           {fieldErrors.branch_ids ? <p id='instructor-branches-error' className='field-error' role='alert'>{fieldErrors.branch_ids}</p> : null}
-        </fieldset>
-        {conflict ? <Button disabled={busy} onClick={reloadInstructor}>تحميل أحدث بيانات المحاضر</Button> : null}
-        <div className='form-actions'><Button type='submit' variant='primary' busy={busy} disabled={conflict}>{editor === 'new' ? 'حفظ ملف المحاضر' : 'حفظ بيانات المحاضر'}</Button><Button disabled={busy} onClick={close}>إلغاء</Button></div>
-        </fieldset>
-      </form> : null}
+        </FieldSet>
+<CenterHeaderActions>{conflict ? <Button disabled={busy} onClick={reloadInstructor}>تحميل أحدث بيانات المحاضر</Button> : null}<Button form={`${formPrefix}-1`} type='submit' variant='primary' busy={busy} disabled={conflict}>{editor === 'new' ? 'حفظ ملف المحاضر' : 'حفظ بيانات المحاضر'}</Button><Button disabled={busy} onClick={close}>إلغاء</Button></CenterHeaderActions>
+        </FieldSet>
+      </FieldGroup>
+</form> : null}
       {!editor && (context.pagination.branches_has_more || context.pagination.branches_page > 1) ? <nav className='form-actions' aria-label='صفحات فروع المحاضرين'>{context.pagination.branches_page > 1 ? <Link href={pageLink(context.pagination.page, context.pagination.branches_page - 1)}>الفروع السابقة</Link> : null}<span>صفحة الفروع {context.pagination.branches_page.toLocaleString('ar-EG')}</span>{context.pagination.branches_has_more ? <Link href={pageLink(context.pagination.page, context.pagination.branches_page + 1)}>الفروع التالية</Link> : null}</nav> : null}
       <DataTable id='instructors' title='سجل المحاضرين' description={detail ? 'البيانات الأساسية للملف ضمن الفروع المصرح بها.' : 'تصفية الجدول ضمن هذه الدفعة (حتى ٥٠ ملفًا). استخدم البحث أعلاه للبحث في جميع الملفات المصرح بها.'} rows={context.instructors} rowKey={(instructor) => instructor.id} searchText={(instructor) => `${instructor.name} ${instructor.phone ?? ''}`} emptyMessage={query ? 'لا يوجد محاضر مطابق ضمن نطاق صلاحيتك.' : 'لا توجد ملفات محاضرين متاحة. أنشئ ملفًا إذا كانت لديك صلاحية الإدارة الأكاديمية.'}
         columns={[

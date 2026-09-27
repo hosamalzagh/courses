@@ -42,9 +42,9 @@ async function changeThroughForm(page: Page, label: string, reason: string) {
   await expect(page.getByRole('textbox', { name: 'سبب تغيير الحالة' })).toHaveAttribute('aria-invalid', 'true');
   await page.getByRole('textbox', { name: 'سبب تغيير الحالة' }).fill(reason);
   await page.getByRole('button', { name: label, exact: true }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
-  await expect(page.getByRole('dialog').getByRole('button', { name: 'إلغاء', exact: true })).toBeFocused();
-  await page.getByRole('dialog').getByRole('button', { name: label, exact: true }).click();
+  await expect(page.getByRole('alertdialog')).toBeVisible();
+  await expect(page.getByRole('alertdialog').getByRole('button', { name: 'إلغاء', exact: true })).toBeFocused();
+  await page.getByRole('alertdialog').getByRole('button', { name: label, exact: true }).click();
 }
 
 test('owner suspends and lifts with visible periods, confirmation, RTL, themes and preserved general data', async ({ page }) => {
@@ -102,7 +102,7 @@ test('parallel requests, stale revision, cross center access, revoked administra
     await staff.getByRole('textbox', { name: 'سبب تغيير الحالة' }).fill('Open stale administrator form');
     expect((await write(owner, `members/${member.id}/grants`, 'PUT', { center_roles: [], branch_roles: member.branch_roles })).status).toBe(200);
     await staff.getByRole('button', { name: 'إيقاف ملف الطالب', exact: true }).click();
-    await staff.getByRole('dialog').getByRole('button', { name: 'إيقاف ملف الطالب', exact: true }).click();
+    await staff.getByRole('alertdialog').getByRole('button', { name: 'إيقاف ملف الطالب', exact: true }).click();
     await expect(staff.getByRole('alert')).toBeVisible();
     context = await (await owner.request.get(`${ownerHost}/api/v1/center/students/${student.id}`)).json();
     expect(context.students[0].status).toBe('active'); expect(context.suspensions).toHaveLength(1);
@@ -116,13 +116,13 @@ test('lost response retries one decision and stale forms recover by loading the 
   await changeThroughForm(page, 'إيقاف ملف الطالب', 'Response lost');
   await expect(page.getByRole('alert').filter({ hasText: 'تعذر تأكيد تغيير الحالة' })).toBeVisible();
   await page.getByRole('button', { name: 'إيقاف ملف الطالب', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'إيقاف ملف الطالب', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'إيقاف ملف الطالب', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'حالة ملف الطالب: موقوف' })).toBeVisible();
   await page.getByRole('button', { name: 'فك إيقاف ملف الطالب', exact: true }).click();
   await page.getByRole('textbox', { name: 'سبب تغيير الحالة' }).fill('Stale lift');
   expect((await write(page, `students/${student.id}/status`, 'POST', { status: 'active', reason: 'Other staff decision', status_revision: 2, request_id: crypto.randomUUID() })).status).toBe(200);
   await page.getByRole('button', { name: 'فك إيقاف ملف الطالب', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'فك إيقاف ملف الطالب', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'فك إيقاف ملف الطالب', exact: true }).click();
   await expect(page.getByRole('alert').filter({ hasText: 'تغيّرت حالة الملف' })).toBeVisible();
   await page.getByRole('button', { name: 'تحميل أحدث حالة الطالب' }).click();
   await expect(page.getByRole('form', { name: 'إيقاف ملف الطالب', exact: true })).toBeVisible();

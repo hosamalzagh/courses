@@ -1,5 +1,9 @@
 "use client";
 
+import { Button } from "@/components/Button";
+import { FieldGroup } from "@/components/ui/field";
+
+
 import { PrefetchLink } from "@/components/PrefetchLink";
 
 import { useState, type FormEvent } from "react";
@@ -85,19 +89,23 @@ export function LoginForm({ expired }: { expired: boolean }) {
 
       {step === "credentials" ? (
         <form className="form-stack" noValidate onSubmit={submitCredentials}>
+<FieldGroup>
           <FormField id="email" label="البريد الإلكتروني" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.email} autoComplete="username" required direction="ltr" />
           <FormField id="password" label="كلمة المرور" type="password" value={password} onChange={(value) => { setPassword(value); setFieldErrors({}); }} error={fieldErrors.password} autoComplete="current-password" required />
-          <button className="button button-primary" type="submit" disabled={busy || !email || !password}>{busy ? "جارٍ التحقق…" : "دخول المركز"}</button>
+          <Button variant="primary" type="submit" disabled={busy || !email || !password} busy={busy} busyLabel="جارٍ التحقق…">دخول المركز</Button>
           <PrefetchLink className="text-link" href="/forgot-password">نسيت كلمة المرور؟</PrefetchLink>
-        </form>
+        </FieldGroup>
+</form>
       ) : (
         <>
           <form className="form-stack" noValidate onSubmit={submitCode}>
+<FieldGroup>
             {useRecovery ? <FormField id="recovery-code" label="رمز الاستعادة" value={recoveryCode} onChange={(value) => { setRecoveryCode(value); setFieldErrors({}); }} error={fieldErrors.recovery_code} required direction="ltr" hint="كل رمز استعادة يُستخدم مرة واحدة" /> :
               <FormField id="code" label="رمز التحقق" value={code} onChange={(value) => { setCode(value); setFieldErrors({}); }} error={fieldErrors.code} autoComplete="one-time-code" required direction="ltr" hint="ستة أرقام من تطبيق المصادقة" />}
-            <button className="button button-primary" type="submit" disabled={busy || (useRecovery ? !recoveryCode : !/^\d{6}$/.test(code))}>{busy ? "جارٍ التحقق…" : "تحقق وادخل"}</button>
-          </form>
-          <button className="text-link" type="button" onClick={() => { setUseRecovery(!useRecovery); setCode(""); setRecoveryCode(""); }}>{useRecovery ? "استخدام تطبيق المصادقة" : "استخدام رمز استعادة"}</button>
+            <Button variant="primary" type="submit" disabled={busy || (useRecovery ? !recoveryCode : !/^\d{6}$/.test(code))} busy={busy} busyLabel="جارٍ التحقق…">تحقق وادخل</Button>
+          </FieldGroup>
+</form>
+          <Button variant="link" type="button" onClick={() => { setUseRecovery(!useRecovery); setCode(""); setRecoveryCode(""); }}>{useRecovery ? "استخدام تطبيق المصادقة" : "استخدام رمز استعادة"}</Button>
         </>
       )}
       <p className="auth-footnote">لا تملك دعوة؟ اطلبها من مالك المركز أو مسؤوله.</p>

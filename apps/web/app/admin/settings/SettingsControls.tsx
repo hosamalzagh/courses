@@ -1,5 +1,10 @@
 "use client";
 
+import { useId } from "react";
+
+import { FieldGroup } from "@/components/ui/field";
+
+
 import { StudentNumberingControls } from "./StudentNumberingControls";
 import { Button } from "@/components/Button";
 import { useState, type FormEvent } from "react";
@@ -13,6 +18,7 @@ import { centerRequest, responseFieldErrors, responseMessage } from "@/lib/clien
 type Settings = { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number };
 
 export function SettingsControls({ context, initialSettings }: { context: CenterContext; initialSettings: Settings }) {
+  const formPrefix = useId();
   const router = useRouter();
   const [email, setEmail] = useState(initialSettings.contact_email ?? "");
   const [phone, setPhone] = useState(initialSettings.phone ?? "");
@@ -39,15 +45,17 @@ export function SettingsControls({ context, initialSettings }: { context: Center
   }
 
   return <>
-    <CenterPageActions context={context} actions={<Button variant="primary" form="center-settings" disabled={busy} type="submit" busy={busy} busyLabel="جارٍ الحفظ…">حفظ الإعدادات</Button>} />
+    <CenterPageActions context={context} actions={<Button variant="primary" form={`${formPrefix}-0`} disabled={busy} type="submit" busy={busy} busyLabel="جارٍ الحفظ…">حفظ الإعدادات</Button>} />
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-      <form id="center-settings" className="context-card form-stack" noValidate onSubmit={save}>
+      <form id={`${formPrefix}-0`} className="context-card form-stack" noValidate onSubmit={save}>
+<FieldGroup>
         <FormField id="contact-email" label="بريد التواصل" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.contact_email} direction="ltr" />
         <FormField id="phone" label="الهاتف" type="tel" value={phone} onChange={(value) => { setPhone(value); setFieldErrors({}); }} error={fieldErrors.phone} direction="ltr" />
         <FormField id="address" label="العنوان" value={address} onChange={(value) => { setAddress(value); setFieldErrors({}); }} error={fieldErrors.address} />
 
-      </form>
+      </FieldGroup>
+</form>
       <StudentNumberingControls start={initialSettings.student_number_start ?? 1} revision={initialSettings.student_number_revision ?? 1} />
   </>;
 }

@@ -1,8 +1,16 @@
 'use client';
+
+import { useId } from "react";
+
+import { Field } from "@/components/ui/field";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+
+import { FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/field";
+
 import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
-import { CenterPageActions } from '@/components/CenterShell';
+import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
 import { DataTable } from '@/components/DataTable';
 import { Button } from '@/components/Button';
 import { FormField } from '@/components/FormField';
@@ -14,6 +22,7 @@ type Editor = { kind: 'course' } | { kind: 'stage'; course: Course } | { kind: '
 type LectureDraft = Omit<PlanLecture, 'planned_hours'> & { planned_hours: string };
 const blankLecture = (): LectureDraft => ({ number: 1, content: '', title: null, planned_hours: '1' });
 export function CurriculumControls({ context, detail = false }: { context: CurriculumContext; detail?: boolean }) {
+  const formPrefix = useId();
   const router = useRouter();
   const [editor, setEditor] = useState<Editor | null>(null);
   const [name, setName] = useState('');
@@ -109,30 +118,31 @@ export function CurriculumControls({ context, detail = false }: { context: Curri
     return <nav className='form-actions' aria-label={`دفعات ${{ courses: 'الكورسات', stages: 'المراحل الدراسية', levels: 'المستويات', branches: 'الفروع' }[kind]}`} key={kind}>{current.page > 1 ? <Link href={href(current.page - 1)}>الدفعة السابقة</Link> : null}<span>دفعة {current.page.toLocaleString('ar-EG')} · حتى ٥٠ سجلًا</span>{current.has_more ? <Link href={href(current.page + 1)}>الدفعة التالية</Link> : null}</nav>;
   }
   return <>
-    <CenterPageActions context={context} actions={!detail && manageable.length ? <Button variant='primary' disabled={busy || editor !== null} onClick={() => open({ kind: 'course' })}>إنشاء كورس</Button> : undefined} />
+    <CenterPageActions context={context} actions={!detail && manageable.length ? <Button hidden={editor !== null} variant='primary' disabled={busy || editor !== null} onClick={() => open({ kind: 'course' })}>إنشاء كورس</Button> : undefined} />
       <UnsavedChangesGuard dirty={dirty} />
       {busy && !editor ? <InlineNotice>جارٍ تحميل خطة المستوى الحالية…</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}{error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
       {detail ? <Link href='/admin/curriculum'>العودة إلى منهج الفرع</Link> : null}
-      {editor ? <form className='context-card form-stack' aria-label='إدارة منهج الفرع' noValidate onSubmit={save}>
+      {editor ? <form id={`${formPrefix}-0`} className='context-card form-stack' aria-label='إدارة منهج الفرع' noValidate onSubmit={save}>
+<FieldGroup>
         <h2>{editor.kind === 'course' ? 'كورس جديد' : editor.kind === 'stage' ? `مرحلة دراسية في ${editor.course.name}` : editor.kind === 'level' ? `مستوى في ${editor.stage.name}` : `تعديل الخطة الأولى — ${editor.level.name}`}</h2>
-        <fieldset disabled={busy} className='form-stack' style={{ border: 0, padding: 0, margin: 0 }}>
+        <FieldSet disabled={busy} className="form-stack" style={{ border: 0, padding: 0, margin: 0 }}>
           {editor.kind !== 'plan' ? <FormField id='curriculum-name' label={editor.kind === 'course' ? 'اسم الكورس' : editor.kind === 'stage' ? 'اسم المرحلة الدراسية' : 'اسم المستوى'} value={name} onChange={(value) => { setName(value); setFieldErrors({}); }} required error={fieldErrors.name} focusOnMount /> : null}
-          {editor.kind === 'course' ? <fieldset className='branch-grants'><legend>الفرع الذي يملك الكورس</legend>{manageable.map((branch) => <label className='check-row' key={branch.id}><input type='radio' name='curriculum-branch' value={branch.id} checked={branchId === branch.id} onChange={() => setBranchId(branch.id)} />{branch.name}</label>)}{fieldErrors.branch_id ? <p className='field-error' role='alert'>{fieldErrors.branch_id}</p> : null}</fieldset> : null}
+          {editor.kind === 'course' ? <FieldSet ><FieldLegend>الفرع الذي يملك الكورس</FieldLegend><Field data-invalid={Boolean(fieldErrors.branch_id)}><RadioGroup disabled={busy} aria-invalid={Boolean(fieldErrors.branch_id)} name='curriculum-branch' value={String(branchId)} onValueChange={(value) => setBranchId(Number(value))}>{manageable.map((branch) => <FieldLabel className="flex items-center gap-2" key={branch.id}><RadioGroupItem value={String(branch.id)} />{branch.name}</FieldLabel>)}</RadioGroup></Field>{fieldErrors.branch_id ? <p className='field-error' role='alert'>{fieldErrors.branch_id}</p> : null}</FieldSet> : null}
           {editor.kind === 'level' || editor.kind === 'plan' ? <>
             <p className='muted'>كل بند محاضرة مطلوبة كاملة. الترقيم متتابع، والعنوان اختياري، ولا تحتاج إلى تقسيم الموضوع. حتى ٢٠٠ محاضرة في الإصدار الأول.</p>
-            {lectures.map((lecture, index) => <fieldset className='branch-grants form-stack' key={index}><legend>المحاضرة المطلوبة رقم {(index + 1).toLocaleString('ar-EG')}</legend>
+            {lectures.map((lecture, index) => <FieldSet className="form-stack" key={index}><FieldLegend>المحاضرة المطلوبة رقم {(index + 1).toLocaleString('ar-EG')}</FieldLegend>
               <FormField id={`lecture-content-${index}`} label={`محتوى المحاضرة ${index + 1}`} required focusOnMount={editor.kind === 'plan' && index === 0} value={lecture.content} onChange={(content) => changeLecture(index, { content })} error={fieldErrors[`lectures.${index}.content`]} />
               <FormField id={`lecture-title-${index}`} label={`عنوان المحاضرة ${index + 1} (اختياري)`} value={lecture.title ?? ''} onChange={(title) => changeLecture(index, { title })} error={fieldErrors[`lectures.${index}.title`]} />
               <FormField id={`lecture-hours-${index}`} label={`الساعات المخططة للمحاضرة ${index + 1}`} value={lecture.planned_hours} type='text' direction='ltr' onChange={(value) => changeLecture(index, { planned_hours: value })} error={fieldErrors[`lectures.${index}.planned_hours`]} hint='ساعات موجبة حتى منزلتين عشريتين. لا تستخدم لحساب نسبة الإتمام.' />
               {lectures.length > 1 ? <Button onClick={() => setLectures((items) => items.filter((_, number) => number !== index).map((item, number) => ({ ...item, number: number + 1 })))}>إزالة المحاضرة {index + 1}</Button> : null}
-            </fieldset>)}
+            </FieldSet>)}
             <Button disabled={lectures.length >= 200} onClick={() => setLectures((items) => [...items, { ...blankLecture(), number: items.length + 1 }])}>إضافة محاضرة كاملة</Button>
           </> : null}
-          {conflict ? <Button onClick={recover}>تحميل البيانات الحالية للمنهج</Button> : null}
-          <div className='form-actions'><Button type='submit' variant='primary' busy={busy} disabled={conflict}>حفظ المنهج</Button><Button onClick={close}>إلغاء</Button></div>
-        </fieldset>
-      </form> : null}
+<CenterHeaderActions>{conflict ? <Button onClick={recover}>تحميل البيانات الحالية للمنهج</Button> : null}<Button form={`${formPrefix}-0`} type='submit' variant='primary' busy={busy} disabled={conflict}>حفظ المنهج</Button><Button disabled={busy} onClick={close}>إلغاء</Button></CenterHeaderActions>
+        </FieldSet>
+      </FieldGroup>
+</form> : null}
       {!detail ? <>
         <DataTable id='curriculum-courses' title='الكورسات' description='المناهج المتاحة في الفروع المصرح بها. البحث والتصفية ضمن الدفعة المعروضة.' rows={context.courses} rowKey={(row) => row.id} searchText={(row) => `${row.name} ${branchName(row.branch_id)}`} emptyMessage='لا توجد كورسات متاحة. أنشئ كورسًا إذا كانت لديك صلاحية الإدارة الأكاديمية.' columns={[
           { key: 'name', label: 'الكورس', filterText: (row) => row.name, render: (row) => <h3>{row.name}</h3> },

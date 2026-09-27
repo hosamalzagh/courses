@@ -1,10 +1,15 @@
 'use client';
 
+import { useId } from "react";
+
+import { FieldGroup, FieldSet } from "@/components/ui/field";
+
+
 import { useEffect, useRef, useState, useTransition, type FormEvent } from 'react';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/Button';
-import { CenterPageActions } from '@/components/CenterShell';
+import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
 import { ConfirmationDialog } from '@/components/ConfirmationDialog';
 import { DataTable } from '@/components/DataTable';
 import { FormField } from '@/components/FormField';
@@ -13,6 +18,7 @@ import { centerRequest, responseMessage } from '@/lib/client-api';
 import type { StudentSearchContext, StudentSearchPolicy } from '@/lib/server-context';
 
 export function StudentSearchControls({ context, query }: { context: StudentSearchContext; query: string }) {
+  const formPrefix = useId();
   const router = useRouter();
   const [search, setSearch] = useState(query);
   const [policy, setPolicy] = useState(context.policy);
@@ -85,18 +91,20 @@ export function StudentSearchControls({ context, query }: { context: StudentSear
       <section className='context-card form-stack' aria-label='إتاحة البحث بين الفروع'>
         <h2>إتاحة البحث بين الفروع</h2>
         <p>الحالة: <strong>{policy.enabled ? 'مفعّل' : 'مغلق'}</strong>. يحتاج الموظف صلاحية البحث المستقلة؛ أدوار التسجيل وحدها لا تكفي.</p>
-        {context.permissions.can_manage_center ? <div className='form-actions'><Button ref={policyButton} busy={busy} disabled={conflict || pending} onClick={() => setConfirmation('search')}>{policy.enabled ? 'تعطيل البحث بين الفروع' : 'تفعيل البحث بين الفروع'}</Button>{conflict ? <Button disabled={busy} onClick={reloadPolicy}>تحميل أحدث إعداد</Button> : null}</div> : <p className='muted'>مالك المركز أو مسؤوله يغيّر هذا الإعداد.</p>}
+        {context.permissions.can_manage_center ? <CenterHeaderActions><Button ref={policyButton} busy={busy} disabled={conflict || pending} onClick={() => setConfirmation('search')}>{policy.enabled ? 'تعطيل البحث بين الفروع' : 'تفعيل البحث بين الفروع'}</Button>{conflict ? <Button disabled={busy} onClick={reloadPolicy}>تحميل أحدث إعداد</Button> : null}</CenterHeaderActions> : <p className='muted'>مالك المركز أو مسؤوله يغيّر هذا الإعداد.</p>}
       </section>
       {context.permissions.can_manage_center ? <section className='context-card form-stack' aria-label='افتراضي مشاركة الملفات الجديدة'>
         <h2>افتراضي مشاركة الملفات الجديدة</h2>
         <p>المشاركة عند الإنشاء: <strong>{policy.default_sharing_enabled ? 'مسموحة' : 'مغلقة'}</strong>. تغيير الافتراضي لا يغيّر اختيارات الطلاب الموجودين، ولا يفتح البحث العام.</p>
-        <div className='form-actions'><Button busy={busy} disabled={conflict || pending} onClick={() => setConfirmation('default')}>تغيير افتراضي المشاركة</Button>{conflict ? <Button disabled={busy} onClick={reloadPolicy}>تحميل أحدث إعداد</Button> : null}</div>
+        <CenterHeaderActions><Button busy={busy} disabled={conflict || pending} onClick={() => setConfirmation('default')}>تغيير افتراضي المشاركة</Button>{conflict ? <Button disabled={busy} onClick={reloadPolicy}>تحميل أحدث إعداد</Button> : null}</CenterHeaderActions>
       </section> : null}
       {!policy.enabled ? <InlineNotice tone='warning'>البحث بين الفروع مغلق في هذا المركز. يمكنك العمل في ملفات الطلاب المصرح بها ضمن فروعك.</InlineNotice> : null}
-      <form className='context-card form-stack' aria-label='البحث في البيانات الأساسية لطلاب المركز' noValidate ref={searchForm} onSubmit={submit} aria-busy={pending}>
-        <fieldset disabled={!context.can_search || busy || pending} style={{ border: 0, padding: 0, margin: 0 }}><FormField id='center-student-search' label='الاسم أو رقم الطالب الداخلي أو رقم التواصل' value={search} onChange={setSearch} hint='خارج فروعك تظهر الملفات التي تسمح بالمشاركة فقط عند فتح البحث العام ومنحك صلاحية البحث. النتائج لا تعرض سجلات الفروع.' /></fieldset>
-        <div className='form-actions'><Button type='submit' variant='primary' busy={pending} disabled={!context.can_search || busy}>بحث في طلاب المركز</Button>{search ? <Button disabled={busy || pending} onClick={() => { setSearch(''); focusAfterClear.current = true; navigate(''); searchForm.current?.querySelector<HTMLInputElement>('#center-student-search')?.focus(); }}>مسح البحث</Button> : null}<Link href='/admin/students'>ملفات الطلاب ضمن فروعك</Link></div>
-      </form>
+      <form id={`${formPrefix}-0`} className='context-card form-stack' aria-label='البحث في البيانات الأساسية لطلاب المركز' noValidate ref={searchForm} onSubmit={submit} aria-busy={pending}>
+<FieldGroup>
+        <FieldSet disabled={!context.can_search || busy || pending} style={{ border: 0, padding: 0, margin: 0 }}><FormField id='center-student-search' label='الاسم أو رقم الطالب الداخلي أو رقم التواصل' value={search} onChange={setSearch} hint='خارج فروعك تظهر الملفات التي تسمح بالمشاركة فقط عند فتح البحث العام ومنحك صلاحية البحث. النتائج لا تعرض سجلات الفروع.' /></FieldSet>
+        <CenterHeaderActions><Button form={`${formPrefix}-0`} type='submit' variant='primary' busy={pending} disabled={!context.can_search || busy}>بحث في طلاب المركز</Button>{search ? <Button disabled={busy || pending} onClick={() => { setSearch(''); focusAfterClear.current = true; navigate(''); searchForm.current?.querySelector<HTMLInputElement>('#center-student-search')?.focus(); }}>مسح البحث</Button> : null}<Link href='/admin/students'>ملفات الطلاب ضمن فروعك</Link></CenterHeaderActions>
+      </FieldGroup>
+</form>
       <DataTable id='center-student-search-results' title='البيانات الأساسية المطابقة' description='حتى ٥٠ نتيجة في الدفعة؛ تصفية الجدول ضمن الدفعة الحالية فقط.' rows={context.students} rowKey={(student) => student.id} searchText={(student) => `${student.student_number} ${student.name} ${student.phone ?? ''}`} emptyMessage={!context.can_search ? 'البحث بين الفروع مغلق.' : query ? 'لا يوجد طالب مطابق في هذا المركز.' : 'أدخل بيانات الطالب لبدء البحث.'} columns={[
         { key: 'number', label: 'رقم الطالب الداخلي', filterText: (student) => String(student.student_number), render: (student) => <span className='table-code'>{student.student_number.toLocaleString('ar-EG')}</span> },
         { key: 'name', label: 'الطالب', filterText: (student) => student.name, render: (student) => <h3>{student.name}</h3> },

@@ -1,8 +1,14 @@
 "use client";
 
+import { useId } from "react";
+
+import { Checkbox } from "@/components/ui/checkbox";
+import { FieldGroup, FieldLabel, FieldSet, FieldLegend } from "@/components/ui/field";
+
+
 import { useState, useEffect, useRef, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { CenterPageActions } from "@/components/CenterShell";
+import { CenterPageActions, CenterHeaderActions } from "@/components/CenterShell";
 import { DataTable } from "@/components/DataTable";
 import { Button } from "@/components/Button";
 import { FormField } from "@/components/FormField";
@@ -19,6 +25,7 @@ const invitationLabels: Record<Invitation["status"], string> = {
 };
 
 export function MemberControls({ context }: { context: MemberContext }) {
+  const formPrefix = useId();
   const router = useRouter();
   const [workspace, setWorkspace] = useState(context);
   const editTrigger = useRef<HTMLButtonElement | null>(null);
@@ -152,11 +159,11 @@ export function MemberControls({ context }: { context: MemberContext }) {
 
   function pagination(section: "members" | "invitations" | "branches") {
     const state = workspace.pagination[section];
-    return <div className="form-actions" aria-label={`صفحات ${section === "members" ? "الموظفين" : section === "invitations" ? "الدعوات" : "الفروع"}`}>
+    return <nav className="form-actions" aria-label={`صفحات ${section === "members" ? "الموظفين" : section === "invitations" ? "الدعوات" : "الفروع"}`}>
       <Button disabled={busy || state.page === 1} onClick={() => requestPageChange(section, state.page - 1)}>الدفعة السابقة</Button>
       <span>دفعة {state.page} · حتى ٥٠ سجلًا؛ البحث داخل الدفعة المعروضة</span>
       <Button disabled={busy || !state.has_more} onClick={() => requestPageChange(section, state.page + 1)}>الدفعة التالية</Button>
-    </div>;
+    </nav>;
   }
 
   async function saveGrants(member: Member) {
@@ -176,16 +183,18 @@ export function MemberControls({ context }: { context: MemberContext }) {
   }
 
   return <>
-    <CenterPageActions context={workspace} actions={<Button variant="primary" form="invite-member" disabled={busy || !email} type="submit" busy={busy} busyLabel="جارٍ إرسال الدعوة…">إرسال الدعوة</Button>} />
+    <CenterPageActions context={workspace} actions={editing ? null : <Button variant="primary" form={`${formPrefix}-0`} disabled={busy || !email} type="submit" busy={busy} busyLabel="جارٍ إرسال الدعوة…">إرسال الدعوة</Button>} />
 
 
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-      <section className="context-card"><h2>دعوة موظف</h2><form id="invite-member" className="member-invite-form" noValidate onSubmit={invite}>
+      <section className="context-card"><h2>دعوة موظف</h2><form id={`${formPrefix}-0`} className="member-invite-form" noValidate onSubmit={invite}>
+<FieldGroup>
         <FormField id="invite-email" label="البريد الإلكتروني" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.email} direction="ltr" required />
-        {isOwner ? <label className="check-row"><input type="checkbox" checked={inviteAsAdmin} onChange={(event) => setInviteAsAdmin(event.target.checked)} />دعوة بصفة مسؤول مركز</label> : null}
+        {isOwner ? <FieldLabel className="flex items-center gap-2"><Checkbox disabled={busy} checked={inviteAsAdmin} onCheckedChange={(checked) => setInviteAsAdmin(checked)} />دعوة بصفة مسؤول مركز</FieldLabel> : null}
 
-      </form></section>
+      </FieldGroup>
+</form></section>
       <DataTable id="invitations" title="الدعوات" rows={invitations} rowKey={(invitation) => invitation.id} searchText={(invitation) => invitation.email} emptyMessage="لا توجد دعوات حاليًا."
         filters={Object.entries(invitationLabels).map(([value, label]) => ({ value, label, matches: (invitation: Invitation) => invitation.status === value }))}
         columns={[
@@ -204,19 +213,19 @@ export function MemberControls({ context }: { context: MemberContext }) {
           { key: "status", label: "الحالة", render: (member) => <span className={`role-pill ${member.status === "active" ? "" : "status-warning"}`}>{member.status === "active" ? "نشط" : "موقوف"}</span> },
           { key: "actions", label: "الإجراءات", actions: true, render: (member) => <div className="row-actions">{isOwner || !member.center_roles.includes("center_owner") ? <Button onClick={(event) => edit(member, event.currentTarget)} disabled={busy}>تعديل الأدوار</Button> : null}<Button variant={member.status === "active" ? "danger" : "secondary"} onClick={() => requestStatusChange(member)} disabled={busy || (member.user.id === context.user.id && member.center_roles.includes("center_owner"))}>{member.status === "active" ? "إيقاف العضوية" : "تنشيط العضوية"}</Button></div> },
         ]}
-        expanded={(member) => editing === member.id ? <div ref={editor} className="grant-editor" role="region" aria-label={`أدوار ${member.user.name}`}><fieldset disabled={busy}><legend>أدوار المركز</legend>
-            {isOwner ? <label className="check-row"><input type="checkbox" checked={centerRoles.includes("center_owner")} onChange={() => toggleCenter("center_owner")} />مالك المركز</label> : null}
-            {isOwner ? <label className="check-row"><input type="checkbox" checked={centerRoles.includes("center_admin")} onChange={() => toggleCenter("center_admin")} />مسؤول المركز</label> : null}
-            <h4>إسنادات الفروع</h4>{workspace.branches.map((branch) => <fieldset key={branch.id} className="branch-grant"><legend>{branch.name}</legend>
+        expanded={(member) => editing === member.id ? <div ref={editor} className="grant-editor" role="region" aria-label={`أدوار ${member.user.name}`}><FieldSet disabled={busy}><FieldLegend>أدوار المركز</FieldLegend>
+            {isOwner ? <FieldLabel className="flex items-center gap-2"><Checkbox disabled={busy} checked={centerRoles.includes("center_owner")} onCheckedChange={() => toggleCenter("center_owner")} />مالك المركز</FieldLabel> : null}
+            {isOwner ? <FieldLabel className="flex items-center gap-2"><Checkbox disabled={busy} checked={centerRoles.includes("center_admin")} onCheckedChange={() => toggleCenter("center_admin")} />مسؤول المركز</FieldLabel> : null}
+            <h4>إسنادات الفروع</h4>{workspace.branches.map((branch) => <FieldSet key={branch.id} ><FieldLegend>{branch.name}</FieldLegend>
               {[false, true].map((additional) => <div key={String(additional)}><h5>{additional ? "صلاحيات إضافية مستقلة" : "أدوار التشغيل"}</h5>
-                {Object.entries(workspace.grant_options).filter(([, option]) => Boolean(option.additional) === additional).map(([role, option]) => <label className="check-row" key={role}>
-                  <input type="checkbox" disabled={Boolean(option.owner_only && !isOwner)} checked={(branchRoles[String(branch.id)] ?? []).includes(role)} onChange={() => toggleBranch(branch.id, role)} />{option.label}
-                </label>)}
+                {Object.entries(workspace.grant_options).filter(([, option]) => Boolean(option.additional) === additional).map(([role, option]) => <FieldLabel className="flex items-center gap-2" key={role}>
+                  <Checkbox  disabled={busy || Boolean(option.owner_only && !isOwner)} checked={(branchRoles[String(branch.id)] ?? []).includes(role)} onCheckedChange={() => toggleBranch(branch.id, role)} />{option.label}
+                </FieldLabel>)}
               </div>)}
-            </fieldset>)}
+            </FieldSet>)}
             {pagination("branches")}
-            <div className="form-actions"><Button variant="primary" onClick={() => requestSaveGrants(member)} busy={busy} busyLabel="جارٍ الحفظ…">حفظ الأدوار</Button><Button onClick={() => setEditing(null)} disabled={busy}>إلغاء</Button></div>
-          </fieldset></div> : null}
+            <CenterHeaderActions><Button variant="primary" onClick={() => requestSaveGrants(member)} busy={busy} busyLabel="جارٍ الحفظ…">حفظ الأدوار</Button><Button onClick={() => setEditing(null)} disabled={busy}>إلغاء</Button></CenterHeaderActions>
+          </FieldSet></div> : null}
       />
       {pagination("members")}
     {confirmation ? <ConfirmationDialog title={confirmation.title} description={confirmation.description} confirmLabel={confirmation.confirmLabel}

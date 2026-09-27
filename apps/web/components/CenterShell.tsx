@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useMemo, type ReactNode, type Dispatch, type SetStateAction } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useMemo, useId, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { useLinkStatus } from "next/link";
 import { PrefetchLink as Link } from "./PrefetchLink";
 import { getAdminHeader } from "@/lib/admin-header";
@@ -8,6 +8,7 @@ import { usePathname } from "next/navigation";
 import type { CenterContext } from "@/lib/server-context";
 import { centerRequest, responseMessage } from "@/lib/client-api";
 import { Button } from "./Button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetClose, SheetTrigger } from "./ui/sheet";
 import { ThemeToggle } from "./ThemeProvider";
 import { InlineNotice } from "./InlineNotice";
 import { TablePreferenceUser } from "./TablePreferences";
@@ -21,8 +22,8 @@ const navigationIcons: Record<string, ReactNode> = {
 };
 
 type PageHeader = { context: CenterContext; title: string; description?: ReactNode; path: string };
-type PageActions = { context: CenterContext; actions?: ReactNode; path: string };
-const PageRegistration = createContext<{ register: Dispatch<SetStateAction<PageHeader | null>>; registerActions: Dispatch<SetStateAction<PageActions | null>> } | null>(null);
+type PageActions = { context?: CenterContext; actions?: ReactNode; path: string };
+const PageRegistration = createContext<{ register: Dispatch<SetStateAction<PageHeader | null>>; registerActions: Dispatch<SetStateAction<Record<string, PageActions>>> } | null>(null);
 
 function NavigationPending() {
   const { pending } = useLinkStatus();
@@ -42,34 +43,47 @@ export function CenterPageRegistration({ context, title, description }: { contex
   return null;
 }
 
-export function CenterPageActions({ context, actions }: { context: CenterContext; actions?: ReactNode }) {
+export function CenterPageActions({ context, actions }: { context?: CenterContext; actions?: ReactNode }) {
   const register = useContext(PageRegistration)?.registerActions;
   const path = usePathname();
+  const id = useId();
   useLayoutEffect(() => {
     if (!register) return;
     const page = { context, actions, path };
-    register(page);
-    return () => register((current) => current === page ? null : current);
-  }, [register, context, actions, path]);
+    register((current) => ({ ...current, [id]: page }));
+    return () => register((current) => {
+      if (current[id] !== page) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  }, [register, context, actions, path, id]);
   return null;
+}
+
+// Every editor contributes its actions to the persistent page header.
+// Submit buttons retain their explicit native `form` association.
+export function CenterHeaderActions({ children }: { children: ReactNode }) {
+  return <CenterPageActions actions={children} />;
 }
 
 export function CenterLayout({ initialContext, children }: { initialContext: CenterContext; children: ReactNode }) {
   const path = usePathname();
   const [page, register] = useState<PageHeader | null>(null);
-  const [pageActions, registerActions] = useState<PageActions | null>(null);
+  const [pageActions, registerActions] = useState<Record<string, PageActions>>({});
   const registration = useMemo(() => ({ register, registerActions }), []);
-  const context = pageActions?.path === path ? pageActions.context : page?.context ?? initialContext;
+  const currentActions = Object.entries(pageActions).filter(([, item]) => item.path === path).sort(([a, left], [b, right]) => Number(!left.context) - Number(!right.context) || a.localeCompare(b));
+  const context = currentActions.find(([, item]) => item.context)?.[1].context ?? (page?.path === path ? page.context : initialContext);
   const currentPage = page?.path === path ? page : null;
   const fallbackHeader = getAdminHeader(path, context);
   const title = currentPage?.title ?? fallbackHeader.title;
   const description = currentPage?.description ?? fallbackHeader.description;
-  const actions = pageActions?.path === path ? pageActions.actions : undefined;
+  const actions = currentActions.map(([id, item]) => <span key={id} className="header-action-group">{item.actions}</span>);
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const drawer = useRef<HTMLDialogElement>(null);
+  const drawerClose = useRef<HTMLButtonElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   const canAudit = context.permissions.can_manage_center || Object.values(context.permissions.branch_roles).some((roles) => roles.includes("branch_auditor"));
   const links = [
@@ -86,20 +100,13 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
 
   useEffect(() => {
     if (!menuOpen) return;
-    const element = drawer.current;
-    const trigger = menuButton.current;
-    element?.showModal();
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     // A drawer becomes desktop navigation when the viewport widens.
     const media = matchMedia("(min-width: 901px)");
     const closeOnDesktop = () => { if (media.matches) setMenuOpen(false); };
     media.addEventListener("change", closeOnDesktop);
     return () => {
-      element?.close();
-      document.body.style.overflow = previousOverflow;
       media.removeEventListener("change", closeOnDesktop);
-      trigger?.focus();
+
     };
   }, [menuOpen]);
 
@@ -123,14 +130,14 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
     return <div className="sidebar-account">
       {!collapsed || mobile ? <div className="sidebar-user"><strong>{context.user.name}</strong><span className="membership-status"><span aria-hidden="true">●</span> نشطة</span></div> : null}
       <div className="sidebar-account-actions">
-        {!mobile ? <Button className="sidebar-icon-button" onClick={() => setCollapsed(!collapsed)} aria-expanded={!collapsed} aria-label={collapsed ? "توسيع القائمة الجانبية" : "طي القائمة الجانبية"} title={collapsed ? "توسيع القائمة" : "طي القائمة"}><span aria-hidden="true">{collapsed ? "‹" : "›"}</span></Button> : null}
+        {!mobile ? <Button variant="ghost" size="icon" onClick={() => setCollapsed(!collapsed)} aria-expanded={!collapsed} aria-label={collapsed ? "توسيع القائمة الجانبية" : "طي القائمة الجانبية"} title={collapsed ? "توسيع القائمة" : "طي القائمة"}><span aria-hidden="true">{collapsed ? "‹" : "›"}</span></Button> : null}
         <ThemeToggle compact />
-        <Button className="sidebar-icon-button" onClick={signOut} busy={busy} busyLabel="…" aria-label="تسجيل الخروج" title="تسجيل الخروج"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h10" /></svg></Button>
+        <Button variant="ghost" size="icon" onClick={signOut} busy={busy} busyLabel="…" aria-label="تسجيل الخروج" title="تسجيل الخروج"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h10" /></svg></Button>
       </div>
     </div>;
   }
 
-  return <PageRegistration.Provider value={registration}><TablePreferenceUser.Provider value={String(context.user.id)}><div className={`center-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
+  return <PageRegistration.Provider value={registration}><TablePreferenceUser.Provider value={String(context.user.id)}><Sheet open={menuOpen} onOpenChange={setMenuOpen}><div className={`center-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
     <a className="skip-link" href="#center-content">انتقل إلى المحتوى</a>
     <aside className="center-sidebar">
       <Link className="brand" href="/admin" aria-label="Courses — الفروع"><span className="brand-mark" aria-hidden="true">C</span>{!collapsed ? <span>Courses</span> : null}</Link>
@@ -142,14 +149,15 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
     </aside>
     <div className="center-frame">
       <header className="center-topbar">
-        <div className="topbar-context"><button ref={menuButton} className="button button-secondary mobile-menu-button" type="button" aria-haspopup="dialog" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}>القائمة</button><div><nav className="page-breadcrumbs" aria-label="مسار الصفحة"><Link href="/admin">{context.center.name}<NavigationPending /></Link><span aria-hidden="true">‹</span><span aria-current="page">{title}</span></nav><h1>{title}</h1>{description ? <p className="page-description">{description}</p> : null}</div></div>
+        <div className="topbar-context"><SheetTrigger render={<Button ref={menuButton} className="hidden min-w-0 max-[900px]:inline-flex" />}>القائمة</SheetTrigger><div><nav className="page-breadcrumbs" aria-label="مسار الصفحة"><Link href="/admin">{context.center.name}<NavigationPending /></Link><span aria-hidden="true">‹</span><span aria-current="page">{title}</span></nav><h1>{title}</h1>{description ? <p className="page-description">{description}</p> : null}</div></div>
         <div className="topbar-actions">{actions}</div>
       </header>
       <div id="center-content" tabIndex={-1} className="center-content">{error ? <InlineNotice tone="error">{error}</InlineNotice> : null}{children}</div>
       <footer className="center-footer">Courses <span>·</span> إدارة المركز والفروع</footer>
     </div>
-    {menuOpen ? <dialog ref={drawer} className="navigation-drawer" aria-labelledby="drawer-title" onCancel={() => setMenuOpen(false)}>
-      <div className="drawer-heading"><h2 id="drawer-title">{context.center.name}</h2><Button onClick={() => setMenuOpen(false)}>إغلاق القائمة</Button></div><div className="sidebar-navigation">{navigation(true)}</div><div className="sidebar-bottom">{navigation(true, true)}{account(true)}</div>
-    </dialog> : null}
-  </div></TablePreferenceUser.Provider></PageRegistration.Provider>;
+    <SheetContent side="right" showCloseButton={false} initialFocus={drawerClose} finalFocus={menuButton} className="p-4">
+      <SheetHeader><div className="flex items-center justify-between gap-2"><SheetTitle>{context.center.name}</SheetTitle><SheetClose ref={drawerClose} render={<Button />}>إغلاق القائمة</SheetClose></div></SheetHeader>
+      <div className="sidebar-navigation">{navigation(true)}</div><div className="sidebar-bottom">{navigation(true, true)}{account(true)}</div>
+    </SheetContent>
+  </div></Sheet></TablePreferenceUser.Provider></PageRegistration.Provider>;
 }

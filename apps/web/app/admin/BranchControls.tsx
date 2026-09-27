@@ -1,8 +1,13 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useId } from "react";
+
+import { FieldGroup } from "@/components/ui/field";
+
+
+import { useState, useRef, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { CenterPageActions } from "@/components/CenterShell";
+import { CenterPageActions, CenterHeaderActions } from "@/components/CenterShell";
 import { DataTable } from "@/components/DataTable";
 import { Button } from "@/components/Button";
 import { FormField } from "@/components/FormField";
@@ -11,6 +16,8 @@ import { centerRequest, responseFieldErrors, responseMessage } from "@/lib/clien
 import type { Branch, CenterContext } from "@/lib/server-context";
 
 export function BranchControls({ context }: { context: CenterContext }) {
+  const formPrefix = useId();
+  const createTrigger = useRef<HTMLButtonElement>(null);
   const router = useRouter();
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
@@ -84,16 +91,18 @@ export function BranchControls({ context }: { context: CenterContext }) {
   }
 
   return <>
-    <CenterPageActions context={context} actions={context.permissions.can_manage_center ? <Button variant="primary" disabled={busy} onClick={() => { setShowCreate(true); setEditing(null); setError(""); setFieldErrors({}); }}>إنشاء فرع</Button> : null} />
+    <CenterPageActions context={context} actions={context.permissions.can_manage_center ? <Button ref={createTrigger} hidden={showCreate || editing !== null} variant="primary" disabled={busy} onClick={() => { setShowCreate(true); setEditing(null); setError(""); setFieldErrors({}); }}>إنشاء فرع</Button> : null} />
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-      {showCreate ? <form className="context-card form-stack" noValidate onSubmit={createBranch} aria-label="فرع جديد">
+      {showCreate ? <form id={`${formPrefix}-0`} className="context-card form-stack" noValidate onSubmit={createBranch} aria-label="فرع جديد">
+<FieldGroup>
         <h2>فرع جديد</h2>
         <FormField id="branch-name" focusOnMount label="اسم الفرع" value={newName} onChange={(value) => { setNewName(value); setFieldErrors({}); }} error={fieldErrors.name} required />
         <FormField id="branch-slug" label="رمز الفرع" value={newSlug} onChange={(value) => { setNewSlug(value); setFieldErrors({}); }} direction="ltr" hint="حروف إنجليزية صغيرة وأرقام وشرطة فقط" error={fieldErrors.slug} required />
         <FormField id="branch-address" label="العنوان" value={newAddress} onChange={(value) => { setNewAddress(value); setFieldErrors({}); }} error={fieldErrors.address} />
-        <div className="form-actions"><Button variant="primary" type="submit" busy={busy} disabled={!newName || !newSlug}>حفظ الفرع</Button><Button disabled={busy} onClick={() => setShowCreate(false)}>إلغاء</Button></div>
-      </form> : null}
+        <CenterHeaderActions><Button form={`${formPrefix}-0`} variant="primary" type="submit" busy={busy} disabled={!newName || !newSlug}>حفظ الفرع</Button><Button disabled={busy} onClick={() => { setShowCreate(false); requestAnimationFrame(() => createTrigger.current?.focus()); }}>إلغاء</Button></CenterHeaderActions>
+      </FieldGroup>
+</form> : null}
       <DataTable id="branches" title="الفروع" rows={context.branches} rowKey={(branch) => branch.id} searchText={(branch) => `${branch.name} ${branch.slug} ${branch.address ?? ""}`} rowClassName="branch-row"
         emptyMessage={context.permissions.can_manage_center ? "أنشئ الفرع الأول ليظهر هنا." : "لا توجد فروع متاحة لك. اطلب من مسؤول المركز إسنادك إلى فرع."}
         columns={[
@@ -102,12 +111,14 @@ export function BranchControls({ context }: { context: CenterContext }) {
           { key: "address", label: "العنوان", filterText: (branch) => branch.address ?? "", render: (branch) => <span className="muted">{branch.address || "لم يُضف عنوان بعد"}</span> },
           { key: "actions", label: "الإجراءات", actions: true, render: (branch) => canEdit(branch) ? <Button disabled={busy} onClick={() => { startEdit(branch); setShowCreate(false); }}>تعديل بيانات الفرع</Button> : <span className="muted">صلاحية عرض فقط</span> },
         ]}
-        expanded={(branch) => editing === branch.id ? <form className="edit-panel form-stack" noValidate aria-label={`تعديل ${branch.name}`} onSubmit={(event) => saveBranch(event, branch.id)}>
+        expanded={(branch) => editing === branch.id ? <form id={`${formPrefix}-1`} className="edit-panel form-stack" noValidate aria-label={`تعديل ${branch.name}`} onSubmit={(event) => saveBranch(event, branch.id)}>
+<FieldGroup>
           <h3>تعديل {branch.name}</h3>
           <FormField id={`name-${branch.id}`} focusOnMount label="اسم الفرع" value={editName} onChange={(value) => { setEditName(value); setFieldErrors({}); }} error={fieldErrors.name} required />
           <FormField id={`address-${branch.id}`} label="العنوان" value={editAddress} onChange={(value) => { setEditAddress(value); setFieldErrors({}); }} error={fieldErrors.address} />
-          <div className="form-actions"><Button variant="primary" type="submit" busy={busy} disabled={!editName}>حفظ التعديل</Button><Button onClick={() => setEditing(null)} disabled={busy}>إلغاء</Button></div>
-        </form> : null}
+          <CenterHeaderActions><Button form={`${formPrefix}-1`} variant="primary" type="submit" busy={busy} disabled={!editName}>حفظ التعديل</Button><Button onClick={() => setEditing(null)} disabled={busy}>إلغاء</Button></CenterHeaderActions>
+        </FieldGroup>
+</form> : null}
       />
   </>;
 }

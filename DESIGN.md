@@ -99,7 +99,7 @@ Hover changes tone, keyboard focus uses a visible green ring, disabled actions r
 
 ### Buttons and actions
 
-One primary action per form. Create actions sit at the table header’s left edge in RTL; save and cancel share a footer at the bottom of their owning form. `Button.tsx` reserves the idle label’s geometry while showing a pending label. Destructive actions are separated and require explicit confirmation when introduced. Busy buttons keep their dimensions and say what is happening.
+One primary action per form. All admin page actions, including create, save, cancel, edit, delete, import, export, print, status, sharing and security workflows, live in the shared sticky page header. Submit actions target their owning forms with native `form` associations. Row entry points and table/dialog controls use the same official components. `Button.tsx` reserves the idle label’s geometry while showing a pending label. Destructive actions are separated and require explicit confirmation when introduced. Busy buttons keep their dimensions and say what is happening.
 
 ### Navigation and data display
 
@@ -130,10 +130,16 @@ Arabic copy names the center and branch explicitly, in line with `CONTEXT.md`. N
 
 ## Shared application frame
 
-`CenterShell` owns the sticky route header (title, breadcrumbs, description and authorized page actions). Every admin workspace supplies its title and actions; headings are not repeated in the content. The sidebar has a separately scrollable navigation region and a fixed bottom region for settings, account security, collapse, theme and sign out. Mobile uses the same regions inside its drawer. Content uses 16/24px spacing; table headings and toolbars use 12/16px. Settings and invitation header actions target their owning forms with native form associations; row and security workflow actions remain with their contextual forms.
+`CenterShell` owns the sticky route header (title, breadcrumbs, description and authorized page actions). Every admin workspace supplies its title and actions; headings are not repeated in the content. The sidebar has a separately scrollable navigation region and a fixed bottom region for settings, account security, collapse, theme and sign out. Mobile uses the same regions inside its drawer. Content uses 16/24px spacing; table headings and toolbars use 12/16px. Every admin form follows the same header action contract, including expanded row editors and security workflows. Independent settings forms register their actions together without replacing one another.
 
 Sidebar footer uses compact settings links, one identity row and a 44px icon action row (collapse, theme, sign out). Icon buttons retain Arabic accessible names and tooltips; mobile reuses the same account component without desktop collapse.
 
 The admin layout retains the sidebar, header and footer across internal navigation. Server-rendered `CenterPage` owns each workspace’s main content structure and read-only material. Small client registration components publish its header and interactive actions; `CenterLayout` owns the persistent frame. Route entrypoints stay server components; request data loads in separate async server components and forms/tables hydrate in dedicated controls. `PrefetchLink` preloads the full authorized SSR destination on hover, keyboard focus or pointer intent. Browser prefetch retention is limited to 30 seconds, and successful mutations refresh the router cache. Pending navigation retains the current content until the destination is ready and displays a fixed progress strip that occupies no layout space. Desktop collapse state survives route changes. `admin-header.tsx` supplies the same title and description before and after hydration; the header reserves its action column on desktop and action row on mobile.
 
 Arabic interface fonts use `next/font/local` with early font preload and metric-adjusted fallbacks. Authentication pages keep the shared shell on the server and hydrate only their forms. Authenticated routes remain request-rendered SSR because sessions, permissions, theme and tenant data are request-specific; no page forces `force-dynamic` or uses a client page entrypoint.
+
+## Official component source
+
+The owner confirmed on 2026-09-27 that Next.js uses official shadcn/ui components, installed with its CLI from `@shadcn`, with the Base UI Nova style and RTL enabled. `apps/web/components/ui` owns the generated primitives. Shared application adapters preserve domain behavior; they compose those primitives instead of implementing alternative button, input, field, checkbox, radio, alert, confirmation, sheet, table or popover styles. The approved IBM Plex fonts and green light/dark tokens remain the theme source. Page actions register through `CenterPageActions`/`CenterHeaderActions`; controls never introduce a second save/cancel footer.
+
+Implementation and review rules for current and future screens, including SQL and frontend performance acceptance, are mandatory in `docs/agents/ui-and-performance.md`, linked from the root and web `AGENTS.md`.

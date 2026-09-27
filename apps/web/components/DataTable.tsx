@@ -1,7 +1,16 @@
 "use client";
 
+import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
+import { InputGroup, InputGroupInput, InputGroupAddon, InputGroupButton } from "./ui/input-group";
+import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell, TableCaption } from "./ui/table";
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent } from "./ui/empty";
+import { Checkbox } from "@/components/ui/checkbox";
+import { FieldLabel, FieldGroup, FieldSet, FieldLegend } from "@/components/ui/field";
+import { Button } from "@/components/Button";
+
+
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { Button } from "./Button";
+
 import { FormField } from "./FormField";
 import { TablePopover } from "./TablePopover";
 import { useTablePreferences } from "./TablePreferences";
@@ -23,6 +32,7 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [draftFilters, setDraftFilters] = useState<Record<string, string>>({});
   const [draftFilter, setDraftFilter] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const preferences = useTablePreferences(id, columns);
   const draggableColumn = useRef<string | null>(null);
@@ -72,15 +82,12 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
     if (url.href !== location.href) window.history.replaceState(window.history.state, "", url);
   }, [id, search, activeFilter?.value, page, currentPage, columnFilters, filterable, ready]);
 
-  function closeFilters() {
-    document.getElementById(`${id}-filters`)?.hidePopover();
-    document.getElementById(`${id}-filters-trigger`)?.focus();
-  }
+  function closeFilters() { setFiltersOpen(false); }
 
   return <section className="data-panel" aria-labelledby={`${id}-title`} data-density="compact">
     <div className="table-heading"><div><h2 id={`${id}-title`}>{title}<span className="record-count">{rows.length.toLocaleString("ar-EG")}</span></h2>{description ? <p className="muted">{description}</p> : null}</div>{action}</div>
     <div className="table-toolbar">
-      <div className="table-search"><label className="sr-only" htmlFor={`${id}-search`}>بحث في {title}</label><span aria-hidden="true">⌕</span><input ref={input} id={`${id}-search`} type="search" value={search} placeholder={`بحث في ${title}…`} onChange={(event) => { setSearch(event.target.value); setPage(1); }} />{search ? <button type="button" aria-label={`مسح البحث في ${title}`} onClick={() => { setSearch(""); setPage(1); input.current?.focus(); }}>×</button> : null}</div>
+      <InputGroup className="max-w-sm"><label className="sr-only" htmlFor={`${id}-search`}>بحث في {title}</label><InputGroupInput ref={input} id={`${id}-search`} type="search" value={search} placeholder={`بحث في ${title}…`} onChange={(event) => { setSearch(event.target.value); setPage(1); }} />{search ? <InputGroupAddon align="inline-end"><InputGroupButton type="button" aria-label={`مسح البحث في ${title}`} onClick={() => { setSearch(""); setPage(1); input.current?.focus(); }}>×</InputGroupButton></InputGroupAddon> : null}</InputGroup>
       <div className="table-tools">
         <TablePopover id={`${id}-columns`} label="الأعمدة" scope={title} title={`الأعمدة المعروضة — ${title}`}>
           <>
@@ -90,26 +97,27 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
               const index = preferences.movable.indexOf(key);
               const required = column.actions || key === columns.find((item) => !item.actions)?.key;
               return <div className="column-option" key={key}>
-                <label className="check-row"><input type="checkbox" checked={!preferences.hidden.includes(key)} disabled={required} onChange={() => preferences.toggle(key)} />{column.label}{required ? <span className="muted">(دائمًا)</span> : null}</label>
-                {!column.actions ? <div className="column-move"><button type="button" disabled={index === 0} aria-label={`نقل ${column.label} قبل العمود السابق`} onClick={() => preferences.move(key, preferences.movable[index - 1])}>↑</button><button type="button" disabled={index === preferences.movable.length - 1} aria-label={`نقل ${column.label} بعد العمود التالي`} onClick={() => preferences.move(key, preferences.movable[index + 1])}>↓</button></div> : <span className="muted">ثابت</span>}
+                <FieldLabel className="flex items-center gap-2"><Checkbox  checked={!preferences.hidden.includes(key)} disabled={required} onCheckedChange={() => preferences.toggle(key)} />{column.label}{required ? <span className="muted">(دائمًا)</span> : null}</FieldLabel>
+                {!column.actions ? <div className="column-move"><Button type="button" disabled={index === 0} aria-label={`نقل ${column.label} قبل العمود السابق`} onClick={() => preferences.move(key, preferences.movable[index - 1])}>↑</Button><Button type="button" disabled={index === preferences.movable.length - 1} aria-label={`نقل ${column.label} بعد العمود التالي`} onClick={() => preferences.move(key, preferences.movable[index + 1])}>↓</Button></div> : <span className="muted">ثابت</span>}
               </div>;
             })}</div>
             <div className="popover-actions"><Button onClick={preferences.reset}>استعادة الأعمدة الافتراضية</Button></div>
           </>
         </TablePopover>
-        <TablePopover id={`${id}-filters`} label="الفلاتر" scope={title} title={`تصفية ${title}`} count={filterCount} onOpen={() => { setDraftFilter(activeFilter?.value ?? ""); setDraftFilters({ ...columnFilters }); }}>
+        <TablePopover id={`${id}-filters`} label="الفلاتر" scope={title} title={`تصفية ${title}`} count={filterCount} open={filtersOpen} onOpenChange={setFiltersOpen} onOpen={() => { setDraftFilter(activeFilter?.value ?? ""); setDraftFilters({ ...columnFilters }); }}>
           <form className="filter-form" noValidate onSubmit={(event) => { event.preventDefault(); setFilter(draftFilter); setColumnFilters(draftFilters); setPage(1); closeFilters(); }}>
-            {filters.length ? <fieldset className="filter-options"><legend>تصفية السجلات</legend><label className="check-row"><input type="radio" name={`${id}-scope`} checked={!draftFilter} onChange={() => setDraftFilter("")} />الكل</label>{filters.map((item) => <label className="check-row" key={item.value}><input type="radio" name={`${id}-scope`} checked={draftFilter === item.value} onChange={() => setDraftFilter(item.value)} />{item.label}</label>)}</fieldset> : null}
+<FieldGroup>
+            {filters.length ? <FieldSet className="filter-options"><FieldLegend>تصفية السجلات</FieldLegend><RadioGroup value={draftFilter} onValueChange={(value) => setDraftFilter(String(value))}><FieldLabel className="flex items-center gap-2"><RadioGroupItem value="" />الكل</FieldLabel>{filters.map((item) => <FieldLabel className="flex items-center gap-2" key={item.value}><RadioGroupItem value={item.value} />{item.label}</FieldLabel>)}</RadioGroup></FieldSet> : null}
             {filterable.map((column) => <FormField key={column.key} id={`${id}-filter-${column.key}`} label={column.label} value={draftFilters[column.key] ?? ""} onChange={(value) => setDraftFilters((previous) => ({ ...previous, [column.key]: value }))} />)}
             <div className="popover-actions"><Button onClick={() => { setFilter(""); setColumnFilters({}); setPage(1); closeFilters(); }}>مسح الفلاتر</Button><Button type="submit" variant="primary">تطبيق</Button></div>
-          </form>
+          </FieldGroup>
+</form>
         </TablePopover>
       </div>
     </div>
     <span id={`${id}-order-help`} className="sr-only">اسحب العمود لتغيير مكانه، أو اضغط Alt مع السهم الأيسر أو الأيمن. عمود الإجراءات ثابت.</span>
     <span className="sr-only" aria-live="polite">{announcement}</span>
-    <div className="table-scroll" role="region" aria-label={`جدول ${title} — قابل للتمرير أفقيًا`} tabIndex={0}>
-      <table ref={tableRef}><caption className="sr-only">{title}</caption><thead><tr>{shownColumns.map((column) => <th scope="col" key={column.key} data-column-key={column.key} className={column.actions ? "actions-column" : "reorderable-column"} tabIndex={column.actions ? undefined : 0} draggable={!column.actions} aria-describedby={column.actions ? undefined : `${id}-order-help`}
+    <Table ref={tableRef} containerProps={{ className: "table-scroll", role: "region", "aria-label": `جدول ${title} — قابل للتمرير أفقيًا`, tabIndex: 0 }}><TableCaption className="sr-only">{title}</TableCaption><TableHeader><TableRow>{shownColumns.map((column) => <TableHead scope="col" key={column.key} data-column-key={column.key} className={column.actions ? "actions-column" : "reorderable-column"} tabIndex={column.actions ? undefined : 0} draggable={!column.actions} aria-describedby={column.actions ? undefined : `${id}-order-help`}
             onDragStart={(event) => { if (column.actions) return; draggableColumn.current = column.key; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", column.key); }}
             onDragOver={(event) => { if (!column.actions) event.preventDefault(); }}
             onDrop={(event) => { event.preventDefault(); if (!column.actions && draggableColumn.current) preferences.move(draggableColumn.current, column.key); draggableColumn.current = null; }}
@@ -122,11 +130,10 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
               if (!target) return;
               preferences.move(column.key, target); setAnnouncement(`تغيّر ترتيب عمود ${column.label}`);
               requestAnimationFrame(() => tableRef.current?.querySelector<HTMLElement>(`th[data-column-key="${CSS.escape(column.key)}"]`)?.focus());
-            }}><span>{column.label}</span>{!column.actions ? <span className="column-grip" aria-hidden="true">⠿</span> : null}</th>)}</tr></thead>
-        <tbody>{pageRows.map((row) => <Fragment key={rowKey(row)}><tr className={rowClassName}>{shownColumns.map((column) => <td key={column.key} className={column.actions ? "actions-column" : undefined}>{column.render(row)}</td>)}</tr>{expanded?.(row) ? <tr className="table-detail-row"><td colSpan={shownColumns.length}>{expanded(row)}</td></tr> : null}</Fragment>)}</tbody>
-      </table>
-      {!visible.length ? <div className="table-empty"><h3>{rows.length ? "لا توجد نتائج مطابقة" : emptyMessage}</h3>{rows.length ? <><p className="muted">جرّب بحثًا آخر أو أعد ضبط التصفية.</p><Button onClick={() => { setSearch(""); setFilter(""); setColumnFilters({}); setPage(1); input.current?.focus(); }}>مسح البحث والتصفية</Button></> : null}</div> : null}
-    </div>
+            }}><span>{column.label}</span>{!column.actions ? <span className="column-grip" aria-hidden="true">⠿</span> : null}</TableHead>)}</TableRow></TableHeader>
+        <TableBody>{pageRows.map((row) => <Fragment key={rowKey(row)}><TableRow className={rowClassName}>{shownColumns.map((column) => <TableCell key={column.key} className={column.actions ? "actions-column" : undefined}>{column.render(row)}</TableCell>)}</TableRow>{expanded?.(row) ? <TableRow className="table-detail-row"><TableCell colSpan={shownColumns.length}>{expanded(row)}</TableCell></TableRow> : null}</Fragment>)}</TableBody>
+      </Table>
+      {!visible.length ? <Empty><EmptyHeader><EmptyTitle><h3>{rows.length ? "لا توجد نتائج مطابقة" : emptyMessage}</h3></EmptyTitle>{rows.length ? <EmptyDescription>جرّب بحثًا آخر أو أعد ضبط التصفية.</EmptyDescription> : null}</EmptyHeader>{rows.length ? <EmptyContent><Button onClick={() => { setSearch(""); setFilter(""); setColumnFilters({}); setPage(1); input.current?.focus(); }}>مسح البحث والتصفية</Button></EmptyContent> : null}</Empty> : null}
     <div className="table-footer"><span aria-live="polite">{visible.length ? `${(start + 1).toLocaleString("ar-EG")}–${Math.min(start + pageSize, visible.length).toLocaleString("ar-EG")} من ${visible.length.toLocaleString("ar-EG")}` : "٠ سجل"}</span><div className="pagination" aria-label={`صفحات ${title}`}><Button disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} aria-label={`الصفحة السابقة في ${title}`}>السابق</Button><span>صفحة {currentPage.toLocaleString("ar-EG")} من {pages.toLocaleString("ar-EG")}</span><Button disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)} aria-label={`الصفحة التالية في ${title}`}>التالي</Button></div></div>
   </section>;
 }

@@ -60,8 +60,8 @@ test('owner configures new defaults and audited sharing separately in RTL and na
   const first = await write(page, 'students', 'POST', { name: `Earlier sharing ${suffix}`, branch_ids: [branch.body.branch.id], request_id: crypto.randomUUID() }); expect(first.status).toBe(201);
   await budget(page, () => page.goto(`${host}/admin/student-search`), true);
   await page.getByRole('button', { name: 'تغيير افتراضي المشاركة', exact: true }).click();
-  await expect(page.getByRole('dialog')).toContainText('تبقى اختيارات الطلاب الموجودين محفوظة');
-  await page.getByRole('dialog').getByRole('button', { name: 'غلق المشاركة للملفات الجديدة', exact: true }).click();
+  await expect(page.getByRole('alertdialog')).toContainText('تبقى اختيارات الطلاب الموجودين محفوظة');
+  await page.getByRole('alertdialog').getByRole('button', { name: 'غلق المشاركة للملفات الجديدة', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'حُفظ افتراضي' })).toBeVisible();
   expect((await (await page.request.get(`${host}/api/v1/center/student-search-workspace`)).json()).policy.enabled).toBe(false);
   expect((await (await page.request.get(`${host}/api/v1/center/students/${first.body.student.id}`)).json()).students[0].sharing_enabled).toBe(true);
@@ -71,9 +71,9 @@ test('owner configures new defaults and audited sharing separately in RTL and na
   const student = (await (await page.request.get(`${host}/api/v1/center/student-workspace?q=${encodeURIComponent(`New sharing ${suffix}`)}`)).json()).students[0]; expect(student.sharing_enabled).toBe(false);
   await budget(page, () => page.goto(`${host}/admin/students/${student.id}`), true);
   await expect(page.getByText('المشاركة بين الفروع: مغلقة', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click(); await expect(page.getByRole('dialog').getByRole('button', { name: 'إلغاء', exact: true })).toBeFocused();
+  await page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click(); await expect(page.getByRole('alertdialog').getByRole('button', { name: 'إلغاء', exact: true })).toBeFocused();
   await page.keyboard.press('Escape'); await expect(page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true })).toBeFocused();
-  await page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click(); await page.getByRole('dialog').getByRole('button', { name: 'السماح بمشاركة الطالب', exact: true }).click();
+  await page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click(); await page.getByRole('alertdialog').getByRole('button', { name: 'السماح بمشاركة الطالب', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('حُفظ اختيار مشاركة الطالب'); await page.reload(); await expect(page.getByText('المشاركة بين الفروع: مسموحة', { exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'تعديل ملف الطالب', exact: true }).click(); await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(`Updated sharing ${suffix}`);
   await page.getByRole('button', { name: 'حفظ بيانات الطالب', exact: true }).click(); await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
@@ -81,7 +81,7 @@ test('owner configures new defaults and audited sharing separately in RTL and na
   await page.goto(`${host}/admin/audit`); await expect(page.getByText('تغيير مشاركة الطالب', { exact: true }).first()).toBeVisible(); await page.getByText('عرض تغيير مشاركة الطالب', { exact: true }).first().click(); await expect(page.getByText('قبل التغيير: مغلقة', { exact: true }).first()).toBeVisible();
   await page.context().addCookies([{ name: 'courses_theme', value: 'dark', url: host }]); await page.setViewportSize({ width: 390, height: 844 }); await page.goto(`${host}/admin/students/${student.id}`);
   expect(await page.locator('html').getAttribute('dir')).toBe('rtl'); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click(); await expect(page.getByRole('dialog')).toBeVisible(); await page.screenshot({ path: '/tmp/courses-issue67-mobile-dark.png', fullPage: true }); await page.getByRole('dialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
+  await page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click(); await expect(page.getByRole('alertdialog')).toBeVisible(); await page.screenshot({ path: '/tmp/courses-issue67-mobile-dark.png', fullPage: true }); await page.getByRole('alertdialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
 });
 test('staff discovery and similarity respect sharing, revocation, direct access, CSRF and center isolation', async ({ browser }) => {
   test.setTimeout(120_000); const owner = await browser.newPage(); const staff = await browser.newPage(); const beta = await browser.newPage();
@@ -101,7 +101,7 @@ test('staff discovery and similarity respect sharing, revocation, direct access,
     await staff.goto(`${host}/admin/student-search?q=${encodeURIComponent(name)}`); await expect(staff.getByRole('table')).not.toContainText(name); expect((await (await staff.request.get(`${host}/api/v1/center/students/similar?name=${encodeURIComponent(name)}`)).json()).students).toHaveLength(0);
     const inside = await write(staff, 'students', 'POST', { name: `Private inside ${suffix}`, branch_ids: [north.body.branch.id], request_id: crypto.randomUUID() }); expect(inside.status).toBe(201); expect((await write(staff, `students/${inside.body.student.id}/sharing`, 'PATCH', { sharing_enabled: false, revision: 1 })).status).toBe(200); expect((await staff.request.get(`${host}/api/v1/center/students/${inside.body.student.id}`)).status()).toBe(200);
     await staff.goto(`${host}/admin/students/${inside.body.student.id}`); await staff.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click();
-    expect((await write(owner, `members/${member.id}/grants`, 'PUT', { center_roles: [], branch_roles: { [north.body.branch.id]: ['attendance'] } })).status).toBe(200); await staff.getByRole('dialog').getByRole('button', { name: 'السماح بمشاركة الطالب', exact: true }).click(); await expect(staff.locator('.notice-error[role=alert]')).toBeVisible(); await expect(staff.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true })).toHaveCount(0); expect((await staff.request.get(`${host}/api/v1/center/student-search-workspace`)).status()).toBe(403);
+    expect((await write(owner, `members/${member.id}/grants`, 'PUT', { center_roles: [], branch_roles: { [north.body.branch.id]: ['attendance'] } })).status).toBe(200); await staff.getByRole('alertdialog').getByRole('button', { name: 'السماح بمشاركة الطالب', exact: true }).click(); await expect(staff.locator('.notice-error[role=alert]')).toBeVisible(); await expect(staff.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true })).toHaveCount(0); expect((await staff.request.get(`${host}/api/v1/center/student-search-workspace`)).status()).toBe(403);
     await login(beta, 'owner', betaHost); expect((await beta.request.get(`${betaHost}/api/v1/center/students/${hidden.body.student.id}`)).status()).toBe(404);
     expect((await owner.request.patch(`${host}/api/v1/center/students/${hidden.body.student.id}/sharing`, { data: { sharing_enabled: true, revision: 2 } })).status()).toBe(419);
   } finally { await Promise.all([owner.close(), staff.close(), beta.close()]); }
@@ -135,13 +135,13 @@ test('simultaneous sharing and profile writes conflict safely and interrupted re
     await page.goto(`${host}/admin/students/${id}`);
     await page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click();
     expect((await write(other, route, 'PATCH', { name: `Newer name ${suffix}`, branch_ids: [branch.body.branch.id], revision: 3 })).status).toBe(200);
-    await page.getByRole('dialog').getByRole('button', { name: 'السماح بمشاركة الطالب', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'السماح بمشاركة الطالب', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'تغيّر ملف الطالب' })).toBeVisible();
     await page.getByRole('button', { name: 'تحميل أحدث بيانات المشاركة', exact: true }).click();
     await expect(page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true })).toBeEnabled();
     await page.route(`**/api/v1/center/${route}/sharing`, async (intercept) => { await intercept.fetch(); await intercept.abort('connectionfailed'); }, { times: 1 });
     await page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'السماح بمشاركة الطالب', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'السماح بمشاركة الطالب', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'تعذر التأكد' })).toBeVisible();
     await page.getByRole('button', { name: 'تحميل أحدث بيانات المشاركة', exact: true }).click();
     await expect(page.getByText('المشاركة بين الفروع: مسموحة', { exact: true })).toBeVisible();

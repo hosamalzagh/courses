@@ -1,10 +1,15 @@
 "use client";
 
+import { useId } from "react";
+
+import { FieldGroup } from "@/components/ui/field";
+
+
 import { Button } from "@/components/Button";
 import { useState, type FormEvent } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useRouter } from "next/navigation";
-import { CenterPageActions } from "@/components/CenterShell";
+import { CenterPageActions, CenterHeaderActions } from "@/components/CenterShell";
 import type { CenterContext } from "@/lib/server-context";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
@@ -16,6 +21,7 @@ export function SecurityControls({ context, initialEnabled, requiredForPlatform 
   initialEnabled: boolean;
   requiredForPlatform: boolean;
 }) {
+  const formPrefix = useId();
   const router = useRouter();
   const [enabled, setEnabled] = useState(initialEnabled);
   const [setupPassword, setSetupPassword] = useState("");
@@ -104,32 +110,38 @@ export function SecurityControls({ context, initialEnabled, requiredForPlatform 
             <h3>احفظ رموز الاستعادة الآن</h3>
             <p className="muted">تظهر هذه الرموز مرة واحدة فقط. احفظها في مكان آمن؛ كل رمز يعمل مرة واحدة إذا فقدت تطبيق المصادقة.</p>
             <div className="role-list">{recoveryCodes.map((item) => <code className="role-pill" dir="ltr" key={item}>{item}</code>)}</div>
-            <Button variant="secondary" type="button" onClick={() => setRecoveryCodes([])}>حفظت الرموز</Button>
+            <CenterHeaderActions><Button variant="secondary" type="button" onClick={() => setRecoveryCodes([])}>حفظت الرموز</Button></CenterHeaderActions>
           </div> : null}
           <p className="muted">عند تسجيل الدخول سيُطلب رمز من تطبيق المصادقة بعد كلمة المرور.</p>
           {requiredForPlatform ? <p className="muted">هذا الحساب يدخل لوحة المنصة، لذلك يبقى التحقق مطلوبًا لها ولا يمكن إيقافه من المركز.</p> :
-            <form className="form-stack" noValidate onSubmit={requestDisable}>
+            <form id={`${formPrefix}-0`} className="form-stack" noValidate onSubmit={requestDisable}>
+<FieldGroup>
               <FormField id="disable-password" label="كلمة المرور الحالية" type="password" value={disablePassword} onChange={(value) => { setDisablePassword(value); setFieldErrors({}); }} error={fieldErrors.password} autoComplete="current-password" required />
               {useRecovery ? <FormField id="disable-recovery" label="رمز الاستعادة" value={recoveryCode} onChange={(value) => { setRecoveryCode(value); setFieldErrors({}); }} error={fieldErrors.recovery_code} direction="ltr" required /> :
                 <FormField id="disable-code" label="رمز المصادقة الحالي" value={code} onChange={(value) => { setCode(value); setFieldErrors({}); }} error={fieldErrors.code} autoComplete="one-time-code" direction="ltr" required />}
-              <button className="text-link" type="button" onClick={() => { setUseRecovery(!useRecovery); setCode(""); setRecoveryCode(""); }}>{useRecovery ? "استخدام تطبيق المصادقة" : "استخدام رمز استعادة"}</button>
-              <div className="form-actions"><Button variant="danger" disabled={busy || !disablePassword || (useRecovery ? !recoveryCode : !/^\d{6}$/.test(code))} type="submit" busy={busy} busyLabel="جارٍ الإيقاف…">إيقاف التحقق بخطوتين</Button></div>
-            </form>}
+              <Button variant="link" type="button" onClick={() => { setUseRecovery(!useRecovery); setCode(""); setRecoveryCode(""); }}>{useRecovery ? "استخدام تطبيق المصادقة" : "استخدام رمز استعادة"}</Button>
+              <CenterHeaderActions><Button form={`${formPrefix}-0`} variant="danger" disabled={busy || !disablePassword || (useRecovery ? !recoveryCode : !/^\d{6}$/.test(code))} type="submit" busy={busy} busyLabel="جارٍ الإيقاف…">إيقاف التحقق بخطوتين</Button></CenterHeaderActions>
+            </FieldGroup>
+</form>}
         </> : secret ? <>
           <p className="muted">امسح الرمز بتطبيق المصادقة، ثم أدخل الرقم الظاهر فيه. تنتهي مهلة الإعداد بعد 10 دقائق.</p>
           <div className="qr-wrap"><QRCodeSVG value={otpauthUrl} size={168} aria-label="رمز إعداد تطبيق المصادقة" /></div>
           <p className="muted">إذا تعذّر مسح الرمز، أدخل هذا المفتاح في التطبيق:</p>
           <div className="mfa-secret" aria-label="مفتاح المصادقة">{secret}</div>
-          <form className="form-stack" noValidate onSubmit={confirmSetup}>
+          <form id={`${formPrefix}-1`} className="form-stack" noValidate onSubmit={confirmSetup}>
+<FieldGroup>
             <FormField id="setup-code" label="رمز التحقق" value={code} onChange={(value) => { setCode(value); setFieldErrors({}); }} error={fieldErrors.code} autoComplete="one-time-code" direction="ltr" required />
-            <div className="form-actions"><Button variant="primary" disabled={busy || !/^\d{6}$/.test(code)} type="submit" busy={busy} busyLabel="جارٍ التفعيل…">تفعيل التحقق</Button><Button type="button" onClick={cancelSetup} disabled={busy}>إلغاء الإعداد</Button></div>
-          </form>
+            <CenterHeaderActions><Button form={`${formPrefix}-1`} variant="primary" disabled={busy || !/^\d{6}$/.test(code)} type="submit" busy={busy} busyLabel="جارٍ التفعيل…">تفعيل التحقق</Button><Button type="button" onClick={cancelSetup} disabled={busy}>إلغاء الإعداد</Button></CenterHeaderActions>
+          </FieldGroup>
+</form>
         </> : <>
           <p className="muted">تدخل الآن بكلمة المرور فقط. يمكنك إضافة رمز المصادقة لحماية حسابك.</p>
-          <form className="form-stack" noValidate onSubmit={startSetup}>
+          <form id={`${formPrefix}-2`} className="form-stack" noValidate onSubmit={startSetup}>
+<FieldGroup>
             <FormField id="setup-password" label="كلمة المرور الحالية" type="password" value={setupPassword} onChange={(value) => { setSetupPassword(value); setFieldErrors({}); }} error={fieldErrors.password} autoComplete="current-password" required />
-            <div className="form-actions"><Button variant="primary" disabled={busy || !setupPassword} type="submit" busy={busy} busyLabel="جارٍ إعداد الحماية…">تفعيل التحقق بخطوتين</Button></div>
-          </form>
+            <CenterHeaderActions><Button form={`${formPrefix}-2`} variant="primary" disabled={busy || !setupPassword} type="submit" busy={busy} busyLabel="جارٍ إعداد الحماية…">تفعيل التحقق بخطوتين</Button></CenterHeaderActions>
+          </FieldGroup>
+</form>
         </>}
       </section>
     {confirmDisable ? <ConfirmationDialog title="إيقاف التحقق بخطوتين؟" description="سيُلغى طلب رمز المصادقة عند دخولك إلى أي مركز." confirmLabel="إيقاف التحقق"
