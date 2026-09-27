@@ -47,6 +47,81 @@ class StudentProfilesTest extends TestCase
         $this->postJson("{$this->base}/students", [...$creation, 'name' => 'طالب تالٍ', 'request_id' => (string) Str::uuid()])->assertCreated()->assertJsonPath('student.student_number', 7001);
     }
 
+    public function test_contacts_and_owned_channels_keep_shared_numbers_and_retry_without_duplicate_profiles(): void
+    {
+        Mail::fake();
+        $contact = ['id' => (string) Str::uuid(), 'name' => 'الأم', 'relationship' => 'والدة', 'phone' => '001234', 'primary' => true];
+        $other = ['id' => (string) Str::uuid(), 'name' => 'الطالب', 'relationship' => 'الطالب نفسه', 'phone' => '005678', 'primary' => false];
+        $channels = ['primary' => ['contact_id' => $contact['id'], 'phone' => '001234'], 'alternative' => ['contact_id' => $other['id'], 'phone' => '005678'], 'whatsapp' => ['contact_id' => $contact['id'], 'phone' => '001234'], 'sinjapp' => ['contact_id' => $other['id'], 'phone' => '005678']];
+        $payload = ['name' => 'طالب بالغ', 'branch_ids' => [$this->north], 'contacts' => [$contact, $other], 'channels' => $channels, 'request_id' => (string) Str::uuid()];
+        $student = $this->postJson("{$this->base}/students", $payload)->assertCreated()
+            ->assertJsonPath('student.contacts.0.name', 'الأم')->assertJsonPath('student.channels.sinjapp.contact_id', $other['id'])
+            ->assertJsonPath('student.phone', '001234')->assertJsonPath('student.legacy_phone', null)->json('student');
+        $this->postJson("{$this->base}/students", $payload)->assertOk()->assertJsonPath('student.id', $student['id']);
+        $this->postJson("{$this->base}/students", [...$payload, 'name' => 'الأخ', 'request_id' => (string) Str::uuid()])->assertCreated();
+        $this->getJson("{$this->base}/students/similar?phone=001234")->assertOk()->assertJsonCount(2, 'students');
+        $this->getJson("{$this->base}/student-workspace?q=005678")->assertOk()->assertJsonCount(2, 'students');
+        $this->getJson("{$this->base}/students/similar?phones[]=9999&phones[]=005678")->assertOk()->assertJsonCount(2, 'students');
+        Mail::assertNothingOutgoing();
+    }
+
+    public function test_contact_edits_preserve_legacy_numbers_and_reject_stale_or_unauthorized_changes(): void
+    {
+        $old = ['name' => 'رقم قديم', 'phone' => '000111', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid()];
+        $student = $this->postJson("{$this->base}/students", $old)->assertCreated()->assertJsonPath('student.contacts', [])->json('student');
+        $route = "{$this->base}/students/{$student['id']}";
+        $contact = ['id' => (string) Str::uuid(), 'name' => 'الطالب نفسه', 'relationship' => 'الطالب', 'phone' => '000222', 'primary' => true];
+        $edit = ['name' => $student['name'], 'phone' => '000111', 'branch_ids' => [], 'revision' => 1, 'contacts' => [$contact], 'channels' => []];
+        $this->patchJson($route, $edit)->assertOk()->assertJsonPath('student.phone', '000222')->assertJsonPath('student.legacy_phone', '000111');
+        $this->patchJson($route, $edit)->assertOk()->assertJsonPath('student.revision', 2);
+        $this->patchJson($route, [...$edit, 'contacts' => [[...$contact, 'phone' => '000333']]])->assertConflict();
+        $this->postJson("{$this->base}/students", $old)->assertOk()->assertJsonPath('student.id', $student['id']);
+        $this->getJson("{$this->base}/student-workspace?q=000111")->assertOk()->assertJsonCount(1, 'students');
+        // Older callers may update other fields; omission never erases the migrated number or contacts.
+        $this->patchJson($route, ['name' => 'اسم معدل', 'branch_ids' => [], 'revision' => 2])->assertOk()
+            ->assertJsonPath('student.legacy_phone', '000111')->assertJsonPath('student.contacts.0.phone', '000222');
+        $this->grant([$this->south => ['registration']]);
+        $this->asUser($this->staff);
+        $this->patchJson($route, [...$edit, 'revision' => 3])->assertNotFound();
+        $this->grant([$this->north => ['attendance']]);
+        $this->asUser($this->staff);
+        $this->patchJson($route, [...$edit, 'revision' => 3])->assertForbidden();
+        $this->asUser($this->owner);
+        $this->getJson($route)->assertOk()->assertJsonPath('students.0.contacts.0.phone', '000222');
+    }
+
+    public function test_contact_validation_rejects_ambiguous_primary_and_foreign_or_unowned_channels(): void
+    {
+        $contact = ['id' => (string) Str::uuid(), 'name' => 'جهة', 'relationship' => 'قريب', 'phone' => '0', 'primary' => true];
+        $payload = ['name' => 'تحقق', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(), 'contacts' => [$contact], 'channels' => []];
+        $this->postJson("{$this->base}/students", [...$payload, 'contacts' => [[...$contact, 'primary' => false]]])->assertUnprocessable()->assertJsonValidationErrors('contacts');
+        $this->postJson("{$this->base}/students", [...$payload, 'contacts' => [$contact, [...$contact, 'id' => (string) Str::uuid()]]])->assertUnprocessable();
+        $this->postJson("{$this->base}/students", [...$payload, 'channels' => ['whatsapp' => ['contact_id' => (string) Str::uuid(), 'phone' => '0000']]])->assertUnprocessable()->assertJsonValidationErrors('channels.whatsapp.contact_id');
+        $this->postJson("{$this->base}/students", [...$payload, 'channels' => ['whatsapp' => ['phone' => '0000']]])->assertUnprocessable();
+        $this->postJson("{$this->base}/students", [...$payload, 'contacts' => [[...$contact, 'phone' => 123]]])->assertUnprocessable();
+        $this->postJson("{$this->base}/students", [...$payload, 'contacts' => [[...$contact, 'phone' => 'abc']]])->assertUnprocessable()->assertJsonValidationErrors('contacts.0.phone');
+        $this->postJson("{$this->base}/students", $payload)->assertCreated()->assertJsonPath('student.phone', '0');
+    }
+
+    public function test_contact_migration_preserves_existing_identity_history_requests_and_unassigned_phone(): void
+    {
+        $payload = ['name' => 'قبل ترحيل التواصل', 'phone' => '0000456', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid()];
+        $student = $this->postJson("{$this->base}/students", $payload)->assertCreated()->json('student');
+        $this->center->run(function (): void {
+            $migration = glob(database_path('migrations/tenant/*_add_student_contacts.php'))[0];
+            (require $migration)->down();
+            DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
+        });
+        $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->postJson("{$this->base}/students", $payload)->assertOk()->assertJsonPath('student.id', $student['id'])
+            ->assertJsonPath('student.student_number', $student['student_number'])->assertJsonPath('student.created_by', $student['created_by'])
+            ->assertJsonPath('student.created_at', $student['created_at'])->assertJsonPath('student.contacts', [])->assertJsonPath('student.legacy_phone', '0000456');
+        $this->getJson("{$this->base}/students/similar?phone=0000456")->assertOk()->assertJsonCount(1, 'students');
+        $entries = collect($this->getJson("{$this->base}/audit")->assertOk()->json('entries'))->where('event', 'student.created');
+        $this->assertCount(1, $entries);
+    }
+
     private Center $center;
 
     private User $owner;
@@ -168,6 +243,9 @@ class StudentProfilesTest extends TestCase
     {
         $this->createStudent('Alpha only', [$this->north]);
         $this->center->run(function (): void {
+            $contactsMigration = glob(database_path('migrations/tenant/*_add_student_contacts.php'))[0];
+            (require $contactsMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($contactsMigration, PATHINFO_FILENAME))->delete();
             $choicesMigration = glob(database_path('migrations/tenant/*_create_student_profile_choices.php'))[0];
             (require $choicesMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($choicesMigration, PATHINFO_FILENAME))->delete();

@@ -400,7 +400,7 @@ test('a shared contact warning permits a separate student without merging profil
   const phone = `010${String(Date.now()).slice(-8)}`;
   await page.goto(`${host}/admin/students/new`);
   await page.getByRole('textbox', { name:'اسم الطالب', exact:true }).fill(name);
-  await page.getByRole('textbox', { name:'رقم التواصل', exact:true }).fill(phone);
+  await enterContact(page, phone);
   const firstResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/center/students') && response.request().method() === 'POST');
   await page.getByRole('button', {name:'حفظ ملف الطالب',exact:true}).click();
   const first = (await (await firstResponse).json()).student;
@@ -408,7 +408,7 @@ test('a shared contact warning permits a separate student without merging profil
   await expect(page).toHaveURL(new RegExp(`/admin/students/${first.id}\\?focus=edit$`));
   await page.goto(`${host}/admin/students/new`);
   await page.getByRole('textbox', {name:'اسم الطالب',exact:true}).fill(`طالب آخر ${Date.now()}`);
-  await page.getByRole('textbox', {name:'رقم التواصل',exact:true}).fill(phone);
+  await enterContact(page, phone);
   await page.getByRole('button', {name:'حفظ ملف الطالب',exact:true}).click();
   await expect(page.getByRole('status').filter({hasText:'توجد ملفات ببيانات متشابهة'})).toContainText(name);
   const secondResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/center/students') && response.request().method() === 'POST');
@@ -446,3 +446,10 @@ test('normal SSR register, create, profile and edit each use at most six measure
   console.log(JSON.stringify({route:'warm table to profile navigation',application_sql:rows.reduce((sum,row)=>sum+(row.count ?? Number.NaN),0),requests:rows.length}));
 
 });
+
+async function enterContact(page: Page, phone: string) {
+  await page.getByRole('button', {name:'إضافة جهة تواصل',exact:true}).click();
+  await page.getByRole('textbox', {name:'اسم جهة التواصل 1',exact:true}).fill('صاحب الرقم المشترك');
+  await page.getByRole('textbox', {name:'الصلة بالطالب 1',exact:true}).fill('ولي أمر');
+  await page.getByRole('textbox', {name:'هاتف جهة التواصل 1',exact:true}).fill(phone);
+}
