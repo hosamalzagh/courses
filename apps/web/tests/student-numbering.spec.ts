@@ -73,7 +73,7 @@ test('numbering, printable barcode, keyboard scan, branch/center isolation and p
     await expect(owner.getByRole('status')).toContainText('حُفظت بداية ترقيم الطلاب.');
     await owner.goto(`${host}/admin/students`);
     const name = `طالب باركود ${stamp}`;
-    await owner.getByRole('button', { name: 'إنشاء ملف طالب' }).click();
+    await owner.getByRole('link', { name: 'إنشاء ملف طالب' }).click();
     await owner.getByRole('textbox', { name: 'اسم الطالب' }).fill(name);
     await owner.getByRole('checkbox', { name: north.body.branch.name, exact: true }).check();
     let saved: { id: string; student_number: number } | undefined;
@@ -85,7 +85,7 @@ test('numbering, printable barcode, keyboard scan, branch/center isolation and p
     await owner.getByRole('button', { name: 'حفظ ملف الطالب' }).click();
     await expect(owner.getByRole('alert')).toBeVisible();
     await owner.getByRole('button', { name: 'حفظ ملف الطالب' }).click();
-    await expect(owner.getByRole('status')).toContainText('أُنشئ ملف الطالب');
+    await expect(owner).toHaveURL(/\/admin\/students\/[a-f0-9-]+\?focus=edit$/);
     expect(saved?.student_number).toBe(start);
     await owner.unroute('**/api/v1/center/students');
     const payload = { name: `ثان ${stamp}`, branch_ids: [south.body.branch.id], request_id: crypto.randomUUID() };

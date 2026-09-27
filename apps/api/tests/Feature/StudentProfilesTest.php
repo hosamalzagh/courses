@@ -17,6 +17,36 @@ class StudentProfilesTest extends TestCase
 {
     use CleansCenterDatabases, RefreshDatabase;
 
+    public function test_profile_numbering_sharing_and_suspension_preserve_each_other_across_retries_and_edits(): void
+    {
+        $this->patchJson("{$this->base}/student-numbering", ['start' => 7000, 'revision' => 1])->assertOk();
+        $this->patchJson("{$this->base}/student-search-policy", ['default_sharing_enabled' => true, 'enabled' => true, 'revision' => 1])->assertOk();
+        $creation = ['name' => 'طالب التكامل', 'phone' => '01070007000', 'date_of_birth' => '2000-01-01', 'school' => 'مدرسة التكامل', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid()];
+        $student = $this->postJson("{$this->base}/students", $creation)->assertCreated()
+            ->assertJsonPath('student.student_number', 7000)->assertJsonPath('student.sharing_enabled', true)
+            ->assertJsonPath('student.status', 'active')->json('student');
+        $route = "{$this->base}/students/{$student['id']}";
+        $this->patchJson("{$route}/sharing", ['sharing_enabled' => false, 'revision' => 1])->assertOk()
+            ->assertJsonPath('student.school', 'مدرسة التكامل')->assertJsonPath('student.student_number', 7000);
+        $suspension = ['status' => 'suspended', 'reason' => 'سبب التكامل', 'status_revision' => 1, 'request_id' => (string) Str::uuid()];
+        $this->postJson("{$route}/status", $suspension)->assertOk();
+        $this->postJson("{$route}/status", $suspension)->assertOk();
+        $this->patchJson($route, ['name' => 'طالب التكامل المعدل', 'phone' => $creation['phone'], 'school' => 'مدرسة معدلة', 'branch_ids' => [], 'revision' => 1])->assertConflict();
+        $this->patchJson($route, ['name' => 'طالب التكامل المعدل', 'phone' => $creation['phone'], 'school' => 'مدرسة معدلة', 'branch_ids' => [], 'revision' => 2])->assertOk()
+            ->assertJsonPath('student.student_number', 7000)->assertJsonPath('student.sharing_enabled', false)
+            ->assertJsonPath('student.status', 'suspended')->assertJsonPath('student.status_revision', 2)
+            ->assertJsonPath('student.date_of_birth', '2000-01-01')->assertJsonPath('student.school', 'مدرسة معدلة');
+        $this->postJson("{$this->base}/students", $creation)->assertOk()
+            ->assertJsonPath('student.id', $student['id'])->assertJsonPath('student.school', 'مدرسة معدلة')
+            ->assertJsonPath('student.student_number', 7000)->assertJsonPath('student.status', 'suspended');
+        $this->getJson("{$route}/barcode")->assertOk()->assertSee('7000')->assertDontSee('مدرسة معدلة');
+        $this->postJson("{$route}/status", ['status' => 'active', 'reason' => 'فك إيقاف التكامل', 'status_revision' => 2, 'request_id' => (string) Str::uuid()])->assertOk();
+        $this->getJson($route)->assertOk()->assertJsonPath('students.0.status', 'active')
+            ->assertJsonPath('students.0.sharing_enabled', false)->assertJsonPath('students.0.revision', 3)
+            ->assertJsonCount(1, 'suspensions');
+        $this->postJson("{$this->base}/students", [...$creation, 'name' => 'طالب تالٍ', 'request_id' => (string) Str::uuid()])->assertCreated()->assertJsonPath('student.student_number', 7001);
+    }
+
     private Center $center;
 
     private User $owner;

@@ -65,9 +65,9 @@ test('owner configures new defaults and audited sharing separately in RTL and na
   await expect(page.getByRole('status').filter({ hasText: 'حُفظ افتراضي' })).toBeVisible();
   expect((await (await page.request.get(`${host}/api/v1/center/student-search-workspace`)).json()).policy.enabled).toBe(false);
   expect((await (await page.request.get(`${host}/api/v1/center/students/${first.body.student.id}`)).json()).students[0].sharing_enabled).toBe(true);
-  await page.goto(`${host}/admin/students`); await page.getByRole('button', { name: 'إنشاء ملف طالب', exact: true }).click();
+  await page.goto(`${host}/admin/students`); await page.getByRole('link', { name: 'إنشاء ملف طالب', exact: true }).click();
   await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(`New sharing ${suffix}`);
-  await page.getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click(); await expect(page.getByRole('status')).toContainText('أُنشئ ملف الطالب');
+  await page.getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click(); await expect(page).toHaveURL(/\/admin\/students\/[a-f0-9-]+\?focus=edit$/);
   const student = (await (await page.request.get(`${host}/api/v1/center/student-workspace?q=${encodeURIComponent(`New sharing ${suffix}`)}`)).json()).students[0]; expect(student.sharing_enabled).toBe(false);
   await budget(page, () => page.goto(`${host}/admin/students/${student.id}`), true);
   await expect(page.getByText('المشاركة بين الفروع: مغلقة', { exact: true })).toBeVisible();
@@ -75,8 +75,8 @@ test('owner configures new defaults and audited sharing separately in RTL and na
   await page.keyboard.press('Escape'); await expect(page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true })).toBeFocused();
   await page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click(); await page.getByRole('dialog').getByRole('button', { name: 'السماح بمشاركة الطالب', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('حُفظ اختيار مشاركة الطالب'); await page.reload(); await expect(page.getByText('المشاركة بين الفروع: مسموحة', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'تعديل ملف الطالب', exact: true }).click(); await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(`Updated sharing ${suffix}`);
-  await page.getByRole('button', { name: 'حفظ بيانات الطالب', exact: true }).click(); await expect(page.getByRole('status').filter({ hasText: 'حُفظت بيانات' })).toBeVisible();
+  await page.getByRole('link', { name: 'تعديل ملف الطالب', exact: true }).click(); await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(`Updated sharing ${suffix}`);
+  await page.getByRole('button', { name: 'حفظ بيانات الطالب', exact: true }).click(); await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
   expect((await (await page.request.get(`${host}/api/v1/center/students/${student.id}`)).json()).students[0].sharing_enabled).toBe(true);
   await page.goto(`${host}/admin/audit`); await expect(page.getByText('تغيير مشاركة الطالب', { exact: true }).first()).toBeVisible(); await page.getByText('عرض تغيير مشاركة الطالب', { exact: true }).first().click(); await expect(page.getByText('قبل التغيير: مغلقة', { exact: true }).first()).toBeVisible();
   await page.context().addCookies([{ name: 'courses_theme', value: 'dark', url: host }]); await page.setViewportSize({ width: 390, height: 844 }); await page.goto(`${host}/admin/students/${student.id}`);
@@ -96,7 +96,7 @@ test('staff discovery and similarity respect sharing, revocation, direct access,
     await expect(staff.getByRole('table')).toContainText(name); await expect(staff.getByRole('table').getByRole('link')).toHaveCount(0);
     const result = await (await staff.request.get(`${host}/api/v1/center/student-search-workspace?q=${encodeURIComponent(name)}`)).json(); expect(Object.keys(result.students[0]).sort()).toEqual(['id', 'name', 'phone', 'student_number', 'within_scope']);
     expect((await staff.request.get(`${host}/api/v1/center/students/${hidden.body.student.id}`)).status()).toBe(404); expect((await write(staff, `students/${hidden.body.student.id}/sharing`, 'PATCH', { sharing_enabled: false, revision: 1 })).status).toBe(404);
-    await staff.goto(`${host}/admin/students`); await staff.getByRole('button', { name: 'إنشاء ملف طالب', exact: true }).click(); await staff.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name); await staff.getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click(); await expect(staff.getByRole('status').filter({ hasText: 'توجد ملفات ببيانات متشابهة' })).toContainText(name);
+    await staff.goto(`${host}/admin/students`); await staff.getByRole('link', { name: 'إنشاء ملف طالب', exact: true }).click(); await staff.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name); await staff.getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click(); await expect(staff.getByRole('status').filter({ hasText: 'توجد ملفات ببيانات متشابهة' })).toContainText(name);
     expect((await write(owner, `students/${hidden.body.student.id}/sharing`, 'PATCH', { sharing_enabled: false, revision: 1 })).status).toBe(200);
     await staff.goto(`${host}/admin/student-search?q=${encodeURIComponent(name)}`); await expect(staff.getByRole('table')).not.toContainText(name); expect((await (await staff.request.get(`${host}/api/v1/center/students/similar?name=${encodeURIComponent(name)}`)).json()).students).toHaveLength(0);
     const inside = await write(staff, 'students', 'POST', { name: `Private inside ${suffix}`, branch_ids: [north.body.branch.id], request_id: crypto.randomUUID() }); expect(inside.status).toBe(201); expect((await write(staff, `students/${inside.body.student.id}/sharing`, 'PATCH', { sharing_enabled: false, revision: 1 })).status).toBe(200); expect((await staff.request.get(`${host}/api/v1/center/students/${inside.body.student.id}`)).status()).toBe(200);
