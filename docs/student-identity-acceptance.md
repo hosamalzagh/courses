@@ -25,4 +25,4 @@ Writes reuse the center/member lock, current permission read and tenant transact
 
 Use the disposable alpha/beta/staff fixture and proxy described in `docs/student-profile-choices-acceptance.md`, after tenant migrations. From `apps/web`, set `COURSES_IDENTITY_CREDENTIALS` to its absolute mode-0600 credential file and `COURSES_IDENTITY_READ_LOG` to the proxy JSONL log including SSR. Optional `COURSES_IDENTITY_ORIGIN` defaults to `http://alpha.courses.test:8057`. Run `npx playwright test student-identity.spec.ts`; the suite skips without the isolated fixture. All identity values in acceptance are synthetic.
 
-No production deployment or government/OCR service integration. #62 must reuse identity authority for classified custom fields; #65 owns identity attachments and #82 owns final expansion-wide integration.
+No production deployment or government/OCR service integration. #62 adds general custom fields; #63 owns their identity classification and must reuse identity authority. #65 owns identity attachments and #82 owns final expansion-wide integration.
