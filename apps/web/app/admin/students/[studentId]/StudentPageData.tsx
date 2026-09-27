@@ -1,4 +1,5 @@
 import 'server-only';
+import { StudentContactSummary } from '@/components/StudentContactSummary';
 import { studentChoiceLabels } from '@/lib/student-profile-choices';
 import type { StudentChoiceKind } from '@/lib/server-context';
 import { loadStudentWorkspace } from '@/lib/server-context';
@@ -16,6 +17,7 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
   const context = await loadStudentWorkspace(query, studentId);
   if (typeof context === 'string') return <CenterAccessState state={context} />;
   const student = context.students[0];
+  const primaryContact = student.contacts.find(contact => contact.id === student.channels.primary?.contact_id) ?? student.contacts.find(contact => contact.primary);
   const value = (text: string | null) => text || 'لم تُضف بعد';
   return <CenterPage context={context} path={`/admin/students/${studentId}`}>
     <StudentProfileActions context={context} />
@@ -25,7 +27,7 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
     <section className='context-card form-stack student-summary' aria-label='ملخص الطالب'>
       <h2>{student.name}</h2>
       <p>رقم الطالب الداخلي: <bdi>{student.student_number.toLocaleString('ar-EG')}</bdi></p>
-      <p>رقم التواصل: <bdi dir='ltr'>{value(student.phone)}</bdi></p>
+      <p>رقم التواصل: <bdi dir='ltr'>{value(student.phone)}</bdi>{primaryContact ? ` — ${primaryContact.name} (${primaryContact.relationship})` : student.phone ? ' — صاحبه غير محدد' : ''}</p>
       <p>الفروع المصرح بها: {student.branch_ids.map((id) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join('، ')}</p>
     </section>
     <nav className='form-actions' aria-label='أقسام ملف الطالب'><a href='#student-personal' aria-current='page'>البيانات الشخصية</a>{context.permissions.can_manage_center || Object.values(context.permissions.branch_roles).some((roles) => roles.includes('branch_auditor')) ? <Link href='/admin/audit'>سجل التغييرات</Link> : null}</nav>
@@ -45,5 +47,6 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
         <div><dt>تاريخ الإنشاء</dt><dd>{new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' }).format(new Date(student.created_at.replace(' ', 'T') + 'Z'))}</dd></div>
       </dl>
     </section>
+    <section className='context-card form-stack' aria-label='جهات التواصل وقنوات المتابعة'><h2>جهات التواصل وقنوات المتابعة</h2><StudentContactSummary data={student} legacyPhone={student.legacy_phone} /></section>
   </CenterPage>;
 }

@@ -6,6 +6,7 @@ use App\Models\Center;
 use App\Models\CenterMembership;
 use App\Support\CenterPermissions;
 use App\Support\StudentBarcode;
+use App\Support\StudentContacts;
 use App\Support\StudentProfileChoices;
 use Carbon\CarbonImmutable;
 use Closure;
@@ -16,6 +17,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use stdClass;
 
 class CenterStudentController extends Controller
@@ -59,7 +61,7 @@ class CenterStudentController extends Controller
             $query->where(function (Builder $query) use ($search, $phone, $data): void {
                 $query->whereRaw('strpos(name_search, ?) > 0', [$search]);
                 if ($phone !== null) {
-                    $query->orWhereRaw('strpos(phone_search, ?) > 0', [$phone]);
+                    StudentContacts::matchPhone($query, $phone);
                 }
                 if (ctype_digit($data['q']) && strlen($data['q']) <= 18) {
                     $query->orWhere('student_number', $data['q']);
@@ -93,20 +95,20 @@ class CenterStudentController extends Controller
 
     public function similar(Request $request): JsonResponse
     {
-        $data = $request->validate(['name' => ['nullable', 'string', 'max:255'], 'phone' => ['nullable', 'string', 'max:50'], 'exclude' => ['nullable', 'uuid']]);
+        $data = $request->validate(['name' => ['nullable', 'string', 'max:255'], 'phone' => ['nullable', 'string', 'max:50'], 'exclude' => ['nullable', 'uuid'], 'phones' => ['sometimes', 'array', 'max:25'], 'phones.*' => ['string', 'max:50']]);
         $permissions = $request->attributes->get('center_permissions');
         $query = $this->visibleStudents($permissions, true);
         $name = $this->normalizeName($data['name'] ?? '');
-        $phone = $this->normalizePhone($data['phone'] ?? null);
-        if ($name === '' && $phone === null) {
+        $phones = StudentContacts::normalizePhones([...($data['phones'] ?? []), $data['phone'] ?? null]);
+        if ($name === '' && $phones === []) {
             return response()->json(['students' => []])->header('Cache-Control', 'private, no-store');
         }
-        $query->where(function (Builder $query) use ($name, $phone): void {
+        $query->where(function (Builder $query) use ($name, $phones): void {
             if ($name !== '') {
                 $query->where('name_search', $name);
             }
-            if ($phone !== null) {
-                $query->orWhere('phone_search', $phone);
+            foreach ($phones as $phone) {
+                StudentContacts::matchPhone($query, $phone, true);
             }
         })->when(! empty($data['exclude']), fn (Builder $query) => $query->where('students.id', '!=', $data['exclude']));
 
@@ -173,6 +175,7 @@ class CenterStudentController extends Controller
             $id = (string) Str::uuid();
             DB::connection('tenant')->table('students')->insert([
                 ...array_intersect_key($data, array_flip(self::GENERAL_FIELDS)),
+                ...StudentContacts::columns($data),
                 'id' => $id, 'name' => $data['name'], 'phone' => $data['phone'],
                 'sharing_enabled' => (bool) DB::connection('tenant')->table('student_search_policy')->where('id', 1)->value('default_sharing_enabled'),
                 'name_search' => $this->normalizeName($data['name']), 'phone_search' => $this->normalizePhone($data['phone']),
@@ -199,11 +202,18 @@ class CenterStudentController extends Controller
             $before = $this->read($studentId, $permissions);
             abort_unless($before['can_manage'], 403);
             $this->authorizeBranches($permissions, $data['branch_ids']);
+            // Omitted legacy phone preserves it. Old callers echoing the summary cannot assign an owner.
+            if (! $request->exists('phone') || (! isset($data['contacts']) && $before['contacts'] !== [] && $data['phone'] === $before['phone'])) {
+                $data['phone'] = $row->phone;
+            } elseif (! isset($data['contacts']) && $before['contacts'] !== [] && $data['phone'] !== $row->phone) {
+                throw ValidationException::withMessages(['contacts' => 'عدّل الرقم من جهات التواصل وقنواته.']);
+            }
             $currentBranches = DB::connection('tenant')->table('student_branches')->where('student_id', $studentId)->pluck('branch_id')->all();
             $added = array_diff($data['branch_ids'], $currentBranches);
             $general = array_intersect_key($data, array_flip(self::GENERAL_FIELDS));
+            $contactChanged = isset($data['contacts']) && ($before['contacts'] != $data['contacts'] || $before['channels'] != $data['channels']);
             $generalChanged = collect($general)->contains(fn ($value, $field): bool => $row->{$field} !== $value);
-            if (! $generalChanged && $row->name === $data['name'] && $row->phone === $data['phone'] && $added === []) {
+            if (! $contactChanged && ! $generalChanged && $row->name === $data['name'] && $row->phone === $data['phone'] && $added === []) {
                 return response()->json(['student' => $before]);
             }
             if ($row->revision !== (int) $request->input('revision')) {
@@ -212,6 +222,7 @@ class CenterStudentController extends Controller
             StudentProfileChoices::validate($data, $row);
             DB::connection('tenant')->table('students')->where('id', $studentId)->update([
                 ...$general,
+                ...StudentContacts::columns($data),
                 'name' => $data['name'], 'phone' => $data['phone'],
                 'name_search' => $this->normalizeName($data['name']), 'phone_search' => $this->normalizePhone($data['phone']),
                 'revision' => $row->revision + 1, 'updated_at' => now(),
@@ -285,9 +296,19 @@ class CenterStudentController extends Controller
             'employer' => ['sometimes', 'nullable', 'string', 'max:255'],
             ...array_fill_keys(StudentProfileChoices::fields(), ['sometimes', 'nullable', 'uuid']),
             'specialization' => ['sometimes', 'nullable', 'string', 'max:255'],
+            ...StudentContacts::rules(),
         ], ['name.required' => 'أدخل اسم الطالب.', 'branch_ids.required' => 'اختر فرعًا مصرحًا به على الأقل.',
             'date_of_birth.*' => 'أدخل تاريخ ميلاد صحيحًا بصيغة YYYY-MM-DD لا يتجاوز اليوم.',
-            'email.*' => 'أدخل بريدًا إلكترونيًا صحيحًا.', 'gender.*' => 'اختر ذكر أو أنثى.']);
+            'email.*' => 'أدخل بريدًا إلكترونيًا صحيحًا.', 'gender.*' => 'اختر ذكر أو أنثى.',
+            'contacts.*.name.*' => 'أدخل اسم جهة التواصل (حتى 255 حرفًا).',
+            'contacts.*.relationship.*' => 'أدخل صلة الجهة بالطالب (حتى 100 حرف).',
+            'contacts.*.phone.*' => 'أدخل هاتف جهة التواصل كنص يحتوي أرقامًا (حتى 50 حرفًا).',
+            'contacts.*.id.*' => 'جهة التواصل غير صالحة أو مكررة.',
+            'contacts.*.primary.*' => 'حدد الجهة الأساسية.',
+            'contacts.*' => 'أدخل قائمة جهات تواصل صحيحة، بحد أقصى 20 جهة.',
+            'channels.*.phone.*' => 'أدخل رقم القناة كنص يحتوي أرقامًا (حتى 50 حرفًا).',
+            'channels.*.contact_id.*' => 'اختر صاحب القناة من جهات هذا الطالب.',
+            'channels.*' => 'حدد قنوات التواصل وأصحابها بصورة صحيحة.']);
         $data['name'] = trim($data['name']);
         abort_if($data['name'] === '', 422, 'أدخل اسم الطالب.');
         $data['phone'] = isset($data['phone']) ? trim($data['phone']) : null;
@@ -299,7 +320,7 @@ class CenterStudentController extends Controller
         $data['branch_ids'] = array_map('intval', $data['branch_ids']);
         sort($data['branch_ids']);
 
-        return $data;
+        return StudentContacts::normalize($data);
     }
 
     private function authorizeBranches(CenterPermissions $permissions, array $branchIds): void
@@ -323,7 +344,8 @@ class CenterStudentController extends Controller
         }
 
         return DB::connection('tenant')->table('students')
-            ->select(['students.id', 'student_number', 'name', 'phone', 'revision', 'created_by', 'created_at', 'sharing_enabled', 'status', 'status_revision', ...self::GENERAL_FIELDS])
+            ->select(['students.id', 'student_number', 'name', 'students.phone as legacy_phone', 'contacts', 'channels', 'revision', 'created_by', 'created_at', 'sharing_enabled', 'status', 'status_revision', ...self::GENERAL_FIELDS])
+            ->selectRaw(StudentContacts::phoneSql().' as phone')
             ->selectSub(StudentProfileChoices::selectedQuery(), 'profile_choices')
             ->selectSub((clone $associations)->selectRaw('json_agg(branch_id ORDER BY branch_id)'), 'branch_ids')
             ->where(function (Builder $query) use ($associations, $permissions, $includeCenterSearch): void {
@@ -342,6 +364,7 @@ class CenterStudentController extends Controller
         $branches = json_decode($row->branch_ids, true);
 
         return [...array_intersect_key((array) $row, array_flip(self::GENERAL_FIELDS)),
+            'contacts' => json_decode($row->contacts, true), 'channels' => json_decode($row->channels, true), 'legacy_phone' => $row->legacy_phone,
             'profile_choices' => json_decode($row->profile_choices ?? '{}', true) ?? [],
             'age' => $row->date_of_birth === null ? null : (int) CarbonImmutable::parse($row->date_of_birth)->diffInYears(CarbonImmutable::today()),
             'status' => $row->status, 'status_revision' => $row->status_revision, 'can_change_status' => $permissions->isCenterManager(),
@@ -368,7 +391,7 @@ class CenterStudentController extends Controller
 
     private function audit(Request $request, string $event, array $after, ?array $before, array $branchIds, array $previousBranchIds = []): void
     {
-        $basic = fn (?array $student): ?array => $student === null ? null : array_intersect_key($student, array_flip(['student_number', 'name', 'phone', 'profile_choices', ...self::GENERAL_FIELDS]));
+        $basic = fn (?array $student): ?array => $student === null ? null : array_intersect_key($student, array_flip(['student_number', 'name', 'phone', 'legacy_phone', 'contacts', 'channels', 'profile_choices', ...self::GENERAL_FIELDS]));
         foreach ($branchIds as $branchId) {
             DB::connection('tenant')->table('center_audit_logs')->insert([
                 'actor_id' => $request->user()->id, 'branch_id' => $branchId, 'event' => $event,

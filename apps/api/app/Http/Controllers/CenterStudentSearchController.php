@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Center;
 use App\Models\CenterMembership;
 use App\Support\CenterPermissions;
+use App\Support\StudentContacts;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
@@ -30,7 +31,8 @@ class CenterStudentSearchController extends Controller
             if (! $permissions->isCenterManager()) {
                 $scope->whereIn('branch_id', self::readableBranches($permissions));
             }
-            $students = DB::connection('tenant')->table('students')->select(['students.id', 'student_number', 'name', 'phone'])
+            $students = DB::connection('tenant')->table('students')->select(['students.id', 'student_number', 'name'])
+                ->selectRaw(StudentContacts::phoneSql().' as phone')
                 ->selectSub((clone $scope)->selectRaw('count(*) > 0'), 'within_scope')
                 ->where(function (Builder $rows) use ($scope): void {
                     $rows->where('students.sharing_enabled', true)->orWhereExists((clone $scope)->selectRaw('1'));
@@ -38,7 +40,7 @@ class CenterStudentSearchController extends Controller
                 ->where(function (Builder $rows) use ($search, $phone, $query): void {
                     $rows->whereRaw('strpos(name_search, ?) > 0', [$search]);
                     if ($phone !== null) {
-                        $rows->orWhereRaw('strpos(phone_search, ?) > 0', [$phone]);
+                        StudentContacts::matchPhone($rows, $phone);
                     }
                     if (ctype_digit($query) && strlen($query) <= 18) {
                         $rows->orWhere('student_number', $query);

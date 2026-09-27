@@ -1,3 +1,5 @@
+import { StudentContactSummary } from './StudentContactSummary';
+import type { StudentContactsData } from '@/lib/server-context';
 import { studentChoiceLabels } from '@/lib/student-profile-choices';
 import type { AuditEntry } from '@/lib/server-context';
 
@@ -32,5 +34,6 @@ export function StudentAuditDetails({ entry }: { entry: AuditEntry }) {
     const labels: Record<string, string> = { date_of_birth: 'تاريخ الميلاد', gender: 'النوع', address: 'العنوان', email: 'البريد', school: 'المدرسة / جهة الدراسة', employer: 'جهة العمل', specialization: 'التخصص' };
     return <>{typeof record.name === 'string' ? record.name : 'غير مسجل'} · رقم {typeof record.student_number === 'number' ? record.student_number.toLocaleString('ar-EG') : 'غير مسجل'} · التواصل: <bdi>{typeof record.phone === 'string' ? record.phone : 'غير مسجل'}</bdi>{record.profile_choices && typeof record.profile_choices === 'object' ? Object.entries(record.profile_choices).map(([kind, choice]) => <span key={kind}> · {studentChoiceLabels[kind as keyof typeof studentChoiceLabels]}: {(choice as { label: string }).label}</span>) : null}{Object.entries(labels).filter(([key]) => key in record).map(([key, label]) => <span key={key}> · {label}: {typeof record[key] === 'string' ? (key === 'gender' ? record[key] === 'male' ? 'ذكر' : 'أنثى' : record[key]) : 'لم يُضف'}</span>)}</>;
   }
-  return <details><summary>عرض تغيير ملف الطالب</summary><p>قبل التغيير: {basic(data.before)}</p><p>بعد التغيير: {basic(data.after)}</p><p>ارتباط الطالب بهذا الفرع: {data.associated_before === true ? 'كان مرتبطًا بالفعل' : 'ارتباط جديد'}</p></details>;
+  const contacts = (value: unknown) => value && typeof value === 'object' && 'contacts' in value && 'channels' in value ? <StudentContactSummary data={value as StudentContactsData} legacyPhone={'legacy_phone' in value && typeof value.legacy_phone === 'string' ? value.legacy_phone : null} /> : null;
+  return <details><summary>عرض تغيير ملف الطالب</summary><p>قبل التغيير: {basic(data.before)}</p>{contacts(data.before)}<p>بعد التغيير: {basic(data.after)}</p>{contacts(data.after)}<p>ارتباط الطالب بهذا الفرع: {data.associated_before === true ? 'كان مرتبطًا بالفعل' : 'ارتباط جديد'}</p></details>;
 }

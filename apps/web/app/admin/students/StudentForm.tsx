@@ -15,6 +15,8 @@ import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard';
 import { buttonVariants } from "@/components/ui/button";
 import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
 import { Button } from '@/components/Button';
+import { StudentContactFields } from '@/components/StudentContactFields';
+import { studentContactsData, contactValidation } from '@/lib/student-contacts';
 import { StudentChoiceFields } from '@/components/StudentChoiceFields';
 import { FormField } from '@/components/FormField';
 import { InlineNotice } from '@/components/InlineNotice';
@@ -34,10 +36,11 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
   const manageable = branches.filter((branch) => context.permissions.can_manage_center || (context.permissions.branch_actions?.[String(branch.id)] ?? []).includes('students.manage'));
   const [editor, setEditor] = useState<Student | 'new'>(student ?? 'new');
   const [name, setName] = useState(student?.name ?? '');
-  const [phone, setPhone] = useState(student?.phone ?? '');
+  const [phone, setPhone] = useState(student?.legacy_phone ?? '');
   const [branchIds, setBranchIds] = useState<number[]>(student?.branch_ids.filter((id) => manageable.some((branch) => branch.id === id)) ?? manageable.slice(0, 1).map((branch) => branch.id));
   const [requestId, setRequestId] = useState(newSubmissionId);
   const [general, setGeneral] = useState<StudentGeneralData>(profileData(student));
+  const [contactData, setContactData] = useState(() => studentContactsData(student));
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
@@ -49,12 +52,13 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
   const [conflict, setConflict] = useState(false);
 
   const initialBranches = editor === 'new' ? manageable.slice(0, 1).map((branch) => branch.id) : editor ? editor.branch_ids.filter((id) => manageable.some((branch) => branch.id === id)) : [];
-  const dirty = !saved && (name !== (editor === 'new' ? '' : editor.name) || phone !== (editor === 'new' ? '' : editor.phone ?? '') || JSON.stringify([...branchIds].sort()) !== JSON.stringify([...initialBranches].sort()) || JSON.stringify(general) !== JSON.stringify(profileData(editor === 'new' ? undefined : editor)));
+  const dirty = !saved && (name !== (editor === 'new' ? '' : editor.name) || phone !== (editor === 'new' ? '' : editor.legacy_phone ?? '') || JSON.stringify([...branchIds].sort()) !== JSON.stringify([...initialBranches].sort()) || JSON.stringify(general) !== JSON.stringify(profileData(editor === 'new' ? undefined : editor)) || JSON.stringify(contactData) !== JSON.stringify(studentContactsData(editor === 'new' ? undefined : editor)));
 
   function open(student: Student) {
     setSaved(false);
     setGeneral(profileData(student));
-    setEditor(student); setName(student.name); setPhone(student.phone ?? '');
+    setContactData(studentContactsData(student));
+    setEditor(student); setName(student.name); setPhone(student.legacy_phone ?? '');
     setBranchIds(student.branch_ids.filter((id) => manageable.some((branch) => branch.id === id)));
     setRequestId(newSubmissionId()); setError(''); setFieldErrors({}); setNotice(''); setSimilar([]); setReviewed(''); setConflict(false);
   }
@@ -80,15 +84,17 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
     event.preventDefault();
     if (!editor || saving.current) return;
     setError(''); setFieldErrors({}); setNotice('');
-    const errors: Record<string, string> = {};
+    const errors: Record<string, string> = contactValidation(contactData);
     if (!name.trim()) errors.name = 'أدخل اسم الطالب.';
     if (editor === 'new' && !branchIds.length) errors.branch_ids = 'اختر فرعًا مصرحًا به على الأقل.';
     if (Object.keys(errors).length) { setFieldErrors(errors); return; }
     saving.current = true; setBusy(true);
     try {
-      const fingerprint = JSON.stringify([name.trim(), phone.trim()]);
+      const fingerprint = JSON.stringify([name.trim(), phone.trim(), contactData]);
       if (reviewed !== fingerprint) {
         const params = new URLSearchParams({ name: name.trim(), phone: phone.trim() });
+        const phones = [...contactData.contacts.map(contact => contact.phone), ...Object.values(contactData.channels).filter(channel => channel !== null).map(channel => channel.phone)];
+        for (const number of new Set(phones.filter(number => number.trim()))) params.append('phones[]', number.trim());
         if (editor !== 'new') params.set('exclude', editor.id);
         const response = await centerRequest(`students/similar?${params}`, 'GET');
         if (!response.ok) { setError(await responseMessage(response)); return; }
@@ -97,7 +103,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         if (matches.length) return;
       }
       const response = await centerRequest(editor === 'new' ? 'students' : `students/${editor.id}`, editor === 'new' ? 'POST' : 'PATCH', {
-        name: name.trim(), phone: phone.trim() || null, branch_ids: editor === 'new' ? branchIds : branchIds.filter((id) => !editor.branch_ids.includes(id)), ...general,
+        name: name.trim(), phone: phone.trim() || null, branch_ids: editor === 'new' ? branchIds : branchIds.filter((id) => !editor.branch_ids.includes(id)), ...general, ...contactData,
         ...(editor === 'new' ? { request_id: requestId } : { revision: editor.revision }),
       });
       if (!response.ok) {
@@ -159,8 +165,8 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         </div>
         <h2>التواصل</h2><div className='student-fields'>
         <FormField id='student-email' label='البريد الإلكتروني' type='email' direction='ltr' value={general.email ?? ''} onChange={(value) => changeGeneral('email', value)} error={fieldErrors.email} autoComplete='email' />
-        <FormField id='student-phone' label='رقم التواصل' value={phone} onChange={(value) => { setSaved(false); setPhone(value); setFieldErrors({}); setSimilar([]); }} error={fieldErrors.phone} type='tel' direction='ltr' autoComplete='off' hint='اختياري، ويمكن لأكثر من طالب استخدام نفس الرقم.' />
-        </div><h2>خلفية الدراسة والعمل</h2><div className='student-fields'>
+        {editor !== 'new' && editor.legacy_phone !== null ? <FormField id='student-phone' label='رقم التواصل' value={phone} onChange={(value) => { setSaved(false); setPhone(value); setFieldErrors({}); setSimilar([]); }} error={fieldErrors.phone} type='tel' direction='ltr' autoComplete='off' hint='رقم سابق بصاحب غير محدد. أضف جهة وقناة لاستكمال صاحب الرقم؛ يبقى الرقم السابق محفوظًا.' /> : null}
+        </div><StudentContactFields prefix={formPrefix} data={contactData} onChange={value => { setSaved(false); setContactData(value); setFieldErrors({}); setSimilar([]); }} errors={fieldErrors} disabled={busy} /><h2>خلفية الدراسة والعمل</h2><div className='student-fields'>
         {([['school', 'المدرسة / جهة الدراسة'], ['employer', 'جهة العمل'], ['specialization', 'التخصص']] as const).map(([key, label]) => <FormField key={key} id={`student-${key}`} label={label} value={general[key] ?? ''} onChange={(value) => changeGeneral(key, value)} error={fieldErrors[key]} />)}
         </div>
         <h2>اختيارات المركز والمصدر</h2><p className='muted'>طريقة جمع البيانات مستقلة عن مصدر المعرفة بالمركز. يُسجل الموظف وتاريخ الإنشاء تلقائيًا.</p>
