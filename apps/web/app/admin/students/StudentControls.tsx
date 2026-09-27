@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { StudentNavigationLink } from './StudentNavigationLink';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
+import { StudentSharingControls } from './StudentSharingControls';
 import { CenterPageActions } from '@/components/CenterShell';
 import { DataTable } from '@/components/DataTable';
 import { Button } from '@/components/Button';
@@ -36,7 +37,7 @@ export function StudentControls({ context, query }: { context: StudentContext; q
           { key: 'name', label: 'الطالب', filterText: (student) => student.name, render: (student) => <h3>{student.name}</h3> },
           { key: 'phone', label: 'رقم التواصل', filterText: (student) => student.phone ?? '', render: (student) => <bdi dir='ltr'>{student.phone || 'لم يُضف رقم تواصل'}</bdi> },
           { key: 'branches', label: 'الفروع المصرح بها', filterText: (student) => student.branch_ids.map((id) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join('، '), render: (student) => student.branch_ids.map((id) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join('، ') },
-          { key: 'actions', label: 'الإجراءات', actions: true, render: (student) => student.can_manage ? <Link href={`/admin/students/${student.id}/edit`}>تعديل ملف الطالب</Link> : <span className='muted'>صلاحية عرض فقط</span> },
+          { key: 'actions', label: 'الإجراءات', actions: true, render: (student) => <div className='form-stack'>{student.can_manage ? <Link href={`/admin/students/${student.id}/edit`}>تعديل ملف الطالب</Link> : <span className='muted'>صلاحية عرض فقط</span>}<StudentSharingControls student={student} /></div> },
         ]} />
       <nav className='form-actions' aria-label='دفعات ملفات الطلاب'>{context.pagination.page > 1 ? <Link href={pageLink(context.pagination.page - 1)}>دفعة الملفات السابقة</Link> : null}<span>دفعة {context.pagination.page.toLocaleString('ar-EG')}</span>{context.pagination.has_more ? <Link href={pageLink(context.pagination.page + 1)}>دفعة الملفات التالية</Link> : null}</nav>
   </>;

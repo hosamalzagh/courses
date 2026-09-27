@@ -138,6 +138,9 @@ class StudentProfilesTest extends TestCase
     {
         $this->createStudent('Alpha only', [$this->north]);
         $this->center->run(function (): void {
+            $migration = glob(database_path('migrations/tenant/*_add_student_cross_branch_sharing.php'))[0];
+            (require $migration)->down();
+            DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
             DB::statement('DROP TABLE student_branches');
             DB::statement('DROP TABLE students');
             DB::table('migrations')->whereIn('migration', ['2026_09_26_193307_create_student_profiles', '2026_09_27_140402_add_general_student_profile_fields'])->delete();

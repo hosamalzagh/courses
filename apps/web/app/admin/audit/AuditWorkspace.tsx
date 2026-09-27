@@ -16,6 +16,7 @@ const eventNames: Record<string, string> = {
   "member.branch_status_changed": "تغيير حالة موظف الفرع",
   "center.student_numbering_changed": "تغيير بداية ترقيم الطلاب",
   "center.settings_updated": "تعديل إعدادات المركز",
+  "student.sharing_changed": "تغيير مشاركة الطالب", "center.student_sharing_default_changed": "تغيير افتراضي مشاركة الملفات الجديدة",
   "student.created": "إنشاء ملف طالب", "student.updated": "تعديل ملف طالب",
   "instructor.created": "إنشاء ملف محاضر", "instructor.updated": "تعديل ملف محاضر",
   "center.student_search_changed": "تغيير إتاحة البحث عن طلاب المركز",

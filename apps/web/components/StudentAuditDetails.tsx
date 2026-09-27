@@ -1,6 +1,14 @@
 import type { AuditEntry } from '@/lib/server-context';
 
 export function StudentAuditDetails({ entry }: { entry: AuditEntry }) {
+  if (entry.event === 'student.sharing_changed') {
+    let details = entry.details;
+    if (typeof details === 'string') { try { details = JSON.parse(details); } catch { return null; } }
+    if (!details || typeof details !== 'object' || Array.isArray(details)) return null;
+    const data = details as { before?: { sharing_enabled?: boolean }; after?: { sharing_enabled?: boolean } };
+    const status = (value?: boolean) => value === true ? 'مسموحة' : value === false ? 'مغلقة' : 'غير مسجل';
+    return <details><summary>عرض تغيير مشاركة الطالب</summary><p>قبل التغيير: {status(data.before?.sharing_enabled)}</p><p>بعد التغيير: {status(data.after?.sharing_enabled)}</p></details>;
+  }
   if (!['student.created', 'student.updated'].includes(entry.event)) return null;
   let details = entry.details;
   if (typeof details === 'string') {

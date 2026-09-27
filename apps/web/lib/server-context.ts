@@ -35,11 +35,11 @@ export type Member = {
 export type Invitation = { id: number; email: string; center_role: string | null; expires_at: string; status: "pending" | "expired" | "uncertain" | "not_sent" };
 export type MemberContext = CenterContext & { members: Member[]; invitations: Invitation[]; grant_options: Record<string, GrantOption>; pagination: WorkspacePagination };
 export type StudentGeneralData = { date_of_birth: string | null; gender: 'male' | 'female' | null; address: string | null; email: string | null; school: string | null; employer: string | null; specialization: string | null };
-export type Student = StudentGeneralData & { age: number | null; created_by: number; created_at: string; id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
+export type Student = StudentGeneralData & { age: number | null; created_by: number; created_at: string; id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean; sharing_enabled: boolean };
 export type StudentContext = CenterContext & { students: Student[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type Instructor = { id: string; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
 export type InstructorContext = CenterContext & { instructors: Instructor[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
-export type StudentSearchPolicy = { enabled: boolean; revision: number };
+export type StudentSearchPolicy = { enabled: boolean; revision: number; default_sharing_enabled: boolean };
 export type StudentSearchResult = { id: string; student_number: number; name: string; phone: string | null; within_scope: boolean };
 export type StudentSearchContext = CenterContext & { policy: StudentSearchPolicy; students: StudentSearchResult[]; pagination: { page: number; has_more: boolean }; can_search: boolean };
 

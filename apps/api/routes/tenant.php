@@ -72,6 +72,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('students/{studentId}/barcode', [CenterStudentController::class, 'barcode']);
         Route::get('students/{studentId}', [CenterStudentController::class, 'workspace']);
         Route::post('students', [CenterStudentController::class, 'store']);
+        Route::patch('students/{studentId}/sharing', [CenterStudentController::class, 'updateSharing']);
         Route::patch('students/{studentId}', [CenterStudentController::class, 'update']);
         Route::get('instructor-workspace', [CenterInstructorController::class, 'workspace']);
         Route::get('instructors/submissions/{requestId}', [CenterInstructorController::class, 'submission']);

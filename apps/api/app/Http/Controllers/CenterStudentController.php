@@ -152,6 +152,7 @@ class CenterStudentController extends Controller
             DB::connection('tenant')->table('students')->insert([
                 ...array_intersect_key($data, array_flip(self::GENERAL_FIELDS)),
                 'id' => $id, 'name' => $data['name'], 'phone' => $data['phone'],
+                'sharing_enabled' => (bool) DB::connection('tenant')->table('student_search_policy')->where('id', 1)->value('default_sharing_enabled'),
                 'name_search' => $this->normalizeName($data['name']), 'phone_search' => $this->normalizePhone($data['phone']),
                 'request_id' => $request->input('request_id'), 'request_hash' => $hash, 'created_by' => $request->user()->id,
                 'created_at' => now(), 'updated_at' => now(),
@@ -197,6 +198,39 @@ class CenterStudentController extends Controller
             $this->audit($request, 'student.updated', $student, $before, array_unique([...$currentBranches, ...$added]), $currentBranches);
 
             return response()->json(['student' => $student]);
+        });
+    }
+
+    public function updateSharing(Request $request, string $studentId): JsonResponse
+    {
+        abort_unless(Str::isUuid($studentId), 404);
+        $data = $request->validate(['sharing_enabled' => ['required', 'boolean'], 'revision' => ['required', 'integer', 'min:1']]);
+
+        return $this->write($request, function (CenterPermissions $permissions) use ($request, $data, $studentId): JsonResponse {
+            $row = DB::connection('tenant')->table('students')->where('id', $studentId)->lockForUpdate()->first();
+            abort_unless($row, 404);
+            $before = $this->read($studentId, $permissions);
+            abort_unless($before['can_manage'], 403);
+            $sharing = (bool) $data['sharing_enabled'];
+            if ((bool) $row->sharing_enabled === $sharing) {
+                return response()->json(['student' => $before]);
+            }
+            if ($row->revision !== (int) $data['revision']) {
+                $this->conflict('student_changed');
+            }
+            DB::connection('tenant')->table('students')->where('id', $studentId)->update([
+                'sharing_enabled' => $sharing, 'revision' => $row->revision + 1, 'updated_at' => now(),
+            ]);
+            $branches = DB::connection('tenant')->table('student_branches')->where('student_id', $studentId)->pluck('branch_id');
+            foreach ($branches as $branchId) {
+                DB::connection('tenant')->table('center_audit_logs')->insert([
+                    'actor_id' => $request->user()->id, 'branch_id' => $branchId, 'event' => 'student.sharing_changed',
+                    'details' => json_encode(['student_id' => $studentId, 'before' => ['sharing_enabled' => (bool) $row->sharing_enabled], 'after' => ['sharing_enabled' => $sharing]]),
+                    'created_at' => now(),
+                ]);
+            }
+
+            return response()->json(['student' => $this->read($studentId, $permissions)]);
         });
     }
 
@@ -264,12 +298,15 @@ class CenterStudentController extends Controller
         }
 
         return DB::connection('tenant')->table('students')
-            ->select(['students.id', 'student_number', 'name', 'phone', 'revision', 'created_by', 'created_at', ...self::GENERAL_FIELDS])
+            ->select(['students.id', 'student_number', 'name', 'phone', 'revision', 'created_by', 'created_at', 'sharing_enabled', ...self::GENERAL_FIELDS])
             ->selectSub((clone $associations)->selectRaw('json_agg(branch_id ORDER BY branch_id)'), 'branch_ids')
             ->where(function (Builder $query) use ($associations, $permissions, $includeCenterSearch): void {
                 $query->whereExists((clone $associations)->selectRaw('1'));
                 if ($includeCenterSearch && CenterStudentSearchController::hasSearchPermission($permissions)) {
-                    $query->orWhereExists(DB::connection('tenant')->table('student_search_policy')->where('id', 1)->where('enabled', true)->selectRaw('1'));
+                    $query->orWhere(function (Builder $shared): void {
+                        $shared->where('students.sharing_enabled', true)
+                            ->whereExists(DB::connection('tenant')->table('student_search_policy')->where('id', 1)->where('enabled', true)->selectRaw('1'));
+                    });
                 }
             });
     }
@@ -282,7 +319,7 @@ class CenterStudentController extends Controller
             'age' => $row->date_of_birth === null ? null : (int) CarbonImmutable::parse($row->date_of_birth)->diffInYears(CarbonImmutable::today()),
             'created_by' => $row->created_by, 'created_at' => $row->created_at,
             'id' => $row->id, 'student_number' => $row->student_number, 'name' => $row->name, 'phone' => $row->phone,
-            'revision' => $row->revision, 'branch_ids' => $branches,
+            'revision' => $row->revision, 'branch_ids' => $branches, 'sharing_enabled' => (bool) $row->sharing_enabled,
             'can_manage' => collect($branches)->contains(fn (int $id): bool => $permissions->can('students.manage', $id))];
     }
 
