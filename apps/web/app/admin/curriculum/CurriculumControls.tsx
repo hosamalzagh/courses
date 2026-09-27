@@ -8,7 +8,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/field";
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
 import { WorkspaceSections } from '@/components/WorkspaceSections';
@@ -25,6 +25,11 @@ const blankLecture = (): LectureDraft => ({ number: 1, content: '', title: null,
 export function CurriculumControls({ context, detail = false, section = 'courses' }: { context: CurriculumContext; detail?: boolean; section?: 'courses' | 'stages' | 'levels' }) {
   const formPrefix = useId();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  function openSection(next: 'courses' | 'stages' | 'levels') {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', next); router.push(`/admin/curriculum?${params}`);
+  }
   const [editor, setEditor] = useState<Editor | null>(null);
   const [loadedSection, setLoadedSection] = useState(section);
   const [name, setName] = useState('');
@@ -125,7 +130,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
         return;
       }
       close(); setNotice('حُفظ المنهج داخل الفرع مع هوية ثابتة لإصدار الخطة.');
-      if (!detail && editor.kind !== 'plan') router.push(`/admin/curriculum?tab=${editor.kind === 'course' ? 'courses' : editor.kind === 'stage' ? 'stages' : 'levels'}`);
+      if (!detail && editor.kind !== 'plan') openSection(editor.kind === 'course' ? 'courses' : editor.kind === 'stage' ? 'stages' : 'levels');
       router.refresh();
     } catch { setError('تعذر تأكيد الحفظ. تحقق من الاتصال وأعد نفس الطلب؛ إعادة الإرسال لا تنشئ سجلًا مكررًا.'); }
     finally { saving.current = false; setBusy(false); }
@@ -147,7 +152,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
       if (editor.kind === 'plan') open({ kind: 'plan', level: data.levels[0] }, true);
       else {
         close(); setNotice('السجل حُفظ سابقًا. راجع السجل في الجدول؛ لن يُنشأ سجل آخر.');
-        if (!detail) router.push(`/admin/curriculum?tab=${data.kind === 'stages' ? 'stages' : data.kind === 'levels' ? 'levels' : 'courses'}`);
+        if (!detail) openSection(data.kind === 'stages' ? 'stages' : data.kind === 'levels' ? 'levels' : 'courses');
       }
       router.refresh();
     } catch { if (workspaceRead.current === load) setError('تعذر تحميل البيانات الحالية. حاول مرة أخرى.'); }

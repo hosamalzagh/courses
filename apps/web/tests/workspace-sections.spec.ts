@@ -314,3 +314,29 @@ test('lost hierarchy creations recover into the tab owning the committed record'
   await page.getByRole('textbox',{name:'محتوى المحاضرة 1',exact:true}).fill('محتوى استعادة المستوى');
   await loseAndRecover('**/api/v1/center/stages/*/levels','اسم المستوى','levels','بحث في المستويات وخططها');
 });
+
+
+test('successful creation and committed recovery retain destination batch state', async ({page}) => {
+  await login(page);
+  const source = `${origin}/admin/curriculum?tab=levels&courses_page=2&stages_page=3&levels_page=4`;
+  const name = `دفعة محفوظة ${Date.now()}`;
+  async function expectBatches() {
+    await expect(page).toHaveURL(url => url.searchParams.get('tab') === 'courses' && url.searchParams.get('courses_page') === '2' && url.searchParams.get('stages_page') === '3' && url.searchParams.get('levels_page') === '4');
+    await expect(page.getByRole('navigation',{name:'دفعات الكورسات',exact:true})).toContainText('دفعة ٢');
+  }
+  await page.goto(source); await page.getByRole('button',{name:'إنشاء كورس',exact:true}).click();
+  await page.getByRole('textbox',{name:'اسم الكورس',exact:true}).fill(name);
+  const created = page.waitForResponse(response => response.url().endsWith('/api/v1/center/courses') && response.request().method() === 'POST');
+  await page.getByRole('button',{name:'حفظ المنهج',exact:true}).click(); expect((await created).status()).toBe(201); await expectBatches();
+  await page.goto(source); await page.getByRole('button',{name:'إنشاء كورس',exact:true}).click();
+  await page.getByRole('textbox',{name:'اسم الكورس',exact:true}).fill(`${name} استعادة`);
+  await page.route('**/api/v1/center/courses', async route => {
+    const response = await route.fetch(); expect(response.status()).toBe(201); await route.abort('connectionfailed');
+  }, {times:1});
+  await page.getByRole('button',{name:'حفظ المنهج',exact:true}).click();
+  await expect(page.getByRole('alert').filter({hasText:'تعذر تأكيد الحفظ'})).toBeVisible();
+  await page.getByRole('textbox',{name:'اسم الكورس',exact:true}).fill(`${name} محاولة مختلفة`);
+  await page.getByRole('button',{name:'حفظ المنهج',exact:true}).click();
+  await expect(page.getByRole('alert').filter({hasText:'تغيّرت الخطة أو حُفظ الطلب'})).toBeVisible();
+  await page.getByRole('button',{name:'تحميل البيانات الحالية للمنهج',exact:true}).click(); await expectBatches();
+});
