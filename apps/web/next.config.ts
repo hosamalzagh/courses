@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["*.courses.test"],
   experimental: {
     // Full prefetches live only in this browser session. Ordinary navigation
     // stays fresh; mutations use router.refresh() to invalidate prefetched data.

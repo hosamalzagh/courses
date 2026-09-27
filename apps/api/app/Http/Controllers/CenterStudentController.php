@@ -5,12 +5,14 @@ namespace App\Http\Controllers;
 use App\Models\Center;
 use App\Models\CenterMembership;
 use App\Support\CenterPermissions;
+use App\Support\StudentBarcode;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use stdClass;
@@ -106,6 +108,20 @@ class CenterStudentController extends Controller
             ->header('Cache-Control', 'private, no-store');
     }
 
+    public function barcode(Request $request, string $studentId): Response
+    {
+        abort_unless(Str::isUuid($studentId), 404);
+        $student = $this->visibleStudents($request->attributes->get('center_permissions'))->where('students.id', $studentId)->first();
+        abort_unless($student, 404);
+        $number = (int) $student->student_number;
+        $svg = StudentBarcode::svg($number);
+
+        return response('<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>طباعة الباركود الأساسي</title><style>body{margin:24px;text-align:center;font-family:system-ui;color:#000;background:#fff}svg{display:block;margin:24px auto 8px;max-width:100%;height:auto}p{font-size:20px;font-family:monospace}button{padding:12px 24px;font:inherit}@media print{button{display:none}body{margin:0}}</style><body>'.$svg.'<p dir="ltr">'.$number.'</p><button onclick="window.print()">طباعة الباركود</button></body></html>')
+            ->header('Cache-Control', 'private, no-store')
+            ->header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'none'")
+            ->header('X-Content-Type-Options', 'nosniff');
+    }
+
     public function store(Request $request): JsonResponse
     {
         $data = $this->validateProfile($request);
@@ -122,6 +138,15 @@ class CenterStudentController extends Controller
                 }
 
                 return response()->json(['student' => $this->read($existing->id, $permissions)]);
+            }
+            $start = DB::connection('tenant')->table('center_settings')->where('id', 1)->value('student_number_start');
+            $sequence = DB::connection('tenant')->selectOne('SELECT last_value, is_called FROM students_student_number_seq');
+            $next = (int) $sequence->last_value + ($sequence->is_called ? 1 : 0);
+            if (max($next, (int) $start) > 9007199254740991) {
+                throw new HttpResponseException(response()->json(['code' => 'student_numbering_exhausted', 'message' => 'وصل ترقيم الطلاب إلى الحد المدعوم. تواصل مع مسؤول المركز.'], 409));
+            }
+            if ((int) $start > $next) {
+                DB::connection('tenant')->selectOne("SELECT setval('students_student_number_seq', ?, false)", [(int) $start]);
             }
             $id = (string) Str::uuid();
             DB::connection('tenant')->table('students')->insert([

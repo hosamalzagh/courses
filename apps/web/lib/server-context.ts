@@ -15,7 +15,7 @@ export type CenterContext = {
     can_manage_center: boolean;
   };
   branches: Branch[];
-  settings?: { contact_email: string | null; phone: string | null; address: string | null };
+  settings?: { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number };
   audit_entries?: AuditEntry[];
 };
 
@@ -53,7 +53,7 @@ const fetchCenterPayload = cache(async function fetchCenterPayload<T>(path: stri
 
   let response: Response;
   try {
-    response = await fetch(`${process.env.COURSES_INTERNAL_API_ORIGIN?.replace('{host}', host) ?? `http://${host}`}/api/v1/center/${path}`, {
+    response = await fetch(`${process.env.COURSES_INTERNAL_API_ORIGIN?.replace('{host}', host) ?? `http://${host}${process.env.COURSES_API_PORT ? `:${process.env.COURSES_API_PORT}` : ""}`}/api/v1/center/${path}`, {
       headers: {
         Cookie: incoming.get("cookie") ?? "",
         Accept: "application/json",
