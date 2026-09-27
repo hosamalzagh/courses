@@ -29,4 +29,4 @@ Run Laravel on 8157 with those environment values, Next.js on 3057 with `COURSES
 
 From `apps/web`, pass `COURSES_CHOICES_CREDENTIALS` as the absolute fixture credentials path `apps/api/storage/app/private/student-choices-browser-credentials.json` and `COURSES_CHOICES_READ_LOG` as the proxy's JSONL path, then run `npx playwright test student-profile-choices.spec.ts`. Credentials are mode 0600 and never committed. Without this disposable fixture the dedicated suite is skipped, keeping ordinary local suites independent.
 
-#58 owns the subsequent contact/identity expansion. Custom fields and their definition types belong to #61; they must integrate with these lists and preserve their selections. No portal, identity field, contact channel or production deployment is included in #57.
+#58 owns the subsequent contact expansion; #61 owns identity data and access. Later custom-field journeys must integrate with these lists and preserve their selections. No portal, identity field, contact channel or production deployment is included in #57.
