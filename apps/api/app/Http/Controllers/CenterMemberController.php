@@ -335,9 +335,14 @@ class CenterMemberController extends Controller
                     }
                     if (! $permissions->isOwner()) {
                         foreach (array_unique([...array_keys($previousBranchRoles), ...$branchIds]) as $branchId) {
-                            $beforeApproval = in_array('financial_approval', $previousBranchRoles[$branchId] ?? [], true);
-                            $afterApproval = in_array('financial_approval', $nextBranchRoles[$branchId] ?? [], true);
-                            abort_if($beforeApproval !== $afterApproval, 403);
+                            foreach (CenterPermissions::GRANTS as $role => $option) {
+                                if (! ($option['owner_only'] ?? false)) {
+                                    continue;
+                                }
+                                $beforeGrant = in_array($role, $previousBranchRoles[$branchId] ?? [], true);
+                                $afterGrant = in_array($role, $nextBranchRoles[$branchId] ?? [], true);
+                                abort_if($beforeGrant !== $afterGrant, 403);
+                            }
                         }
                     }
 

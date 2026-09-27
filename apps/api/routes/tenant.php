@@ -74,6 +74,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('student-search-workspace', [CenterStudentSearchController::class, 'workspace']);
         Route::patch('student-search-policy', [CenterStudentSearchController::class, 'updatePolicy']);
         Route::get('students/similar', [CenterStudentController::class, 'similar']);
+        Route::post('students/identity-preview', [CenterStudentController::class, 'identityPreview']);
         Route::get('students/submissions/{requestId}', [CenterStudentController::class, 'submission']);
         Route::get('students/{studentId}/barcode', [CenterStudentController::class, 'barcode']);
         Route::get('students/{studentId}', [CenterStudentController::class, 'workspace']);

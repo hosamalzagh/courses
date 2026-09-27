@@ -99,7 +99,7 @@ test('combined profile keeps number and sharing through suspension, general edit
   expect((await write(page, 'student-numbering', 'PATCH', { start, revision: settings.student_number_revision })).status).toBe(200);
   const policy = (await (await page.request.get(`${host}/api/v1/center/student-search-workspace`)).json()).policy;
   expect((await write(page, 'student-search-policy', 'PATCH', { enabled: true, default_sharing_enabled: true, revision: policy.revision })).status).toBe(200);
-  const student = await create(page, `طالب قبول ${Date.now()} تكامل`, {label:'كارت التكامل',value:manualCode});
+  const student = await create(page, `طالب قبول ${Date.now()} تكامل`, {label:'كارت التكامل',value:manualCode}, '000-INTEGRATION-PASSPORT');
   expect(student.student_number).toBe(start);
   await expect(page.getByText('المشاركة بين الفروع: مسموحة', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click();
@@ -124,6 +124,7 @@ test('combined profile keeps number and sharing through suspension, general edit
   expect(current.student_number).toBe(start); expect(current.school).toBe('مدرسة التكامل');
   expect(current.sharing_enabled).toBe(false); expect(current.status).toBe('suspended');
   expect(current.manual_code).toBe(manualCode);
+  expect(current.identity.passport_number).toBe('000-INTEGRATION-PASSPORT');
   expect(current.contacts[0].phone).toBe('00012345678'); expect(current.contacts[0].name).toBe('صاحب الرقم المشترك');
   const barcode = await page.request.get(`${host}/api/v1/center/students/${student.id}/barcode`);
   expect(barcode.status()).toBe(200); expect(await barcode.text()).toContain(String(start));
@@ -210,11 +211,12 @@ async function write(page: Page, route: string, method: string, payload: object)
   return result;
 }
 
-async function create(page: Page, name: string, code?: {label:string;value:string}) {
+async function create(page: Page, name: string, code?: {label:string;value:string}, passport?: string) {
   await page.goto(`${host}/admin/students/new`);
   await expect(page.getByRole('textbox', { name: 'اسم الطالب', exact: true })).toBeFocused();
   await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name);
   if (code) await page.getByRole('textbox',{name:code.label,exact:true}).fill(code.value);
+  if (passport) await page.getByRole('textbox',{name:'رقم جواز السفر',exact:true}).fill(passport);
   const response = page.waitForResponse((response) => response.url().endsWith('/api/v1/center/students') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click();
   const student = (await (await response).json()).student;
