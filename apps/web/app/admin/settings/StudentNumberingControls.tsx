@@ -48,7 +48,7 @@ export function StudentNumberingControls({ start, revision }: { start: number; r
     saving.current = true;
     setBusy(true); setError("");
     try {
-      const response = await fetch("/api/v1/center/settings", { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+      const response = await centerRequest("settings", "GET");
       if (!response.ok) throw new Error(await responseMessage(response));
       const data = await response.json();
       setValue(String(data.settings.student_number_start));

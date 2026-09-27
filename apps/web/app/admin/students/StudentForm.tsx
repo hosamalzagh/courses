@@ -15,7 +15,12 @@ type SimilarStudent = Pick<Student, 'id' | 'student_number' | 'name' | 'phone'> 
 
 export function StudentForm({ context, student }: { context: StudentContext; student?: Student }) {
   const router = useRouter();
-  const manageable = context.branches.filter((branch) => context.permissions.can_manage_center || (context.permissions.branch_actions?.[String(branch.id)] ?? []).includes('students.manage'));
+  const [branches, setBranches] = useState(context.branches);
+  const [branchPage, setBranchPage] = useState(context.pagination.branches_page);
+  const [hasMoreBranches, setHasMoreBranches] = useState(context.pagination.branches_has_more);
+  const [loadingBranches, setLoadingBranches] = useState(false);
+  const loadingBranchPage = useRef(false);
+  const manageable = branches.filter((branch) => context.permissions.can_manage_center || (context.permissions.branch_actions?.[String(branch.id)] ?? []).includes('students.manage'));
   const [editor, setEditor] = useState<Student | 'new'>(student ?? 'new');
   const [name, setName] = useState(student?.name ?? '');
   const [phone, setPhone] = useState(student?.phone ?? '');
@@ -43,6 +48,23 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
     setRequestId(newSubmissionId()); setError(''); setFieldErrors({}); setNotice(''); setSimilar([]); setReviewed(''); setConflict(false);
   }
 
+  async function loadMoreBranches() {
+    if (loadingBranchPage.current || !hasMoreBranches) return;
+    loadingBranchPage.current = true; setLoadingBranches(true); setError('');
+    try {
+      const response = await centerRequest(`student-workspace?branches_page=${branchPage + 1}`, 'GET');
+      if (!response.ok) { setError(await responseMessage(response)); return; }
+      const data = await response.json() as StudentContext;
+      setBranches((current) => [...current, ...data.branches.filter((branch) => !current.some((existing) => existing.id === branch.id))]);
+      if (editor !== 'new') {
+        const associated = data.branches.filter((branch) => editor.branch_ids.includes(branch.id) && (context.permissions.can_manage_center || (context.permissions.branch_actions?.[String(branch.id)] ?? []).includes('students.manage'))).map((branch) => branch.id);
+        setBranchIds((current) => [...new Set([...current, ...associated])]);
+      }
+      setBranchPage(data.pagination.branches_page); setHasMoreBranches(data.pagination.branches_has_more);
+    } catch { setError('تعذر تحميل بقية الفروع. مدخلات الملف محفوظة؛ أعد المحاولة.'); }
+    finally { loadingBranchPage.current = false; setLoadingBranches(false); }
+  }
+
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editor || saving.current) return;
@@ -64,7 +86,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         if (matches.length) return;
       }
       const response = await centerRequest(editor === 'new' ? 'students' : `students/${editor.id}`, editor === 'new' ? 'POST' : 'PATCH', {
-        name: name.trim(), phone: phone.trim() || null, branch_ids: branchIds, ...general,
+        name: name.trim(), phone: phone.trim() || null, branch_ids: editor === 'new' ? branchIds : branchIds.filter((id) => !editor.branch_ids.includes(id)), ...general,
         ...(editor === 'new' ? { request_id: requestId } : { revision: editor.revision }),
       });
       if (!response.ok) {
@@ -135,6 +157,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
             const associated = editor !== 'new' && editor.branch_ids.includes(branch.id);
             return <label key={branch.id} className='check-row'><input type='checkbox' checked={branchIds.includes(branch.id)} disabled={busy || associated} onChange={(event) => { setSaved(false); setBranchIds((ids) => event.target.checked ? [...ids, branch.id] : ids.filter((id) => id !== branch.id)); setFieldErrors({}); }} />{branch.name}{associated ? ' — مرتبط بالفعل' : ''}</label>;
           })}
+          {hasMoreBranches ? <Button busy={loadingBranches} onClick={loadMoreBranches}>تحميل المزيد من الفروع</Button> : null}
           {fieldErrors.branch_ids ? <p id='student-branches-error' className='field-error' role='alert'>{fieldErrors.branch_ids}</p> : null}
         </fieldset>
         {similar.length ? <InlineNotice tone='warning'><strong>توجد ملفات ببيانات متشابهة ضمن نطاق صلاحيتك.</strong><p>راجع الملف المتاح ضمن فروعك لإعادة استخدامه. البيانات الأساسية خارج فروعك لا تمنح تعديل الملف؛ تواصل مع مسؤول المركز عند الحاجة. يمكنك حفظ ملف مستقل إذا كان طالبًا آخر؛ لا تُدمج الملفات تلقائيًا.</p><ul>{similar.map((student) => <li key={student.id}>{student.within_scope === false ? <span>{student.name} — رقم {student.student_number.toLocaleString('ar-EG')} · بيانات أساسية خارج فروعك</span> : <Link href={`/admin/students/${student.id}`}>{student.name} — رقم {student.student_number.toLocaleString('ar-EG')}</Link>}{student.phone ? <bdi> · {student.phone}</bdi> : null}</li>)}</ul></InlineNotice> : null}

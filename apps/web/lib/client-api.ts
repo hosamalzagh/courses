@@ -53,6 +53,7 @@ export async function responseMessage(response: Response): Promise<string> {
     if (data.code === "invitation_delivery_uncertain") {
       return "حالة إرسال الدعوة غير مؤكدة. اطلب من دعم المنصة التحقق من البريد قبل إعادة الإرسال.";
     }
+    if (data.code === "student_numbering_exhausted") return "وصل ترقيم الطلاب إلى الحد الأقصى. تواصل مع مسؤول المركز قبل إنشاء ملف جديد.";
     if (data.code === "last_active_owner") {
       return "لا يمكن إيقاف آخر مالك نشط للمركز أو إزالة دوره. أضف مالكًا آخر أولًا.";
     }

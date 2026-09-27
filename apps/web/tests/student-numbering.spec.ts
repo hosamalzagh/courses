@@ -6,7 +6,7 @@ import path from 'node:path';
 // This suite requires its own Next.js/Laravel/PostgreSQL fixtures.
 const host = process.env.COURSES_NUMBERING_ORIGIN ?? '';
 const fixturePath = process.env.COURSES_NUMBERING_FIXTURES ?? '';
-const php = process.env.COURSES_PHP_BIN ?? 'php85';
+const php = process.env.COURSES_PHP_BIN ?? (process.platform === 'darwin' ? 'php85' : 'php');
 const apiDirectory = path.resolve(process.cwd(), '../api');
 test.skip(!host || !fixturePath, 'Requires isolated numbering browser fixtures.');
 function credentials(center: 'alpha' | 'beta', role: 'owner' | 'staff') { return JSON.parse(readFileSync(fixturePath, 'utf8'))[center][role]; }

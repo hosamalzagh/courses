@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 
 const host = process.env.COURSES_SHARING_HOST ?? 'http://issue67-alpha.courses.test';
 const betaHost = process.env.COURSES_SHARING_BETA_HOST ?? 'http://issue67-beta.courses.test';
-const php = process.env.COURSES_PHP ?? '/Users/hosamalzagh/Library/Application Support/Herd/bin/php85';
+const php = process.env.COURSES_PHP_BIN ?? process.env.COURSES_PHP ?? (process.platform === 'darwin' ? 'php85' : 'php');
 const apiDirectory = resolve(__dirname, '../../api');
 const port = process.env.COURSES_SHARING_DB_PORT;
 let credentials: Record<string, { email: string; password: string; id: number }>;

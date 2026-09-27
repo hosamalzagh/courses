@@ -15,6 +15,48 @@ const fixture = fixtureFile ? JSON.parse(readFileSync(fixtureFile, 'utf8')) : un
 const sessions: Partial<Record<'alpha' | 'beta' | 'staff', Awaited<ReturnType<BrowserContext['storageState']>>>> = {};
 const credentials = (name: 'alpha' | 'beta' | 'staff') => fixture?.[name] ?? localCredentials(name);
 
+test('creation and edit load branch choices beyond the first fifty without losing inputs', async ({ page }) => {
+  await signIn(page, 'beta');
+  let lastBranch: { id: number; name: string } | undefined;
+  const branchIds: number[] = [];
+  for (let index = 0; index < 51; index++) {
+    const result = await write(page, 'branches', 'POST', { name: `فرع إضافي ${Date.now()} ${index}`, slug: `profile-${Date.now()}-${index}` });
+    expect(result.status).toBe(201); lastBranch = result.body.branch; branchIds.push(lastBranch!.id);
+  }
+  await page.goto(`${betaHost}/admin/students/new`);
+  const name = `طالب فروع ${Date.now()}`;
+  await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name);
+  await page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true }).fill('مدرسة محفوظة أثناء التحميل');
+  while (await page.getByRole('button', { name: 'تحميل المزيد من الفروع', exact: true }).count()) {
+    const response = page.waitForResponse((response) => response.url().includes('student-workspace?branches_page='));
+    await page.getByRole('button', { name: 'تحميل المزيد من الفروع', exact: true }).click();
+    expect((await response).status()).toBe(200);
+    await expect(page.locator('button[aria-busy="true"]')).toHaveCount(0);
+  }
+  await page.getByRole('checkbox', { name: lastBranch!.name, exact: true }).check();
+  await expect(page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true })).toHaveValue('مدرسة محفوظة أثناء التحميل');
+  const saved = page.waitForResponse((response) => response.url().endsWith('/api/v1/center/students') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click();
+  const student = (await (await saved).json()).student;
+  expect(student.branch_ids).toContain(lastBranch!.id);
+  const expanded = await write(page, `students/${student.id}`, 'PATCH', { name, branch_ids: branchIds.slice(0, 50), revision: student.revision });
+  expect(expanded.status).toBe(200); expect(expanded.body.student.branch_ids.length).toBeGreaterThan(50);
+  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
+  await page.goto(`${betaHost}/admin/students/${student.id}/edit`);
+  await page.getByRole('textbox', { name: 'جهة العمل', exact: true }).fill('جهة محفوظة أثناء التحميل');
+  while (await page.getByRole('button', { name: 'تحميل المزيد من الفروع', exact: true }).count()) {
+    const response = page.waitForResponse((response) => response.url().includes('student-workspace?branches_page='));
+    await page.getByRole('button', { name: 'تحميل المزيد من الفروع', exact: true }).click();
+    expect((await response).status()).toBe(200);
+    await expect(page.locator('button[aria-busy="true"]')).toHaveCount(0);
+  }
+  await expect(page.getByRole('checkbox', { name: `${lastBranch!.name} — مرتبط بالفعل`, exact: true })).toBeChecked();
+  await page.getByRole('button', { name: 'حفظ بيانات الطالب', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
+  const current = (await (await page.request.get(`${betaHost}/api/v1/center/students/${student.id}`)).json()).students[0];
+  expect(current.branch_ids).toContain(lastBranch!.id); expect(current.employer).toBe('جهة محفوظة أثناء التحميل');
+});
+
 test('combined profile keeps number and sharing through suspension, general edits and browser Back', async ({ page }) => {
   await signIn(page);
   const settings = (await (await page.request.get(`${host}/api/v1/center/settings`)).json()).settings;
