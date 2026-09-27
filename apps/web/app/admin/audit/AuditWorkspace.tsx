@@ -1,13 +1,11 @@
-"use client";
-
+import { CenterPage } from "@/components/CenterPage";
 import { GrantAuditDetails } from "@/components/GrantAuditDetails";
 import { StudentAuditDetails } from "@/components/StudentAuditDetails";
 import { InstructorAuditDetails } from "@/components/InstructorAuditDetails";
 import { StudentSearchAuditDetails } from "@/components/StudentSearchAuditDetails";
 import { CurriculumAuditDetails } from "@/components/CurriculumAuditDetails";
-import { CenterShell } from "@/components/CenterShell";
-import { DataTable } from "@/components/DataTable";
 import type { AuditEntry, CenterContext } from "@/lib/server-context";
+import { AuditControls, type AuditRow } from "./AuditControls";
 
 const eventNames: Record<string, string> = {
   "branch.created": "إنشاء فرع", "branch.updated": "تعديل فرع",
@@ -24,20 +22,14 @@ const eventNames: Record<string, string> = {
 };
 
 export function AuditWorkspace({ context, initialEntries }: { context: CenterContext; initialEntries: AuditEntry[] }) {
-  return <CenterShell context={context} title="سجل التدقيق" description="آخر 50 تغييرًا ضمن نطاق صلاحيتك. التوقيت بتوقيت القاهرة.">
-    <main className="members-main">
-
-      <DataTable id="audit" title="الأحداث" description="البحث والتصفية ضمن آخر 50 تغييرًا فقط." rows={initialEntries} rowKey={(entry) => entry.id}
-        searchText={(entry) => `${eventNames[entry.event] ?? entry.event} ${entry.branch_id ?? ""} ${entry.actor_id ?? ""}`} emptyMessage="لا توجد أحداث بعد."
-        filters={[{ value: "center", label: "المركز", matches: (entry) => entry.branch_id === null }, { value: "branch", label: "الفروع", matches: (entry) => entry.branch_id !== null }]}
-        columns={[
-          { key: "event", label: "التغيير", filterText: (entry) => eventNames[entry.event] ?? entry.event, render: (entry) => <h3>{eventNames[entry.event] ?? entry.event}</h3> },
-          { key: "scope", label: "النطاق", filterText: (entry) => entry.branch_id ? `فرع رقم ${entry.branch_id}` : "المركز", render: (entry) => entry.branch_id ? `فرع رقم ${entry.branch_id}` : "المركز" },
-          { key: "actor", label: "المنفّذ", filterText: (entry) => entry.actor_id === null ? "غير معروف" : `منفّذ رقم ${entry.actor_id}`, render: (entry) => entry.actor_id === null ? "غير معروف" : `منفّذ رقم ${entry.actor_id}` },
-          { key: "roles", label: "القيم قبل وبعد", render: (entry) => <><GrantAuditDetails entry={entry} /><StudentAuditDetails entry={entry} /><InstructorAuditDetails entry={entry} /><StudentSearchAuditDetails entry={entry} /><CurriculumAuditDetails entry={entry} /></> },
-          { key: "time", label: "الوقت · القاهرة", filterText: (entry) => new Date(entry.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" }), render: (entry) => <time className="muted" dateTime={entry.created_at}>{new Date(entry.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}</time> },
-        ]}
-      />
-    </main>
-  </CenterShell>;
+  const rows: AuditRow[] = initialEntries.map((entry) => ({
+    id: entry.id, event: eventNames[entry.event] ?? entry.event,
+    scope: entry.branch_id ? `فرع رقم ${entry.branch_id}` : "المركز",
+    actor: entry.actor_id === null ? "غير معروف" : `منفّذ رقم ${entry.actor_id}`,
+    time: new Date(entry.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" }),
+    createdAt: entry.created_at, branch: entry.branch_id !== null,
+    search: `${eventNames[entry.event] ?? entry.event} ${entry.branch_id ?? ""} ${entry.actor_id ?? ""}`,
+    details: <><GrantAuditDetails entry={entry} /><StudentAuditDetails entry={entry} /><InstructorAuditDetails entry={entry} /><StudentSearchAuditDetails entry={entry} /><CurriculumAuditDetails entry={entry} /></>,
+  }));
+  return <CenterPage context={context} path="/admin/audit"><AuditControls rows={rows} /></CenterPage>;
 }

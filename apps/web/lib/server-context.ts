@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import type { CurriculumContext } from "./curriculum";
@@ -43,7 +44,7 @@ export type StudentSearchContext = CenterContext & { policy: StudentSearchPolicy
 
 export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable";
 
-async function fetchCenterPayload<T>(path: string): Promise<T | CenterAccessFailure> {
+const fetchCenterPayload = cache(async function fetchCenterPayload<T>(path: string): Promise<T | CenterAccessFailure> {
   const incoming = await headers();
   const host = incoming.get("host")?.split(":")[0].toLowerCase() ?? "";
 
@@ -76,7 +77,7 @@ async function fetchCenterPayload<T>(path: string): Promise<T | CenterAccessFail
   if (!response.ok) return "unavailable";
 
   return response.json() as Promise<T>;
-}
+});
 
 export function loadCenterContext(include?: "settings" | "audit"): Promise<CenterContext | CenterAccessFailure> {
   return fetchCenterPayload<CenterContext>(`user${include ? `?include=${include}` : ""}`);
@@ -100,4 +101,36 @@ export function loadStudentSearchWorkspace(query = ""): Promise<StudentSearchCon
 
 export function loadCurriculumWorkspace(query = "", levelId?: string): Promise<CurriculumContext | CenterAccessFailure> {
   return fetchCenterPayload<CurriculumContext>(`${levelId ? `levels/${encodeURIComponent(levelId)}` : "curriculum-workspace"}${query ? `?${query}` : ""}`);
+}
+
+// Proxy supplies the actual URL so the layout shares the page's authorized payload.
+// React cache deduplicates only within this server render, never between users/centers.
+export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAccessFailure> {
+  const incoming = await headers();
+  const url = new URL(incoming.get("x-courses-admin-url") ?? "/admin", "http://courses.test");
+  const path = url.pathname;
+  function query(keys: string[]) {
+    const result = new URLSearchParams();
+    for (const key of keys) {
+      const values = url.searchParams.getAll(key);
+      if (values.length === 1) result.set(key, values[0]);
+    }
+    return result.toString();
+  }
+  if (path === "/admin" || path === "/admin/security") return loadCenterContext();
+  if (path === "/admin/settings") return loadCenterContext("settings");
+  if (path === "/admin/audit") return loadCenterContext("audit");
+  if (path === "/admin/members") return loadMemberWorkspace(query(["members_page", "invitations_page", "branches_page"]));
+  if (path === "/admin/students") return loadStudentWorkspace(query(["page", "branches_page", "q"]));
+  if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q"]));
+  if (path === "/admin/curriculum") return loadCurriculumWorkspace(query(["courses_page", "stages_page", "levels_page", "branches_page"]));
+  if (path === "/admin/student-search") return loadStudentSearchWorkspace(query(["q", "page"]));
+  const detail = path.match(/^\/admin\/(students|instructors|curriculum)\/([^/]+)$/);
+  if (detail) {
+    const id = decodeURIComponent(detail[2]);
+    if (detail[1] === "students") return loadStudentWorkspace("", id);
+    if (detail[1] === "instructors") return loadInstructorWorkspace("", id);
+    return loadCurriculumWorkspace("", id);
+  }
+  notFound();
 }

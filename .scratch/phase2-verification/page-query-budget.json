@@ -1,0 +1,404 @@
+{
+  "measured_at": "2026-09-26T06:58:06.241Z",
+  "pages": [
+    {
+      "page": "alpha.courses.test/admin",
+      "cold": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 2,
+        "total": 5,
+        "recorded": 5,
+        "duplicates": 0,
+        "sql_ms": 22.27
+      },
+      "warm": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 2,
+        "total": 5,
+        "recorded": 5,
+        "duplicates": 0,
+        "sql_ms": 30.38
+      }
+    },
+    {
+      "page": "alpha.courses.test/admin/settings",
+      "cold": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 3,
+        "total": 6,
+        "recorded": 6,
+        "duplicates": 0,
+        "sql_ms": 26.78
+      },
+      "warm": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 3,
+        "total": 6,
+        "recorded": 6,
+        "duplicates": 0,
+        "sql_ms": 25.4
+      }
+    },
+    {
+      "page": "alpha.courses.test/admin/members",
+      "cold": {
+        "requests": 1,
+        "central": 4,
+        "tenant": 2,
+        "total": 6,
+        "recorded": 6,
+        "duplicates": 0,
+        "sql_ms": 25.18
+      },
+      "warm": {
+        "requests": 1,
+        "central": 4,
+        "tenant": 2,
+        "total": 6,
+        "recorded": 6,
+        "duplicates": 0,
+        "sql_ms": 24.24
+      }
+    },
+    {
+      "page": "alpha.courses.test/admin/audit",
+      "cold": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 3,
+        "total": 6,
+        "recorded": 6,
+        "duplicates": 0,
+        "sql_ms": 27.28
+      },
+      "warm": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 3,
+        "total": 6,
+        "recorded": 6,
+        "duplicates": 0,
+        "sql_ms": 21.85
+      }
+    },
+    {
+      "page": "alpha.courses.test/admin/security",
+      "cold": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 2,
+        "total": 5,
+        "recorded": 5,
+        "duplicates": 0,
+        "sql_ms": 25.39
+      },
+      "warm": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 2,
+        "total": 5,
+        "recorded": 5,
+        "duplicates": 0,
+        "sql_ms": 24.32
+      }
+    },
+    {
+      "page": "beta.courses.test/admin",
+      "cold": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 2,
+        "total": 5,
+        "recorded": 5,
+        "duplicates": 0,
+        "sql_ms": 26.05
+      },
+      "warm": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 2,
+        "total": 5,
+        "recorded": 5,
+        "duplicates": 0,
+        "sql_ms": 28.18
+      }
+    },
+    {
+      "page": "beta.courses.test/admin/settings",
+      "cold": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 3,
+        "total": 6,
+        "recorded": 6,
+        "duplicates": 0,
+        "sql_ms": 27.17
+      },
+      "warm": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 3,
+        "total": 6,
+        "recorded": 6,
+        "duplicates": 0,
+        "sql_ms": 26.9
+      }
+    },
+    {
+      "page": "beta.courses.test/admin/members",
+      "cold": {
+        "requests": 1,
+        "central": 4,
+        "tenant": 2,
+        "total": 6,
+        "recorded": 6,
+        "duplicates": 0,
+        "sql_ms": 31.59
+      },
+      "warm": {
+        "requests": 1,
+        "central": 4,
+        "tenant": 2,
+        "total": 6,
+        "recorded": 6,
+        "duplicates": 0,
+        "sql_ms": 29.86
+      }
+    },
+    {
+      "page": "beta.courses.test/admin/audit",
+      "cold": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 3,
+        "total": 6,
+        "recorded": 6,
+        "duplicates": 0,
+        "sql_ms": 35.39
+      },
+      "warm": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 3,
+        "total": 6,
+        "recorded": 6,
+        "duplicates": 0,
+        "sql_ms": 27.99
+      }
+    },
+    {
+      "page": "beta.courses.test/admin/security",
+      "cold": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 2,
+        "total": 5,
+        "recorded": 5,
+        "duplicates": 0,
+        "sql_ms": 26.35
+      },
+      "warm": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 2,
+        "total": 5,
+        "recorded": 5,
+        "duplicates": 0,
+        "sql_ms": 27.01
+      }
+    },
+    {
+      "page": "courses.test/admin",
+      "cold": {
+        "requests": 1,
+        "central": 1,
+        "tenant": 0,
+        "total": 1,
+        "recorded": 1,
+        "duplicates": 0,
+        "sql_ms": 10.07
+      },
+      "warm": {
+        "requests": 1,
+        "central": 1,
+        "tenant": 0,
+        "total": 1,
+        "recorded": 1,
+        "duplicates": 0,
+        "sql_ms": 8.8
+      }
+    },
+    {
+      "page": "courses.test/admin/centers",
+      "cold": {
+        "requests": 1,
+        "central": 4,
+        "tenant": 0,
+        "total": 4,
+        "recorded": 4,
+        "duplicates": 0,
+        "sql_ms": 13.44
+      },
+      "warm": {
+        "requests": 1,
+        "central": 4,
+        "tenant": 0,
+        "total": 4,
+        "recorded": 4,
+        "duplicates": 0,
+        "sql_ms": 12.43
+      }
+    },
+    {
+      "page": "courses.test/admin/centers/create",
+      "cold": {
+        "requests": 1,
+        "central": 1,
+        "tenant": 0,
+        "total": 1,
+        "recorded": 1,
+        "duplicates": 0,
+        "sql_ms": 9.82
+      },
+      "warm": {
+        "requests": 1,
+        "central": 1,
+        "tenant": 0,
+        "total": 1,
+        "recorded": 1,
+        "duplicates": 0,
+        "sql_ms": 11.66
+      }
+    },
+    {
+      "page": "courses.test/admin/users/create",
+      "cold": {
+        "requests": 1,
+        "central": 1,
+        "tenant": 0,
+        "total": 1,
+        "recorded": 1,
+        "duplicates": 0,
+        "sql_ms": 9.52
+      },
+      "warm": {
+        "requests": 1,
+        "central": 1,
+        "tenant": 0,
+        "total": 1,
+        "recorded": 1,
+        "duplicates": 0,
+        "sql_ms": 9.96
+      }
+    },
+    {
+      "page": "courses.test/admin/users/1/edit",
+      "cold": {
+        "requests": 1,
+        "central": 2,
+        "tenant": 0,
+        "total": 2,
+        "recorded": 2,
+        "duplicates": 0,
+        "sql_ms": 13.7
+      },
+      "warm": {
+        "requests": 1,
+        "central": 2,
+        "tenant": 0,
+        "total": 2,
+        "recorded": 2,
+        "duplicates": 0,
+        "sql_ms": 13.72
+      }
+    },
+    {
+      "page": "courses.test/admin/users",
+      "cold": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 0,
+        "total": 3,
+        "recorded": 3,
+        "duplicates": 0,
+        "sql_ms": 14.4
+      },
+      "warm": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 0,
+        "total": 3,
+        "recorded": 3,
+        "duplicates": 0,
+        "sql_ms": 12.99
+      }
+    },
+    {
+      "page": "courses.test/admin/platform-audit-logs",
+      "cold": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 0,
+        "total": 3,
+        "recorded": 3,
+        "duplicates": 0,
+        "sql_ms": 13.88
+      },
+      "warm": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 0,
+        "total": 3,
+        "recorded": 3,
+        "duplicates": 0,
+        "sql_ms": 15.36
+      }
+    },
+    {
+      "page": "courses.test/admin/centers/d12c29e1-35b8-4994-9ac1-f203092b66c7",
+      "cold": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 0,
+        "total": 3,
+        "recorded": 3,
+        "duplicates": 0,
+        "sql_ms": 12.14
+      },
+      "warm": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 0,
+        "total": 3,
+        "recorded": 3,
+        "duplicates": 0,
+        "sql_ms": 13.46
+      }
+    },
+    {
+      "page": "courses.test/admin/centers/d12c29e1-35b8-4994-9ac1-f203092b66c7/edit",
+      "cold": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 0,
+        "total": 3,
+        "recorded": 3,
+        "duplicates": 0,
+        "sql_ms": 11.58
+      },
+      "warm": {
+        "requests": 1,
+        "central": 3,
+        "tenant": 0,
+        "total": 3,
+        "recorded": 3,
+        "duplicates": 0,
+        "sql_ms": 12.31
+      }
+    }
+  ]
+}

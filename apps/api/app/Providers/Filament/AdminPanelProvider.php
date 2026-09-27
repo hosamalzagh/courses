@@ -29,6 +29,7 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->authGuard('platform')
             ->path('admin')
+            ->viteTheme('resources/css/filament/admin/theme.css')
             ->domain(config('courses.platform_host'))
             ->login()
             ->profile()

@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ConfirmationDialog } from "./ConfirmationDialog";
 
 export function UnsavedChangesGuard({ dirty }: { dirty: boolean }) {
+  const router = useRouter();
   const [destination, setDestination] = useState<string | null>(null);
   const leaving = useRef(false);
 
@@ -34,6 +36,8 @@ export function UnsavedChangesGuard({ dirty }: { dirty: boolean }) {
 
   return destination && dirty ? <ConfirmationDialog title="مغادرة دون حفظ" description="لديك بيانات لم تُحفظ. يمكنك إلغاء المغادرة ومتابعة تعديلها، أو مغادرة الصفحة دون حفظها." confirmLabel="مغادرة دون حفظ" onCancel={() => setDestination(null)} onConfirm={() => {
     leaving.current = true;
-    window.location.assign(destination);
+    const url = new URL(destination);
+    if (url.origin === window.location.origin) router.push(url.pathname + url.search + url.hash);
+    else window.location.assign(destination);
   }} /> : null;
 }

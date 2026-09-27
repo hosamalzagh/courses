@@ -110,6 +110,8 @@ test("combined branch roles persist, sensitive grants stay separate, and open pa
     await row.getByRole("button", { name: "تعديل الأدوار" }).click();
     await expect(editor.getByRole("group", { name: north.name, exact: true }).getByRole("checkbox", { name: "الحضور", exact: true })).toBeChecked();
     await owner.screenshot({ path: "/tmp/courses-issue20/roles-desktop.png", fullPage: true });
+    await owner.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
+    await owner.screenshot({ path: "/tmp/courses-issue20/roles-dark.png", fullPage: true });
     await owner.getByRole("button", { name: "إلغاء", exact: true }).click();
     await owner.setViewportSize({ width: 390, height: 844 });
     await row.getByRole("button", { name: "تعديل الأدوار" }).click();

@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useMemo, type ReactNode, type Dispatch, type SetStateAction } from "react";
+import { useLinkStatus } from "next/link";
+import { PrefetchLink as Link } from "./PrefetchLink";
+import { getAdminHeader } from "@/lib/admin-header";
 import { usePathname } from "next/navigation";
 import type { CenterContext } from "@/lib/server-context";
 import { centerRequest, responseMessage } from "@/lib/client-api";
@@ -17,8 +20,51 @@ const navigationIcons: Record<string, ReactNode> = {
   security: <><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3Z" /><path d="m8 12 3 3 5-6" /></>,
 };
 
-export function CenterShell({ context, children, title, description, actions }: { context: CenterContext; children: ReactNode; title: string; description?: ReactNode; actions?: ReactNode }) {
+type PageHeader = { context: CenterContext; title: string; description?: ReactNode; path: string };
+type PageActions = { context: CenterContext; actions?: ReactNode; path: string };
+const PageRegistration = createContext<{ register: Dispatch<SetStateAction<PageHeader | null>>; registerActions: Dispatch<SetStateAction<PageActions | null>> } | null>(null);
+
+function NavigationPending() {
+  const { pending } = useLinkStatus();
+  return pending ? <span className="route-progress" role="status"><span className="sr-only">جارٍ تحميل محتوى الصفحة…</span></span> : null;
+}
+
+// Tiny client bridges keep server page markup outside the client module tree.
+export function CenterPageRegistration({ context, title, description }: { context: CenterContext; title: string; description?: ReactNode }) {
+  const register = useContext(PageRegistration)?.register;
   const path = usePathname();
+  useLayoutEffect(() => {
+    if (!register) return;
+    const page = { context, title, description, path };
+    register(page);
+    return () => register((current) => current === page ? null : current);
+  }, [register, context, title, description, path]);
+  return null;
+}
+
+export function CenterPageActions({ context, actions }: { context: CenterContext; actions?: ReactNode }) {
+  const register = useContext(PageRegistration)?.registerActions;
+  const path = usePathname();
+  useLayoutEffect(() => {
+    if (!register) return;
+    const page = { context, actions, path };
+    register(page);
+    return () => register((current) => current === page ? null : current);
+  }, [register, context, actions, path]);
+  return null;
+}
+
+export function CenterLayout({ initialContext, children }: { initialContext: CenterContext; children: ReactNode }) {
+  const path = usePathname();
+  const [page, register] = useState<PageHeader | null>(null);
+  const [pageActions, registerActions] = useState<PageActions | null>(null);
+  const registration = useMemo(() => ({ register, registerActions }), []);
+  const context = pageActions?.path === path ? pageActions.context : page?.context ?? initialContext;
+  const currentPage = page?.path === path ? page : null;
+  const fallbackHeader = getAdminHeader(path, context);
+  const title = currentPage?.title ?? fallbackHeader.title;
+  const description = currentPage?.description ?? fallbackHeader.description;
+  const actions = pageActions?.path === path ? pageActions.actions : undefined;
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -68,9 +114,9 @@ export function CenterShell({ context, children, title, description, actions }: 
   }
 
   function navigation(mobile = false, footer = false) {
-    return <nav aria-label={mobile ? "تنقل المركز على الهاتف" : "إدارة المركز"} className="center-nav">{links.filter((link) => footer === ["settings", "security"].includes(link.icon)).map((link) => <a key={link.href} href={link.href} aria-current={path === link.href ? "page" : undefined} title={collapsed && !mobile ? link.label : undefined} onClick={() => setMenuOpen(false)}>
-      <svg className="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{navigationIcons[link.icon]}</svg><span className={collapsed && !mobile ? "sr-only" : ""}>{link.label}</span>
-    </a>)}</nav>;
+    return <nav aria-label={mobile ? "تنقل المركز على الهاتف" : "إدارة المركز"} className="center-nav">{links.filter((link) => footer === ["settings", "security"].includes(link.icon)).map((link) => <Link key={link.href} href={link.href} aria-current={path === link.href ? "page" : undefined} title={collapsed && !mobile ? link.label : undefined} onClick={() => setMenuOpen(false)}>
+      <svg className="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{navigationIcons[link.icon]}</svg><span className={collapsed && !mobile ? "sr-only" : ""}>{link.label}</span><NavigationPending />
+    </Link>)}</nav>;
   }
 
   function account(mobile = false) {
@@ -84,10 +130,10 @@ export function CenterShell({ context, children, title, description, actions }: 
     </div>;
   }
 
-  return <TablePreferenceUser.Provider value={String(context.user.id)}><div className={`center-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
+  return <PageRegistration.Provider value={registration}><TablePreferenceUser.Provider value={String(context.user.id)}><div className={`center-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
     <a className="skip-link" href="#center-content">انتقل إلى المحتوى</a>
     <aside className="center-sidebar">
-      <a className="brand" href="/admin" aria-label="Courses — الفروع"><span className="brand-mark" aria-hidden="true">C</span>{!collapsed ? <span>Courses</span> : null}</a>
+      <Link className="brand" href="/admin" aria-label="Courses — الفروع"><span className="brand-mark" aria-hidden="true">C</span>{!collapsed ? <span>Courses</span> : null}</Link>
       {!collapsed ? <div className="sidebar-center"><span className="eyebrow">مساحة المركز</span><strong>{context.center.name}</strong></div> : null}
       <div className="sidebar-navigation">{navigation()}</div>
       <div className="sidebar-bottom">{navigation(false, true)}
@@ -96,8 +142,8 @@ export function CenterShell({ context, children, title, description, actions }: 
     </aside>
     <div className="center-frame">
       <header className="center-topbar">
-        <div className="topbar-context"><button ref={menuButton} className="button button-secondary mobile-menu-button" type="button" aria-haspopup="dialog" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}>القائمة</button><div><nav className="page-breadcrumbs" aria-label="مسار الصفحة"><a href="/admin">{context.center.name}</a><span aria-hidden="true">‹</span><span aria-current="page">{title}</span></nav><h1>{title}</h1>{description ? <p className="page-description">{description}</p> : null}</div></div>
-        {actions ? <div className="topbar-actions">{actions}</div> : null}
+        <div className="topbar-context"><button ref={menuButton} className="button button-secondary mobile-menu-button" type="button" aria-haspopup="dialog" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}>القائمة</button><div><nav className="page-breadcrumbs" aria-label="مسار الصفحة"><Link href="/admin">{context.center.name}<NavigationPending /></Link><span aria-hidden="true">‹</span><span aria-current="page">{title}</span></nav><h1>{title}</h1>{description ? <p className="page-description">{description}</p> : null}</div></div>
+        <div className="topbar-actions">{actions}</div>
       </header>
       <div id="center-content" tabIndex={-1} className="center-content">{error ? <InlineNotice tone="error">{error}</InlineNotice> : null}{children}</div>
       <footer className="center-footer">Courses <span>·</span> إدارة المركز والفروع</footer>
@@ -105,5 +151,5 @@ export function CenterShell({ context, children, title, description, actions }: 
     {menuOpen ? <dialog ref={drawer} className="navigation-drawer" aria-labelledby="drawer-title" onCancel={() => setMenuOpen(false)}>
       <div className="drawer-heading"><h2 id="drawer-title">{context.center.name}</h2><Button onClick={() => setMenuOpen(false)}>إغلاق القائمة</Button></div><div className="sidebar-navigation">{navigation(true)}</div><div className="sidebar-bottom">{navigation(true, true)}{account(true)}</div>
     </dialog> : null}
-  </div></TablePreferenceUser.Provider>;
+  </div></TablePreferenceUser.Provider></PageRegistration.Provider>;
 }

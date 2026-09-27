@@ -1,5 +1,5 @@
-import Link from 'next/link';
+import { PrefetchLink as Link } from '@/components/PrefetchLink';
 
 export default function InstructorNotFound() {
-  return <main className='state-page'><div><h1>ملف المحاضر غير متاح</h1><p>لا يوجد ملف متاح بهذا الرابط ضمن نطاق صلاحيتك في المركز.</p><Link prefetch={false} href='/admin/instructors'>العودة إلى ملفات المحاضرين</Link></div></main>;
+  return <main className='state-page'><div><h1>ملف المحاضر غير متاح</h1><p>لا يوجد ملف متاح بهذا الرابط ضمن نطاق صلاحيتك في المركز.</p><Link href='/admin/instructors'>العودة إلى ملفات المحاضرين</Link></div></main>;
 }

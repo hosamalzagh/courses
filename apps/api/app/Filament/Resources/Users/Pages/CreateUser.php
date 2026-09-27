@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Users\Pages;
 
 use App\Filament\Resources\Users\UserResource;
 use App\Models\User;
+use App\Support\PlatformAudit;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -19,10 +20,8 @@ class CreateUser extends CreateRecord
             $user->platform_role = $data['platform_role'];
             $user->email_verified_at = now();
             $user->save();
-            DB::connection('central')->table('platform_audit_logs')->insert([
-                'actor_id' => auth()->id(), 'event' => 'platform_user.created',
-                'details' => json_encode(['user_id' => $user->id, 'role' => $user->platform_role]),
-                'created_at' => now(),
+            PlatformAudit::record(auth()->user(), null, 'platform_user.created', [
+                'user_id' => $user->id, 'user_name' => $user->name, 'role' => $user->platform_role,
             ]);
 
             return $user;

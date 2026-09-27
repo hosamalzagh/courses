@@ -1,7 +1,8 @@
 "use client";
 
+import { PrefetchLink } from "@/components/PrefetchLink";
+
 import { useState, type FormEvent } from "react";
-import { AuthShell } from "@/components/AuthShell";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
 import { centerRequest, responseFieldErrors, responseMessage } from "@/lib/client-api";
@@ -33,7 +34,7 @@ export function ResetPasswordForm({ token, initialEmail }: { token: string; init
     finally { setBusy(false); }
   }
 
-  return <AuthShell><span className="eyebrow">استعادة الدخول</span><h1>عيّن كلمة مرور جديدة</h1>
+  return <><span className="eyebrow">استعادة الدخول</span><h1>عيّن كلمة مرور جديدة</h1>
     {done ? <InlineNotice>حُفظت كلمة المرور. يمكنك الدخول الآن.</InlineNotice> : null}
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {!done ? <form className="form-stack" noValidate onSubmit={submit}>
@@ -42,6 +43,6 @@ export function ResetPasswordForm({ token, initialEmail }: { token: string; init
       <FormField id="confirmation" label="تأكيد كلمة المرور" type="password" value={confirmation} onChange={(value) => { setConfirmation(value); setFieldErrors({}); }} error={fieldErrors.password_confirmation} autoComplete="new-password" required />
       <button className="button button-primary" disabled={busy || !email || !password || !confirmation}>{busy ? "جارٍ الحفظ…" : "حفظ كلمة المرور"}</button>
     </form> : null}
-    <p className="auth-footnote"><a className="text-link" href="/login">العودة إلى الدخول</a></p>
-  </AuthShell>;
+    <p className="auth-footnote"><PrefetchLink className="text-link" href="/login">العودة إلى الدخول</PrefetchLink></p>
+  </>;
 }

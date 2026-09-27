@@ -1,0 +1,486 @@
+{
+  "repo": "hosamalzagh/courses",
+  "parent": 19,
+  "issues": {
+    "1": {
+      "number": 20,
+      "id": 5596035283,
+      "url": "https://github.com/hosamalzagh/courses/issues/20",
+      "title": "[Phase 3 / 01] الأدوار التشغيلية والصلاحيات الإضافية",
+      "body_sha256": "704d67e9db4955f51a426d615c05fb7206050e315257274ad0a674780998c76c"
+    },
+    "2": {
+      "number": 21,
+      "id": 5596035718,
+      "url": "https://github.com/hosamalzagh/courses/issues/21",
+      "title": "[Phase 3 / 02] ملف الطالب ورقمه الداخلي",
+      "body_sha256": "9cdcf3340a30fa8b63adfbae8175ec68855395138d78e34cfa971abb34711013"
+    },
+    "3": {
+      "number": 22,
+      "id": 5596036101,
+      "url": "https://github.com/hosamalzagh/courses/issues/22",
+      "title": "[Phase 3 / 03] البحث عن الطلاب بين الفروع",
+      "body_sha256": "748f7f35658ebe641b8d2e9041040b1c96baadfe9b4c1e5d9645073f683e6136"
+    },
+    "4": {
+      "number": 23,
+      "id": 5596036351,
+      "url": "https://github.com/hosamalzagh/courses/issues/23",
+      "title": "[Phase 3 / 04] ملفات المحاضرين",
+      "body_sha256": "11c7c210e48f120d2ce559dc809f7f87c96612eda2d40b1e4ec2a3bc4c506995"
+    },
+    "5": {
+      "number": 24,
+      "id": 5596036698,
+      "url": "https://github.com/hosamalzagh/courses/issues/24",
+      "title": "[Phase 3 / 05] إنشاء منهج الفرع وخطة المستوى الأولى",
+      "body_sha256": "795e7899043f64b6bf183562c85315ed4deb58251fc18bdd468c3d0a4b0dc45e"
+    },
+    "6": {
+      "number": 25,
+      "id": 5596037269,
+      "url": "https://github.com/hosamalzagh/courses/issues/25",
+      "title": "[Phase 3 / 06] تعديل خطط المستويات بإصدارات محفوظة",
+      "body_sha256": "69a111f87109477a06d40ec0acf71a18bdef603871a87f9a86204ae41738f566"
+    },
+    "7": {
+      "number": 26,
+      "id": 5596037499,
+      "url": "https://github.com/hosamalzagh/courses/issues/26",
+      "title": "[Phase 3 / 07] نسخ المنهج بين الفروع",
+      "body_sha256": "d15246c61ecf7ae5732a575d7aec78daa18fcf8455ccb6b3454e00ab5082bbe8"
+    },
+    "8": {
+      "number": 27,
+      "id": 5596037889,
+      "url": "https://github.com/hosamalzagh/courses/issues/27",
+      "title": "[Phase 3 / 08] المجموعات وإعدادات الدراسة والسعر",
+      "body_sha256": "d4c1561dcfa0d3c1d08967e6c0a449336bd1a926ae4aff771279a50de5f8c33f"
+    },
+    "9": {
+      "number": 28,
+      "id": 5596038143,
+      "url": "https://github.com/hosamalzagh/courses/issues/28",
+      "title": "[Phase 3 / 09] حساب الطالب والعملة والدفعات المقدمة",
+      "body_sha256": "d1986287aeca75a35910f3c91ddca87ebd9a0509c9b663288c0ffe228640d55e"
+    },
+    "10": {
+      "number": 29,
+      "id": 5596038371,
+      "url": "https://github.com/hosamalzagh/courses/issues/29",
+      "title": "[Phase 3 / 10] التسجيل ومحاولة الدراسة ورسومها",
+      "body_sha256": "aebf5359a9a04a0dabf408b605efc560cc641aa5f3fb21f0c158ec27eb008950"
+    },
+    "11": {
+      "number": 30,
+      "id": 5596038943,
+      "url": "https://github.com/hosamalzagh/courses/issues/30",
+      "title": "[Phase 3 / 11] جدولة المحاضرات وترقيمها",
+      "body_sha256": "9ce4f1fa00d1040df439120636999e7af19f3ba957ec336ee3bb0a3bd7577775"
+    },
+    "12": {
+      "number": 31,
+      "id": 5596039250,
+      "url": "https://github.com/hosamalzagh/courses/issues/31",
+      "title": "[Phase 3 / 12] المحاضر الفعلي ومدة التدريس",
+      "body_sha256": "0c7cbd8cbe1cc1333094c2e99d262f90a36106b38586abbec7fcfcc07bc67cc0"
+    },
+    "13": {
+      "number": 32,
+      "id": 5596039557,
+      "url": "https://github.com/hosamalzagh/courses/issues/32",
+      "title": "[Phase 3 / 13] الحضور وإغلاق المحاضرة والتراجع الفوري",
+      "body_sha256": "b261877d00f02308d824a9d7eb9b6a579ec88d218352497f352252a4c06d3c98"
+    },
+    "14": {
+      "number": 33,
+      "id": 5596039825,
+      "url": "https://github.com/hosamalzagh/courses/issues/33",
+      "title": "[Phase 3 / 14] تقرير تغطية المحتوى وأهلية الإتمام",
+      "body_sha256": "c1df9225ec7b86c920c26e7f36e1137d09568682a7bad3e1d46631deb01ad16d"
+    },
+    "15": {
+      "number": 34,
+      "id": 5596040162,
+      "url": "https://github.com/hosamalzagh/courses/issues/34",
+      "title": "[Phase 3 / 15] الانتظار وإعادة الإلحاق بالمحاولة نفسها",
+      "body_sha256": "bc7491cf8e303c77449b48f0a92a836136eaac30194756fafc38a6ce6a4a7f8e"
+    },
+    "16": {
+      "number": 35,
+      "id": 5596040424,
+      "url": "https://github.com/hosamalzagh/courses/issues/35",
+      "title": "[Phase 3 / 16] الانسحاب وإعادة الدراسة بمحاولة جديدة",
+      "body_sha256": "26220de3a1b6570603efa2ccf523735f4ad79e84df217011fdb3b3520f0892e8"
+    },
+    "17": {
+      "number": 36,
+      "id": 5596040729,
+      "url": "https://github.com/hosamalzagh/courses/issues/36",
+      "title": "[Phase 3 / 17] قواعد الغياب وتقرير المراجعة",
+      "body_sha256": "8e4184866d86c33d20bc8c5fd276b4a0d4db6367828d7774473734fe3fea9734"
+    },
+    "18": {
+      "number": 37,
+      "id": 5596041043,
+      "url": "https://github.com/hosamalzagh/courses/issues/37",
+      "title": "[Phase 3 / 18] النقل الجماعي للانتظار من تقرير الغياب",
+      "body_sha256": "cd6cfa96c8503c67759e1af2573e5247a753f6213ae588d50857515116923e8a"
+    },
+    "19": {
+      "number": 38,
+      "id": 5596041347,
+      "url": "https://github.com/hosamalzagh/courses/issues/38",
+      "title": "[Phase 3 / 19] اعتماد معادلة المحتوى",
+      "body_sha256": "7b1e0736a67393dfb2e3bc8938bd81bae72a46826217e07deffdb00c52b858f9"
+    },
+    "20": {
+      "number": 39,
+      "id": 5596041588,
+      "url": "https://github.com/hosamalzagh/courses/issues/39",
+      "title": "[Phase 3 / 20] النقل بين المجموعات والفروع مع المعاينة",
+      "body_sha256": "ff605148ccee4d2a9092cc0146a5482d20bfedb9821d604c4cbbb4000b500a7d"
+    },
+    "21": {
+      "number": 40,
+      "id": 5596041840,
+      "url": "https://github.com/hosamalzagh/courses/issues/40",
+      "title": "[Phase 3 / 21] تصحيح الحضور وإلغاء اعتماد المحاضرة",
+      "body_sha256": "e2e78710903aff1a5e37ce23371cc659857a66506631028bc7ea68f2fce24b41"
+    },
+    "22": {
+      "number": 41,
+      "id": 5596042063,
+      "url": "https://github.com/hosamalzagh/courses/issues/41",
+      "title": "[Phase 3 / 22] حضور التعويض واحتسابه",
+      "body_sha256": "4e23d394028296c242ef7b58ec84cadf05b624531fefd595865ad220e9bb5ba7"
+    },
+    "23": {
+      "number": 42,
+      "id": 5596042317,
+      "url": "https://github.com/hosamalzagh/courses/issues/42",
+      "title": "[Phase 3 / 23] إلغاء موعد محاضرة مع بديل",
+      "body_sha256": "7ab3a4b5a73cdbcc5ebbbec4aa47985bc0c2b0f59d4c50287028770ab8160d41"
+    },
+    "24": {
+      "number": 43,
+      "id": 5596042750,
+      "url": "https://github.com/hosamalzagh/courses/issues/43",
+      "title": "[Phase 3 / 24] زيادة أو خفض عدد المحاضرات المعتمد للمجموعة",
+      "body_sha256": "e4c949b47a11db33fa3a5e09992765ae1a3f0beb67a560fc3a8b44b8f867165d"
+    },
+    "25": {
+      "number": 44,
+      "id": 5596046108,
+      "url": "https://github.com/hosamalzagh/courses/issues/44",
+      "title": "[Phase 3 / 25] تطبيق إصدار خطة جديد على دراسة قائمة",
+      "body_sha256": "d58cc4b68857a0b58a7e454525b0f86a3d872496d2e3e6763494868be34dcfc1"
+    },
+    "26": {
+      "number": 45,
+      "id": 5596046324,
+      "url": "https://github.com/hosamalzagh/courses/issues/45",
+      "title": "[Phase 3 / 26] تغيير نسبة الإتمام وتطبيقها على التسجيلات الحالية",
+      "body_sha256": "ebad8111fed2a70d6ebde478e5af77483d6c4284f38a48670e1b32984913fac7"
+    },
+    "27": {
+      "number": 46,
+      "id": 5596046576,
+      "url": "https://github.com/hosamalzagh/courses/issues/46",
+      "title": "[Phase 3 / 27] إكمال المجموعة واعتماد إتمام الطلاب",
+      "body_sha256": "4a5ad403ca9744cbd19b3f5b2f4f3211309a9857bcb81d18c0071468af68d1fc"
+    },
+    "28": {
+      "number": 47,
+      "id": 5596046790,
+      "url": "https://github.com/hosamalzagh/courses/issues/47",
+      "title": "[Phase 3 / 28] إتمام الكورس متعدد المستويات",
+      "body_sha256": "65d15d4db3bb22cf63b4bcdb6d105a81c07adb733ea8768233631317c2bd4720"
+    },
+    "29": {
+      "number": 48,
+      "id": 5596047014,
+      "url": "https://github.com/hosamalzagh/courses/issues/48",
+      "title": "[Phase 3 / 29] تخصيص الدفعات والرصيد المتاح",
+      "body_sha256": "cd7834e6ca625b1ab599d66baa2f971a845019e892a75096ad9c043285e057b5"
+    },
+    "30": {
+      "number": 49,
+      "id": 5596047208,
+      "url": "https://github.com/hosamalzagh/courses/issues/49",
+      "title": "[Phase 3 / 30] استخدام الرصيد بين الفروع",
+      "body_sha256": "2374bd912fdd73ce4e9ae88733814c7518ebcebf52743e1b255c7ce504d4a36c"
+    },
+    "31": {
+      "number": 50,
+      "id": 5596047407,
+      "url": "https://github.com/hosamalzagh/courses/issues/50",
+      "title": "[Phase 3 / 31] تصحيح تخصيص دفعة دون تغيير المقبوض",
+      "body_sha256": "85b0e0bbdb36a9f2a4d5fada625fcc629321f3fa9a6e43bb17708274a9e63594"
+    },
+    "32": {
+      "number": 51,
+      "id": 5596047639,
+      "url": "https://github.com/hosamalzagh/courses/issues/51",
+      "title": "[Phase 3 / 32] تسوية رسوم الانسحاب والمعالجة المالية الصريحة",
+      "body_sha256": "188e9bc15f31209eb5b14f1500eb06950e7832fd564be199dd09527858ab5ef7"
+    },
+    "33": {
+      "number": 52,
+      "id": 5596047836,
+      "url": "https://github.com/hosamalzagh/courses/issues/52",
+      "title": "[Phase 3 / 33] الاسترداد النقدي من الرصيد المتاح",
+      "body_sha256": "a8554063deeb9a92c6a23ebe760380a58b12727279cd1528d9c429aefc6f73a4"
+    },
+    "34": {
+      "number": 53,
+      "id": 5596048031,
+      "url": "https://github.com/hosamalzagh/courses/issues/53",
+      "title": "[Phase 3 / 34] تصحيح الدفعة وتخصيصاتها معًا",
+      "body_sha256": "ad88600d993cf2fe45f921a34045e1dbd82d43a4f3e77000ed795e275c261f47"
+    },
+    "35": {
+      "number": 54,
+      "id": 5596048351,
+      "url": "https://github.com/hosamalzagh/courses/issues/54",
+      "title": "[Phase 3 / 35] القبول المحلي للرحلة المتكاملة",
+      "body_sha256": "33dad14535fc71f64b92326001672b821a04f14c7e295908a53ac2d697c5e393"
+    }
+  },
+  "edges": [
+    [
+      2,
+      1
+    ],
+    [
+      3,
+      2
+    ],
+    [
+      4,
+      1
+    ],
+    [
+      5,
+      1
+    ],
+    [
+      6,
+      5
+    ],
+    [
+      7,
+      5
+    ],
+    [
+      8,
+      4
+    ],
+    [
+      8,
+      5
+    ],
+    [
+      9,
+      2
+    ],
+    [
+      10,
+      8
+    ],
+    [
+      10,
+      9
+    ],
+    [
+      11,
+      8
+    ],
+    [
+      12,
+      11
+    ],
+    [
+      13,
+      10
+    ],
+    [
+      13,
+      11
+    ],
+    [
+      14,
+      13
+    ],
+    [
+      15,
+      10
+    ],
+    [
+      16,
+      10
+    ],
+    [
+      17,
+      13
+    ],
+    [
+      18,
+      15
+    ],
+    [
+      18,
+      17
+    ],
+    [
+      19,
+      6
+    ],
+    [
+      20,
+      14
+    ],
+    [
+      20,
+      19
+    ],
+    [
+      20,
+      15
+    ],
+    [
+      21,
+      14
+    ],
+    [
+      21,
+      17
+    ],
+    [
+      22,
+      19
+    ],
+    [
+      22,
+      21
+    ],
+    [
+      23,
+      14
+    ],
+    [
+      24,
+      23
+    ],
+    [
+      25,
+      14
+    ],
+    [
+      25,
+      19
+    ],
+    [
+      26,
+      14
+    ],
+    [
+      27,
+      14
+    ],
+    [
+      28,
+      27
+    ],
+    [
+      29,
+      10
+    ],
+    [
+      30,
+      29
+    ],
+    [
+      31,
+      30
+    ],
+    [
+      32,
+      16
+    ],
+    [
+      32,
+      29
+    ],
+    [
+      33,
+      29
+    ],
+    [
+      34,
+      29
+    ],
+    [
+      35,
+      3
+    ],
+    [
+      35,
+      7
+    ],
+    [
+      35,
+      12
+    ],
+    [
+      35,
+      18
+    ],
+    [
+      35,
+      20
+    ],
+    [
+      35,
+      22
+    ],
+    [
+      35,
+      24
+    ],
+    [
+      35,
+      25
+    ],
+    [
+      35,
+      26
+    ],
+    [
+      35,
+      28
+    ],
+    [
+      35,
+      31
+    ],
+    [
+      35,
+      32
+    ],
+    [
+      35,
+      33
+    ],
+    [
+      35,
+      34
+    ]
+  ],
+  "verified": {
+    "issue_count": 35,
+    "edge_count": 57,
+    "parent_body_state_labels_comments_unchanged": true
+  }
+}

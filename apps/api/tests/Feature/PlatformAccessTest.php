@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use App\Filament\Resources\Centers\Pages\ListCenters;
+use App\Filament\Resources\PlatformAuditLogs\Pages\ManagePlatformAuditLogs;
 use App\Filament\Resources\Users\Pages\CreateUser;
 use App\Filament\Resources\Users\Pages\EditUser;
 use App\Filament\Resources\Users\Pages\ListUsers;
 use App\Models\Center;
+use App\Models\PlatformAuditLog;
 use App\Models\User;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Auth\Pages\Login;
@@ -100,6 +102,35 @@ class PlatformAccessTest extends TestCase
         $warmStatusPage = $this->get("http://courses.test/admin/centers/{$center->id}")->assertOk();
         $this->assertLessThanOrEqual(6, (int) $warmStatusPage->headers->get('X-Courses-Query-Count'));
 
+    }
+
+    public function test_platform_audit_table_renders_event_columns_and_record_content(): void
+    {
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        $owner = User::factory()->create(['platform_role' => 'platform_owner']);
+        $this->actingAs($owner, 'platform');
+
+        $auditId = DB::connection('central')->table('platform_audit_logs')->insertGetId([
+            'actor_id' => $owner->id,
+            'tenant_id' => 'audit-center',
+            'event' => 'center.updated',
+            'details' => json_encode(['fields' => ['plan']], JSON_THROW_ON_ERROR),
+            'created_at' => now(),
+        ]);
+        $audit = PlatformAuditLog::findOrFail($auditId);
+        $page = Livewire::test(ManagePlatformAuditLogs::class)
+            ->assertSuccessful()
+            ->assertCanSeeTableRecords([$audit]);
+
+        foreach (['created_at', 'event', 'actor_id', 'tenant_id', 'details'] as $column) {
+            $page->assertCanRenderTableColumn($column);
+        }
+
+        $page->assertSee('تعديل بيانات المركز')
+            ->assertSee('مركز غير متاح')
+            ->assertSee('الخطة')
+            ->searchTable('center.updated')->assertCanSeeTableRecords([$audit])
+            ->searchTable('missing.event')->assertCanNotSeeTableRecords([$audit]);
     }
 
     public function test_landlord_center_search_stays_within_query_budget_without_tenant_reads(): void

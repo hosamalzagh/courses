@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Users\Pages;
 
 use App\Filament\Resources\Users\UserResource;
 use App\Models\User;
+use App\Support\PlatformAudit;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -37,17 +38,16 @@ class EditUser extends EditRecord
                 }
             }
             if ($changedFields !== []) {
-                DB::connection('central')->table('platform_audit_logs')->insert([
-                    'actor_id' => auth()->id(), 'event' => 'platform_user.updated',
-                    'details' => json_encode(['user_id' => $record->id, 'changed_fields' => $changedFields]),
-                    'created_at' => now(),
+                PlatformAudit::record(auth()->user(), null, 'platform_user.updated', [
+                    'user_id' => $record->id, 'user_name' => $record->name, 'changed_fields' => $changedFields,
+                    'changes' => PlatformAudit::changes($oldValues, $record->only(['name', 'email'])),
                 ]);
             }
             if ($oldRole !== $record->platform_role) {
-                DB::connection('central')->table('platform_audit_logs')->insert([
-                    'actor_id' => auth()->id(), 'event' => 'platform_user.role_changed',
-                    'details' => json_encode(['user_id' => $record->id, 'old_role' => $oldRole, 'new_role' => $record->platform_role]),
-                    'created_at' => now(),
+                PlatformAudit::record(auth()->user(), null, 'platform_user.role_changed', [
+                    'user_id' => $record->id, 'user_name' => $record->name,
+                    'old_role' => $oldRole, 'new_role' => $record->platform_role,
+                    'changes' => PlatformAudit::changes(['platform_role' => $oldRole], ['platform_role' => $record->platform_role]),
                 ]);
             }
         });

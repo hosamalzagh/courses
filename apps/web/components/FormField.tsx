@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 type Props = {
   id: string;
   label: string;
@@ -16,6 +16,7 @@ type Props = {
 };
 
 export function FormField({ id, label, value, onChange, type = "text", autoComplete, required, hint, error, direction, focusOnMount = false }: Props) {
+  const [visible, setVisible] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!focusOnMount) return;
@@ -30,11 +31,11 @@ export function FormField({ id, label, value, onChange, type = "text", autoCompl
   return (
     <div className="field">
       <label htmlFor={id}>{label}</label>
-      <input
+      <div className={type === "password" ? "field-password" : undefined}><input
         ref={inputRef}
         id={id}
         name={id}
-        type={type}
+        type={type === "password" && visible ? "text" : type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         autoComplete={autoComplete}
@@ -42,7 +43,7 @@ export function FormField({ id, label, value, onChange, type = "text", autoCompl
         aria-invalid={Boolean(error)}
         aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
         dir={direction}
-      />
+      />{type === "password" ? <button type="button" aria-label={`${visible ? "إخفاء" : "إظهار"} ${label}`} aria-pressed={visible} onClick={() => setVisible(!visible)}>{visible ? "إخفاء" : "إظهار"}</button> : null}</div>
       {hint && !error ? <span id={`${id}-hint`} className="field-hint">{hint}</span> : null}
       {error ? <span id={`${id}-error`} className="field-error">{error}</span> : null}
     </div>

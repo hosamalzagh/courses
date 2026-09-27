@@ -1,8 +1,9 @@
 "use client";
 
+import { PrefetchLink } from "@/components/PrefetchLink";
+
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { AuthShell } from "@/components/AuthShell";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
 import { centerRequest, responseFieldErrors, responseMessage } from "@/lib/client-api";
@@ -73,7 +74,7 @@ export function LoginForm({ expired }: { expired: boolean }) {
   }
 
   return (
-    <AuthShell>
+    <>
       <span className="eyebrow">دخول المركز</span>
       <h1>{step === "credentials" ? "أهلًا بك في مركزك" : "تحقق من هويتك"}</h1>
       <p className="muted">
@@ -87,7 +88,7 @@ export function LoginForm({ expired }: { expired: boolean }) {
           <FormField id="email" label="البريد الإلكتروني" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.email} autoComplete="username" required direction="ltr" />
           <FormField id="password" label="كلمة المرور" type="password" value={password} onChange={(value) => { setPassword(value); setFieldErrors({}); }} error={fieldErrors.password} autoComplete="current-password" required />
           <button className="button button-primary" type="submit" disabled={busy || !email || !password}>{busy ? "جارٍ التحقق…" : "دخول المركز"}</button>
-          <a className="text-link" href="/forgot-password">نسيت كلمة المرور؟</a>
+          <PrefetchLink className="text-link" href="/forgot-password">نسيت كلمة المرور؟</PrefetchLink>
         </form>
       ) : (
         <>
@@ -100,6 +101,6 @@ export function LoginForm({ expired }: { expired: boolean }) {
         </>
       )}
       <p className="auth-footnote">لا تملك دعوة؟ اطلبها من مالك المركز أو مسؤوله.</p>
-    </AuthShell>
+    </>
   );
 }

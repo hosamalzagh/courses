@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Centers\Pages;
 
 use App\Filament\Resources\Centers\CenterResource;
 use App\Support\CenterDomain;
+use App\Support\PlatformAudit;
 use Filament\Actions\ViewAction;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
@@ -35,16 +36,18 @@ class EditCenter extends EditRecord
         CenterDomain::validateUnique($domain, $old, 'data.subdomain');
         unset($data['subdomain'], $data['slug'], $data['owner_email']);
         DB::connection('central')->transaction(function () use ($record, $data, $domain, $old): void {
+            $before = [...$record->only(array_keys($data)), 'domain' => $old];
             $record->update($data);
             if ($domain !== $old) {
                 $record->domains()->delete();
                 $record->domains()->create(['domain' => $domain]);
             }
-            DB::connection('central')->table('platform_audit_logs')->insert([
-                'actor_id' => auth()->id(), 'tenant_id' => $record->id, 'event' => 'center.updated',
-                'details' => json_encode(['fields' => array_keys($data), 'domain' => $domain]),
-                'created_at' => now(),
-            ]);
+            $changes = PlatformAudit::changes($before, [...$record->only(array_keys($data)), 'domain' => $domain]);
+            if ($changes !== []) {
+                PlatformAudit::record(auth()->user(), $record, 'center.updated', [
+                    'fields' => array_keys($changes), 'domain' => $domain, 'changes' => $changes,
+                ]);
+            }
         });
 
         return $record;

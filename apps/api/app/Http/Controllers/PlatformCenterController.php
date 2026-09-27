@@ -6,6 +6,7 @@ use App\Jobs\ProvisionCenter;
 use App\Models\Center;
 use App\Support\CenterDomain;
 use App\Support\CenterPlans;
+use App\Support\PlatformAudit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -101,8 +102,12 @@ class PlatformCenterController extends Controller
         ]);
 
         DB::connection('central')->transaction(function () use ($request, $center, $data): void {
+            $before = $center->only(array_keys($data));
             $center->update($data);
-            $this->audit($request, $center, 'center.updated', $data);
+            $changes = PlatformAudit::changes($before, $center->only(array_keys($data)));
+            if ($changes !== []) {
+                $this->audit($request, $center, 'center.updated', ['changes' => $changes]);
+            }
         });
 
         return response()->json(['center' => $center->fresh()->load('domains')]);
@@ -116,12 +121,19 @@ class PlatformCenterController extends Controller
             'subdomain' => CenterDomain::subdomainRules(),
         ]);
         $domain = CenterDomain::fromSubdomain($data['subdomain']);
-        CenterDomain::validateUnique($domain);
 
         DB::connection('central')->transaction(function () use ($request, $center, $domain): void {
+            $oldDomain = $center->domains()->first()?->domain;
+            CenterDomain::validateUnique($domain, $oldDomain);
+            if ($oldDomain === $domain) {
+                return;
+            }
             $center->domains()->delete();
             $center->domains()->create(['domain' => $domain]);
-            $this->audit($request, $center, 'center.domain_changed', ['domain' => $domain]);
+            $this->audit($request, $center, 'center.domain_changed', [
+                'domain' => $domain,
+                'changes' => PlatformAudit::changes(['domain' => $oldDomain], ['domain' => $domain]),
+            ]);
         });
 
         return response()->json(['center' => $center->fresh()->load('domains')]);
@@ -150,12 +162,6 @@ class PlatformCenterController extends Controller
 
     private function audit(Request $request, Center $center, string $event, array $details = []): void
     {
-        DB::connection('central')->table('platform_audit_logs')->insert([
-            'actor_id' => $request->user()->id,
-            'tenant_id' => $center->id,
-            'event' => $event,
-            'details' => json_encode($details),
-            'created_at' => now(),
-        ]);
+        PlatformAudit::record($request->user(), $center, $event, $details);
     }
 }

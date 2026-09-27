@@ -6,6 +6,7 @@ use App\Filament\Resources\Centers\CenterResource;
 use App\Jobs\ProvisionCenter;
 use App\Models\Center;
 use App\Support\CenterDomain;
+use App\Support\PlatformAudit;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -25,11 +26,7 @@ class CreateCenter extends CreateRecord
                 'owner_email' => strtolower($data['owner_email']),
             ]);
             $center->domains()->create(['domain' => $domain]);
-            DB::connection('central')->table('platform_audit_logs')->insert([
-                'actor_id' => auth()->id(), 'tenant_id' => $center->id,
-                'event' => 'center.created', 'details' => json_encode(['domain' => $domain]),
-                'created_at' => now(),
-            ]);
+            PlatformAudit::record(auth()->user(), $center, 'center.created', ['domain' => $domain]);
 
             return $center;
         });
