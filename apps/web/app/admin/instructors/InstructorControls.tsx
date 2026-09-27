@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/field";
 
 
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
@@ -24,7 +24,6 @@ export function InstructorControls({ context, query, detail = false, section = '
   const router = useRouter();
   const [editor, setEditor] = useState<Instructor | 'new' | null>(null);
   const [loadedSection, setLoadedSection] = useState(section);
-  if (loadedSection !== section) { setLoadedSection(section); setEditor(null); }
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [branchIds, setBranchIds] = useState<number[]>([]);
@@ -34,12 +33,20 @@ export function InstructorControls({ context, query, detail = false, section = '
   const [requestId, setRequestId] = useState('');
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
+  const workspaceRead = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    const abandoned = workspaceRead.current;
+    if (abandoned) {
+      workspaceRead.current = null; abandoned.abort(); saving.current = false; setBusy(false);
+    }
+  }, [section]);
   const trigger = useRef<HTMLElement | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [conflict, setConflict] = useState(false);
   const [initialValues, setInitialValues] = useState('');
+  if (loadedSection !== section) { setLoadedSection(section); setEditor(null); setError(''); setConflict(false); setFieldErrors({}); }
   const dirty = editor !== null && JSON.stringify([name, phone, [...branchIds].sort((a, b) => a - b)]) !== initialValues;
   const manageable = context.branches.filter((branch) => context.permissions.can_manage_center || (context.permissions.branch_actions?.[String(branch.id)] ?? []).includes('instructors.manage'));
 
@@ -97,18 +104,26 @@ export function InstructorControls({ context, query, detail = false, section = '
   }
 
   async function reloadInstructor() {
-    if (!editor) return;
-    setBusy(true);
+    if (!editor || saving.current) return;
+    const load = new AbortController(); workspaceRead.current = load;
+    saving.current = true; setBusy(true);
     try {
-      const response = await centerRequest(editor === 'new' ? `instructors/submissions/${requestId}` : `instructors/${editor.id}`, 'GET');
-      if (!response.ok) { setError(await responseMessage(response)); return; }
+      const response = await centerRequest(editor === 'new' ? `instructors/submissions/${requestId}` : `instructors/${editor.id}`, 'GET', undefined, load.signal);
+      if (!response.ok) {
+        const message = await responseMessage(response);
+        if (workspaceRead.current === load) setError(message);
+        return;
+      }
       const data = await response.json() as InstructorContext & { instructor?: Instructor };
+      if (workspaceRead.current !== load) return;
       const wasNew = editor === 'new';
       open(wasNew ? data.instructor! : data.instructors[0], true);
       if (wasNew) setNotice('الملف حُفظ سابقًا. راجع بياناته قبل تعديلها؛ لن يُنشأ ملف آخر.');
       router.refresh();
-    } catch { setError('تعذر تحميل أحدث البيانات. حاول مرة أخرى.'); }
-    finally { setBusy(false); }
+    } catch { if (workspaceRead.current === load) setError('تعذر تحميل أحدث البيانات. حاول مرة أخرى.'); }
+    finally {
+      if (workspaceRead.current === load) { workspaceRead.current = null; saving.current = false; setBusy(false); }
+    }
   }
 
   function pageLink(page: number, branchesPage = context.pagination.branches_page) {

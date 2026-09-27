@@ -27,7 +27,6 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   const router = useRouter();
   const [editor, setEditor] = useState<Editor | null>(null);
   const [loadedSection, setLoadedSection] = useState(section);
-  if (loadedSection !== section) { setLoadedSection(section); setEditor(null); }
   const [name, setName] = useState('');
   const [branchId, setBranchId] = useState(0);
   const [lectures, setLectures] = useState<LectureDraft[]>([blankLecture()]);
@@ -38,17 +37,18 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [conflict, setConflict] = useState(false);
   const saving = useRef(false);
-  const planLoad = useRef<AbortController | null>(null);
+  const workspaceRead = useRef<AbortController | null>(null);
   useEffect(() => () => {
-    const abandoned = planLoad.current;
+    const abandoned = workspaceRead.current;
     if (abandoned) {
-      planLoad.current = null;
+      workspaceRead.current = null;
       abandoned.abort();
       saving.current = false;
       setBusy(false);
     }
   }, [section]);
   const [baseline, setBaseline] = useState('');
+  if (loadedSection !== section) { setLoadedSection(section); setEditor(null); setError(''); setConflict(false); setFieldErrors({}); }
   const dirty = editor !== null && baseline !== JSON.stringify([name, branchId, lectures]);
   const trigger = useRef<HTMLElement | null>(null);
   const manageable = context.branches.filter((branch) => context.permissions.can_manage_center || context.permissions.branch_actions?.[String(branch.id)]?.includes('curriculum.manage'));
@@ -65,24 +65,24 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   async function editPlan(level: Level) {
     if (saving.current) return;
     const load = new AbortController();
-    planLoad.current = load;
+    workspaceRead.current = load;
     const action = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     saving.current = true; setBusy(true); setError('');
     try {
       const response = await centerRequest(`levels/${level.id}`, 'GET', undefined, load.signal);
       if (!response.ok) {
         const message = await responseMessage(response);
-        if (planLoad.current === load) setError(message);
+        if (workspaceRead.current === load) setError(message);
         return;
       }
       const data = await response.json() as CurriculumContext;
-      if (planLoad.current !== load) return;
+      if (workspaceRead.current !== load) return;
       trigger.current = action;
       open({ kind: 'plan', level: data.levels[0] }, true);
-    } catch { if (planLoad.current === load) setError('تعذر تحميل خطة المستوى. حاول مرة أخرى.'); }
+    } catch { if (workspaceRead.current === load) setError('تعذر تحميل خطة المستوى. حاول مرة أخرى.'); }
     finally {
-      if (planLoad.current === load) {
-        planLoad.current = null; saving.current = false; setBusy(false);
+      if (workspaceRead.current === load) {
+        workspaceRead.current = null; saving.current = false; setBusy(false);
       }
     }
   }
@@ -132,17 +132,28 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   }
   async function recover() {
     if (!editor || saving.current) return;
+    const load = new AbortController();
+    workspaceRead.current = load;
     saving.current = true; setBusy(true);
     try {
-      const response = await centerRequest(editor.kind === 'plan' ? `levels/${editor.level.id}` : `curriculum/submissions/${requestId}`, 'GET');
-      if (!response.ok) { setError(await responseMessage(response)); return; }
+      const response = await centerRequest(editor.kind === 'plan' ? `levels/${editor.level.id}` : `curriculum/submissions/${requestId}`, 'GET', undefined, load.signal);
+      if (!response.ok) {
+        const message = await responseMessage(response);
+        if (workspaceRead.current === load) setError(message);
+        return;
+      }
       const data = await response.json() as CurriculumContext & { kind: string; record: Course | Stage | Level };
+      if (workspaceRead.current !== load) return;
       if (editor.kind === 'plan') open({ kind: 'plan', level: data.levels[0] }, true);
       else if (data.kind === 'levels') { open({ kind: 'plan', level: data.record as Level }, true); setNotice('المستوى حُفظ سابقًا. راجع خطته قبل تعديلها؛ لن يُنشأ مستوى آخر.'); }
       else { close(); setNotice('السجل حُفظ سابقًا. راجع السجل في الجدول؛ لن يُنشأ سجل آخر.'); }
       router.refresh();
-    } catch { setError('تعذر تحميل البيانات الحالية. حاول مرة أخرى.'); }
-    finally { saving.current = false; setBusy(false); }
+    } catch { if (workspaceRead.current === load) setError('تعذر تحميل البيانات الحالية. حاول مرة أخرى.'); }
+    finally {
+      if (workspaceRead.current === load) {
+        workspaceRead.current = null; saving.current = false; setBusy(false);
+      }
+    }
   }
   function batch(kind: keyof CurriculumContext['pagination']) {
     const current = context.pagination[kind];

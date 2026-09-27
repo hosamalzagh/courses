@@ -220,3 +220,64 @@ test('abandoning a stalled plan read releases controls and cannot overwrite a ne
     await expect(page.getByRole('button',{name:'حفظ المنهج',exact:true})).toBeEnabled();
   } finally { release(); }
 });
+
+
+test('a stalled revision recovery cannot reopen the editor after section navigation', async ({page}) => {
+  await login(page); await page.goto(`${origin}/admin/curriculum?tab=levels`);
+  const edit = page.getByRole('button',{name:'تعديل الخطة الأولى',exact:true}).first();
+  const id = await edit.getAttribute('data-curriculum-edit'); expect(id).toBeTruthy();
+  await edit.click(); await expect(page.getByRole('form',{name:'إدارة منهج الفرع',exact:true})).toBeVisible();
+  const current = (await (await page.request.get(`${origin}/api/v1/center/levels/${id}`)).json()).levels[0].plan;
+  const changed = `محتوى تحديث التعارض ${Date.now()}`;
+  expect((await write(page,`levels/${id}/first-plan`,'PATCH', {plan_version_id:current.id,revision:current.revision,lectures:current.lectures.map((lecture:{number:number;title:string|null;planned_hours:number}) => ({number:lecture.number,title:lecture.title,planned_hours:lecture.planned_hours,content:changed}))})).status).toBe(200);
+  // Submit the unchanged baseline to create a conflict while the editor is not dirty.
+  await page.getByRole('button',{name:'حفظ المنهج',exact:true}).click();
+  await expect(page.getByRole('alert').filter({hasText:'تغيّرت الخطة'})).toBeVisible();
+  let release!: () => void; const held = new Promise<void>(resolve => {release=resolve;});
+  let started!: () => void; const requestStarted = new Promise<void>(resolve => {started=resolve;});
+  let finished!: () => void; const requestFinished = new Promise<void>(resolve => {finished=resolve;});
+  await page.route(`**/api/v1/center/levels/${id}`, async route => {
+    const response = await route.fetch(); started(); await held;
+    await route.fulfill({response}).catch(() => {}); finished();
+  }, {times:1});
+  try {
+    await page.getByRole('button',{name:'تحميل البيانات الحالية للمنهج',exact:true}).click(); await requestStarted;
+    await page.getByRole('tab',{name:'الكورسات',exact:true}).click(); await expect(page).toHaveURL(/tab=courses/);
+    await expect(page.getByRole('button',{name:'إنشاء كورس',exact:true})).toBeEnabled();
+    await expect(page.getByRole('form',{name:'إدارة منهج الفرع',exact:true})).toHaveCount(0);
+    release(); await requestFinished;
+    await expect(page.getByRole('form',{name:'إدارة منهج الفرع',exact:true})).toHaveCount(0);
+    await page.getByRole('tab',{name:'المستويات وخططها',exact:true}).click(); await expect(page).toHaveURL(/tab=levels/);
+    await page.locator(`[data-curriculum-edit="${id}"]`).click();
+    await expect(page.getByRole('textbox',{name:'محتوى المحاضرة 1',exact:true})).toHaveValue(changed);
+  } finally {release();}
+});
+
+
+test('abandoned instructor recovery cannot replace the search view or its header', async ({page}) => {
+  await login(page); await page.goto(`${origin}/admin/instructors`);
+  const edit = page.getByRole('button',{name:'تعديل ملف المحاضر',exact:true}).first();
+  const id = await edit.getAttribute('data-instructor-edit'); expect(id).toBeTruthy();
+  await edit.click();
+  const current = (await (await page.request.get(`${origin}/api/v1/center/instructors/${id}`)).json()).instructors[0];
+  expect((await write(page,`instructors/${id}`,'PATCH',{name:`000 أحدث ${Date.now()}`,phone:current.phone,branch_ids:current.branch_ids,revision:current.revision})).status).toBe(200);
+  await page.getByRole('button',{name:'حفظ بيانات المحاضر',exact:true}).click();
+  await expect(page.getByRole('alert').filter({hasText:'تغيّرت بيانات الملف'})).toBeVisible();
+  let release!: () => void; const held = new Promise<void>(resolve => {release=resolve;});
+  let started!: () => void; const requestStarted = new Promise<void>(resolve => {started=resolve;});
+  let finished!: () => void; const requestFinished = new Promise<void>(resolve => {finished=resolve;});
+  await page.route(`**/api/v1/center/instructors/${id}`, async route => {
+    const response = await route.fetch(); started(); await held;
+    await route.fulfill({response}).catch(() => {}); finished();
+  }, {times:1});
+  try {
+    await page.getByRole('button',{name:'تحميل أحدث بيانات المحاضر',exact:true}).click(); await requestStarted;
+    await page.getByRole('tab',{name:'البحث عن محاضر',exact:true}).click(); await expect(page).toHaveURL(/tab=search/);
+    await expect(page.getByRole('button',{name:'بحث عن محاضر',exact:true})).toBeEnabled();
+    release(); await requestFinished;
+    await expect(page.getByRole('button',{name:'تحميل أحدث بيانات المحاضر',exact:true})).toHaveCount(0);
+    await expect(page.getByRole('textbox',{name:'اسم المحاضر',exact:true})).toHaveCount(0);
+    await expect(page.getByRole('textbox',{name:'البحث في جميع الملفات المصرح بها',exact:true})).toBeVisible();
+    await expect(page.getByRole('alert').filter({hasText:'تغيّرت بيانات الملف'})).toHaveCount(0);
+  } finally {release();}
+});
