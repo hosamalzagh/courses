@@ -93,6 +93,18 @@ jobs:
       - name: Install PHP dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
 
+      - name: Set up Node.js for Laravel assets
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+
+      - name: Build Laravel and Filament assets
+        run: |
+          npm ci
+          npm run build
+
       - name: Prepare test environment
         run: |
           cp .env.example .env
