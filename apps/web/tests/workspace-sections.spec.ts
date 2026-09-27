@@ -188,26 +188,35 @@ test('search settings register only their actions and recover current policy bef
 });
 
 
-test('a delayed plan read cannot open an editor after switching sections', async ({page}) => {
+test('abandoning a stalled plan read releases controls and cannot overwrite a newer editor', async ({page}) => {
   await login(page); await page.goto(`${origin}/admin/curriculum?tab=levels`);
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
   let started!: () => void;
   const requestStarted = new Promise<void>(resolve => { started = resolve; });
+  let finished!: () => void;
+  const requestFinished = new Promise<void>(resolve => { finished = resolve; });
   await page.route('**/api/v1/center/levels/*', async route => {
-    const response = await route.fetch(); started(); await held; await route.fulfill({response});
+    const response = await route.fetch(); started(); await held;
+    // The original browser request is deliberately aborted by section navigation.
+    await route.fulfill({response}).catch(() => {}); finished();
   }, {times:1});
-  const loaded = page.waitForResponse(response => /\/api\/v1\/center\/levels\/[^/]+$/.test(response.url()));
   try {
     await page.getByRole('button',{name:'تعديل الخطة الأولى',exact:true}).first().click();
     await requestStarted;
     await page.getByRole('tab',{name:'الكورسات',exact:true}).click(); await expect(page).toHaveURL(/tab=courses/);
+    await expect(page.getByRole('button',{name:'إنشاء كورس',exact:true})).toBeEnabled();
+    await expect(page.getByText('جارٍ تحميل خطة المستوى الحالية…',{exact:true})).toHaveCount(0);
+    await page.getByRole('button',{name:'إنشاء كورس',exact:true}).click();
+    await expect(page.getByRole('form',{name:'إدارة منهج الفرع',exact:true})).toBeVisible();
+    await page.getByRole('button',{name:'إلغاء',exact:true}).click();
     await page.getByRole('tab',{name:'المستويات وخططها',exact:true}).click(); await expect(page).toHaveURL(/tab=levels/);
-    release(); await loaded;
-    await expect(page.getByText('جارٍ تحميل خطة المستوى الحالية…', {exact:true})).toHaveCount(0);
     await expect(page.getByRole('form',{name:'إدارة منهج الفرع',exact:true})).toHaveCount(0);
-    await expect(page.getByRole('table')).toHaveCount(1);
     await page.getByRole('button',{name:'تعديل الخطة الأولى',exact:true}).first().click();
     await expect(page.getByRole('form',{name:'إدارة منهج الفرع',exact:true})).toBeVisible();
+    const input = page.getByRole('textbox',{name:'محتوى المحاضرة 1',exact:true}); await input.fill('مسودة الطلب الأحدث');
+    release(); await requestFinished;
+    await expect(input).toHaveValue('مسودة الطلب الأحدث');
+    await expect(page.getByRole('button',{name:'حفظ المنهج',exact:true})).toBeEnabled();
   } finally { release(); }
 });

@@ -38,10 +38,15 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [conflict, setConflict] = useState(false);
   const saving = useRef(false);
-  const planView = useRef<object>({});
-  useEffect(() => {
-    planView.current = {};
-    return () => { planView.current = {}; };
+  const planLoad = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    const abandoned = planLoad.current;
+    if (abandoned) {
+      planLoad.current = null;
+      abandoned.abort();
+      saving.current = false;
+      setBusy(false);
+    }
   }, [section]);
   const [baseline, setBaseline] = useState('');
   const dirty = editor !== null && baseline !== JSON.stringify([name, branchId, lectures]);
@@ -59,22 +64,27 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   }
   async function editPlan(level: Level) {
     if (saving.current) return;
-    const originView = planView.current;
+    const load = new AbortController();
+    planLoad.current = load;
     const action = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     saving.current = true; setBusy(true); setError('');
     try {
-      const response = await centerRequest(`levels/${level.id}`, 'GET');
+      const response = await centerRequest(`levels/${level.id}`, 'GET', undefined, load.signal);
       if (!response.ok) {
         const message = await responseMessage(response);
-        if (planView.current === originView) setError(message);
+        if (planLoad.current === load) setError(message);
         return;
       }
       const data = await response.json() as CurriculumContext;
-      if (planView.current !== originView) return;
+      if (planLoad.current !== load) return;
       trigger.current = action;
       open({ kind: 'plan', level: data.levels[0] }, true);
-    } catch { if (planView.current === originView) setError('تعذر تحميل خطة المستوى. حاول مرة أخرى.'); }
-    finally { saving.current = false; setBusy(false); }
+    } catch { if (planLoad.current === load) setError('تعذر تحميل خطة المستوى. حاول مرة أخرى.'); }
+    finally {
+      if (planLoad.current === load) {
+        planLoad.current = null; saving.current = false; setBusy(false);
+      }
+    }
   }
   function close() {
     setEditor(null); setError(''); setConflict(false);

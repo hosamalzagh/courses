@@ -6,7 +6,7 @@ export function newSubmissionId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export async function centerRequest(path: string, method: "GET" | "POST" | "PATCH" | "PUT", body?: object): Promise<Response> {
+export async function centerRequest(path: string, method: "GET" | "POST" | "PATCH" | "PUT", body?: object, signal?: AbortSignal): Promise<Response> {
   if (method !== "GET") {
     await fetch("/sanctum/csrf-cookie", { credentials: "same-origin", cache: "no-store" });
   }
@@ -15,6 +15,7 @@ export async function centerRequest(path: string, method: "GET" | "POST" | "PATC
 
   const response = await fetch(`/api/v1/center/${path}`, {
     method,
+    signal,
     credentials: "same-origin",
     cache: "no-store",
     headers: {
