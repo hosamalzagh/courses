@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { Button } from "@/components/Button";
@@ -18,10 +18,14 @@ export function StudentNumberingControls({ start, revision }: { start: number; r
   const [fieldError, setFieldError] = useState("");
   const [notice, setNotice] = useState("");
   const [conflict, setConflict] = useState(false);
+  const saving = useRef(false);
 
 
   async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError(""); setFieldError(""); setNotice(""); setConflict(false);
+    event.preventDefault();
+    if (saving.current) return;
+    saving.current = true;
+    setBusy(true); setError(""); setFieldError(""); setNotice(""); setConflict(false);
     try {
       const response = await centerRequest("student-numbering", "PATCH", { start: value, revision: currentRevision });
       if (!response.ok) {
@@ -36,10 +40,12 @@ export function StudentNumberingControls({ start, revision }: { start: number; r
       setNotice("حُفظت بداية ترقيم الطلاب.");
       router.refresh();
     } catch (failure) { setError(failure instanceof Error ? failure.message : "تعذر حفظ بداية الترقيم."); }
-    finally { setBusy(false); }
+    finally { saving.current = false; setBusy(false); }
   }
 
   async function reload() {
+    if (saving.current) return;
+    saving.current = true;
     setBusy(true); setError("");
     try {
       const response = await fetch("/api/v1/center/settings", { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
@@ -48,7 +54,7 @@ export function StudentNumberingControls({ start, revision }: { start: number; r
       setValue(String(data.settings.student_number_start));
       setSavedValue(String(data.settings.student_number_start)); setCurrentRevision(data.settings.student_number_revision); setConflict(false);
     } catch (failure) { setError(failure instanceof Error ? failure.message : "تعذر تحميل الإعداد الحالي."); }
-    finally { setBusy(false); }
+    finally { saving.current = false; setBusy(false); }
   }
 
   return <form className="context-card form-stack" noValidate onSubmit={save} aria-label="ترقيم الطلاب">
@@ -57,10 +63,12 @@ export function StudentNumberingControls({ start, revision }: { start: number; r
     <p>تسلسل واحد لجميع فروع المركز. تغيير البداية يحفظ أرقام الطلاب الحالية، ولا يعيد استعمال رقم صدر سابقًا. إذا كانت البداية أقل من التسلسل الحالي يستمر الترقيم منه.</p>
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
+    <fieldset disabled={busy} className="form-stack" style={{ border: 0, margin: 0, padding: 0 }}>
     <FormField id="student-number-start" label="بداية ترقيم الطلاب" value={value} onChange={(next) => { setValue(next); setFieldError(""); }} type="number" direction="ltr" required error={fieldError} />
     <div className="form-actions">
       <Button variant="primary" type="submit" disabled={busy || conflict} busy={busy} busyLabel="جارٍ الحفظ…">حفظ بداية الترقيم</Button>
       {conflict ? <Button type="button" disabled={busy} onClick={reload}>تحميل إعداد الترقيم الحالي</Button> : null}
     </div>
+    </fieldset>
   </form>;
 }

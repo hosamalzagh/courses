@@ -36,6 +36,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
   const dirty = !saved && (name !== (editor === 'new' ? '' : editor.name) || phone !== (editor === 'new' ? '' : editor.phone ?? '') || JSON.stringify([...branchIds].sort()) !== JSON.stringify([...initialBranches].sort()) || JSON.stringify(general) !== JSON.stringify(profileData(editor === 'new' ? undefined : editor)));
 
   function open(student: Student) {
+    setSaved(false);
     setGeneral(profileData(student));
     setEditor(student); setName(student.name); setPhone(student.phone ?? '');
     setBranchIds(student.branch_ids.filter((id) => manageable.some((branch) => branch.id === id)));
@@ -67,7 +68,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         ...(editor === 'new' ? { request_id: requestId } : { revision: editor.revision }),
       });
       if (!response.ok) {
-        if (response.status === 409) {
+        if (response.status === 409 && (await response.clone().json().catch(() => ({}))).code !== 'student_numbering_exhausted') {
           setConflict(true);
           setError('تغيّرت بيانات الملف أو الطلب. راجع أحدث بيانات الطالب قبل إعادة الحفظ.');
         } else if (response.status === 404) {
@@ -78,6 +79,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         return;
       }
       const data = await response.json() as { student: Student };
+      open(data.student);
       setSaved(true);
       router.push(`/admin/students/${data.student.id}?focus=edit`);
       router.refresh();
@@ -95,20 +97,20 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
       const wasNew = editor === 'new';
       open(wasNew ? data.student! : data.students[0]);
       if (wasNew) setNotice('الملف حُفظ سابقًا. راجع بياناته قبل تعديلها؛ لن يُنشأ ملف آخر.');
-      router.refresh();
       requestAnimationFrame(() => document.getElementById('student-name')?.focus());
     } catch { setError('تعذر تحميل أحدث البيانات. حاول مرة أخرى.'); }
     finally { setBusy(false); }
   }
 
   function changeGeneral(field: keyof StudentGeneralData, value: string) {
+    setSaved(false);
     setGeneral((data) => ({ ...data, [field]: value || null }));
     setFieldErrors((errors) => ({ ...errors, [field]: '' }));
   }
 
   return <>
     <CenterPageActions context={context} />
-    <UnsavedChangesGuard dirty={dirty} />
+    <UnsavedChangesGuard dirty={dirty} guardHistory />
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
       <form className='context-card form-stack' aria-label={editor === 'new' ? 'ملف طالب جديد' : `تعديل ملف ${editor.name}`} noValidate onSubmit={save}>
@@ -116,14 +118,14 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         <fieldset disabled={busy} className='form-stack' style={{ border: 0, padding: 0, margin: 0 }}>
         <h2>البيانات الشخصية</h2>
         <div className='student-fields'>
-        <FormField id='student-name' label='اسم الطالب' focusOnMount value={name} onChange={(value) => { setName(value); setFieldErrors({}); setSimilar([]); }} error={fieldErrors.name} required autoComplete='off' />
+        <FormField id='student-name' label='اسم الطالب' focusOnMount value={name} onChange={(value) => { setSaved(false); setName(value); setFieldErrors({}); setSimilar([]); }} error={fieldErrors.name} required autoComplete='off' />
         <FormField id='student-date_of_birth' label='تاريخ الميلاد' value={general.date_of_birth ?? ''} onChange={(value) => changeGeneral('date_of_birth', value)} error={fieldErrors.date_of_birth} direction='ltr' hint='اختياري بصيغة YYYY-MM-DD. العمر يُحسب تلقائيًا من التاريخ.' />
         <fieldset className='branch-grants'><legend>النوع (اختياري)</legend>{[['', 'غير محدد'], ['male', 'ذكر'], ['female', 'أنثى']].map(([value, label]) => <label className='check-row' key={value}><input type='radio' name='student-gender' value={value} checked={(general.gender ?? '') === value} onChange={() => changeGeneral('gender', value)} />{label}</label>)}{fieldErrors.gender ? <p className='field-error' role='alert'>{fieldErrors.gender}</p> : null}</fieldset>
         <FormField id='student-address' label='العنوان' value={general.address ?? ''} onChange={(value) => changeGeneral('address', value)} error={fieldErrors.address} autoComplete='street-address' />
         </div>
         <h2>التواصل</h2><div className='student-fields'>
         <FormField id='student-email' label='البريد الإلكتروني' type='email' direction='ltr' value={general.email ?? ''} onChange={(value) => changeGeneral('email', value)} error={fieldErrors.email} autoComplete='email' />
-        <FormField id='student-phone' label='رقم التواصل' value={phone} onChange={(value) => { setPhone(value); setFieldErrors({}); setSimilar([]); }} error={fieldErrors.phone} type='tel' direction='ltr' autoComplete='off' hint='اختياري، ويمكن لأكثر من طالب استخدام نفس الرقم.' />
+        <FormField id='student-phone' label='رقم التواصل' value={phone} onChange={(value) => { setSaved(false); setPhone(value); setFieldErrors({}); setSimilar([]); }} error={fieldErrors.phone} type='tel' direction='ltr' autoComplete='off' hint='اختياري، ويمكن لأكثر من طالب استخدام نفس الرقم.' />
         </div><h2>خلفية الدراسة والعمل</h2><div className='student-fields'>
         {([['school', 'المدرسة / جهة الدراسة'], ['employer', 'جهة العمل'], ['specialization', 'التخصص']] as const).map(([key, label]) => <FormField key={key} id={`student-${key}`} label={label} value={general[key] ?? ''} onChange={(value) => changeGeneral(key, value)} error={fieldErrors[key]} />)}
         </div>
@@ -131,7 +133,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
           <p id='student-branches-hint' className='muted'>اختر فروع التسجيل المصرح بها. تبقى ارتباطات الملف السابقة محفوظة.</p>
           {manageable.map((branch) => {
             const associated = editor !== 'new' && editor.branch_ids.includes(branch.id);
-            return <label key={branch.id} className='check-row'><input type='checkbox' checked={branchIds.includes(branch.id)} disabled={busy || associated} onChange={(event) => { setBranchIds((ids) => event.target.checked ? [...ids, branch.id] : ids.filter((id) => id !== branch.id)); setFieldErrors({}); }} />{branch.name}{associated ? ' — مرتبط بالفعل' : ''}</label>;
+            return <label key={branch.id} className='check-row'><input type='checkbox' checked={branchIds.includes(branch.id)} disabled={busy || associated} onChange={(event) => { setSaved(false); setBranchIds((ids) => event.target.checked ? [...ids, branch.id] : ids.filter((id) => id !== branch.id)); setFieldErrors({}); }} />{branch.name}{associated ? ' — مرتبط بالفعل' : ''}</label>;
           })}
           {fieldErrors.branch_ids ? <p id='student-branches-error' className='field-error' role='alert'>{fieldErrors.branch_ids}</p> : null}
         </fieldset>

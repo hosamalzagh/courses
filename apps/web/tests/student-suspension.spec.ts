@@ -71,7 +71,7 @@ test('owner suspends and lifts with visible periods, confirmation, RTL, themes a
   await page.screenshot({ path: '/tmp/courses-issue68-mobile-dark.png', fullPage: true });
   await page.goto(`${ownerHost}/admin/audit`);
   await page.getByText('عرض تغيير حالة الطالب', { exact: true }).first().click();
-  await expect(page.getByText('السبب: قبول فك الإيقاف', { exact: true })).toBeVisible();
+  await expect(page.locator('details[open]').getByText('السبب: قبول فك الإيقاف', { exact: true })).toBeVisible();
 });
 
 test('parallel requests, stale revision, cross center access, revoked administrator, and CSRF cannot bypass status decisions', async ({ browser }) => {

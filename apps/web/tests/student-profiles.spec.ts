@@ -15,6 +15,74 @@ const fixture = fixtureFile ? JSON.parse(readFileSync(fixtureFile, 'utf8')) : un
 const sessions: Partial<Record<'alpha' | 'beta' | 'staff', Awaited<ReturnType<BrowserContext['storageState']>>>> = {};
 const credentials = (name: 'alpha' | 'beta' | 'staff') => fixture?.[name] ?? localCredentials(name);
 
+test('combined profile keeps number and sharing through suspension, general edits and browser Back', async ({ page }) => {
+  await signIn(page);
+  const settings = (await (await page.request.get(`${host}/api/v1/center/settings`)).json()).settings;
+  const start = Date.now() * 100;
+  expect((await write(page, 'student-numbering', 'PATCH', { start, revision: settings.student_number_revision })).status).toBe(200);
+  const policy = (await (await page.request.get(`${host}/api/v1/center/student-search-workspace`)).json()).policy;
+  expect((await write(page, 'student-search-policy', 'PATCH', { enabled: true, default_sharing_enabled: true, revision: policy.revision })).status).toBe(200);
+  const student = await create(page, `طالب قبول ${Date.now()} تكامل`);
+  expect(student.student_number).toBe(start);
+  await expect(page.getByText('المشاركة بين الفروع: مسموحة', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'غلق مشاركة الطالب', exact: true }).click();
+  await expect(page.getByText('المشاركة بين الفروع: مغلقة', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'إيقاف ملف الطالب', exact: true }).click();
+  await page.getByRole('textbox', { name: 'سبب تغيير الحالة' }).fill('إيقاف قبول التكامل');
+  await page.getByRole('button', { name: 'إيقاف ملف الطالب', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'إيقاف ملف الطالب', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'حالة ملف الطالب: موقوف' })).toBeVisible();
+  await page.getByRole('link', { name: 'تعديل ملف الطالب', exact: true }).click();
+  await page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true }).fill('مدرسة التكامل');
+  await page.goBack();
+  await expect(page.getByRole('dialog')).toContainText('مغادرة دون حفظ');
+  await page.getByRole('dialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}/edit$`));
+  await expect(page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true })).toHaveValue('مدرسة التكامل');
+  await page.getByRole('button', { name: 'حفظ بيانات الطالب', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
+  const current = (await (await page.request.get(`${host}/api/v1/center/students/${student.id}`)).json()).students[0];
+  expect(current.student_number).toBe(start); expect(current.school).toBe('مدرسة التكامل');
+  expect(current.sharing_enabled).toBe(false); expect(current.status).toBe('suspended');
+  const barcode = await page.request.get(`${host}/api/v1/center/students/${student.id}/barcode`);
+  expect(barcode.status()).toBe(200); expect(await barcode.text()).toContain(String(start));
+  expect(await barcode.text()).not.toContain('مدرسة التكامل');
+  await page.getByRole('button', { name: 'فك إيقاف ملف الطالب', exact: true }).click();
+  await page.getByRole('textbox', { name: 'سبب تغيير الحالة' }).fill('عودة قبول التكامل');
+  await page.getByRole('button', { name: 'فك إيقاف ملف الطالب', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'فك إيقاف ملف الطالب', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'حالة ملف الطالب: نشط' })).toBeVisible();
+  await expect(page.getByText('المشاركة بين الفروع: مغلقة', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'تعديل ملف الطالب', exact: true }).click();
+  await page.getByRole('link', { name: 'إلغاء', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}/edit$`));
+  await expect(page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true })).toBeVisible();
+  await page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true }).fill('تعديل لم يُحفظ');
+  await page.goForward();
+  await expect(page.getByRole('dialog')).toContainText('مغادرة دون حفظ');
+  await page.getByRole('dialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true })).toHaveValue('تعديل لم يُحفظ');
+  await page.evaluate(() => history.go(-2));
+  await expect(page.getByRole('dialog')).toContainText('مغادرة دون حفظ');
+  await page.getByRole('dialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}/edit$`));
+  await expect(page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true })).toHaveValue('تعديل لم يُحفظ');
+  await page.goForward();
+  await page.getByRole('dialog').getByRole('button', { name: 'مغادرة دون حفظ', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
+  expect((await (await page.request.get(`${host}/api/v1/center/students/${student.id}`)).json()).students[0].school).toBe('مدرسة التكامل');
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}/edit$`));
+  await page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true }).fill('تعديل بعد العودة');
+  await page.goBack();
+  await expect(page.getByRole('dialog')).toContainText('مغادرة دون حفظ');
+  await page.getByRole('dialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true })).toHaveValue('تعديل بعد العودة');
+});
+
 function measureCursor(): number {
   if (process.env.COURSES_PROFILE_READ_LOG) return readFileSync(process.env.COURSES_PROFILE_READ_LOG, 'utf8').trim().split('\n').length;
   return Number(execFileSync(php, ['artisan', 'tinker', '--no-interaction', String.raw`--execute=echo \Illuminate\Support\Facades\DB::connection('central')->table('telescope_entries')->max('sequence') ?? 0;`], {cwd:apiDirectory,stdio:'pipe'}).toString().trim());
@@ -89,8 +157,9 @@ test.beforeAll(async ({ browser }) => {
 test.afterEach(() => {
   if (!createdStudentIds.size) return;
   execFileSync(php, ['artisan', 'tinker', '--no-interaction', '--execute=' + String.raw`
-    if (getenv('COURSES_PROFILE_FIXTURE_FILE') && config('database.connections.central.port') !== '5556') throw new \RuntimeException('Isolated profile fixture connection required');
-    if (!app()->isLocal() || config('database.connections.central.database') !== 'courses_central') throw new \RuntimeException('Local fixture cleanup only');
+    $isolated = getenv('COURSES_PROFILE_FIXTURE_FILE') && getenv('COURSES_PROFILE_DB_PORT') && (string) config('database.connections.central.port') === getenv('COURSES_PROFILE_DB_PORT') && (string) config('database.connections.central.port') !== '5432' && config('database.connections.central.host') === '127.0.0.1';
+    if (getenv('COURSES_PROFILE_FIXTURE_FILE') && !$isolated) throw new \RuntimeException('Isolated profile fixture connection required');
+    if (!app()->isLocal() || (!$isolated && config('database.connections.central.database') !== 'courses_central')) throw new \RuntimeException('Local fixture cleanup only');
     $ids = json_decode(getenv('COURSES_TEST_STUDENT_IDS'), true, flags: JSON_THROW_ON_ERROR);
     foreach ($ids as $id) if (!\Illuminate\Support\Str::isUuid($id)) throw new \RuntimeException('Unexpected fixture identifier');
     \App\Models\Center::where('slug', 'alpha')->firstOrFail()->run(function () use ($ids) {
@@ -98,6 +167,7 @@ test.afterEach(() => {
         $rows = \Illuminate\Support\Facades\DB::table('students')->whereIn('id', $ids)->get();
         foreach ($rows as $row) if (!preg_match('/^(طالب قبول|طالب آخر|محجوب|مصرح|إعادة|متزامن أول|متزامن ثان|استعادة) [0-9]{13}/u', $row->name)) throw new \RuntimeException('Unexpected student fixture');
         \Illuminate\Support\Facades\DB::table('center_audit_logs')->whereIn(\Illuminate\Support\Facades\DB::raw("details->>'student_id'"), $ids)->delete();
+        \Illuminate\Support\Facades\DB::table('student_suspensions')->whereIn('student_id', $ids)->delete();
         \Illuminate\Support\Facades\DB::table('student_branches')->whereIn('student_id', $ids)->delete();
         \Illuminate\Support\Facades\DB::table('students')->whereIn('id', $ids)->delete();
       });
@@ -287,7 +357,7 @@ test('normal SSR register, create, profile and edit each use at most six measure
     expect(rows.reduce((sum,row) => sum+(row.count ?? Number.NaN),0)).toBeLessThanOrEqual(6);
     console.log(JSON.stringify({route,application_sql:rows.reduce((sum,row)=>sum+(row.count ?? Number.NaN),0),requests:rows.length}));
   }
-  await page.goto(`${host}/admin/students`);
+  await page.goto(`${host}/admin/students?q=${encodeURIComponent(String(student.student_number))}`);
   const cursor = measureCursor();
   const link = page.locator(`a[href="/admin/students/${student.id}"]`).first();
   await link.hover();

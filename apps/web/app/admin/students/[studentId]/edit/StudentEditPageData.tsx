@@ -8,5 +8,5 @@ export async function StudentEditPageData({ params }: { params: Promise<{ studen
   const context = await loadStudentWorkspace('', studentId);
   if (typeof context === 'string') return <CenterAccessState state={context} />;
   if (!context.students[0].can_manage) return <CenterAccessState state='forbidden' />;
-  return <CenterPage context={context} path={`/admin/students/${studentId}/edit`}><StudentForm context={context} student={context.students[0]} /></CenterPage>;
+  return <CenterPage context={context} path={`/admin/students/${studentId}/edit`}><StudentForm key={`${context.students[0].id}:${context.students[0].revision}`} context={context} student={context.students[0]} /></CenterPage>;
 }
