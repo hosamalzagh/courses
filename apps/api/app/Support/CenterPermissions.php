@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 class CenterPermissions
 {
     public const GRANTS = [
+        'student_identity' => ['description' => 'قراءة القومي والجواز وبيانات الهوية داخل الفروع المسندة فقط. التعديل يحتاج إدارة ملف الطالب؛ يمنحها المالك فقط.', 'label' => 'بيانات هوية الطالب', 'actions' => ['students.identity'], 'additional' => true, 'owner_only' => true],
         'branch_manager' => ['description' => 'عرض بيانات الفرع وتعديلها. أدوار التشغيل والصلاحيات الإضافية تُمنح بصورة مستقلة.', 'label' => 'مدير الفرع', 'actions' => ['read', 'update']],
         'branch_viewer' => ['description' => 'عرض بيانات الفرع دون تعديل.', 'label' => 'عرض الفرع', 'actions' => ['read']],
         'branch_auditor' => ['description' => 'عرض الفرع وسجل تدقيقه.', 'label' => 'تدقيق الفرع', 'actions' => ['read', 'audit']],

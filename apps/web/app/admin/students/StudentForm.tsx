@@ -15,13 +15,14 @@ import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard';
 import { buttonVariants } from "@/components/ui/button";
 import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
 import { Button } from '@/components/Button';
+import { StudentIdentityFields } from '@/components/StudentIdentityFields';
 import { StudentContactFields } from '@/components/StudentContactFields';
 import { studentContactsData, contactValidation } from '@/lib/student-contacts';
 import { StudentChoiceFields } from '@/components/StudentChoiceFields';
 import { FormField } from '@/components/FormField';
 import { InlineNotice } from '@/components/InlineNotice';
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from '@/lib/client-api';
-import type { Student, StudentContext, StudentGeneralData } from '@/lib/server-context';
+import type { Student, StudentContext, StudentGeneralData, StudentIdentityData } from '@/lib/server-context';
 
 type SimilarStudent = Pick<Student, 'id' | 'student_number' | 'name' | 'phone'> & { within_scope?: boolean };
 
@@ -42,6 +43,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
   const [requestId, setRequestId] = useState(newSubmissionId);
   const [general, setGeneral] = useState<StudentGeneralData>(profileData(student));
   const [contactData, setContactData] = useState(() => studentContactsData(student));
+  const [identity, setIdentity] = useState<StudentIdentityData>(student?.identity ?? {national_id:null,passport_number:null});
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
@@ -53,11 +55,14 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
   const [conflict, setConflict] = useState(false);
 
   const initialBranches = editor === 'new' ? manageable.slice(0, 1).map((branch) => branch.id) : editor ? editor.branch_ids.filter((id) => manageable.some((branch) => branch.id === id)) : [];
-  const dirty = !saved && (manualCode !== (editor === 'new' ? '' : editor.manual_code ?? '') || name !== (editor === 'new' ? '' : editor.name) || phone !== (editor === 'new' ? '' : editor.legacy_phone ?? '') || JSON.stringify([...branchIds].sort()) !== JSON.stringify([...initialBranches].sort()) || JSON.stringify(general) !== JSON.stringify(profileData(editor === 'new' ? undefined : editor)) || JSON.stringify(contactData) !== JSON.stringify(studentContactsData(editor === 'new' ? undefined : editor)));
+  const canManageIdentity = editor === 'new' ? branchIds.some(id => context.permissions.can_manage_center || (context.permissions.branch_actions?.[String(id)] ?? []).includes('students.identity')) : editor.can_manage_identity;
+  const canReadIdentity = editor === 'new' ? canManageIdentity : editor.can_read_identity;
+  const dirty = !saved && (JSON.stringify(identity) !== JSON.stringify(editor === 'new' ? {national_id:null,passport_number:null} : editor.identity ?? {national_id:null,passport_number:null}) || manualCode !== (editor === 'new' ? '' : editor.manual_code ?? '') || name !== (editor === 'new' ? '' : editor.name) || phone !== (editor === 'new' ? '' : editor.legacy_phone ?? '') || JSON.stringify([...branchIds].sort()) !== JSON.stringify([...initialBranches].sort()) || JSON.stringify(general) !== JSON.stringify(profileData(editor === 'new' ? undefined : editor)) || JSON.stringify(contactData) !== JSON.stringify(studentContactsData(editor === 'new' ? undefined : editor)));
 
   function open(student: Student) {
     setSaved(false);
     setGeneral(profileData(student));
+    setIdentity(student.identity ?? {national_id:null,passport_number:null});
     setManualCode(student.manual_code ?? '');
     setContactData(studentContactsData(student));
     setEditor(student); setName(student.name); setPhone(student.legacy_phone ?? '');
@@ -105,7 +110,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         if (matches.length) return;
       }
       const response = await centerRequest(editor === 'new' ? 'students' : `students/${editor.id}`, editor === 'new' ? 'POST' : 'PATCH', {
-        name: name.trim(), phone: phone.trim() || null, branch_ids: editor === 'new' ? branchIds : branchIds.filter((id) => !editor.branch_ids.includes(id)), ...general, ...contactData, ...(context.student_code_settings.enabled ? {manual_code:manualCode.trim() || null} : {}),
+        name: name.trim(), phone: phone.trim() || null, branch_ids: editor === 'new' ? branchIds : branchIds.filter((id) => !editor.branch_ids.includes(id)), ...general, ...contactData, ...(canManageIdentity ? identity : {}), ...(context.student_code_settings.enabled ? {manual_code:manualCode.trim() || null} : {}),
         ...(editor === 'new' ? { request_id: requestId } : { revision: editor.revision }),
       });
       if (!response.ok) {
@@ -166,6 +171,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         <FormField id='student-address' label='العنوان' value={general.address ?? ''} onChange={(value) => changeGeneral('address', value)} error={fieldErrors.address} autoComplete='street-address' />
         </div>
         {context.student_code_settings.enabled ? <FormField id={`${formPrefix}-manual-code`} label={context.student_code_settings.label} value={manualCode} direction='ltr' autoComplete='off' error={fieldErrors.manual_code} hint='اختياري. احتفظ بالأصفار والأحرف؛ الرمز فريد داخل المركز ولا يطابق رقم طالب آخر.' onChange={value => {setSaved(false);setManualCode(value);setFieldErrors({});}} /> : editor !== 'new' && editor.manual_code ? <p>{context.student_code_settings.label} — معطل، والقيمة محفوظة: <bdi dir='ltr'>{editor.manual_code}</bdi></p> : null}
+        {canReadIdentity ? <StudentIdentityFields key={editor === 'new' ? requestId : `${editor.id}-${editor.revision}`} prefix={formPrefix} identity={identity} onChange={value => {setSaved(false);setIdentity(value);setFieldErrors({});}} dateOfBirth={general.date_of_birth} onBirthChange={value => changeGeneral('date_of_birth',value)} studentId={editor === 'new' ? undefined : editor.id} branchIds={branchIds} errors={fieldErrors} onFieldErrors={setFieldErrors} busy={busy} canManage={canManageIdentity} onBusyChange={value => {saving.current=value;setBusy(value);}} /> : null}
         <h2>التواصل</h2><div className='student-fields'>
         <FormField id='student-email' label='البريد الإلكتروني' type='email' direction='ltr' value={general.email ?? ''} onChange={(value) => changeGeneral('email', value)} error={fieldErrors.email} autoComplete='email' />
         {editor !== 'new' && editor.legacy_phone !== null ? <FormField id='student-phone' label='رقم التواصل' value={phone} onChange={(value) => { setSaved(false); setPhone(value); setFieldErrors({}); setSimilar([]); }} error={fieldErrors.phone} type='tel' direction='ltr' autoComplete='off' hint='رقم سابق بصاحب غير محدد. أضف جهة وقناة لاستكمال صاحب الرقم؛ يبقى الرقم السابق محفوظًا.' /> : null}
