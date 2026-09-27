@@ -25,6 +25,7 @@ class CenterStudentController extends Controller
     {
         $data = $request->validate([
             'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'status_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'branches_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'q' => ['nullable', 'string', 'max:255'],
         ]);
@@ -54,6 +55,13 @@ class CenterStudentController extends Controller
                 }
             });
         }
+        if ($studentId !== null) {
+            $statusPage = (int) ($data['status_page'] ?? 1);
+            $history = DB::connection('tenant')->table('student_suspensions')->where('student_id', $studentId)
+                ->orderByDesc('suspended_at')->orderByDesc('id')->offset(($statusPage - 1) * 20)->limit(21)
+                ->select(['id', 'suspended_by', 'suspended_by_name', 'suspended_reason', 'suspended_at', 'lifted_by', 'lifted_by_name', 'lifted_reason', 'lifted_at']);
+            $query->selectSub(DB::connection('tenant')->query()->fromSub($history, 'periods')->selectRaw('json_agg(periods)'), 'suspensions');
+        }
         $students = $query->orderBy('student_number')->offset(($page - 1) * 50)->limit(51)->get();
         if ($studentId !== null) {
             abort_if($students->isEmpty(), 404);
@@ -66,6 +74,7 @@ class CenterStudentController extends Controller
             'permissions' => $permissions->toArray(),
             'branches' => $branches->take(50)->values(),
             'students' => $students->take(50)->map(fn (stdClass $student): array => $this->payload($student, $permissions))->values(),
+            ...($studentId !== null ? ['suspensions' => array_slice(json_decode($students->first()->suspensions ?? '[]', true) ?? [], 0, 20), 'status_pagination' => ['page' => $statusPage, 'has_more' => count(json_decode($students->first()->suspensions ?? '[]', true) ?? []) > 20]] : []),
             'pagination' => ['page' => $page, 'has_more' => $students->count() > 50, 'branches_page' => $branchPage, 'branches_has_more' => $branches->count() > 50],
         ])->header('Cache-Control', 'private, no-store');
     }
@@ -252,6 +261,7 @@ class CenterStudentController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'], 'phone' => ['nullable', 'string', 'max:50'],
             'branch_ids' => ['present', 'array', $request->isMethod('POST') ? 'min:1' : 'min:0', 'max:50'], 'branch_ids.*' => ['integer', 'distinct'],
+            'status' => ['prohibited'], 'status_revision' => ['prohibited'],
             'student_number' => ['prohibited'], 'user_id' => ['prohibited'],
             'date_of_birth' => ['sometimes', 'nullable', 'date_format:Y-m-d', 'after_or_equal:0001-01-01', 'before_or_equal:today'],
             'gender' => ['sometimes', 'nullable', 'in:male,female'],
@@ -298,7 +308,7 @@ class CenterStudentController extends Controller
         }
 
         return DB::connection('tenant')->table('students')
-            ->select(['students.id', 'student_number', 'name', 'phone', 'revision', 'created_by', 'created_at', 'sharing_enabled', ...self::GENERAL_FIELDS])
+            ->select(['students.id', 'student_number', 'name', 'phone', 'revision', 'created_by', 'created_at', 'sharing_enabled', 'status', 'status_revision', ...self::GENERAL_FIELDS])
             ->selectSub((clone $associations)->selectRaw('json_agg(branch_id ORDER BY branch_id)'), 'branch_ids')
             ->where(function (Builder $query) use ($associations, $permissions, $includeCenterSearch): void {
                 $query->whereExists((clone $associations)->selectRaw('1'));
@@ -317,6 +327,7 @@ class CenterStudentController extends Controller
 
         return [...array_intersect_key((array) $row, array_flip(self::GENERAL_FIELDS)),
             'age' => $row->date_of_birth === null ? null : (int) CarbonImmutable::parse($row->date_of_birth)->diffInYears(CarbonImmutable::today()),
+            'status' => $row->status, 'status_revision' => $row->status_revision, 'can_change_status' => $permissions->isCenterManager(),
             'created_by' => $row->created_by, 'created_at' => $row->created_at,
             'id' => $row->id, 'student_number' => $row->student_number, 'name' => $row->name, 'phone' => $row->phone,
             'revision' => $row->revision, 'branch_ids' => $branches, 'sharing_enabled' => (bool) $row->sharing_enabled,

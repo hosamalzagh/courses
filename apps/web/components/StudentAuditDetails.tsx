@@ -9,13 +9,14 @@ export function StudentAuditDetails({ entry }: { entry: AuditEntry }) {
     const status = (value?: boolean) => value === true ? 'مسموحة' : value === false ? 'مغلقة' : 'غير مسجل';
     return <details><summary>عرض تغيير مشاركة الطالب</summary><p>قبل التغيير: {status(data.before?.sharing_enabled)}</p><p>بعد التغيير: {status(data.after?.sharing_enabled)}</p></details>;
   }
-  if (!['student.created', 'student.updated'].includes(entry.event)) return null;
+  if (!['student.created', 'student.updated', 'student.suspended', 'student.reactivated'].includes(entry.event)) return null;
   let details = entry.details;
   if (typeof details === 'string') {
     try { details = JSON.parse(details); } catch { return null; }
   }
   if (!details || typeof details !== 'object' || Array.isArray(details)) return null;
   const data = details as Record<string, unknown>;
+  if (['student.suspended', 'student.reactivated'].includes(entry.event)) return <details><summary>عرض تغيير حالة الطالب</summary><p>قبل التغيير: {data.before === 'active' ? 'نشط' : 'موقوف'}</p><p>بعد التغيير: {data.after === 'active' ? 'نشط' : 'موقوف'}</p><p>السبب: {typeof data.reason === 'string' ? data.reason : ''}</p></details>;
   function basic(value: unknown) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return 'لم يكن الملف موجودًا';
     const record = value as Record<string, unknown>;

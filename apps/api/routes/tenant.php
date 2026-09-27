@@ -11,6 +11,7 @@ use App\Http\Controllers\CenterSettingsController;
 use App\Http\Controllers\CenterStudentController;
 use App\Http\Controllers\CenterStudentNumberingController;
 use App\Http\Controllers\CenterStudentSearchController;
+use App\Http\Controllers\CenterStudentStatusController;
 use App\Http\Middleware\MeasureCenterQueries;
 use App\Http\Middleware\RequireCenterMember;
 use App\Http\Middleware\ResolveCenter;
@@ -71,6 +72,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('students/submissions/{requestId}', [CenterStudentController::class, 'submission']);
         Route::get('students/{studentId}/barcode', [CenterStudentController::class, 'barcode']);
         Route::get('students/{studentId}', [CenterStudentController::class, 'workspace']);
+        Route::post('students/{studentId}/status', [CenterStudentStatusController::class, 'store']);
         Route::post('students', [CenterStudentController::class, 'store']);
         Route::patch('students/{studentId}/sharing', [CenterStudentController::class, 'updateSharing']);
         Route::patch('students/{studentId}', [CenterStudentController::class, 'update']);

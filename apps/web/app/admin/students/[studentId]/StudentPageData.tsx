@@ -3,16 +3,22 @@ import { loadStudentWorkspace } from '@/lib/server-context';
 import { CenterAccessState } from '@/components/CenterAccessState';
 import { CenterPage } from '@/components/CenterPage';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
+import { StudentStatusPanel } from '../StudentStatusPanel';
+import { StudentSharingControls } from '../StudentSharingControls';
 import { StudentProfileActions } from '../StudentProfileActions';
 
-export async function StudentPageData({ params }: { params: Promise<{ studentId: string }> }) {
+export async function StudentPageData({ params, searchParams }: { params: Promise<{ studentId: string }>; searchParams: Promise<{ status_page?: string }> }) {
   const { studentId } = await params;
-  const context = await loadStudentWorkspace('', studentId);
+  const { status_page } = await searchParams;
+  const query = new URLSearchParams(status_page ? { status_page } : {}).toString();
+  const context = await loadStudentWorkspace(query, studentId);
   if (typeof context === 'string') return <CenterAccessState state={context} />;
   const student = context.students[0];
   const value = (text: string | null) => text || 'لم تُضف بعد';
   return <CenterPage context={context} path={`/admin/students/${studentId}`}>
     <StudentProfileActions context={context} />
+    <StudentSharingControls student={student} />
+    <StudentStatusPanel context={context} />
     <Link href='/admin/students'>العودة إلى ملفات الطلاب</Link>
     <section className='context-card form-stack student-summary' aria-label='ملخص الطالب'>
       <h2>{student.name}</h2>

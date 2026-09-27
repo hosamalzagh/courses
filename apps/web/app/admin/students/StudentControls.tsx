@@ -35,6 +35,7 @@ export function StudentControls({ context, query }: { context: StudentContext; q
         columns={[
           { key: 'number', label: 'رقم الطالب الداخلي', filterText: (student) => String(student.student_number), render: (student) => <Link className='table-code' href={`/admin/students/${student.id}`}>{student.student_number.toLocaleString('ar-EG')}</Link> },
           { key: 'name', label: 'الطالب', filterText: (student) => student.name, render: (student) => <h3>{student.name}</h3> },
+          { key: 'status', label: 'حالة الملف', filterText: (student) => student.status === 'active' ? 'نشط' : 'موقوف', render: (student) => student.status === 'active' ? 'نشط' : 'موقوف' },
           { key: 'phone', label: 'رقم التواصل', filterText: (student) => student.phone ?? '', render: (student) => <bdi dir='ltr'>{student.phone || 'لم يُضف رقم تواصل'}</bdi> },
           { key: 'branches', label: 'الفروع المصرح بها', filterText: (student) => student.branch_ids.map((id) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join('، '), render: (student) => student.branch_ids.map((id) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join('، ') },
           { key: 'actions', label: 'الإجراءات', actions: true, render: (student) => <div className='form-stack'>{student.can_manage ? <Link href={`/admin/students/${student.id}/edit`}>تعديل ملف الطالب</Link> : <span className='muted'>صلاحية عرض فقط</span>}<StudentSharingControls student={student} /></div> },
