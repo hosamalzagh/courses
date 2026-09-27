@@ -1,0 +1,52 @@
+'use client';
+import { useId, useRef, useState, type FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
+import { CenterHeaderActions } from '@/components/CenterShell';
+import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard';
+import { Button } from '@/components/Button';
+import { FormField } from '@/components/FormField';
+import { InlineNotice } from '@/components/InlineNotice';
+import { Checkbox } from '@/components/ui/checkbox';
+import { FieldGroup, FieldSet, FieldLabel } from '@/components/ui/field';
+import { centerRequest, responseFieldErrors, responseMessage } from '@/lib/client-api';
+import type { CenterSettings } from '@/lib/server-context';
+
+type CodeSettings = { enabled: boolean; label: string; revision: number };
+function codeSettings(settings: CenterSettings): CodeSettings { return { enabled: Boolean(settings.student_code_enabled), label: settings.student_code_label ?? 'الباركود الإضافي', revision: settings.student_code_revision ?? 1 }; }
+export function StudentCodeControls({ settings }: { settings: CenterSettings }) {
+  const prefix = useId(); const router = useRouter(); const saving = useRef(false);
+  const [saved, setSaved] = useState(() => codeSettings(settings)); const [draft, setDraft] = useState(saved);
+  const [busy, setBusy] = useState(false); const [conflict, setConflict] = useState(false);
+  const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [errors, setErrors] = useState<Record<string,string>>({});
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (saving.current) return;
+    if (!draft.label.trim()) { setErrors({label:'أدخل اسم الباركود الإضافي.'}); return; }
+    saving.current = true; setBusy(true); setError(''); setErrors({}); setNotice('');
+    try {
+      const response = await centerRequest('student-code-settings','PATCH',draft);
+      if (!response.ok) { setErrors(await responseFieldErrors(response)); setConflict(response.status === 409); throw new Error(await responseMessage(response)); }
+      const value = codeSettings((await response.json()).settings); setSaved(value); setDraft(value); setConflict(false);
+      setNotice('حُفظ إعداد الباركود الإضافي.'); router.refresh();
+    } catch (failure) { setError(failure instanceof Error ? failure.message : 'تعذر حفظ إعداد الباركود. مدخلاتك محفوظة.'); }
+    finally { saving.current = false; setBusy(false); }
+  }
+  async function reload() {
+    if (saving.current) return; saving.current=true; setBusy(true); setError('');
+    try {
+      const response = await centerRequest('settings','GET'); if (!response.ok) throw new Error(await responseMessage(response));
+      const value = codeSettings((await response.json()).settings); setSaved(value); setDraft(value); setConflict(false); setErrors({});
+    } catch (failure) { setError(failure instanceof Error ? failure.message : 'تعذر تحميل الإعداد الحالي.'); }
+    finally { saving.current=false; setBusy(false); }
+  }
+  return <form id={`${prefix}-code-settings`} className='context-card form-stack' aria-label='إعداد الباركود الإضافي' noValidate onSubmit={submit}>
+    <FieldGroup><UnsavedChangesGuard dirty={JSON.stringify(draft) !== JSON.stringify(saved)} />
+      <h2>الباركود الإضافي</h2><p>رمز يدوي إضافي باسم يختاره المركز. تعطيله يحفظ القيم السابقة ويوقف استخدامها للبحث؛ لا تتغير أرقام الطلاب الداخلية.</p>
+      {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}{notice ? <InlineNotice>{notice}</InlineNotice> : null}
+      <FieldSet disabled={busy}>
+        <FieldLabel className='flex items-center gap-2'><Checkbox checked={draft.enabled} onCheckedChange={enabled => {setDraft({...draft,enabled:Boolean(enabled)});setNotice('');}} />تفعيل الباركود الإضافي</FieldLabel>
+        <FormField id={`${prefix}-code-label`} label='اسم الباركود الإضافي' required value={draft.label} error={errors.label} onChange={label => {setDraft({...draft,label});setErrors({});setNotice('');}} />
+        <CenterHeaderActions><Button type='submit' form={`${prefix}-code-settings`} variant='primary' busy={busy} disabled={conflict}>حفظ إعداد الباركود الإضافي</Button><Button disabled={busy} onClick={() => {setDraft(saved);setErrors({});setError('');setNotice('');}}>إلغاء إعداد الباركود</Button>{conflict ? <Button disabled={busy} onClick={reload}>تحميل إعداد الباركود الحالي</Button> : null}</CenterHeaderActions>
+      </FieldSet>
+    </FieldGroup>
+  </form>;
+}

@@ -93,11 +93,13 @@ test('cached student editors keep unique native submit ownership', async ({ page
 test('combined profile keeps number and sharing through suspension, general edits and browser Back', async ({ page }) => {
   await signIn(page);
   const settings = (await (await page.request.get(`${host}/api/v1/center/settings`)).json()).settings;
+  expect((await write(page,'student-code-settings','PATCH',{enabled:true,label:'كارت التكامل',revision:settings.student_code_revision})).status).toBe(200);
+  const manualCode=`000-INTEGRATION-${Date.now()}`;
   const start = Date.now() * 100;
   expect((await write(page, 'student-numbering', 'PATCH', { start, revision: settings.student_number_revision })).status).toBe(200);
   const policy = (await (await page.request.get(`${host}/api/v1/center/student-search-workspace`)).json()).policy;
   expect((await write(page, 'student-search-policy', 'PATCH', { enabled: true, default_sharing_enabled: true, revision: policy.revision })).status).toBe(200);
-  const student = await create(page, `طالب قبول ${Date.now()} تكامل`);
+  const student = await create(page, `طالب قبول ${Date.now()} تكامل`, {label:'كارت التكامل',value:manualCode});
   expect(student.student_number).toBe(start);
   await expect(page.getByText('المشاركة بين الفروع: مسموحة', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'تغيير مشاركة الطالب', exact: true }).click();
@@ -121,6 +123,7 @@ test('combined profile keeps number and sharing through suspension, general edit
   const current = (await (await page.request.get(`${host}/api/v1/center/students/${student.id}`)).json()).students[0];
   expect(current.student_number).toBe(start); expect(current.school).toBe('مدرسة التكامل');
   expect(current.sharing_enabled).toBe(false); expect(current.status).toBe('suspended');
+  expect(current.manual_code).toBe(manualCode);
   expect(current.contacts[0].phone).toBe('00012345678'); expect(current.contacts[0].name).toBe('صاحب الرقم المشترك');
   const barcode = await page.request.get(`${host}/api/v1/center/students/${student.id}/barcode`);
   expect(barcode.status()).toBe(200); expect(await barcode.text()).toContain(String(start));
@@ -207,10 +210,11 @@ async function write(page: Page, route: string, method: string, payload: object)
   return result;
 }
 
-async function create(page: Page, name: string) {
+async function create(page: Page, name: string, code?: {label:string;value:string}) {
   await page.goto(`${host}/admin/students/new`);
   await expect(page.getByRole('textbox', { name: 'اسم الطالب', exact: true })).toBeFocused();
   await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name);
+  if (code) await page.getByRole('textbox',{name:code.label,exact:true}).fill(code.value);
   const response = page.waitForResponse((response) => response.url().endsWith('/api/v1/center/students') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click();
   const student = (await (await response).json()).student;
@@ -454,4 +458,6 @@ async function enterContact(page: Page, phone: string) {
   await page.getByRole('textbox', {name:'اسم جهة التواصل 1',exact:true}).fill('صاحب الرقم المشترك');
   await page.getByRole('textbox', {name:'الصلة بالطالب 1',exact:true}).fill('ولي أمر');
   await page.getByRole('textbox', {name:'هاتف جهة التواصل 1',exact:true}).fill(phone);
+  await expect(page.getByRole('textbox', {name:'اسم جهة التواصل 1',exact:true})).toHaveValue('صاحب الرقم المشترك');
+  await expect(page.getByRole('textbox', {name:'الصلة بالطالب 1',exact:true})).toHaveValue('ولي أمر');
 }

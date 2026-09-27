@@ -12,7 +12,7 @@ class CenterSettingsController extends Controller
     {
         abort_unless($request->attributes->get('center_permissions')->isCenterManager(), 403);
         $settings = DB::connection('tenant')->table('center_settings')->where('id', 1)
-            ->first(['contact_email', 'phone', 'address', 'student_number_start', 'student_number_revision']);
+            ->first(['contact_email', 'phone', 'address', 'student_number_start', 'student_number_revision', 'student_code_enabled', 'student_code_label', 'student_code_revision']);
 
         return response()->json(['settings' => $settings ?: [
             'contact_email' => null, 'phone' => null, 'address' => null, 'student_number_start' => 1, 'student_number_revision' => 1,

@@ -16,9 +16,12 @@ export function StudentContactFields({ prefix, data, onChange, errors, disabled 
 }) {
   const [removal, setRemoval] = useState<string | null>(null);
   function add() {
+    const trigger = document.activeElement;
     const contact = { id: newSubmissionId(), name: '', relationship: '', phone: '', primary: data.contacts.length === 0 };
     onChange({ ...data, contacts: [...data.contacts, contact] });
-    requestAnimationFrame(() => document.getElementById(`${prefix}-contact-${contact.id}-name`)?.focus());
+    requestAnimationFrame(() => {
+      if (document.activeElement === trigger) document.getElementById(`${prefix}-contact-${contact.id}-name`)?.focus();
+    });
   }
   function remove(id: string) {
     const contacts = data.contacts.filter(contact => contact.id !== id);

@@ -36,6 +36,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
   const manageable = branches.filter((branch) => context.permissions.can_manage_center || (context.permissions.branch_actions?.[String(branch.id)] ?? []).includes('students.manage'));
   const [editor, setEditor] = useState<Student | 'new'>(student ?? 'new');
   const [name, setName] = useState(student?.name ?? '');
+  const [manualCode, setManualCode] = useState(student?.manual_code ?? '');
   const [phone, setPhone] = useState(student?.legacy_phone ?? '');
   const [branchIds, setBranchIds] = useState<number[]>(student?.branch_ids.filter((id) => manageable.some((branch) => branch.id === id)) ?? manageable.slice(0, 1).map((branch) => branch.id));
   const [requestId, setRequestId] = useState(newSubmissionId);
@@ -52,11 +53,12 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
   const [conflict, setConflict] = useState(false);
 
   const initialBranches = editor === 'new' ? manageable.slice(0, 1).map((branch) => branch.id) : editor ? editor.branch_ids.filter((id) => manageable.some((branch) => branch.id === id)) : [];
-  const dirty = !saved && (name !== (editor === 'new' ? '' : editor.name) || phone !== (editor === 'new' ? '' : editor.legacy_phone ?? '') || JSON.stringify([...branchIds].sort()) !== JSON.stringify([...initialBranches].sort()) || JSON.stringify(general) !== JSON.stringify(profileData(editor === 'new' ? undefined : editor)) || JSON.stringify(contactData) !== JSON.stringify(studentContactsData(editor === 'new' ? undefined : editor)));
+  const dirty = !saved && (manualCode !== (editor === 'new' ? '' : editor.manual_code ?? '') || name !== (editor === 'new' ? '' : editor.name) || phone !== (editor === 'new' ? '' : editor.legacy_phone ?? '') || JSON.stringify([...branchIds].sort()) !== JSON.stringify([...initialBranches].sort()) || JSON.stringify(general) !== JSON.stringify(profileData(editor === 'new' ? undefined : editor)) || JSON.stringify(contactData) !== JSON.stringify(studentContactsData(editor === 'new' ? undefined : editor)));
 
   function open(student: Student) {
     setSaved(false);
     setGeneral(profileData(student));
+    setManualCode(student.manual_code ?? '');
     setContactData(studentContactsData(student));
     setEditor(student); setName(student.name); setPhone(student.legacy_phone ?? '');
     setBranchIds(student.branch_ids.filter((id) => manageable.some((branch) => branch.id === id)));
@@ -103,11 +105,11 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         if (matches.length) return;
       }
       const response = await centerRequest(editor === 'new' ? 'students' : `students/${editor.id}`, editor === 'new' ? 'POST' : 'PATCH', {
-        name: name.trim(), phone: phone.trim() || null, branch_ids: editor === 'new' ? branchIds : branchIds.filter((id) => !editor.branch_ids.includes(id)), ...general, ...contactData,
+        name: name.trim(), phone: phone.trim() || null, branch_ids: editor === 'new' ? branchIds : branchIds.filter((id) => !editor.branch_ids.includes(id)), ...general, ...contactData, ...(context.student_code_settings.enabled ? {manual_code:manualCode.trim() || null} : {}),
         ...(editor === 'new' ? { request_id: requestId } : { revision: editor.revision }),
       });
       if (!response.ok) {
-        if (response.status === 409 && (await response.clone().json().catch(() => ({}))).code !== 'student_numbering_exhausted') {
+        if (response.status === 409 && !['student_numbering_exhausted','student_number_code_collision'].includes((await response.clone().json().catch(() => ({}))).code)) {
           setConflict(true);
           setError('تغيّرت بيانات الملف أو الطلب. راجع أحدث بيانات الطالب قبل إعادة الحفظ.');
         } else if (response.status === 404) {
@@ -163,6 +165,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         <FieldSet data-invalid={Boolean(fieldErrors.gender)}><FieldLegend>النوع (اختياري)</FieldLegend><Field data-invalid={Boolean(fieldErrors.gender)}><RadioGroup disabled={busy} aria-invalid={Boolean(fieldErrors.gender)} name='student-gender' value={general.gender ?? ''} onValueChange={(value) => changeGeneral('gender', String(value))}>{[['', 'غير محدد'], ['male', 'ذكر'], ['female', 'أنثى']].map(([value, label]) => <FieldLabel className="flex items-center gap-2" key={value}><RadioGroupItem value={value} />{label}</FieldLabel>)}</RadioGroup></Field>{fieldErrors.gender ? <p className='field-error' role='alert'>{fieldErrors.gender}</p> : null}</FieldSet>
         <FormField id='student-address' label='العنوان' value={general.address ?? ''} onChange={(value) => changeGeneral('address', value)} error={fieldErrors.address} autoComplete='street-address' />
         </div>
+        {context.student_code_settings.enabled ? <FormField id={`${formPrefix}-manual-code`} label={context.student_code_settings.label} value={manualCode} direction='ltr' autoComplete='off' error={fieldErrors.manual_code} hint='اختياري. احتفظ بالأصفار والأحرف؛ الرمز فريد داخل المركز ولا يطابق رقم طالب آخر.' onChange={value => {setSaved(false);setManualCode(value);setFieldErrors({});}} /> : editor !== 'new' && editor.manual_code ? <p>{context.student_code_settings.label} — معطل، والقيمة محفوظة: <bdi dir='ltr'>{editor.manual_code}</bdi></p> : null}
         <h2>التواصل</h2><div className='student-fields'>
         <FormField id='student-email' label='البريد الإلكتروني' type='email' direction='ltr' value={general.email ?? ''} onChange={(value) => changeGeneral('email', value)} error={fieldErrors.email} autoComplete='email' />
         {editor !== 'new' && editor.legacy_phone !== null ? <FormField id='student-phone' label='رقم التواصل' value={phone} onChange={(value) => { setSaved(false); setPhone(value); setFieldErrors({}); setSimilar([]); }} error={fieldErrors.phone} type='tel' direction='ltr' autoComplete='off' hint='رقم سابق بصاحب غير محدد. أضف جهة وقناة لاستكمال صاحب الرقم؛ يبقى الرقم السابق محفوظًا.' /> : null}

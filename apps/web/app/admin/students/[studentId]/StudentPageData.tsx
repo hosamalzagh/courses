@@ -27,6 +27,7 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
     <section className='context-card form-stack student-summary' aria-label='ملخص الطالب'>
       <h2>{student.name}</h2>
       <p>رقم الطالب الداخلي: <bdi>{student.student_number.toLocaleString('ar-EG')}</bdi></p>
+      {student.manual_code !== null ? <p>{context.student_code_settings.label}{context.student_code_settings.enabled ? '' : ' — معطل، والقيمة محفوظة'}: <bdi dir='ltr'>{student.manual_code}</bdi></p> : null}
       <p>رقم التواصل: <bdi dir='ltr'>{value(student.phone)}</bdi>{primaryContact ? ` — ${primaryContact.name} (${primaryContact.relationship})` : student.phone ? ' — صاحبه غير محدد' : ''}</p>
       <p>الفروع المصرح بها: {student.branch_ids.map((id) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join('، ')}</p>
     </section>

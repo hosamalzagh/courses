@@ -53,7 +53,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
 
             if ($request->query('include') === 'settings' && $permissions->isCenterManager()) {
                 $payload['settings'] = DB::connection('tenant')->table('center_settings')->where('id', 1)
-                    ->first(['contact_email', 'phone', 'address', 'student_number_start', 'student_number_revision']) ?: [
+                    ->first(['contact_email', 'phone', 'address', 'student_number_start', 'student_number_revision', 'student_code_enabled', 'student_code_label', 'student_code_revision']) ?: [
                         'contact_email' => null, 'phone' => null, 'address' => null, 'student_number_start' => 1, 'student_number_revision' => 1,
                     ];
             }
@@ -103,6 +103,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::patch('members/{membership}/status', [CenterMemberController::class, 'updateStatus']);
         Route::put('members/{membership}/grants', [CenterMemberController::class, 'updateGrants']);
         Route::get('settings', [CenterSettingsController::class, 'show']);
+        Route::patch('student-code-settings', [CenterStudentController::class, 'updateCodeSettings']);
         Route::patch('student-numbering', [CenterStudentNumberingController::class, 'update']);
         Route::patch('settings', [CenterSettingsController::class, 'update']);
         Route::get('audit', [CenterAuditController::class, 'index']);

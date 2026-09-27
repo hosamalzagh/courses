@@ -6,6 +6,7 @@ use App\Models\Center;
 use App\Models\CenterMembership;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -50,6 +51,104 @@ class StudentNumberingTest extends TestCase
         $this->asUser($this->owner);
         $this->north = $this->postJson("{$this->base}/branches", ['name' => 'North', 'slug' => 'north'])->assertCreated()->json('branch.id');
         $this->south = $this->postJson("{$this->base}/branches", ['name' => 'South', 'slug' => 'south'])->assertCreated()->json('branch.id');
+    }
+
+    public function test_named_manual_codes_preserve_strings_and_survive_disabling_without_ambiguous_lookup(): void
+    {
+        $this->patchJson("{$this->base}/student-code-settings", ['enabled' => true, 'label' => 'كارت المركز', 'revision' => 1])->assertOk()
+            ->assertJsonPath('settings.student_code_label', 'كارت المركز');
+        $payload = ['name' => 'ملف بالكارت', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(), 'manual_code' => '000A12'];
+        $student = $this->postJson("{$this->base}/students", $payload)->assertCreated()->assertJsonPath('student.manual_code', '000A12')->json('student');
+        $this->postJson("{$this->base}/students", $payload)->assertOk()->assertJsonPath('student.id', $student['id']);
+        $this->getJson("{$this->base}/student-workspace?identifier=000A12")->assertOk()->assertJsonCount(1, 'students')->assertJsonPath('students.0.id', $student['id']);
+        $this->patchJson("{$this->base}/student-code-settings", ['enabled' => false, 'label' => 'الكارت القديم', 'revision' => 2])->assertOk();
+        $this->getJson("{$this->base}/student-workspace?identifier=000A12")->assertOk()->assertJsonCount(0, 'students');
+        $this->patchJson("{$this->base}/students/{$student['id']}", ['name' => 'تعديل عام', 'branch_ids' => [], 'revision' => 1])->assertOk()->assertJsonPath('student.manual_code', '000A12');
+        $this->patchJson("{$this->base}/student-code-settings", ['enabled' => true, 'label' => 'الكارت القديم', 'revision' => 3])->assertOk();
+        $this->getJson("{$this->base}/student-workspace?identifier=000A12")->assertOk()->assertJsonPath('students.0.id', $student['id']);
+    }
+
+    public function test_manual_code_conflicts_are_safe_and_future_sequence_collisions_fail_without_renumbering(): void
+    {
+        $this->patchJson("{$this->base}/student-code-settings", ['enabled' => true, 'label' => 'كارت', 'revision' => 1])->assertOk();
+        $firstPayload = ['name' => 'محجوب لا يكشف', 'branch_ids' => [$this->south], 'request_id' => (string) Str::uuid(), 'manual_code' => '0005'];
+        $first = $this->postJson("{$this->base}/students", $firstPayload)->assertCreated()->json('student');
+        $secondPayload = ['name' => 'ثان', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid()];
+        $second = $this->postJson("{$this->base}/students", $secondPayload)->assertCreated()->json('student');
+        $this->patchJson("{$this->base}/students/{$first['id']}", ['name' => $first['name'], 'branch_ids' => [], 'revision' => 1, 'manual_code' => '0002'])->assertUnprocessable()->assertJsonValidationErrors('manual_code')->assertDontSee('ثان');
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $this->postJson("{$this->base}/students", [...$secondPayload, 'request_id' => (string) Str::uuid(), 'manual_code' => '0005'])->assertUnprocessable()->assertJsonValidationErrors('manual_code')->assertDontSee($first['name']);
+        $this->asUser($this->owner);
+        $this->patchJson("{$this->base}/student-code-settings", ['enabled' => false, 'label' => 'كارت', 'revision' => 2])->assertOk();
+        $this->patchJson("{$this->base}/student-numbering", ['start' => 5, 'revision' => 1])->assertOk();
+        $next = [...$secondPayload, 'request_id' => (string) Str::uuid()];
+        $this->postJson("{$this->base}/students", $next)->assertConflict()->assertJsonPath('code', 'student_number_code_collision')->assertDontSee($first['name']);
+        $this->getJson("{$this->base}/students/submissions/{$next['request_id']}")->assertNotFound();
+        $this->getJson("{$this->base}/students/{$first['id']}")->assertOk()->assertJsonPath('students.0.student_number', 1)->assertJsonPath('students.0.manual_code', '0005');
+        $this->getJson("{$this->base}/students/{$second['id']}")->assertOk()->assertJsonPath('students.0.student_number', 2);
+        $this->patchJson("{$this->base}/student-code-settings", ['enabled' => true, 'label' => 'كارت', 'revision' => 3])->assertOk();
+        $this->patchJson("{$this->base}/students/{$first['id']}", ['name' => $first['name'], 'branch_ids' => [], 'revision' => 1, 'manual_code' => 'CARD-0005'])->assertOk();
+        $this->postJson("{$this->base}/students", $next)->assertCreated()->assertJsonPath('student.student_number', 5);
+    }
+
+    public function test_scanned_identifier_wins_over_name_and_phone_matches_and_never_opens_a_hidden_profile(): void
+    {
+        $this->patchJson("{$this->base}/student-code-settings", ['enabled' => true, 'label' => 'كارت', 'revision' => 1])->assertOk();
+        $payload = ['name' => 'صاحب الكارت', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(), 'manual_code' => '000CARD'];
+        $student = $this->postJson("{$this->base}/students", $payload)->assertCreated()->json('student');
+        $this->postJson("{$this->base}/students", ['name' => 'اسم يحتوي 000CARD', 'phone' => '0001', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid()])->assertCreated();
+        $this->getJson("{$this->base}/student-workspace?identifier=000CARD")->assertOk()->assertJsonCount(1, 'students')->assertJsonPath('students.0.id', $student['id']);
+        $this->getJson("{$this->base}/student-workspace?identifier=1")->assertOk()->assertJsonCount(1, 'students')->assertJsonPath('students.0.id', $student['id']);
+        $this->getJson("{$this->base}/student-workspace?q=0001")->assertOk()->assertJsonCount(2, 'students');
+        $this->grant([$this->south => ['attendance']]);
+        $this->asUser($this->staff);
+        $this->getJson("{$this->base}/student-workspace?identifier=000CARD")->assertOk()->assertJsonCount(0, 'students');
+        $this->getJson("{$this->base}/student-workspace?identifier=1")->assertOk()->assertJsonCount(0, 'students');
+    }
+
+    public function test_manual_code_settings_and_writes_obey_current_grants_and_revisions(): void
+    {
+        $this->patchJson("{$this->base}/student-code-settings", ['enabled' => true, 'label' => 'كارت', 'revision' => 1])->assertOk();
+        $this->patchJson("{$this->base}/student-code-settings", ['enabled' => false, 'label' => 'اسم آخر', 'revision' => 1])->assertConflict();
+        $payload = ['name' => 'ترخيص الكارت', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(), 'manual_code' => '0'];
+        $student = $this->postJson("{$this->base}/students", $payload)->assertCreated()->assertJsonPath('student.manual_code', '0')->json('student');
+        $this->postJson("{$this->base}/students", [...$payload, 'request_id' => (string) Str::uuid(), 'manual_code' => 123])->assertUnprocessable();
+        $this->grant([$this->north => ['attendance']]);
+        $this->asUser($this->staff);
+        $this->patchJson("{$this->base}/student-code-settings", ['enabled' => false, 'label' => 'تجاوز', 'revision' => 2])->assertForbidden();
+        $edit = ['name' => $student['name'], 'branch_ids' => [], 'revision' => 1, 'manual_code' => '000XYZ'];
+        $this->patchJson("{$this->base}/students/{$student['id']}", $edit)->assertForbidden();
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $this->patchJson("{$this->base}/students/{$student['id']}", $edit)->assertOk()->assertJsonPath('student.manual_code', '000XYZ');
+        $this->patchJson("{$this->base}/students/{$student['id']}", [...$edit, 'manual_code' => 'قديم'])->assertConflict();
+        $this->asUser($this->owner);
+        $this->patchJson("{$this->base}/student-code-settings", ['enabled' => false, 'label' => 'كارت', 'revision' => 2])->assertOk();
+        $this->patchJson("{$this->base}/students/{$student['id']}", [...$edit, 'revision' => 2, 'manual_code' => null])->assertUnprocessable()->assertJsonValidationErrors('manual_code');
+        $this->postJson("{$this->base}/students", $payload)->assertOk()->assertJsonPath('student.manual_code', '000XYZ');
+    }
+
+    public function test_manual_code_migration_keeps_old_request_identity_history_and_sequence(): void
+    {
+        $payload = ['name' => 'قبل الكارت الإضافي', 'phone' => '000100', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid()];
+        $student = $this->postJson("{$this->base}/students", $payload)->assertCreated()->json('student');
+        $this->center->run(function (): void {
+            $migration = glob(database_path('migrations/tenant/*_add_student_manual_codes.php'))[0];
+            (require $migration)->down();
+            DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
+        });
+        $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->postJson("{$this->base}/students", $payload)->assertOk()->assertJsonPath('student.id', $student['id'])
+            ->assertJsonPath('student.student_number', 1)->assertJsonPath('student.legacy_phone', '000100')->assertJsonPath('student.manual_code', null)
+            ->assertJsonPath('student.created_by', $student['created_by'])->assertJsonPath('student.created_at', $student['created_at']);
+        $this->postJson("{$this->base}/students", [...$payload, 'request_id' => (string) Str::uuid()])->assertCreated()->assertJsonPath('student.student_number', 2);
+        $this->patchJson("{$this->base}/student-code-settings", ['enabled' => true, 'label' => 'كارت', 'revision' => 1])->assertOk();
+        $this->patchJson("{$this->base}/students/{$student['id']}", ['name' => $student['name'], 'branch_ids' => [], 'revision' => 1,
+            'manual_code' => '0004', 'manual_code_number' => 'SAFE'])->assertOk()->assertJsonPath('student.manual_code', '0004');
+        $this->patchJson("{$this->base}/student-numbering", ['start' => 4, 'revision' => 1])->assertOk();
+        $this->postJson("{$this->base}/students", [...$payload, 'request_id' => (string) Str::uuid()])->assertConflict()->assertJsonPath('code', 'student_number_code_collision');
     }
 
     public function test_sequence_start_is_center_wide_and_never_reuses_issued_numbers(): void
