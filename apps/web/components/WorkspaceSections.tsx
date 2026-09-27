@@ -28,7 +28,7 @@ export function WorkspaceSections({ value, label, path, sections }: {
     <div className="workspace-sections-scroll">
       <TabsList ref={list} variant="line" aria-label={label} activateOnFocus={false}>
         {sections.map((section) => <TabsTrigger key={section.value} value={section.value} nativeButton={false}
-          render={<PrefetchLink href={href(section)} scroll={false} prefetchOnFocus={false} />}>
+          render={<PrefetchLink href={href(section)} scroll={false} />}>
           {section.label}
         </TabsTrigger>)}
       </TabsList>
