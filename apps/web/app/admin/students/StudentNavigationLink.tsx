@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 
+import { buttonVariants } from "@/components/ui/button";
+
 // Mounted inside the shared header, after its page actions have registered.
 export function StudentNavigationLink({ href, focusKey, children, primary = false }: { href: string; focusKey: string; children: ReactNode; primary?: boolean }) {
   const link = useRef<HTMLAnchorElement>(null);
@@ -14,5 +16,5 @@ export function StudentNavigationLink({ href, focusKey, children, primary = fals
     const frame = requestAnimationFrame(() => { link.current?.focus(); setRecoveringFocus(false); });
     return () => cancelAnimationFrame(frame);
   }, [params, focusKey]);
-  return <Link className={`button button-${primary ? 'primary' : 'secondary'}`} prefetchOnFocus={!recoveringFocus} ref={link} href={href}>{children}</Link>;
+  return <Link className={buttonVariants({ variant: primary ? 'default' : 'outline' })} prefetchOnFocus={!recoveringFocus} ref={link} href={href}>{children}</Link>;
 }

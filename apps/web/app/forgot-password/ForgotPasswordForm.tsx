@@ -1,5 +1,9 @@
 "use client";
 
+import { Button } from "@/components/Button";
+import { FieldGroup } from "@/components/ui/field";
+
+
 import { PrefetchLink } from "@/components/PrefetchLink";
 
 import { useState, type FormEvent } from "react";
@@ -31,8 +35,10 @@ export function ForgotPasswordForm() {
     <p className="muted">أدخل بريدك. إذا كان الحساب موجودًا، ستصلك رسالة لاستعادة الدخول.</p>
     {sent ? <InlineNotice>إذا كان الحساب موجودًا، أُرسلت رسالة الاستعادة.</InlineNotice> : null}
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
-    <form className="form-stack" noValidate onSubmit={submit}><FormField id="email" label="البريد الإلكتروني" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.email} direction="ltr" required />
-      <button className="button button-primary" disabled={busy || !email}>{busy ? "جارٍ الإرسال…" : "إرسال رابط الاستعادة"}</button></form>
+    <form className="form-stack" noValidate onSubmit={submit}>
+<FieldGroup><FormField id="email" label="البريد الإلكتروني" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.email} direction="ltr" required />
+      <Button type="submit" variant="primary" disabled={busy || !email} busy={busy} busyLabel="جارٍ الإرسال…">إرسال رابط الاستعادة</Button></FieldGroup>
+</form>
     <p className="auth-footnote"><PrefetchLink className="text-link" href="/login">العودة إلى الدخول</PrefetchLink></p>
   </>;
 }

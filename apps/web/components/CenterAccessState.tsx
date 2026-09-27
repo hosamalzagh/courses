@@ -1,3 +1,4 @@
+import { buttonVariants } from "@/components/ui/button";
 import type { CenterAccessFailure } from "@/lib/server-context";
 
 const content = {
@@ -10,5 +11,5 @@ const content = {
 export function CenterAccessState({ state }: { state: CenterAccessFailure }) {
   const { eyebrow, title, detail } = content[state];
 
-  return <main className="state-page"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p className="muted">{detail}</p><a className="button button-secondary" href={state === "student_unavailable" ? "/admin/students" : "/login"}>{state === "student_unavailable" ? "العودة إلى ملفات الطلاب" : "العودة إلى الدخول"}</a></div></main>;
+  return <main className="state-page"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p className="muted">{detail}</p><a className={buttonVariants({ variant: "outline" })} href={state === "student_unavailable" ? "/admin/students" : "/login"}>{state === "student_unavailable" ? "العودة إلى ملفات الطلاب" : "العودة إلى الدخول"}</a></div></main>;
 }

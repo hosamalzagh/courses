@@ -71,7 +71,7 @@ test("combined branch roles persist, sensitive grants stay separate, and open pa
     await editor.getByRole("group", { name: north.name, exact: true }).getByRole("checkbox", { name: "الحضور", exact: true }).check();
     await editor.getByRole("group", { name: south.name, exact: true }).getByRole("checkbox", { name: "الحسابات", exact: true }).check();
     await editor.getByRole("button", { name: "حفظ الأدوار", exact: true }).click();
-    await owner.getByRole("dialog").getByRole("button", { name: "حفظ التغيير" }).click();
+    await owner.getByRole("alertdialog").getByRole("button", { name: "حفظ التغيير" }).click();
     await expect(owner.getByRole("status")).toContainText("حُفظت أدوار الموظف");
     await signIn(staff, host, staffCredentials.email, staffCredentials.password);
     let response = await staff.request.get(`${host}/api/v1/center/user`);
@@ -87,7 +87,7 @@ test("combined branch roles persist, sensitive grants stay separate, and open pa
     await row.getByRole("button", { name: "تعديل الأدوار" }).click();
     await editor.getByRole("group", { name: north.name, exact: true }).getByRole("checkbox", { name: "خصم الرسوم بسبب مسجل" }).check();
     await editor.getByRole("button", { name: "حفظ الأدوار", exact: true }).click();
-    await owner.getByRole("dialog").getByRole("button", { name: "حفظ التغيير" }).click();
+    await owner.getByRole("alertdialog").getByRole("button", { name: "حفظ التغيير" }).click();
     await expect(owner.getByRole("status")).toContainText("حُفظت أدوار الموظف");
     response = await staff.request.get(`${host}/api/v1/center/user`);
     actions = (await response.json()).user.permissions.branch_actions;
@@ -104,7 +104,7 @@ test("combined branch roles persist, sensitive grants stay separate, and open pa
     expect(await save(owner, original.id, { center_roles: [], branch_roles: { [north.id]: ["attendance"] } })).toBe(200);
     await editor.getByRole("group", { name: north.name, exact: true }).getByRole("checkbox", { name: "الإدارة الأكاديمية", exact: true }).check();
     await editor.getByRole("button", { name: "حفظ الأدوار", exact: true }).click();
-    await owner.getByRole("dialog").getByRole("button", { name: "حفظ التغيير" }).click();
+    await owner.getByRole("alertdialog").getByRole("button", { name: "حفظ التغيير" }).click();
     await expect(owner.getByRole("alert").filter({ hasText: "تغيّرت صلاحيات الموظف" })).toContainText("تغيّرت صلاحيات الموظف");
     expect(currentWorkspace.members.find((member) => member.id === original!.id)?.grant_revision).toBeTruthy();
     await row.getByRole("button", { name: "تعديل الأدوار" }).click();

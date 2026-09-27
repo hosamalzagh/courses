@@ -1,5 +1,9 @@
 "use client";
 
+import { Button } from "@/components/Button";
+import { FieldGroup } from "@/components/ui/field";
+
+
 import { PrefetchLink } from "@/components/PrefetchLink";
 
 import { useEffect, useState, type FormEvent } from "react";
@@ -73,11 +77,13 @@ export function InvitationForm() {
         <>
           <p className="muted">دُعيت إلى <strong>{invitation.center.name}</strong> بالبريد <bdi dir="ltr">{invitation.email}</bdi>.</p>
           <form className="form-stack" noValidate onSubmit={accept}>
+<FieldGroup>
             <FormField id="name" label="الاسم" value={name} onChange={(value) => { setName(value); setFieldErrors({}); }} error={fieldErrors.name} autoComplete="name" required />
             <FormField id="password" label="كلمة المرور" type="password" value={password} onChange={(value) => { setPassword(value); setFieldErrors({}); }} error={fieldErrors.password} autoComplete="new-password" hint="12 حرفًا على الأقل. إذا كان لك حساب سابق، أدخل كلمة مروره." required />
             <FormField id="password-confirmation" label="تأكيد كلمة المرور" type="password" value={confirmation} onChange={(value) => { setConfirmation(value); setFieldErrors({}); }} error={fieldErrors.password_confirmation} autoComplete="new-password" required />
-            <button className="button button-primary" type="submit" disabled={busy || !name || !password || !confirmation}>{busy ? "جارٍ قبول الدعوة…" : "قبول الدعوة"}</button>
-          </form>
+            <Button variant="primary" type="submit" disabled={busy || !name || !password || !confirmation} busy={busy} busyLabel="جارٍ قبول الدعوة…">قبول الدعوة</Button>
+          </FieldGroup>
+</form>
         </>
       ) : null}
       <p className="auth-footnote"><PrefetchLink className="text-link" href="/login">العودة إلى الدخول</PrefetchLink></p>

@@ -1,5 +1,12 @@
 'use client';
 
+import { useId } from "react";
+
+import { FieldGroup, FieldSet } from "@/components/ui/field";
+
+
+import { CenterHeaderActions } from "@/components/CenterShell";
+
 import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/Button';
@@ -11,6 +18,7 @@ import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } 
 import type { Student, StudentContext } from '@/lib/server-context';
 
 export function StudentStatusControls({ student }: { student: Student }) {
+  const formPrefix = useId();
   const router = useRouter();
   const [decision, setDecision] = useState<{ student: Student; requestId: string } | null>(null);
   const [reason, setReason] = useState('');
@@ -66,19 +74,20 @@ export function StudentStatusControls({ student }: { student: Student }) {
     finally { setBusy(false); }
   }
   return <>
-    {student.can_change_status && !decision ? <div className='form-actions'><Button ref={trigger} variant={student.status === 'active' ? 'danger' : 'secondary'} onClick={() => { setDecision({ student, requestId: newSubmissionId() }); setNotice(''); }}>{label}</Button></div> : null}
+    {student.can_change_status && !decision ? <CenterHeaderActions><Button ref={trigger} variant={student.status === 'active' ? 'danger' : 'secondary'} onClick={() => { setDecision({ student, requestId: newSubmissionId() }); setNotice(''); }}>{label}</Button></CenterHeaderActions> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
     <UnsavedChangesGuard dirty={decision !== null && reason !== ''} />
-    {decision ? <form className='form-stack' aria-label={label} noValidate onSubmit={confirm}>
+    {decision ? <form id={`${formPrefix}-0`} className='form-stack' aria-label={label} noValidate onSubmit={confirm}>
+<FieldGroup>
       <h3>{label} — {student.name}</h3>
       <p>يُحفظ القرار وسببه في تاريخ الملف. تبقى التسجيلات والدراسة والحركات المالية محفوظة.</p>
-      <fieldset disabled={busy} className='form-stack' style={{ border: 0, padding: 0, margin: 0 }}>
+      <FieldSet disabled={busy} className="form-stack" style={{ border: 0, padding: 0, margin: 0 }}>
         <FormField id='student-status-reason' label='سبب تغيير الحالة' value={reason} onChange={(value) => { if (submittedReason === null) { setReason(value); setReasonError(''); } }} required focusOnMount error={reasonError} hint={submittedReason !== null ? 'القرار أُرسل؛ أعد المحاولة بنفس السبب أو حمّل أحدث حالة قبل قرار جديد.' : 'سبب إلزامي يظهر للموظفين المخولين بقراءة الملف.'} />
-        {conflict || submittedReason !== null ? <Button disabled={busy} onClick={reload}>تحميل أحدث حالة الطالب</Button> : null}
-        <div className='form-actions'><Button variant={decision.student.status === 'active' ? 'danger' : 'primary'} type='submit' busy={busy} disabled={conflict}>{label}</Button><Button disabled={busy} onClick={close}>إلغاء</Button></div>
-      </fieldset>
-    </form> : null}
+        <CenterHeaderActions>{conflict || submittedReason !== null ? <Button disabled={busy} onClick={reload}>تحميل أحدث حالة الطالب</Button> : null}<Button form={`${formPrefix}-0`} variant={decision.student.status === 'active' ? 'danger' : 'primary'} type='submit' busy={busy} disabled={conflict}>{label}</Button><Button disabled={busy} onClick={close}>إلغاء</Button></CenterHeaderActions>
+      </FieldSet>
+    </FieldGroup>
+</form> : null}
     {confirming ? <ConfirmationDialog title={label} description={decision?.student.status === 'active' ? `إيقاف ملف ${student.name} في جميع فروع المركز بالسبب المسجل. تبقى سجلاته محفوظة.` : `فك إيقاف ملف ${student.name} بالسبب المسجل، مع حفظ فترة الإيقاف السابقة.`} confirmLabel={label} onCancel={() => setConfirming(false)} onConfirm={save} /> : null}
   </>;
 }

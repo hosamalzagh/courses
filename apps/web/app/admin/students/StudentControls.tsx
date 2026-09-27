@@ -1,17 +1,23 @@
 'use client';
 
+import { useId } from "react";
+
+import { FieldGroup } from "@/components/ui/field";
+
+
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { StudentNavigationLink } from './StudentNavigationLink';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { StudentSharingControls } from './StudentSharingControls';
-import { CenterPageActions } from '@/components/CenterShell';
+import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
 import { DataTable } from '@/components/DataTable';
 import { Button } from '@/components/Button';
 import { FormField } from '@/components/FormField';
 import type { StudentContext } from '@/lib/server-context';
 
 export function StudentControls({ context, query }: { context: StudentContext; query: string }) {
+  const formPrefix = useId();
   const router = useRouter();
   const [search, setSearch] = useState(query);
   const manageable = context.branches.filter((branch) => context.permissions.can_manage_center || (context.permissions.branch_actions?.[String(branch.id)] ?? []).includes('students.manage'));
@@ -26,10 +32,12 @@ export function StudentControls({ context, query }: { context: StudentContext; q
 
   return <>
     <CenterPageActions context={context} actions={manageable.length ? <StudentNavigationLink primary focusKey='create' href='/admin/students/new'>إنشاء ملف طالب</StudentNavigationLink> : undefined} />
-      <form className='context-card form-stack' noValidate onSubmit={(event) => { event.preventDefault(); router.push(`/admin/students?${new URLSearchParams({ q: search })}`); }} aria-label='البحث في جميع ملفات الطلاب'>
+      <form id={`${formPrefix}-0`} className='context-card form-stack' noValidate onSubmit={(event) => { event.preventDefault(); router.push(`/admin/students?${new URLSearchParams({ q: search })}`); }} aria-label='البحث في جميع ملفات الطلاب'>
+<FieldGroup>
         <FormField id='student-global-search' label='البحث في جميع الملفات المصرح بها' value={search} onChange={setSearch} hint='الاسم أو رقم الطالب الداخلي/مسح الباركود أو رقم التواصل. لا يشمل الفروع المحجوبة.' />
-        <div className='form-actions'><Button type='submit' variant='primary' >بحث عن طالب</Button>{search ? <Button onClick={() => { setSearch(''); document.getElementById('student-global-search')?.focus(); router.push('/admin/students'); }}>مسح البحث</Button> : null}</div>
-      </form>
+        <CenterHeaderActions><Button form={`${formPrefix}-0`} type='submit' variant='primary' >بحث عن طالب</Button>{search ? <Button onClick={() => { setSearch(''); document.getElementById('student-global-search')?.focus(); router.push('/admin/students'); }}>مسح البحث</Button> : null}</CenterHeaderActions>
+      </FieldGroup>
+</form>
       {(context.pagination.branches_has_more || context.pagination.branches_page > 1) ? <nav className='form-actions' aria-label='صفحات فروع الطلاب'>{context.pagination.branches_page > 1 ? <Link href={pageLink(context.pagination.page, context.pagination.branches_page - 1)}>الفروع السابقة</Link> : null}<span>صفحة الفروع {context.pagination.branches_page.toLocaleString('ar-EG')}</span>{context.pagination.branches_has_more ? <Link href={pageLink(context.pagination.page, context.pagination.branches_page + 1)}>الفروع التالية</Link> : null}</nav> : null}
       <DataTable id='students' title='سجل الطلاب' description={'تصفية الجدول ضمن هذه الدفعة (حتى ٥٠ ملفًا). استخدم البحث أعلاه للبحث في جميع الملفات المصرح بها.'} rows={context.students} rowKey={(student) => student.id} searchText={(student) => `${student.student_number} ${student.name} ${student.phone ?? ''}`} emptyMessage={query ? 'لا يوجد طالب مطابق ضمن نطاق صلاحيتك.' : 'لا توجد ملفات طلاب متاحة. أنشئ ملفًا إذا كانت لديك صلاحية التسجيل.'}
         columns={[

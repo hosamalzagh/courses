@@ -1,5 +1,9 @@
 "use client";
 
+import { Button } from "@/components/Button";
+import { FieldGroup } from "@/components/ui/field";
+
+
 import { PrefetchLink } from "@/components/PrefetchLink";
 
 import { useState, type FormEvent } from "react";
@@ -38,11 +42,13 @@ export function ResetPasswordForm({ token, initialEmail }: { token: string; init
     {done ? <InlineNotice>حُفظت كلمة المرور. يمكنك الدخول الآن.</InlineNotice> : null}
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {!done ? <form className="form-stack" noValidate onSubmit={submit}>
+<FieldGroup>
       <FormField id="email" label="البريد الإلكتروني" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.email} direction="ltr" required />
       <FormField id="password" label="كلمة المرور الجديدة" type="password" value={password} onChange={(value) => { setPassword(value); setFieldErrors({}); }} error={fieldErrors.password} autoComplete="new-password" required />
       <FormField id="confirmation" label="تأكيد كلمة المرور" type="password" value={confirmation} onChange={(value) => { setConfirmation(value); setFieldErrors({}); }} error={fieldErrors.password_confirmation} autoComplete="new-password" required />
-      <button className="button button-primary" disabled={busy || !email || !password || !confirmation}>{busy ? "جارٍ الحفظ…" : "حفظ كلمة المرور"}</button>
-    </form> : null}
+      <Button type="submit" variant="primary" disabled={busy || !email || !password || !confirmation} busy={busy} busyLabel="جارٍ الحفظ…">حفظ كلمة المرور</Button>
+    </FieldGroup>
+</form> : null}
     <p className="auth-footnote"><PrefetchLink className="text-link" href="/login">العودة إلى الدخول</PrefetchLink></p>
   </>;
 }

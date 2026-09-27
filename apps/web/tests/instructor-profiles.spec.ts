@@ -116,8 +116,8 @@ test('instructor profiles are created without accounts, reused across branches a
   await page.getByRole('textbox', { name: 'اسم المحاضر', exact: true }).fill(firstName);
   await page.getByRole('textbox', { name: 'رقم التواصل', exact: true }).fill(phone);
   await page.getByRole('link', { name: 'الفروع', exact: true }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByRole('dialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
+  await expect(page.getByRole('alertdialog')).toBeVisible();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'اسم المحاضر', exact: true })).toHaveValue(firstName);
   const createdResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/center/instructors') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'حفظ ملف المحاضر', exact: true }).click();

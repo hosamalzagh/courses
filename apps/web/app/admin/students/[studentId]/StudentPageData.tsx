@@ -17,7 +17,7 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
   const value = (text: string | null) => text || 'لم تُضف بعد';
   return <CenterPage context={context} path={`/admin/students/${studentId}`}>
     <StudentProfileActions context={context} />
-    <StudentSharingControls student={student} />
+    <StudentSharingControls student={student} inHeader />
     <StudentStatusPanel context={context} />
     <Link href='/admin/students'>العودة إلى ملفات الطلاب</Link>
     <section className='context-card form-stack student-summary' aria-label='ملخص الطالب'>

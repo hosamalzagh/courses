@@ -85,7 +85,7 @@ test('center search management confirms visibility, recovers stale and uncertain
     await expect(page.getByRole('button', { name: 'بحث في طلاب المركز', exact: true })).toBeDisabled();
     const toggle = page.getByRole('button', { name: 'تفعيل البحث بين الفروع', exact: true });
     await toggle.click();
-    const dialog = page.getByRole('dialog', { name: 'تفعيل البحث بين الفروع' });
+    const dialog = page.getByRole('alertdialog', { name: 'تفعيل البحث بين الفروع' });
     await expect(dialog.getByRole('button', { name: 'إلغاء', exact: true })).toBeFocused();
     await page.keyboard.press('Escape'); await expect(toggle).toBeFocused();
     await toggle.click();
@@ -110,7 +110,7 @@ test('center search management confirms visibility, recovers stale and uncertain
     expect((await write(page, 'student-search-policy', 'PATCH', { enabled: false, revision: old.revision })).status).toBe(200);
     expect((await write(page, 'student-search-policy', 'PATCH', { enabled: true, revision: old.revision + 1 })).status).toBe(200);
     await page.getByRole('button', { name: 'تعطيل البحث بين الفروع', exact: true }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'تعطيل البحث', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'تعطيل البحث', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'تغيّر إعداد البحث' })).toBeVisible();
     await page.getByRole('button', { name: 'تحميل أحدث إعداد' }).click();
     await expect(page.getByRole('status').filter({ hasText: 'حُمّل أحدث إعداد' })).toBeVisible();
@@ -119,7 +119,7 @@ test('center search management confirms visibility, recovers stale and uncertain
       else await route.continue();
     });
     await page.getByRole('button', { name: 'تعطيل البحث بين الفروع', exact: true }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'تعطيل البحث', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'تعطيل البحث', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'تعذر التأكد من حفظ الإعداد' })).toBeVisible();
     await page.getByRole('button', { name: 'تحميل أحدث إعداد' }).click();
     await expect(page.getByRole('button', { name: 'تفعيل البحث بين الفروع', exact: true })).toBeVisible();
@@ -170,8 +170,8 @@ test('search and similarity reveal basic data only and lose revoked cross-branch
     await staff.getByRole('button', { name: 'إنشاء ملف طالب', exact: true }).click();
     await staff.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name);
     await staff.getByRole('link', { name: 'البحث في طلاب المركز', exact: true }).click();
-    await expect(staff.getByRole('dialog', { name: 'مغادرة دون حفظ' })).toBeVisible();
-    await staff.getByRole('dialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
+    await expect(staff.getByRole('alertdialog', { name: 'مغادرة دون حفظ' })).toBeVisible();
+    await staff.getByRole('alertdialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
     await expect(staff.getByRole('textbox', { name: 'اسم الطالب', exact: true })).toHaveValue(name);
     await staff.getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click();
     const warning = staff.getByRole('status').filter({ hasText: 'توجد ملفات ببيانات متشابهة' });

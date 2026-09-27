@@ -2,13 +2,14 @@
 
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { CenterHeaderActions } from "@/components/CenterShell";
 import { Button } from '@/components/Button';
 import { ConfirmationDialog } from '@/components/ConfirmationDialog';
 import { InlineNotice } from '@/components/InlineNotice';
 import { centerRequest, responseMessage } from '@/lib/client-api';
 import type { Student, StudentContext } from '@/lib/server-context';
 
-export function StudentSharingControls({ student }: { student: Student }) {
+export function StudentSharingControls({ student, inHeader = false }: { student: Student; inHeader?: boolean }) {
   const router = useRouter();
   const [current, setCurrent] = useState(student);
   const [loadedStudent, setLoadedStudent] = useState(student);
@@ -52,8 +53,11 @@ export function StudentSharingControls({ student }: { student: Student }) {
 
   return <div className='form-stack'>
     <span>المشاركة بين الفروع: {current.sharing_enabled ? 'مسموحة' : 'مغلقة'}</span>
-    {current.can_manage ? <Button ref={actionButton} busy={busy} disabled={conflict} onClick={() => setConfirmation(true)}>تغيير مشاركة الطالب</Button> : null}
+    {inHeader ? <CenterHeaderActions>    {current.can_manage ? <Button ref={actionButton} busy={busy} disabled={conflict} onClick={() => setConfirmation(true)}>تغيير مشاركة الطالب</Button> : null}
     {conflict ? <Button disabled={busy} onClick={reloadStudent}>تحميل أحدث بيانات المشاركة</Button> : null}
+</CenterHeaderActions> : <>    {current.can_manage ? <Button ref={actionButton} busy={busy} disabled={conflict} onClick={() => setConfirmation(true)}>تغيير مشاركة الطالب</Button> : null}
+    {conflict ? <Button disabled={busy} onClick={reloadStudent}>تحميل أحدث بيانات المشاركة</Button> : null}
+</>}
     {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     {confirmation ? <ConfirmationDialog title={`تغيير مشاركة ${current.name}`} description={current.sharing_enabled ? 'لن يظهر هذا الطالب خارج فروع الموظف. يبقى ملفه متاحًا داخل الفروع المصرح بها.' : 'يمكن لصاحب منحة البحث العثور على اسم الطالب ورقمه والتواصل عند فتح البحث العام للمركز. لا تمنح المشاركة فتح الملف أو الدراسة أو المال أو الهوية خارج فروعه.'} confirmLabel={current.sharing_enabled ? 'غلق مشاركة الطالب' : 'السماح بمشاركة الطالب'} onCancel={() => setConfirmation(false)} onConfirm={changeSharing} /> : null}
