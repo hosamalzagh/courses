@@ -53,9 +53,9 @@ export function StudentSharingControls({ student, inHeader = false, compact = fa
 
   return <div className={compact ? 'student-row-actions' : 'form-stack'}>
     {!compact || !current.can_manage ? <span>المشاركة بين الفروع: {current.sharing_enabled ? 'مسموحة' : 'مغلقة'}</span> : null}
-    {inHeader ? <CenterHeaderActions>    {current.can_manage ? <Button ref={actionButton} busy={busy} disabled={conflict} onClick={() => setConfirmation(true)} aria-label='تغيير مشاركة الطالب'>{compact ? `المشاركة: ${current.sharing_enabled ? 'مسموحة' : 'مغلقة'}` : 'تغيير مشاركة الطالب'}</Button> : null}
+    {inHeader ? <CenterHeaderActions>    {current.can_manage ? <Button ref={actionButton} busy={busy} disabled={conflict} onClick={() => setConfirmation(true)} aria-label={compact ? `تغيير مشاركة الطالب — المشاركة ${current.sharing_enabled ? 'مسموحة' : 'مغلقة'}` : 'تغيير مشاركة الطالب'}>{compact ? `المشاركة: ${current.sharing_enabled ? 'مسموحة' : 'مغلقة'}` : 'تغيير مشاركة الطالب'}</Button> : null}
     {conflict ? <Button disabled={busy} onClick={reloadStudent}>تحميل أحدث بيانات المشاركة</Button> : null}
-</CenterHeaderActions> : <>    {current.can_manage ? <Button ref={actionButton} busy={busy} disabled={conflict} onClick={() => setConfirmation(true)} aria-label='تغيير مشاركة الطالب'>{compact ? `المشاركة: ${current.sharing_enabled ? 'مسموحة' : 'مغلقة'}` : 'تغيير مشاركة الطالب'}</Button> : null}
+</CenterHeaderActions> : <>    {current.can_manage ? <Button ref={actionButton} busy={busy} disabled={conflict} onClick={() => setConfirmation(true)} aria-label={compact ? `تغيير مشاركة الطالب — المشاركة ${current.sharing_enabled ? 'مسموحة' : 'مغلقة'}` : 'تغيير مشاركة الطالب'}>{compact ? `المشاركة: ${current.sharing_enabled ? 'مسموحة' : 'مغلقة'}` : 'تغيير مشاركة الطالب'}</Button> : null}
     {conflict ? <Button disabled={busy} onClick={reloadStudent}>تحميل أحدث بيانات المشاركة</Button> : null}
 </>}
     {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}

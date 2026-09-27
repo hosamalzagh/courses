@@ -11,23 +11,24 @@ export function WorkspaceSections({ value, label, path, sections }: {
   value: string;
   label: string;
   path: string;
-  sections: { value: string; label: string; content: ReactNode }[];
+  sections: { value: string; label: string; content: ReactNode; resetParams?: string[] }[];
 }) {
   const params = useSearchParams();
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
     list.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [value]);
-  function href(next: string) {
+  function href(section: { value: string; resetParams?: string[] }) {
     const query = new URLSearchParams(params.toString());
-    query.set("tab", next);
+    for (const key of section.resetParams ?? []) query.delete(key);
+    query.set("tab", section.value);
     return `${path}?${query}`;
   }
   return <Tabs value={value} className="workspace-sections">
     <div className="workspace-sections-scroll">
       <TabsList ref={list} variant="line" aria-label={label} activateOnFocus={false}>
         {sections.map((section) => <TabsTrigger key={section.value} value={section.value} nativeButton={false}
-          render={<PrefetchLink href={href(section.value)} scroll={false} prefetchOnFocus={false} />}>
+          render={<PrefetchLink href={href(section)} scroll={false} prefetchOnFocus={false} />}>
           {section.label}
         </TabsTrigger>)}
       </TabsList>

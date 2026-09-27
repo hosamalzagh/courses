@@ -63,7 +63,7 @@ export function StudentControls({ context, query, identifier = '', section = 're
   return <>
     <CenterPageActions context={context} actions={manageable.length ? <StudentNavigationLink primary focusKey='create' href='/admin/students/new'>إنشاء ملف طالب</StudentNavigationLink> : undefined} />
     <WorkspaceSections value={section} label='أقسام ملفات الطلاب' path='/admin/students' sections={[
-      { value: 'register', label: 'سجل الطلاب', content: register },
+      { value: 'register', label: 'سجل الطلاب', resetParams: ['q', 'identifier', 'page'], content: register },
       { value: 'search', label: 'البحث عن طالب', content: <>{searchForm}{register}</> },
     ]} />
   </>;

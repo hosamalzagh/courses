@@ -159,7 +159,7 @@ export function InstructorControls({ context, query, detail = false, section = '
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
       {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
       {detail ? <><Link href='/admin/instructors'>العودة إلى ملفات المحاضرين</Link>{editorForm}<div hidden={Boolean(editor)} className='workspace-register'>{register}</div></> : <WorkspaceSections value={section} label='أقسام ملفات المحاضرين' path='/admin/instructors' sections={[
-        { value: 'register', label: 'سجل المحاضرين', content: <>{editorForm}<div hidden={Boolean(editor)} className='workspace-register'>{register}</div></> },
+        { value: 'register', label: 'سجل المحاضرين', resetParams: ['q', 'page'], content: <>{editorForm}<div hidden={Boolean(editor)} className='workspace-register'>{register}</div></> },
         { value: 'search', label: 'البحث عن محاضر', content: <>{editorForm}{!editor ? searchForm : null}<div hidden={Boolean(editor)} className='workspace-register'>{register}</div></> },
       ]} />}
   </>;

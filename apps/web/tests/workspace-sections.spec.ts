@@ -46,6 +46,17 @@ test('peer views show one panel, retain route/header state, render without JS an
       await expect(page.getByRole('button', {name:'تغيير افتراضي المشاركة',exact:true})).toBeVisible();
     }
   }
+  for (const [route, label] of [['students','سجل الطلاب'],['instructors','سجل المحاضرين']]) {
+    await page.goto(`${origin}/admin/${route}?tab=search&q=missing-sections-result&page=99`);
+    await page.getByRole('tab',{name:label,exact:true}).click();
+    await expect(page).toHaveURL(`${origin}/admin/${route}?tab=register`);
+    await expect(page.getByRole('table')).not.toContainText('لا يوجد');
+    if (route === 'students') {
+      const action = page.getByRole('button',{name:/^تغيير مشاركة الطالب — المشاركة (مسموحة|مغلقة)$/}).first();
+      await expect(action).toBeVisible();
+      await expect(action).toHaveAccessibleName(/المشاركة (مسموحة|مغلقة)$/);
+    }
+  }
   await page.goto(`${origin}/admin/curriculum?courses_page=1`);
   await page.locator('.center-topbar').evaluate(node => node.setAttribute('data-sections-header','retained'));
   const documents:string[]=[]; page.on('request',request => {if(request.resourceType()==='document')documents.push(request.url());});
