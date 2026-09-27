@@ -64,6 +64,10 @@ After pulling code changes into an existing local installation, run `php85 artis
 
 ## Verify and maintain
 
+GitHub Actions runs the `CI` workflow on pushes to `main`, pull requests targeting `main`, and manual runs from the Actions tab. The Laravel job uses PHP 8.5, PostgreSQL 18 and Redis 7 to run the complete unit/feature suite, including center provisioning, worker isolation and backup/restore. Its application role cannot create databases; the separate provisioning connection uses the disposable CI database administrator. The Next.js job uses Node.js 24 to run ESLint, TypeScript checks and the production build. Both jobs install dependencies from the committed lockfiles and use fresh runner environments without production credentials.
+
+The Playwright browser suite remains a local acceptance check because it currently depends on Herd routing, the bootstrapped local centers and Mailpit. CI does not deploy the application.
+
 ```bash
 curl -I http://courses.test/admin/login
 curl -I http://alpha.courses.test/login
