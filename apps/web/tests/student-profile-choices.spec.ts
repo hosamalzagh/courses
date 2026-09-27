@@ -179,3 +179,32 @@ test('a committed choice with a lost response retries the same definition and au
   const definitions=(await (await page.request.get(`${origin}/api/v1/center/student-profile-choices?kind=qualification&manage=1&q=${encodeURIComponent(label)}`)).json()).choices;expect(definitions).toHaveLength(1);
   await page.getByRole('link',{name:'سجل التدقيق',exact:true}).click();await page.getByText('عرض تغيير قائمة الطالب',{exact:true}).first().click();await expect(page.getByText(`بعد التغيير: ${label}`,{exact:false})).toBeVisible();
 });
+
+test('clearing choice search restores all results without losing form inputs', async ({page}) => {
+  await signIn(page); await page.goto(`${origin}/admin/students/new`);
+  await page.getByRole('textbox',{name:'اسم الطالب',exact:true}).fill('مدخل محفوظ أثناء البحث');
+  const search=page.getByRole('textbox',{name:'البحث في المدينة',exact:true});
+  await search.fill(`لا توجد مدينة ${Date.now()}`);
+  const response=page.waitForResponse(r=>r.url().includes('student-profile-choices?kind=city'));
+  await page.getByRole('button',{name:'بحث في المدينة',exact:true}).click();expect((await response).status()).toBe(200);
+  await expect(page.locator('button[aria-busy=true]')).toHaveCount(0);
+  await search.fill('');await expect(search).toBeVisible();
+  await page.getByRole('button',{name:'بحث في المدينة',exact:true}).click();
+  await expect(page.getByRole('button',{name:'تحميل المزيد من المدينة',exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox',{name:'اسم الطالب',exact:true})).toHaveValue('مدخل محفوظ أثناء البحث');
+});
+
+test('moving a definition across the server page boundary replaces its old row', async ({page}) => {
+  await signIn(page);await page.goto(`${origin}/admin/student-profile-choices?kind=city`);
+  const rows=(await (await page.request.get(`${origin}/api/v1/center/student-profile-choices?kind=city&manage=1`)).json()).choices;
+  expect(rows).toHaveLength(50);
+  const next=(await (await page.request.get(`${origin}/api/v1/center/student-profile-choices?kind=city&manage=1&page=2`)).json()).choices;
+  const replacement=next[0];
+  const choice=rows[0];
+  await page.getByRole('row').filter({has:page.getByRole('cell',{name:choice.label,exact:true})}).getByRole('button',{name:'تعديل',exact:true}).click();
+  await page.getByRole('textbox',{name:'الترتيب',exact:true}).fill('999999');
+  await page.getByRole('button',{name:'حفظ الاختيار',exact:true}).click();
+  await expect(page.getByRole('cell',{name:choice.label,exact:true})).toHaveCount(0);
+  await page.getByPlaceholder('بحث في المدينة…').fill(replacement.label);
+  await expect(page.getByRole('cell',{name:replacement.label,exact:true})).toBeVisible();
+});

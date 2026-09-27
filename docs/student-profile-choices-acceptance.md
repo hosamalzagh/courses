@@ -10,8 +10,9 @@ The management page searches/paginates in SQL with 50 definitions per response. 
 
 ## Verification on 2026-09-27
 
+- Full Laravel suite: 103 passed, 2456 assertions after building the local Vite assets.
 - Focused HTTP tests: 35 passed, 965 assertions (choice management, old disabled values, revisions/retries, current role checks, two centers sharing a login, existing-center migration, student profile/numbering/sharing/suspension regressions).
-- Real browser: five dedicated journeys through production-built Next.js, Laravel and disposable PostgreSQL, with real login/session and CSRF. Covers all lists, registration/manager separation, direct cross-center rejection, revoked authority, concurrent requests, long lists, stale revision recovery, lost response retry and readable audit.
+- Real browser: seven dedicated journeys through production-built Next.js, Laravel and disposable PostgreSQL, with real login/session and CSRF. Covers all lists, registration/manager separation, direct cross-center rejection, revoked authority, concurrent requests, long lists, clearing filtered choices, server pagination after reordering, stale revision recovery, lost response retry and readable audit.
 - Three existing browser integration journeys pass: cached editors with unique submit ownership; numbering/sharing/suspension and general edits; full SSR read budget including profile/edit and warm navigation.
 - Actual SSR measurements from the proxy: management 5; student register/create/profile/edit each 6. Warm intent navigation stays within 6, sends no document request, and retains the same header element. Missing SQL counts fail acceptance.
 - Desktop/mobile RTL and light/dark screenshots were visually inspected. Header actions, validation focus, cancel focus and table overflow were exercised. Lint, TypeScript and production build pass.

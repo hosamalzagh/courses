@@ -17,7 +17,7 @@ import type { StudentChoiceContext, StudentProfileChoice, StudentChoiceKind } fr
 export function StudentChoiceControls({ context, kind, query }: { context: StudentChoiceContext; kind: string; query: string }) {
   const router = useRouter();
   const prefix = useId();
-  const [rows, setRows] = useState(context.choices);
+  const rows = context.choices;
   const [editor, setEditor] = useState<StudentProfileChoice | null>(null);
   const [label, setLabel] = useState('');
   const [position, setPosition] = useState('0');
@@ -52,8 +52,6 @@ export function StudentChoiceControls({ context, kind, query }: { context: Stude
       if (!response.ok) {
         setErrors(await responseFieldErrors(response)); setError(await responseMessage(response)); setConflict(response.status === 409); return;
       }
-      const saved = (await response.json()).choice as StudentProfileChoice;
-      setRows(current => [...current.filter(choice => choice.id !== saved.id), saved].sort((a,b) => a.position - b.position || a.id.localeCompare(b.id)));
       close(); router.refresh();
     } catch { setError('تعذر حفظ الاختيار. مدخلاتك محفوظة؛ أعد نفس الطلب دون إضافة اختيار آخر.'); }
     finally { saving.current = false; setBusy(false); }
@@ -65,7 +63,7 @@ export function StudentChoiceControls({ context, kind, query }: { context: Stude
       const response = await centerRequest(`student-profile-choices/${editor.id}`, 'GET');
       if (!response.ok) { setError(await responseMessage(response)); return; }
       const choice = (await response.json()).choice as StudentProfileChoice;
-      setRows(current => current.map(row => row.id === choice.id ? choice : row)); open(choice);
+      open(choice);
       requestAnimationFrame(() => document.getElementById(`${prefix}-label`)?.focus());
     } catch { setError('تعذر تحميل الاختيار الحالي. أعد المحاولة.'); }
     finally { saving.current = false; setBusy(false); }

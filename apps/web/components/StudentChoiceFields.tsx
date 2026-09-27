@@ -41,7 +41,7 @@ function StudentChoiceField({ prefix, kind, initial, selected, value, onChange, 
   const visible = value && current?.id === value && !choices.some(choice => choice.id === value) ? [current, ...choices] : choices;
   return <div className='form-stack'>
     <ChoiceField id={`${prefix}-${kind}`} label={label} value={value} onChange={value => { setCurrent(choices.find(choice => choice.id === value)); onChange(value); }} error={error} disabled={disabled || busy} items={[{ value: '', label: 'لم يُحدد' }, ...visible.map(choice => ({ value: choice.id, label: `${choice.label}${choice.active ? '' : ' — معطل'}`, disabled: !choice.active }))]} />
-    {list.has_more || query ? <><FormField id={`${prefix}-${kind}-search`} label={`البحث في ${label}`} value={query} onChange={setQuery} /><Button disabled={disabled} busy={busy} onClick={() => load(1)}>بحث في {label}</Button></> : null}
+    {initial.has_more || list.has_more || query ? <><FormField id={`${prefix}-${kind}-search`} label={`البحث في ${label}`} value={query} onChange={setQuery} /><Button disabled={disabled} busy={busy} onClick={() => load(1)}>بحث في {label}</Button></> : null}
     {list.has_more ? <Button disabled={disabled} busy={busy} onClick={() => load(list.page + 1)}>تحميل المزيد من {label}</Button> : null}
     {failure ? <InlineNotice tone='error'>{failure}</InlineNotice> : null}
   </div>;
