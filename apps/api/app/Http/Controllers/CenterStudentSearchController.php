@@ -19,7 +19,7 @@ class CenterStudentSearchController extends Controller
         $data = $request->validate(['q' => ['nullable', 'string', 'max:255'], 'page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
         $permissions = $request->attributes->get('center_permissions');
         abort_unless(self::hasSearchPermission($permissions), 403);
-        $policy = DB::connection('tenant')->table('student_search_policy')->where('id', 1)->first(['enabled', 'revision']);
+        $policy = DB::connection('tenant')->table('student_search_policy')->where('id', 1)->first(['enabled', 'revision', 'default_sharing_enabled']);
         $page = (int) ($data['page'] ?? 1);
         $query = trim($data['q'] ?? '');
         $students = collect();
@@ -31,7 +31,10 @@ class CenterStudentSearchController extends Controller
                 $scope->whereIn('branch_id', self::readableBranches($permissions));
             }
             $students = DB::connection('tenant')->table('students')->select(['students.id', 'student_number', 'name', 'phone'])
-                ->selectSub($scope->selectRaw('count(*) > 0'), 'within_scope')
+                ->selectSub((clone $scope)->selectRaw('count(*) > 0'), 'within_scope')
+                ->where(function (Builder $rows) use ($scope): void {
+                    $rows->where('students.sharing_enabled', true)->orWhereExists((clone $scope)->selectRaw('1'));
+                })
                 ->where(function (Builder $rows) use ($search, $phone, $query): void {
                     $rows->whereRaw('strpos(name_search, ?) > 0', [$search]);
                     if ($phone !== null) {
@@ -48,7 +51,7 @@ class CenterStudentSearchController extends Controller
             'membership' => $request->attributes->get('center_membership')->only(['status', 'grants_version']),
             'center' => $request->attributes->get('center')->only(['id', 'name', 'slug']),
             'permissions' => $permissions->toArray(), 'branches' => [],
-            'policy' => ['enabled' => (bool) $policy->enabled, 'revision' => $policy->revision],
+            'policy' => ['enabled' => (bool) $policy->enabled, 'revision' => $policy->revision, 'default_sharing_enabled' => (bool) $policy->default_sharing_enabled],
             'can_search' => (bool) $policy->enabled,
             'students' => $students->take(50)->map(fn (stdClass $row): array => [
                 'id' => $row->id, 'student_number' => $row->student_number, 'name' => $row->name, 'phone' => $row->phone,
@@ -60,7 +63,7 @@ class CenterStudentSearchController extends Controller
 
     public function updatePolicy(Request $request): JsonResponse
     {
-        $data = $request->validate(['enabled' => ['required', 'boolean'], 'revision' => ['required', 'integer', 'min:1']]);
+        $data = $request->validate(['enabled' => ['required_without:default_sharing_enabled', 'boolean'], 'default_sharing_enabled' => ['sometimes', 'boolean'], 'revision' => ['required', 'integer', 'min:1']]);
 
         return DB::connection('central')->transaction(function () use ($request, $data): JsonResponse {
             $centerId = $request->attributes->get('center')->id;
@@ -72,23 +75,29 @@ class CenterStudentSearchController extends Controller
             return DB::connection('tenant')->transaction(function () use ($request, $data): JsonResponse {
                 abort_unless(CenterPermissions::forUser($request->user()->id)->isCenterManager(), 403);
                 $policy = DB::connection('tenant')->table('student_search_policy')->where('id', 1)->lockForUpdate()->first();
-                $enabled = (bool) $data['enabled'];
-                if ((bool) $policy->enabled !== $enabled) {
+                $enabled = (bool) ($data['enabled'] ?? $policy->enabled);
+                $defaultSharing = (bool) ($data['default_sharing_enabled'] ?? $policy->default_sharing_enabled);
+                if ((bool) $policy->enabled !== $enabled || (bool) $policy->default_sharing_enabled !== $defaultSharing) {
                     if ($policy->revision !== (int) $data['revision']) {
                         throw new HttpResponseException(response()->json(['code' => 'student_search_policy_changed'], 409));
                     }
                     DB::connection('tenant')->table('student_search_policy')->where('id', 1)->update([
-                        'enabled' => $enabled, 'revision' => $policy->revision + 1, 'updated_at' => now(),
+                        'enabled' => $enabled, 'default_sharing_enabled' => $defaultSharing, 'revision' => $policy->revision + 1, 'updated_at' => now(),
                     ]);
-                    DB::connection('tenant')->table('center_audit_logs')->insert([
-                        'actor_id' => $request->user()->id, 'event' => 'center.student_search_changed',
-                        'details' => json_encode(['before' => ['enabled' => (bool) $policy->enabled], 'after' => ['enabled' => $enabled]]), 'created_at' => now(),
-                    ]);
+                    foreach (['enabled' => ['center.student_search_changed', $enabled], 'default_sharing_enabled' => ['center.student_sharing_default_changed', $defaultSharing]] as $field => [$event, $value]) {
+                        if ((bool) $policy->{$field} !== $value) {
+                            DB::connection('tenant')->table('center_audit_logs')->insert([
+                                'actor_id' => $request->user()->id, 'event' => $event,
+                                'details' => json_encode(['before' => [$field => (bool) $policy->{$field}], 'after' => [$field => $value]]), 'created_at' => now(),
+                            ]);
+                        }
+                    }
                     $policy->enabled = $enabled;
+                    $policy->default_sharing_enabled = $defaultSharing;
                     $policy->revision++;
                 }
 
-                return response()->json(['policy' => ['enabled' => (bool) $policy->enabled, 'revision' => $policy->revision]])->header('Cache-Control', 'private, no-store');
+                return response()->json(['policy' => ['enabled' => (bool) $policy->enabled, 'revision' => $policy->revision, 'default_sharing_enabled' => (bool) $policy->default_sharing_enabled]])->header('Cache-Control', 'private, no-store');
             });
         });
     }

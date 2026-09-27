@@ -124,6 +124,9 @@ class CenterStudentSearchTest extends TestCase
     {
         $student = $this->createStudent('Preserved', [$this->south]);
         $this->center->run(function (): void {
+            $migration = glob(database_path('migrations/tenant/*_add_student_cross_branch_sharing.php'))[0];
+            (require $migration)->down();
+            DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
             DB::statement('DROP TABLE student_search_policy');
             DB::table('migrations')->where('migration', '2026_09_26_201812_create_student_search_policy')->delete();
         });
@@ -145,6 +148,93 @@ class CenterStudentSearchTest extends TestCase
         $this->patchJson("{$base}/student-search-policy", ['enabled' => true, 'revision' => 1])->assertOk();
         $this->getJson("{$base}/student-search-workspace?q=Preserved")->assertOk()->assertJsonCount(0, 'students');
         $this->getJson("{$base}/students/{$student['id']}")->assertNotFound();
+    }
+
+    public function test_new_profile_sharing_uses_the_saved_default_without_rewriting_existing_profiles(): void
+    {
+        $first = $this->createStudent('First', [$this->north]);
+        $this->assertTrue($first['sharing_enabled']);
+        $this->patchJson("{$this->base}/student-search-policy", ['default_sharing_enabled' => false, 'revision' => 1])
+            ->assertOk()->assertJsonPath('policy.enabled', false)->assertJsonPath('policy.default_sharing_enabled', false);
+        $second = $this->createStudent('Second', [$this->south]);
+        $this->assertFalse($second['sharing_enabled']);
+        $this->getJson("{$this->base}/students/{$first['id']}")->assertOk()->assertJsonPath('students.0.sharing_enabled', true);
+    }
+
+    public function test_eight_discovery_conditions_and_similar_warnings_preserve_branch_access(): void
+    {
+        $outside = $this->createStudent('Matrix outside', [$this->south]);
+        $inside = $this->createStudent('Matrix inside', [$this->north]);
+        foreach ([false, true] as $enabled) {
+            foreach ([false, true] as $sharing) {
+                foreach ([false, true] as $grant) {
+                    $this->asUser($this->owner);
+                    $policy = $this->getJson("{$this->base}/student-search-workspace")->json('policy');
+                    $this->patchJson("{$this->base}/student-search-policy", ['enabled' => $enabled, 'revision' => $policy['revision']])->assertOk();
+                    foreach ([$outside, $inside] as $student) {
+                        $current = $this->getJson("{$this->base}/students/{$student['id']}")->json('students.0');
+                        $this->patchJson("{$this->base}/students/{$student['id']}/sharing", ['sharing_enabled' => $sharing, 'revision' => $current['revision']])->assertOk();
+                    }
+                    $this->grant([$this->north => $grant ? ['registration', 'center_student_search'] : ['registration']]);
+                    $this->asUser($this->staff);
+                    $this->getJson("{$this->base}/students/similar?name=Matrix%20outside")->assertOk()->assertJsonCount($enabled && $sharing && $grant ? 1 : 0, 'students');
+                    $this->getJson("{$this->base}/students/similar?name=Matrix%20inside")->assertOk()->assertJsonCount(1, 'students');
+                    $search = $this->getJson("{$this->base}/student-search-workspace?q=Matrix");
+                    if ($grant) {
+                        $search->assertOk()->assertJsonCount($enabled ? ($sharing ? 2 : 1) : 0, 'students');
+                    } else {
+                        $search->assertForbidden();
+                    }
+                    $this->getJson("{$this->base}/students/{$outside['id']}")->assertNotFound();
+                    $this->patchJson("{$this->base}/students/{$outside['id']}/sharing", ['sharing_enabled' => true, 'revision' => 1])->assertNotFound();
+                    $this->getJson("{$this->base}/students/{$inside['id']}")->assertOk();
+                }
+            }
+        }
+    }
+
+    public function test_sharing_is_a_separate_audited_action_with_safe_retries_conflicts_and_revocation(): void
+    {
+        $student = $this->createStudent('Sharing action', [$this->north, $this->south]);
+        $this->grant([$this->north => ['registration', 'branch_auditor']]);
+        $this->asUser($this->staff);
+        $url = "{$this->base}/students/{$student['id']}/sharing";
+        $this->patchJson($url, ['sharing_enabled' => false, 'revision' => 1])->assertOk()->assertJsonPath('student.revision', 2)->assertJsonPath('student.sharing_enabled', false);
+        $this->patchJson($url, ['sharing_enabled' => false, 'revision' => 1])->assertOk()->assertJsonPath('student.revision', 2);
+        $this->patchJson($url, ['sharing_enabled' => true, 'revision' => 1])->assertConflict();
+        $this->patchJson("{$this->base}/students/{$student['id']}", ['name' => 'Changed name', 'branch_ids' => [$this->north], 'revision' => 2])->assertOk()->assertJsonPath('student.sharing_enabled', false);
+        $events = collect($this->getJson("{$this->base}/audit")->assertOk()->json('entries'))->where('event', 'student.sharing_changed');
+        $this->assertCount(1, $events);
+        $event = $events->first();
+        $this->assertSame($this->staff->id, $event['actor_id']);
+        $this->assertNotEmpty($event['created_at']);
+        $this->assertSame(['student_id' => $student['id'], 'before' => ['sharing_enabled' => true], 'after' => ['sharing_enabled' => false]], json_decode($event['details'], true));
+        $this->grant([$this->north => ['attendance']]);
+        $this->asUser($this->staff);
+        $this->patchJson($url, ['sharing_enabled' => true, 'revision' => 3])->assertForbidden();
+        $this->asUser($this->owner);
+        $this->getJson("{$this->base}/students/{$student['id']}")->assertOk()->assertJsonPath('students.0.sharing_enabled', false);
+    }
+
+    public function test_existing_profiles_keep_their_discovery_eligibility_and_history_when_migrated(): void
+    {
+        $student = $this->createStudent('Legacy profile', [$this->south]);
+        $this->patchJson("{$this->base}/student-search-policy", ['enabled' => true, 'revision' => 1])->assertOk();
+        $events = $this->getJson("{$this->base}/audit")->assertOk()->json('entries');
+        $this->center->run(function (): void {
+            $migration = glob(database_path('migrations/tenant/*_add_student_cross_branch_sharing.php'))[0];
+            (require $migration)->down();
+            DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
+        });
+        $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->getJson("{$this->base}/students/{$student['id']}")->assertOk()
+            ->assertJsonPath('students.0.student_number', $student['student_number'])
+            ->assertJsonPath('students.0.revision', 1)->assertJsonPath('students.0.sharing_enabled', true);
+        $this->getJson("{$this->base}/student-search-workspace?q=Legacy")->assertOk()
+            ->assertJsonPath('policy.enabled', true)->assertJsonCount(1, 'students');
+        $this->assertSame($events, $this->getJson("{$this->base}/audit")->json('entries'));
+        $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->getJson("{$this->base}/student-workspace")->assertOk()->assertJsonCount(1, 'students');
     }
 
     private function createStudent(string $name, array $branches): array

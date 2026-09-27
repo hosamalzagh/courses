@@ -1,5 +1,6 @@
 "use client";
 
+import { StudentNumberingControls } from "./StudentNumberingControls";
 import { Button } from "@/components/Button";
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -9,7 +10,7 @@ import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
 import { centerRequest, responseFieldErrors, responseMessage } from "@/lib/client-api";
 
-type Settings = { contact_email: string | null; phone: string | null; address: string | null };
+type Settings = { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number };
 
 export function SettingsControls({ context, initialSettings }: { context: CenterContext; initialSettings: Settings }) {
   const router = useRouter();
@@ -47,5 +48,6 @@ export function SettingsControls({ context, initialSettings }: { context: Center
         <FormField id="address" label="العنوان" value={address} onChange={(value) => { setAddress(value); setFieldErrors({}); }} error={fieldErrors.address} />
 
       </form>
+      <StudentNumberingControls start={initialSettings.student_number_start ?? 1} revision={initialSettings.student_number_revision ?? 1} />
   </>;
 }

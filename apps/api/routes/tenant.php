@@ -9,7 +9,9 @@ use App\Http\Controllers\CenterMemberController;
 use App\Http\Controllers\CenterSecurityController;
 use App\Http\Controllers\CenterSettingsController;
 use App\Http\Controllers\CenterStudentController;
+use App\Http\Controllers\CenterStudentNumberingController;
 use App\Http\Controllers\CenterStudentSearchController;
+use App\Http\Controllers\CenterStudentStatusController;
 use App\Http\Middleware\MeasureCenterQueries;
 use App\Http\Middleware\RequireCenterMember;
 use App\Http\Middleware\ResolveCenter;
@@ -50,8 +52,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
 
             if ($request->query('include') === 'settings' && $permissions->isCenterManager()) {
                 $payload['settings'] = DB::connection('tenant')->table('center_settings')->where('id', 1)
-                    ->first(['contact_email', 'phone', 'address']) ?: [
-                        'contact_email' => null, 'phone' => null, 'address' => null,
+                    ->first(['contact_email', 'phone', 'address', 'student_number_start', 'student_number_revision']) ?: [
+                        'contact_email' => null, 'phone' => null, 'address' => null, 'student_number_start' => 1, 'student_number_revision' => 1,
                     ];
             }
 
@@ -68,8 +70,11 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::patch('student-search-policy', [CenterStudentSearchController::class, 'updatePolicy']);
         Route::get('students/similar', [CenterStudentController::class, 'similar']);
         Route::get('students/submissions/{requestId}', [CenterStudentController::class, 'submission']);
+        Route::get('students/{studentId}/barcode', [CenterStudentController::class, 'barcode']);
         Route::get('students/{studentId}', [CenterStudentController::class, 'workspace']);
+        Route::post('students/{studentId}/status', [CenterStudentStatusController::class, 'store']);
         Route::post('students', [CenterStudentController::class, 'store']);
+        Route::patch('students/{studentId}/sharing', [CenterStudentController::class, 'updateSharing']);
         Route::patch('students/{studentId}', [CenterStudentController::class, 'update']);
         Route::get('instructor-workspace', [CenterInstructorController::class, 'workspace']);
         Route::get('instructors/submissions/{requestId}', [CenterInstructorController::class, 'submission']);
@@ -93,6 +98,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::patch('members/{membership}/status', [CenterMemberController::class, 'updateStatus']);
         Route::put('members/{membership}/grants', [CenterMemberController::class, 'updateGrants']);
         Route::get('settings', [CenterSettingsController::class, 'show']);
+        Route::patch('student-numbering', [CenterStudentNumberingController::class, 'update']);
         Route::patch('settings', [CenterSettingsController::class, 'update']);
         Route::get('audit', [CenterAuditController::class, 'index']);
         Route::post('security/mfa/setup', [CenterSecurityController::class, 'setup'])->middleware('throttle:center-route');

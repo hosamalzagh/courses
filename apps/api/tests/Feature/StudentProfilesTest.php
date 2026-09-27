@@ -17,6 +17,36 @@ class StudentProfilesTest extends TestCase
 {
     use CleansCenterDatabases, RefreshDatabase;
 
+    public function test_profile_numbering_sharing_and_suspension_preserve_each_other_across_retries_and_edits(): void
+    {
+        $this->patchJson("{$this->base}/student-numbering", ['start' => 7000, 'revision' => 1])->assertOk();
+        $this->patchJson("{$this->base}/student-search-policy", ['default_sharing_enabled' => true, 'enabled' => true, 'revision' => 1])->assertOk();
+        $creation = ['name' => 'طالب التكامل', 'phone' => '01070007000', 'date_of_birth' => '2000-01-01', 'school' => 'مدرسة التكامل', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid()];
+        $student = $this->postJson("{$this->base}/students", $creation)->assertCreated()
+            ->assertJsonPath('student.student_number', 7000)->assertJsonPath('student.sharing_enabled', true)
+            ->assertJsonPath('student.status', 'active')->json('student');
+        $route = "{$this->base}/students/{$student['id']}";
+        $this->patchJson("{$route}/sharing", ['sharing_enabled' => false, 'revision' => 1])->assertOk()
+            ->assertJsonPath('student.school', 'مدرسة التكامل')->assertJsonPath('student.student_number', 7000);
+        $suspension = ['status' => 'suspended', 'reason' => 'سبب التكامل', 'status_revision' => 1, 'request_id' => (string) Str::uuid()];
+        $this->postJson("{$route}/status", $suspension)->assertOk();
+        $this->postJson("{$route}/status", $suspension)->assertOk();
+        $this->patchJson($route, ['name' => 'طالب التكامل المعدل', 'phone' => $creation['phone'], 'school' => 'مدرسة معدلة', 'branch_ids' => [], 'revision' => 1])->assertConflict();
+        $this->patchJson($route, ['name' => 'طالب التكامل المعدل', 'phone' => $creation['phone'], 'school' => 'مدرسة معدلة', 'branch_ids' => [], 'revision' => 2])->assertOk()
+            ->assertJsonPath('student.student_number', 7000)->assertJsonPath('student.sharing_enabled', false)
+            ->assertJsonPath('student.status', 'suspended')->assertJsonPath('student.status_revision', 2)
+            ->assertJsonPath('student.date_of_birth', '2000-01-01')->assertJsonPath('student.school', 'مدرسة معدلة');
+        $this->postJson("{$this->base}/students", $creation)->assertOk()
+            ->assertJsonPath('student.id', $student['id'])->assertJsonPath('student.school', 'مدرسة معدلة')
+            ->assertJsonPath('student.student_number', 7000)->assertJsonPath('student.status', 'suspended');
+        $this->getJson("{$route}/barcode")->assertOk()->assertSee('7000')->assertDontSee('مدرسة معدلة');
+        $this->postJson("{$route}/status", ['status' => 'active', 'reason' => 'فك إيقاف التكامل', 'status_revision' => 2, 'request_id' => (string) Str::uuid()])->assertOk();
+        $this->getJson($route)->assertOk()->assertJsonPath('students.0.status', 'active')
+            ->assertJsonPath('students.0.sharing_enabled', false)->assertJsonPath('students.0.revision', 3)
+            ->assertJsonCount(1, 'suspensions');
+        $this->postJson("{$this->base}/students", [...$creation, 'name' => 'طالب تالٍ', 'request_id' => (string) Str::uuid()])->assertCreated()->assertJsonPath('student.student_number', 7001);
+    }
+
     private Center $center;
 
     private User $owner;
@@ -138,9 +168,14 @@ class StudentProfilesTest extends TestCase
     {
         $this->createStudent('Alpha only', [$this->north]);
         $this->center->run(function (): void {
+            $migration = glob(database_path('migrations/tenant/*_add_student_cross_branch_sharing.php'))[0];
+            (require $migration)->down();
+            DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
+            DB::statement('DROP TABLE student_suspensions');
+            DB::table('migrations')->where('migration', '2026_09_27_140230_add_student_suspension_history')->delete();
             DB::statement('DROP TABLE student_branches');
             DB::statement('DROP TABLE students');
-            DB::table('migrations')->where('migration', '2026_09_26_193307_create_student_profiles')->delete();
+            DB::table('migrations')->whereIn('migration', ['2026_09_26_193307_create_student_profiles', '2026_09_27_140402_add_general_student_profile_fields'])->delete();
         });
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
         $student = $this->createStudent('Migrated', [$this->north]);
@@ -184,6 +219,87 @@ class StudentProfilesTest extends TestCase
         $this->postJson("{$this->base}/students", ['name' => 'Matching', 'phone' => '01234', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid()])->assertCreated();
         $this->postJson("{$this->base}/students", ['name' => 'Other', 'phone' => '56789', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid()])->assertCreated();
         $this->getJson("{$this->base}/student-workspace?q=0")->assertOk()->assertJsonCount(1, 'students')->assertJsonPath('students.0.name', 'Matching');
+    }
+
+    public function test_general_profile_fields_are_optional_persistent_and_age_is_derived_on_birthday(): void
+    {
+        $this->travelTo(now()->setDate(2026, 9, 26));
+        $student = $this->createStudent('طفل', [$this->north]);
+        $this->assertNull($student['date_of_birth']);
+        $payload = ['name' => 'طفل', 'branch_ids' => [], 'revision' => 1,
+            'date_of_birth' => '2016-09-27', 'gender' => 'female', 'address' => 'العنوان',
+            'email' => 'student@example.test', 'school' => 'مدرسة', 'employer' => 'جهة العمل', 'specialization' => 'التخصص'];
+        $this->patchJson("{$this->base}/students/{$student['id']}", $payload)->assertOk()
+            ->assertJsonPath('student.age', 9)->assertJsonPath('student.school', 'مدرسة')
+            ->assertJsonPath('student.student_number', $student['student_number']);
+        $this->travelTo(now()->setDate(2026, 9, 27));
+        $this->getJson("{$this->base}/students/{$student['id']}")->assertOk()
+            ->assertJsonPath('students.0.age', 10)->assertJsonPath('students.0.employer', 'جهة العمل')
+            ->assertJsonPath('students.0.created_by', $this->owner->id);
+        $this->patchJson("{$this->base}/students/{$student['id']}", [...$payload, 'revision' => 1, 'school' => 'تعديل قديم'])
+            ->assertConflict();
+        $this->patchJson("{$this->base}/students/{$student['id']}", ['name' => 'اسم جديد', 'branch_ids' => [], 'revision' => 2])
+            ->assertOk()->assertJsonPath('student.school', 'مدرسة')->assertJsonPath('student.date_of_birth', '2016-09-27');
+    }
+
+    public function test_birth_date_and_general_fields_reject_invalid_values_without_changing_the_profile(): void
+    {
+        $this->travelTo(now()->setDate(2026, 9, 27));
+        foreach (['2026-09-28', '2025-02-29', '2016-13-01', '27/09/2016', '0000-01-01'] as $date) {
+            $this->postJson("{$this->base}/students", ['name' => 'طالب', 'branch_ids' => [$this->north],
+                'request_id' => (string) Str::uuid(), 'date_of_birth' => $date])->assertUnprocessable()->assertJsonValidationErrors('date_of_birth');
+        }
+        $student = $this->postJson("{$this->base}/students", ['name' => 'مولود اليوم', 'branch_ids' => [$this->north],
+            'request_id' => (string) Str::uuid(), 'date_of_birth' => '2026-09-27'])->assertCreated()->assertJsonPath('student.age', 0)->json('student');
+        $this->patchJson("{$this->base}/students/{$student['id']}", ['name' => 'طالب', 'branch_ids' => [], 'revision' => 1,
+            'email' => 'invalid', 'gender' => 'unknown'])->assertUnprocessable()->assertJsonValidationErrors(['email', 'gender']);
+        $this->getJson("{$this->base}/students/{$student['id']}")->assertOk()->assertJsonPath('students.0.name', 'مولود اليوم');
+    }
+
+    public function test_expanding_an_existing_center_preserves_numbers_contacts_associations_audit_and_requests(): void
+    {
+        $requestId = (string) Str::uuid();
+        $payload = ['name' => 'ملف قديم', 'phone' => '01012345678', 'branch_ids' => [$this->north, $this->south], 'request_id' => $requestId];
+        $student = $this->postJson("{$this->base}/students", $payload)->assertCreated()->json('student');
+        $this->center->run(function (): void {
+            $migration = require database_path('migrations/tenant/2026_09_27_140402_add_general_student_profile_fields.php');
+            $migration->down();
+            DB::table('migrations')->where('migration', '2026_09_27_140402_add_general_student_profile_fields')->delete();
+        });
+        $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->postJson("{$this->base}/students", $payload)->assertOk()->assertJsonPath('student.id', $student['id']);
+        $this->getJson("{$this->base}/students/{$student['id']}")->assertOk()
+            ->assertJsonPath('students.0.student_number', $student['student_number'])
+            ->assertJsonPath('students.0.phone', '01012345678')
+            ->assertJsonPath('students.0.branch_ids', [$this->north, $this->south])
+            ->assertJsonPath('students.0.created_by', $student['created_by'])
+            ->assertJsonPath('students.0.created_at', $student['created_at'])
+            ->assertJsonPath('students.0.date_of_birth', null);
+        $events = collect($this->getJson("{$this->base}/audit")->assertOk()->json('entries'))->where('event', 'student.created');
+        $this->assertCount(2, $events);
+        $this->getJson("{$this->base}/students/submissions/{$requestId}")->assertOk()->assertJsonPath('student.id', $student['id']);
+    }
+
+    public function test_leap_day_birthdays_and_nullable_birth_dates_have_no_stored_age(): void
+    {
+        $this->travelTo(now()->setDate(2024, 2, 28));
+        $student = $this->postJson("{$this->base}/students", ['name' => 'ميلاد كبيس', 'branch_ids' => [$this->north],
+            'request_id' => (string) Str::uuid(), 'date_of_birth' => '2020-02-29'])->assertCreated()->assertJsonPath('student.age', 3)->json('student');
+        $this->travelTo(now()->setDate(2024, 2, 29));
+        $this->getJson("{$this->base}/students/{$student['id']}")->assertOk()->assertJsonPath('students.0.age', 4);
+        $this->patchJson("{$this->base}/students/{$student['id']}", ['name' => $student['name'], 'branch_ids' => [], 'revision' => 1,
+            'date_of_birth' => null, 'created_by' => $this->staff->id, 'created_at' => '1999-01-01', 'age' => 99])->assertOk()
+            ->assertJsonPath('student.age', null)->assertJsonPath('student.created_by', $this->owner->id);
+    }
+
+    public function test_registration_can_edit_shared_general_data_without_managing_every_visible_branch(): void
+    {
+        $student = $this->createStudent('فروع متعددة', [$this->north, $this->south]);
+        $this->grant([$this->north => ['registration'], $this->south => ['attendance']]);
+        $this->asUser($this->staff);
+        $this->patchJson("{$this->base}/students/{$student['id']}", ['name' => $student['name'], 'branch_ids' => [$this->north],
+            'revision' => 1, 'school' => 'مدرسة معدلة'])->assertOk()
+            ->assertJsonPath('student.school', 'مدرسة معدلة')->assertJsonPath('student.branch_ids', [$this->north, $this->south]);
     }
 
     private function createStudent(string $name, array $branches): array

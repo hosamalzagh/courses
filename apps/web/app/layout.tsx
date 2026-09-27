@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import localFont from "next/font/local";
+import { NavigationHistoryTracker } from "@/components/UnsavedChangesGuard";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 
@@ -35,7 +36,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const theme = (await cookies()).get("courses_theme")?.value === "dark" ? "dark" : "light";
   return (
     <html lang="ar" dir="rtl" data-theme={theme} className={`${arabic.variable} ${latin.variable} ${codes.variable}`}>
-      <body><ThemeProvider initialTheme={theme}>{children}</ThemeProvider></body>
+      <body><ThemeProvider initialTheme={theme}><NavigationHistoryTracker />{children}</ThemeProvider></body>
     </html>
   );
 }

@@ -20,7 +20,7 @@ export function StudentSearchControls({ context, query }: { context: StudentSear
   const [loadedQuery, setLoadedQuery] = useState(query);
   if (loadedRevision !== context.policy.revision) { setLoadedRevision(context.policy.revision); setPolicy(context.policy); }
   if (loadedQuery !== query) { setLoadedQuery(query); setSearch(query); }
-  const [confirmation, setConfirmation] = useState(false);
+  const [confirmation, setConfirmation] = useState<'search' | 'default' | null>(null);
   const [busy, setBusy] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState('');
@@ -39,9 +39,9 @@ export function StudentSearchControls({ context, query }: { context: StudentSear
 
   async function savePolicy() {
     if (saving.current) return;
-    saving.current = true; setConfirmation(false); setBusy(true); setError(''); setNotice('');
+    saving.current = true; setConfirmation(null); setBusy(true); setError(''); setNotice('');
     try {
-      const response = await centerRequest('student-search-policy', 'PATCH', { enabled: !policy.enabled, revision: policy.revision });
+      const response = await centerRequest('student-search-policy', 'PATCH', { ...(confirmation === 'default' ? { default_sharing_enabled: !policy.default_sharing_enabled } : { enabled: !policy.enabled }), revision: policy.revision });
       if (!response.ok) {
         if (response.status === 409) { setConflict(true); setError('تغيّر إعداد البحث. حمّل أحدث إعداد قبل التعديل.'); }
         else setError(await responseMessage(response));
@@ -49,7 +49,7 @@ export function StudentSearchControls({ context, query }: { context: StudentSear
       }
       const data = await response.json() as { policy: StudentSearchPolicy };
       setPolicy(data.policy); setConflict(false);
-      setNotice(data.policy.enabled ? 'فُعّل البحث في البيانات الأساسية لأصحاب صلاحية البحث المستقلة.' : 'عُطّل البحث بين الفروع. بقيت ملفات الطلاب وتاريخهم محفوظة.');
+      setNotice(confirmation === 'default' ? 'حُفظ افتراضي مشاركة الملفات الجديدة. بقيت اختيارات الطلاب الموجودين محفوظة.' : data.policy.enabled ? 'فُعّل البحث في البيانات الأساسية لأصحاب صلاحية البحث المستقلة.' : 'عُطّل البحث بين الفروع. بقيت ملفات الطلاب وتاريخهم محفوظة.');
       router.refresh();
     } catch { setError('تعذر التأكد من حفظ الإعداد. حمّل أحدث حالة لمعرفة ما حُفظ قبل التعديل.'); setConflict(true); }
     finally { saving.current = false; setBusy(false); }
@@ -85,11 +85,16 @@ export function StudentSearchControls({ context, query }: { context: StudentSear
       <section className='context-card form-stack' aria-label='إتاحة البحث بين الفروع'>
         <h2>إتاحة البحث بين الفروع</h2>
         <p>الحالة: <strong>{policy.enabled ? 'مفعّل' : 'مغلق'}</strong>. يحتاج الموظف صلاحية البحث المستقلة؛ أدوار التسجيل وحدها لا تكفي.</p>
-        {context.permissions.can_manage_center ? <div className='form-actions'><Button ref={policyButton} busy={busy} disabled={conflict || pending} onClick={() => setConfirmation(true)}>{policy.enabled ? 'تعطيل البحث بين الفروع' : 'تفعيل البحث بين الفروع'}</Button>{conflict ? <Button disabled={busy} onClick={reloadPolicy}>تحميل أحدث إعداد</Button> : null}</div> : <p className='muted'>مالك المركز أو مسؤوله يغيّر هذا الإعداد.</p>}
+        {context.permissions.can_manage_center ? <div className='form-actions'><Button ref={policyButton} busy={busy} disabled={conflict || pending} onClick={() => setConfirmation('search')}>{policy.enabled ? 'تعطيل البحث بين الفروع' : 'تفعيل البحث بين الفروع'}</Button>{conflict ? <Button disabled={busy} onClick={reloadPolicy}>تحميل أحدث إعداد</Button> : null}</div> : <p className='muted'>مالك المركز أو مسؤوله يغيّر هذا الإعداد.</p>}
       </section>
+      {context.permissions.can_manage_center ? <section className='context-card form-stack' aria-label='افتراضي مشاركة الملفات الجديدة'>
+        <h2>افتراضي مشاركة الملفات الجديدة</h2>
+        <p>المشاركة عند الإنشاء: <strong>{policy.default_sharing_enabled ? 'مسموحة' : 'مغلقة'}</strong>. تغيير الافتراضي لا يغيّر اختيارات الطلاب الموجودين، ولا يفتح البحث العام.</p>
+        <div className='form-actions'><Button busy={busy} disabled={conflict || pending} onClick={() => setConfirmation('default')}>تغيير افتراضي المشاركة</Button>{conflict ? <Button disabled={busy} onClick={reloadPolicy}>تحميل أحدث إعداد</Button> : null}</div>
+      </section> : null}
       {!policy.enabled ? <InlineNotice tone='warning'>البحث بين الفروع مغلق في هذا المركز. يمكنك العمل في ملفات الطلاب المصرح بها ضمن فروعك.</InlineNotice> : null}
       <form className='context-card form-stack' aria-label='البحث في البيانات الأساسية لطلاب المركز' noValidate ref={searchForm} onSubmit={submit} aria-busy={pending}>
-        <fieldset disabled={!context.can_search || busy || pending} style={{ border: 0, padding: 0, margin: 0 }}><FormField id='center-student-search' label='الاسم أو رقم الطالب الداخلي أو رقم التواصل' value={search} onChange={setSearch} hint='البحث يشمل كل فروع هذا المركز عند تفعيل الإتاحة. النتائج لا تعرض سجلات الفروع.' /></fieldset>
+        <fieldset disabled={!context.can_search || busy || pending} style={{ border: 0, padding: 0, margin: 0 }}><FormField id='center-student-search' label='الاسم أو رقم الطالب الداخلي أو رقم التواصل' value={search} onChange={setSearch} hint='خارج فروعك تظهر الملفات التي تسمح بالمشاركة فقط عند فتح البحث العام ومنحك صلاحية البحث. النتائج لا تعرض سجلات الفروع.' /></fieldset>
         <div className='form-actions'><Button type='submit' variant='primary' busy={pending} disabled={!context.can_search || busy}>بحث في طلاب المركز</Button>{search ? <Button disabled={busy || pending} onClick={() => { setSearch(''); focusAfterClear.current = true; navigate(''); searchForm.current?.querySelector<HTMLInputElement>('#center-student-search')?.focus(); }}>مسح البحث</Button> : null}<Link href='/admin/students'>ملفات الطلاب ضمن فروعك</Link></div>
       </form>
       <DataTable id='center-student-search-results' title='البيانات الأساسية المطابقة' description='حتى ٥٠ نتيجة في الدفعة؛ تصفية الجدول ضمن الدفعة الحالية فقط.' rows={context.students} rowKey={(student) => student.id} searchText={(student) => `${student.student_number} ${student.name} ${student.phone ?? ''}`} emptyMessage={!context.can_search ? 'البحث بين الفروع مغلق.' : query ? 'لا يوجد طالب مطابق في هذا المركز.' : 'أدخل بيانات الطالب لبدء البحث.'} columns={[
@@ -99,6 +104,6 @@ export function StudentSearchControls({ context, query }: { context: StudentSear
         { key: 'scope', label: 'إتاحة الملف', render: (student) => student.within_scope ? <Link href={`/admin/students/${student.id}`}>عرض الملف ضمن فروعك</Link> : <span className='muted'>بيانات أساسية فقط · خارج فروعك</span> },
       ]} />
       <nav className='form-actions' aria-label='دفعات نتائج بحث المركز'>{context.pagination.page > 1 ? <Button disabled={busy || pending} onClick={() => navigate(query, context.pagination.page - 1)}>الدفعة السابقة</Button> : null}<span>دفعة {context.pagination.page.toLocaleString('ar-EG')}</span>{context.pagination.has_more ? <Button disabled={busy || pending} onClick={() => navigate(query, context.pagination.page + 1)}>الدفعة التالية</Button> : null}</nav>
-      {confirmation ? <ConfirmationDialog title={policy.enabled ? 'تعطيل البحث بين الفروع' : 'تفعيل البحث بين الفروع'} description={policy.enabled ? 'سيتوقف البحث خارج الفروع المسندة. تبقى ملفات الطلاب والارتباطات والتاريخ محفوظة.' : 'سيتمكن صاحب صلاحية البحث المستقلة من رؤية الاسم ورقم الطالب ورقم التواصل عبر فروع المركز. لا تُفتح السجلات الدراسية أو المالية ولا صلاحية التعديل.'} confirmLabel={policy.enabled ? 'تعطيل البحث' : 'تفعيل البحث'} onCancel={() => setConfirmation(false)} onConfirm={savePolicy} /> : null}
+      {confirmation ? <ConfirmationDialog title={confirmation === 'default' ? 'تغيير افتراضي مشاركة الملفات الجديدة' : policy.enabled ? 'تعطيل البحث بين الفروع' : 'تفعيل البحث بين الفروع'} description={confirmation === 'default' ? 'سيطبق الاختيار الجديد عند إنشاء ملفات جديدة فقط. تبقى اختيارات الطلاب الموجودين محفوظة، والبحث خارج الفروع يحتاج إعداد البحث ومنحة الموظف ومشاركة الطالب معًا.' : policy.enabled ? 'سيتوقف البحث خارج الفروع المسندة. تبقى ملفات الطلاب والارتباطات والتاريخ محفوظة.' : 'سيتمكن صاحب صلاحية البحث المستقلة من رؤية الاسم ورقم الطالب ورقم التواصل للطلاب الذين يسمحون بالمشاركة عبر فروع المركز. لا تُفتح السجلات الدراسية أو المالية ولا صلاحية التعديل.'} confirmLabel={confirmation === 'default' ? (policy.default_sharing_enabled ? 'غلق المشاركة للملفات الجديدة' : 'السماح بالمشاركة للملفات الجديدة') : policy.enabled ? 'تعطيل البحث' : 'تفعيل البحث'} onCancel={() => setConfirmation(null)} onConfirm={savePolicy} /> : null}
   </>;
 }
