@@ -6,6 +6,7 @@ import { studentChoiceLabels } from '@/lib/student-profile-choices';
 import type { AuditEntry } from '@/lib/server-context';
 
 export function StudentAuditDetails({ entry }: { entry: AuditEntry }) {
+  if (entry.event === 'student.photo_changed') return <p>حُفظت صورة شخصية جديدة للطالب. محتوى الصور يعرض داخل الملف المصرح به.</p>;
   if (entry.event === 'center.student_custom_field_changed') {
     let details=entry.details;if(typeof details === 'string') {try{details=JSON.parse(details);}catch{return null;}}
     if(!details || typeof details !== 'object' || Array.isArray(details) || !('after' in details) || !details.after)return null;

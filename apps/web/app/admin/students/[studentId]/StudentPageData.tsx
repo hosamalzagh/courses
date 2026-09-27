@@ -1,4 +1,6 @@
 import 'server-only';
+import Image from 'next/image';
+import { StudentPhotoControls } from '@/components/StudentPhotoControls';
 import { StudentCustomFieldHistory } from '@/components/StudentCustomFieldHistory';
 import { StudentCustomFieldSummary } from '@/components/StudentCustomFields';
 import { InlineNotice } from '@/components/InlineNotice';
@@ -28,12 +30,14 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
     <StudentStatusPanel context={context} />
     <Link href='/admin/students'>العودة إلى ملفات الطلاب</Link>
     <section className='context-card form-stack student-summary' aria-label='ملخص الطالب'>
+      {student.photo ? <Image src={student.photo.preview} alt={`صورة ${student.name}`} width={96} height={96} unoptimized className='rounded-lg object-cover' /> : <p>لم تُضف صورة للطالب بعد.</p>}
       <h2>{student.name}</h2>
       <p>رقم الطالب الداخلي: <bdi>{student.student_number.toLocaleString('ar-EG')}</bdi></p>
       {student.manual_code !== null ? <p>{context.student_code_settings.label}{context.student_code_settings.enabled ? '' : ' — معطل، والقيمة محفوظة'}: <bdi dir='ltr'>{student.manual_code}</bdi></p> : null}
       <p>رقم التواصل: <bdi dir='ltr'>{value(student.phone)}</bdi>{primaryContact ? ` — ${primaryContact.name} (${primaryContact.relationship})` : student.phone ? ' — صاحبه غير محدد' : ''}</p>
       <p>الفروع المصرح بها: {student.branch_ids.map((id) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join('، ')}</p>
     </section>
+    <StudentPhotoControls key={student.id} student={student} />
     {student.missing_custom_fields > 0 ? <InlineNotice tone='warning'>الملف ينقصه {student.missing_custom_fields.toLocaleString('ar-EG')} من الحقول المطلوبة. أكملها عند تعديل البيانات؛ المشاركة والإيقاف مستقلان.</InlineNotice> : null}
     <nav className='form-actions' aria-label='أقسام ملف الطالب'><Link href={`/admin/students/${student.id}`} aria-current={tab === 'custom-history' ? undefined : 'page'}>البيانات الشخصية</Link><Link href={`/admin/students/${student.id}?tab=custom-history`} aria-current={tab === 'custom-history' ? 'page' : undefined}>تاريخ الحقول الإضافية</Link>{context.permissions.can_manage_center || Object.values(context.permissions.branch_roles).some((roles) => roles.includes('branch_auditor')) ? <Link href='/admin/audit'>سجل التغييرات</Link> : null}</nav>
     {context.custom_history ? <StudentCustomFieldHistory history={context.custom_history} studentId={student.id} /> : <>
