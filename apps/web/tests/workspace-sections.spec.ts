@@ -340,3 +340,38 @@ test('successful creation and committed recovery retain destination batch state'
   await expect(page.getByRole('alert').filter({hasText:'تغيّرت الخطة أو حُفظ الطلب'})).toBeVisible();
   await page.getByRole('button',{name:'تحميل البيانات الحالية للمنهج',exact:true}).click(); await expectBatches();
 });
+
+
+test('settings skip retained student queries and browser history dismisses policy confirmations', async ({page}) => {
+  await login(page);
+  const original = (await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy;
+  try {
+    if (!original.enabled) expect((await write(page,'student-search-policy','PATCH',{enabled:true,revision:original.revision})).status).toBe(200);
+    const student = (await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json()).students[0];
+    const value = String(student.student_number);
+    const start = cursor(); await page.goto(`${origin}/admin/student-search?tab=settings&q=${value}&page=2`);
+    await expect(page.getByRole('tab',{name:'إعدادات المشاركة والبحث',exact:true})).toHaveAttribute('aria-selected','true');
+    const rows = metrics(start); expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every(row => typeof row.count === 'number' && row.count > 0)).toBe(true);
+    const sql = rows.reduce((sum,row) => sum + row.count,0); expect(sql).toBeLessThanOrEqual(5);
+    console.log(JSON.stringify({route:'student-search settings with retained query',sql}));
+    await page.getByRole('tab',{name:'البحث عن طالب',exact:true}).click();
+    await expect(page).toHaveURL(url => url.searchParams.get('q') === value && url.searchParams.get('page') === '2' && url.searchParams.get('tab') === 'search');
+    await expect(page.getByRole('textbox',{name:'الاسم أو رقم الطالب الداخلي أو رقم التواصل',exact:true})).toHaveValue(value);
+    await page.goto(`${origin}/admin/student-search`);
+    await page.getByRole('tab',{name:'إعدادات المشاركة والبحث',exact:true}).click(); await expect(page).toHaveURL(/tab=settings/);
+    const current = (await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy;
+    await page.getByRole('button',{name:'تغيير افتراضي المشاركة',exact:true}).click(); await expect(page.getByRole('alertdialog')).toBeVisible();
+    await page.goBack(); await expect(page.getByRole('tab',{name:'البحث عن طالب',exact:true})).toHaveAttribute('aria-selected','true');
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await page.goForward(); await expect(page.getByRole('tab',{name:'إعدادات المشاركة والبحث',exact:true})).toHaveAttribute('aria-selected','true');
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await page.getByRole('button',{name:'تعطيل البحث بين الفروع',exact:true}).click(); await expect(page.getByRole('alertdialog')).toBeVisible();
+    await page.goBack(); await expect(page.getByRole('tab',{name:'البحث عن طالب',exact:true})).toHaveAttribute('aria-selected','true');
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    expect((await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy.revision).toBe(current.revision);
+  } finally {
+    const current = (await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy;
+    expect((await write(page,'student-search-policy','PATCH',{enabled:original.enabled,default_sharing_enabled:original.default_sharing_enabled,revision:current.revision})).status).toBe(200);
+  }
+});

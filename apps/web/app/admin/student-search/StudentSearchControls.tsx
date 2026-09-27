@@ -28,6 +28,8 @@ export function StudentSearchControls({ context, query, section = 'search' }: { 
   if (loadedRevision !== context.policy.revision) { setLoadedRevision(context.policy.revision); setPolicy(context.policy); }
   if (loadedQuery !== query) { setLoadedQuery(query); setSearch(query); }
   const [confirmation, setConfirmation] = useState<'search' | 'default' | null>(null);
+  const [loadedSection, setLoadedSection] = useState(section);
+  if (loadedSection !== section) { setLoadedSection(section); setConfirmation(null); }
   const [busy, setBusy] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState('');
@@ -45,7 +47,7 @@ export function StudentSearchControls({ context, query, section = 'search' }: { 
   }, [pending, query]);
 
   async function savePolicy() {
-    if (saving.current) return;
+    if (saving.current || !confirmation || section !== 'settings') return;
     saving.current = true; setConfirmation(null); setBusy(true); setError(''); setNotice('');
     try {
       const response = await centerRequest('student-search-policy', 'PATCH', { ...(confirmation === 'default' ? { default_sharing_enabled: !policy.default_sharing_enabled } : { enabled: !policy.enabled }), revision: policy.revision });
@@ -121,6 +123,6 @@ export function StudentSearchControls({ context, query, section = 'search' }: { 
       { value: 'search', label: 'البحث عن طالب', content: searchView },
       ...(context.permissions.can_manage_center ? [{ value: 'settings', label: 'إعدادات المشاركة والبحث', content: settings }] : []),
     ]} />
-      {confirmation ? <ConfirmationDialog title={confirmation === 'default' ? 'تغيير افتراضي مشاركة الملفات الجديدة' : policy.enabled ? 'تعطيل البحث بين الفروع' : 'تفعيل البحث بين الفروع'} description={confirmation === 'default' ? 'سيطبق الاختيار الجديد عند إنشاء ملفات جديدة فقط. تبقى اختيارات الطلاب الموجودين محفوظة، والبحث خارج الفروع يحتاج إعداد البحث ومنحة الموظف ومشاركة الطالب معًا.' : policy.enabled ? 'سيتوقف البحث خارج الفروع المسندة. تبقى ملفات الطلاب والارتباطات والتاريخ محفوظة.' : 'سيتمكن صاحب صلاحية البحث المستقلة من رؤية الاسم ورقم الطالب ورقم التواصل للطلاب الذين يسمحون بالمشاركة عبر فروع المركز. لا تُفتح السجلات الدراسية أو المالية ولا صلاحية التعديل.'} confirmLabel={confirmation === 'default' ? (policy.default_sharing_enabled ? 'غلق المشاركة للملفات الجديدة' : 'السماح بالمشاركة للملفات الجديدة') : policy.enabled ? 'تعطيل البحث' : 'تفعيل البحث'} onCancel={() => setConfirmation(null)} onConfirm={savePolicy} /> : null}
+      {section === 'settings' && confirmation ? <ConfirmationDialog title={confirmation === 'default' ? 'تغيير افتراضي مشاركة الملفات الجديدة' : policy.enabled ? 'تعطيل البحث بين الفروع' : 'تفعيل البحث بين الفروع'} description={confirmation === 'default' ? 'سيطبق الاختيار الجديد عند إنشاء ملفات جديدة فقط. تبقى اختيارات الطلاب الموجودين محفوظة، والبحث خارج الفروع يحتاج إعداد البحث ومنحة الموظف ومشاركة الطالب معًا.' : policy.enabled ? 'سيتوقف البحث خارج الفروع المسندة. تبقى ملفات الطلاب والارتباطات والتاريخ محفوظة.' : 'سيتمكن صاحب صلاحية البحث المستقلة من رؤية الاسم ورقم الطالب ورقم التواصل للطلاب الذين يسمحون بالمشاركة عبر فروع المركز. لا تُفتح السجلات الدراسية أو المالية ولا صلاحية التعديل.'} confirmLabel={confirmation === 'default' ? (policy.default_sharing_enabled ? 'غلق المشاركة للملفات الجديدة' : 'السماح بالمشاركة للملفات الجديدة') : policy.enabled ? 'تعطيل البحث' : 'تفعيل البحث'} onCancel={() => setConfirmation(null)} onConfirm={savePolicy} /> : null}
   </>;
 }
