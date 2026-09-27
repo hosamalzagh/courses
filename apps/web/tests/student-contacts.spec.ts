@@ -18,7 +18,10 @@ async function select(page: Page, label: string, value: string) {
 test('create an adult profile with owned shared channels and preserve them across edits', async ({ page }) => {
   const phone = `000${Date.now()}`; const name = `بالغ تواصل ${Date.now()}`;
   await signIn(page);
+  const cityLabel = `000 تكامل التواصل ${Date.now()}`; const cityId = crypto.randomUUID();
+  expect((await write(page,'student-profile-choices','POST',{id:cityId,kind:'city',label:cityLabel,position:0,active:true})).status).toBe(201);
   await page.goto(`${origin}/admin/students/new`);
+  await select(page,'المدينة',cityLabel);
   await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name);
   await page.getByRole('button', { name: 'إضافة جهة تواصل', exact: true }).click();
   await page.getByRole('textbox', { name: 'اسم جهة التواصل 1', exact: true }).fill('صاحب الرقم');
@@ -29,6 +32,7 @@ test('create an adult profile with owned shared channels and preserve them acros
   const response = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/students'));
   await page.getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click();
   const student = (await (await response).json()).student;
+  expect(student.city_id).toBe(cityId);
   await expect(page).toHaveURL(new RegExp(`/students/${student.id}\\?focus=edit$`));
   await expect(page.getByText('صاحب الرقم — الطالب نفسه — أساسية', { exact: true })).toBeVisible();
   await expect(page.getByText('واتساب: صاحب الرقم', { exact: true })).toBeVisible();
@@ -37,6 +41,7 @@ test('create an adult profile with owned shared channels and preserve them acros
   await page.getByRole('textbox', { name: 'جهة العمل', exact: true }).fill('تعديل يحفظ القنوات');
   await page.getByRole('button', { name: 'حفظ بيانات الطالب', exact: true }).click();
   await expect(page.getByText('واتساب: صاحب الرقم', { exact: true })).toBeVisible();
+  await expect(page.getByText(cityLabel,{exact:true})).toBeVisible();
   await page.getByRole('link',{name:'سجل التغييرات',exact:true}).click();
   const entry = page.getByRole('row').filter({hasText:name}).first();
   await entry.locator('summary').click();
@@ -146,7 +151,13 @@ test('contact validation, cancel focus and RTL themes stay usable on desktop and
   await cancel.click(); await expect(page.getByRole('alertdialog')).toBeVisible();
   await page.getByRole('button',{name:'إلغاء',exact:true}).click();
   await expect(cancel).toBeFocused(); await expect(phone).toHaveValue('000555');
-  await page.getByRole('button',{name:'حذف جهة التواصل 1',exact:true}).click();
+  const remove = page.getByRole('button',{name:'حذف جهة التواصل 1',exact:true});
+  await remove.click();
+  await expect(page.getByRole('alertdialog')).toContainText('جهة لوحة المفاتيح');
+  await page.getByRole('alertdialog').getByRole('button',{name:'إلغاء',exact:true}).click();
+  await expect(remove).toBeFocused(); await expect(phone).toHaveValue('000555');
+  await remove.click();
+  await page.getByRole('alertdialog').getByRole('button',{name:'حذف جهة التواصل',exact:true}).click();
   await expect(page.getByRole('textbox',{name:'رقم قناة واتساب',exact:true})).toHaveCount(0);
   await expect(page.getByRole('textbox',{name:'اسم جهة التواصل 1',exact:true})).toHaveCount(0);
 });

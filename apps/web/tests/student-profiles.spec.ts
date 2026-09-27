@@ -109,6 +109,7 @@ test('combined profile keeps number and sharing through suspension, general edit
   await page.getByRole('alertdialog').getByRole('button', { name: 'إيقاف ملف الطالب', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'حالة ملف الطالب: موقوف' })).toBeVisible();
   await page.getByRole('link', { name: 'تعديل ملف الطالب', exact: true }).click();
+  await enterContact(page, '00012345678');
   await page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true }).fill('مدرسة التكامل');
   await page.goBack();
   await expect(page.getByRole('alertdialog')).toContainText('مغادرة دون حفظ');
@@ -120,6 +121,7 @@ test('combined profile keeps number and sharing through suspension, general edit
   const current = (await (await page.request.get(`${host}/api/v1/center/students/${student.id}`)).json()).students[0];
   expect(current.student_number).toBe(start); expect(current.school).toBe('مدرسة التكامل');
   expect(current.sharing_enabled).toBe(false); expect(current.status).toBe('suspended');
+  expect(current.contacts[0].phone).toBe('00012345678'); expect(current.contacts[0].name).toBe('صاحب الرقم المشترك');
   const barcode = await page.request.get(`${host}/api/v1/center/students/${student.id}/barcode`);
   expect(barcode.status()).toBe(200); expect(await barcode.text()).toContain(String(start));
   expect(await barcode.text()).not.toContain('مدرسة التكامل');

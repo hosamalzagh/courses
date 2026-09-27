@@ -49,7 +49,6 @@ class StudentProfilesTest extends TestCase
 
     public function test_contacts_and_owned_channels_keep_shared_numbers_and_retry_without_duplicate_profiles(): void
     {
-        Mail::fake();
         $contact = ['id' => (string) Str::uuid(), 'name' => 'الأم', 'relationship' => 'والدة', 'phone' => '001234', 'primary' => true];
         $other = ['id' => (string) Str::uuid(), 'name' => 'الطالب', 'relationship' => 'الطالب نفسه', 'phone' => '005678', 'primary' => false];
         $channels = ['primary' => ['contact_id' => $contact['id'], 'phone' => '001234'], 'alternative' => ['contact_id' => $other['id'], 'phone' => '005678'], 'whatsapp' => ['contact_id' => $contact['id'], 'phone' => '001234'], 'sinjapp' => ['contact_id' => $other['id'], 'phone' => '005678']];
@@ -62,7 +61,9 @@ class StudentProfilesTest extends TestCase
         $this->getJson("{$this->base}/students/similar?phone=001234")->assertOk()->assertJsonCount(2, 'students');
         $this->getJson("{$this->base}/student-workspace?q=005678")->assertOk()->assertJsonCount(2, 'students');
         $this->getJson("{$this->base}/students/similar?phones[]=9999&phones[]=005678")->assertOk()->assertJsonCount(2, 'students');
-        Mail::assertNothingOutgoing();
+        // Only the provisioning invitation from setUp; contacts send no additional mail.
+        Mail::assertSentCount(1);
+        Mail::assertNothingQueued();
     }
 
     public function test_contact_edits_preserve_legacy_numbers_and_reject_stale_or_unauthorized_changes(): void

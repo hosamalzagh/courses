@@ -70,9 +70,14 @@ class StudentContacts
             return [];
         }
         $phones = [...array_column($data['contacts'], 'phone'), ...array_column(array_filter($data['channels']), 'phone')];
-        $phones = array_values(array_unique(array_filter(array_map(CenterStudentSearchController::normalizePhone(...), $phones), fn ($phone) => $phone !== null)));
+        $phones = self::normalizePhones($phones);
 
         return ['contacts' => json_encode($data['contacts']), 'channels' => json_encode($data['channels']), 'contact_phones' => json_encode($phones)];
+    }
+
+    public static function normalizePhones(array $phones): array
+    {
+        return array_values(array_unique(array_filter(array_map(CenterStudentSearchController::normalizePhone(...), $phones), fn ($phone) => $phone !== null)));
     }
 
     public static function phoneSql(): string

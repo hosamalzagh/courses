@@ -99,7 +99,7 @@ class CenterStudentController extends Controller
         $permissions = $request->attributes->get('center_permissions');
         $query = $this->visibleStudents($permissions, true);
         $name = $this->normalizeName($data['name'] ?? '');
-        $phones = array_values(array_unique(array_filter(array_map($this->normalizePhone(...), [...($data['phones'] ?? []), $data['phone'] ?? null]), fn ($phone) => $phone !== null)));
+        $phones = StudentContacts::normalizePhones([...($data['phones'] ?? []), $data['phone'] ?? null]);
         if ($name === '' && $phones === []) {
             return response()->json(['students' => []])->header('Cache-Control', 'private, no-store');
         }
