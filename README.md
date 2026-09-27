@@ -68,6 +68,8 @@ GitHub Actions runs the `CI` workflow on pushes to `main`, pull requests targeti
 
 The Playwright browser suite remains a local acceptance check because it currently depends on Herd routing, the bootstrapped local centers and Mailpit. CI does not deploy the application.
 
+CodeRabbit reviews ready pull requests targeting the default branch (`main`) and reviews subsequent commits automatically. Its repository configuration is in `.coderabbit.yaml`: feedback is in Arabic, with balanced reviews informed by the root agent rules, glossary and ADRs, plus each app's own rules. Draft pull requests are not reviewed automatically. Use pull requests for changes that need CodeRabbit review; direct pushes to `main` run CI but do not create a pull request review.
+
 ```bash
 curl -I http://courses.test/admin/login
 curl -I http://alpha.courses.test/login
