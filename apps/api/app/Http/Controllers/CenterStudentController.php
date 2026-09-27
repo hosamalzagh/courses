@@ -32,6 +32,8 @@ class CenterStudentController extends Controller
             'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'status_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'branches_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'tab' => ['sometimes', 'in:custom-history'],
+            'custom_history_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'q' => ['nullable', 'string', 'max:255'],
             'identifier' => ['nullable', 'string', 'max:50'],
         ]);
@@ -46,7 +48,7 @@ class CenterStudentController extends Controller
         $workspace = DB::connection('tenant')->query()
             ->selectSub(DB::connection('tenant')->query()->fromSub($branchRows, 'branch_rows')->selectRaw('json_agg(branch_rows)'), 'branches')
             ->selectSub(StudentProfileChoices::initialQuery(), 'choices')
-            ->selectSub(StudentCustomFields::initialQuery(), 'custom_fields')
+            ->selectSub(StudentCustomFields::initialQuery($permissions, $studentId), 'custom_fields')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('student_custom_fields_revision'), 'custom_fields_revision')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->selectRaw("json_build_object('enabled', student_code_enabled, 'label', student_code_label, 'revision', student_code_revision)"), 'code_settings')->first();
         $branches = collect(json_decode($workspace->branches ?? '[]'));
@@ -85,6 +87,11 @@ class CenterStudentController extends Controller
                 ->select(['id', 'suspended_by', 'suspended_by_name', 'suspended_reason', 'suspended_at', 'lifted_by', 'lifted_by_name', 'lifted_reason', 'lifted_at']);
             $query->selectSub(DB::connection('tenant')->query()->fromSub($history, 'periods')->selectRaw('json_agg(periods)'), 'suspensions');
         }
+        if ($studentId !== null && ($data['tab'] ?? '') === 'custom-history') {
+            $historyPage = (int) ($data['custom_history_page'] ?? 1);
+            $history = StudentCustomFields::historyQuery($historyPage, $permissions)->whereColumn('history.student_id', 'students.id');
+            $query->selectSub(DB::connection('tenant')->query()->fromSub($history, 'history_rows')->selectRaw('json_agg(history_rows ORDER BY id DESC)'), 'custom_history');
+        }
         $students = $query->orderBy('student_number')->offset(($page - 1) * 50)->limit(51)->get();
         if ($studentId !== null) {
             abort_if($students->isEmpty(), 404);
@@ -101,6 +108,7 @@ class CenterStudentController extends Controller
             'custom_fields' => ['fields' => array_slice(json_decode($workspace->custom_fields ?? '[]', true) ?? [], 0, 50), 'revision' => (int) $workspace->custom_fields_revision, 'page' => 1, 'has_more' => count(json_decode($workspace->custom_fields ?? '[]', true) ?? []) > 50],
             'students' => $students->take(50)->map(fn (stdClass $student): array => $this->payload($student, $permissions))->values(),
             ...($studentId !== null ? ['suspensions' => array_slice(json_decode($students->first()->suspensions ?? '[]', true) ?? [], 0, 20), 'status_pagination' => ['page' => $statusPage, 'has_more' => count(json_decode($students->first()->suspensions ?? '[]', true) ?? []) > 20]] : []),
+            ...(isset($historyPage) ? ['custom_history' => ['entries' => array_slice(json_decode($students->first()->custom_history ?? '[]', true) ?? [], 0, 50), 'pagination' => ['page' => $historyPage, 'has_more' => count(json_decode($students->first()->custom_history ?? '[]', true) ?? []) > 50]]] : []),
             'pagination' => ['page' => $page, 'has_more' => $students->count() > 50, 'branches_page' => $branchPage, 'branches_has_more' => $branches->count() > 50],
         ])->header('Cache-Control', 'private, no-store');
     }
@@ -165,6 +173,7 @@ class CenterStudentController extends Controller
         return $this->write($request, function (CenterPermissions $permissions) use ($request, $data): JsonResponse {
             $this->authorizeBranches($permissions, $data['branch_ids']);
             StudentIdentity::authorize($data, $permissions, $data['branch_ids']);
+            StudentCustomFields::authorize($data, $permissions, $data['branch_ids']);
             $hash = hash('sha256', json_encode($data));
             $existing = DB::connection('tenant')->table('students')->where('request_id', $request->input('request_id'))->first();
             if ($existing) {
@@ -178,7 +187,7 @@ class CenterStudentController extends Controller
             StudentManualCodes::validate($data['manual_code'] ?? null);
             $identity = StudentIdentity::columns($data, $permissions, $data['branch_ids']);
             StudentProfileChoices::validate($data);
-            $customValues = StudentCustomFields::validate($data);
+            $customValues = StudentCustomFields::validate($data, StudentIdentity::canManage($permissions, $data['branch_ids']));
             $start = DB::connection('tenant')->table('center_settings')->where('id', 1)->value('student_number_start');
             $sequence = DB::connection('tenant')->selectOne('SELECT last_value, is_called FROM students_student_number_seq');
             $next = (int) $sequence->last_value + ($sequence->is_called ? 1 : 0);
@@ -200,7 +209,7 @@ class CenterStudentController extends Controller
                 'request_id' => $request->input('request_id'), 'request_hash' => $hash, 'created_by' => $request->user()->id,
                 'created_at' => now(), 'updated_at' => now(),
             ]);
-            StudentCustomFields::save($id, $customValues);
+            StudentCustomFields::save($id, array_filter($customValues, fn ($value) => $value !== null), $request, 1);
             $this->associate($id, $data['branch_ids']);
             $student = $this->read($id, $permissions);
             $this->audit($request, 'student.created', $student, null, $data['branch_ids'], [], array_keys(array_filter($customValues, fn ($value) => $value !== null)));
@@ -229,6 +238,7 @@ class CenterStudentController extends Controller
             }
             $currentBranches = DB::connection('tenant')->table('student_branches')->where('student_id', $studentId)->pluck('branch_id')->all();
             StudentIdentity::authorize($data, $permissions, $currentBranches);
+            StudentCustomFields::authorize($data, $permissions, $currentBranches);
             $identity = array_intersect_key($data, array_flip(StudentIdentity::FIELDS));
             $identityChanged = collect($identity)->contains(fn ($value, $field): bool => $row->{$field} !== $value);
             $added = array_diff($data['branch_ids'], $currentBranches);
@@ -242,7 +252,7 @@ class CenterStudentController extends Controller
             if (($identityChanged || $manualChanged || $contactChanged || $generalChanged || $customChanged || $row->name !== $data['name'] || $row->phone !== $data['phone'] || $added !== []) && $row->revision !== (int) $request->input('revision')) {
                 $this->conflict('student_changed');
             }
-            $customValues = StudentCustomFields::validate($data, $studentId);
+            $customValues = StudentCustomFields::validate($data, StudentIdentity::canManage($permissions, $currentBranches), $studentId);
             if (! $customChanged && ! $identityChanged && ! $manualChanged && ! $contactChanged && ! $generalChanged && $row->name === $data['name'] && $row->phone === $data['phone'] && $added === []) {
                 return response()->json(['student' => $before]);
             }
@@ -260,7 +270,7 @@ class CenterStudentController extends Controller
                 'revision' => $row->revision + 1, 'updated_at' => now(),
             ]);
             $changedCustomValues = array_filter($customValues, fn ($value, $id) => ($storedCustom[$id] ?? null) !== $value, ARRAY_FILTER_USE_BOTH);
-            StudentCustomFields::save($studentId, $changedCustomValues);
+            StudentCustomFields::save($studentId, $changedCustomValues, $request, $row->revision + 1);
             $this->associate($studentId, $added);
             $student = $this->read($studentId, $permissions);
             $this->audit($request, 'student.updated', $student, $before, array_unique([...$currentBranches, ...$added]), $currentBranches, array_keys($changedCustomValues));
@@ -438,7 +448,7 @@ class CenterStudentController extends Controller
             ->addSelect(['students.id', 'student_number', 'manual_code', 'name', 'students.phone as legacy_phone', 'contacts', 'channels', 'revision', 'created_by', 'created_at', 'sharing_enabled', 'status', 'status_revision', ...self::GENERAL_FIELDS])
             ->selectRaw(StudentContacts::phoneSql().' as phone')
             ->selectSub(StudentProfileChoices::selectedQuery(), 'profile_choices')
-            ->when($includeProfileDetails, fn (Builder $query) => $query->selectSub(StudentCustomFields::valuesQuery(), 'custom_values'))
+            ->when($includeProfileDetails, fn (Builder $query) => $query->selectSub(StudentCustomFields::valuesQuery($permissions), 'custom_values'))
             ->selectSub(StudentCustomFields::missingQuery(), 'missing_custom_fields')
             ->selectSub((clone $associations)->selectRaw('json_agg(branch_id ORDER BY branch_id)'), 'branch_ids')
             ->where(function (Builder $query) use ($associations, $permissions, $includeCenterSearch): void {

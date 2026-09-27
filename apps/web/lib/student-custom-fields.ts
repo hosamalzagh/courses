@@ -13,6 +13,7 @@ export function customFieldErrors(
 ): Record<string, string> {
   const errors: Record<string, string> = {};
   for (const field of fields) {
+    if (!field.active) continue;
     const value = values[field.id];
     const missing = value === undefined || value === null || value === "";
     if (missing) {

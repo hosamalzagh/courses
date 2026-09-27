@@ -59,6 +59,53 @@ async function write(
   );
 }
 
+async function loadTextField(page: Page, label: string) {
+  while (
+    !(await page.getByRole("textbox", { name: label, exact: true }).count())
+  ) {
+    const before = await page.locator('[data-slot="field"]').count();
+    await page
+      .getByRole("button", { name: "تحميل المزيد من الحقول", exact: true })
+      .click();
+    await expect
+      .poll(() => page.locator('[data-slot="field"]').count())
+      .toBeGreaterThan(before);
+  }
+}
+async function locateDefinition(page: Page, fieldId: string) {
+  for (let batch = 1; ; batch++) {
+    const data = await (
+      await page.request.get(
+        `${origin}/api/v1/center/student-custom-fields?manage=1&page=${batch}`,
+      )
+    ).json();
+    if (data.fields.some((field: { id: string }) => field.id === fieldId)) {
+      await page.goto(`${origin}/admin/student-custom-fields?page=${batch}`);
+      return;
+    }
+    expect(data.pagination.has_more).toBe(true);
+  }
+}
+async function expectStoredValue(
+  page: Page,
+  studentId: string,
+  fieldId: string,
+  value: string,
+) {
+  for (let batch = 1; ; batch++) {
+    const data = await (
+      await page.request.get(
+        `${origin}/api/v1/center/student-custom-fields?student_id=${studentId}&page=${batch}`,
+      )
+    ).json();
+    if (Object.hasOwn(data.values, fieldId)) {
+      expect(data.values[fieldId]).toBe(value);
+      return;
+    }
+    expect(data.pagination.has_more).toBe(true);
+  }
+}
+
 test.beforeEach(async ({ page }) => {
   await signIn(page);
   for (let pageNumber = 1; ; pageNumber++) {
@@ -305,6 +352,24 @@ test("all custom types validate in the real form, old missing fields warn, and i
         .getByRole("button", { name: "حفظ الحقل", exact: true })
         .click();
       fields.push((await (await response).json()).field);
+      for (let batch = 1; ; batch++) {
+        const data = await (
+          await page.request.get(
+            `${origin}/api/v1/center/student-custom-fields?manage=1&page=${batch}`,
+          )
+        ).json();
+        if (
+          data.fields.some(
+            (item: { id: string }) => item.id === fields.at(-1)!.id,
+          )
+        ) {
+          await page.goto(
+            `${origin}/admin/student-custom-fields?page=${batch}`,
+          );
+          break;
+        }
+        expect(data.pagination.has_more).toBe(true);
+      }
       await page
         .getByRole("searchbox", { name: "بحث في حقول المركز", exact: true })
         .fill(label);
@@ -334,6 +399,22 @@ test("all custom types validate in the real form, old missing fields warn, and i
     );
     expect(suspension.status).toBe(200);
     await page.goto(`${origin}/admin/students/new`);
+    while (
+      !(await page
+        .getByRole("combobox", {
+          name: `${fields[4].label} (مطلوب)`,
+          exact: true,
+        })
+        .count())
+    ) {
+      const before = await page.locator('[data-slot="field"]').count();
+      await page
+        .getByRole("button", { name: "تحميل المزيد من الحقول", exact: true })
+        .click();
+      await expect
+        .poll(() => page.locator('[data-slot="field"]').count())
+        .toBeGreaterThan(before);
+    }
     const name = `CUSTOM62 typed student ${stamp}`;
     await page
       .getByRole("textbox", { name: "اسم الطالب", exact: true })
@@ -379,19 +460,60 @@ test("all custom types validate in the real form, old missing fields warn, and i
       .getByRole("button", { name: "حفظ ملف الطالب", exact: true })
       .click();
     const student = (await (await saved).json()).student;
+    while (!(await page.getByText("000CARD", { exact: true }).count())) {
+      const before = await page.locator("dl.student-data > div").count();
+      await page
+        .getByRole("button", { name: "تحميل المزيد من الحقول", exact: true })
+        .click();
+      await expect
+        .poll(() => page.locator("dl.student-data > div").count())
+        .toBeGreaterThan(before);
+    }
     await expect(page.getByText("000CARD", { exact: true })).toBeVisible();
-    expect(student.custom_values[fields[4].id]).toBe(false);
-    expect(student.custom_values[fields[1].id]).toBe("0");
+    const storedValues: Record<string, string | boolean | null> = {};
+    for (let batch = 1; ; batch++) {
+      const data = await (
+        await page.request.get(
+          `${origin}/api/v1/center/student-custom-fields?student_id=${student.id}&page=${batch}`,
+        )
+      ).json();
+      Object.assign(storedValues, data.values);
+      if (!data.pagination.has_more) break;
+    }
+    expect(storedValues[fields[4].id]).toBe(false);
+    expect(storedValues[fields[1].id]).toBe("0");
     expect(student.identity.passport_number).toBe("000CUSTOM-INTEGRATION");
     await page
       .getByRole("link", { name: "تعديل ملف الطالب", exact: true })
       .click();
+    while (
+      !(await page
+        .getByRole("textbox", { name: fields[0].label, exact: true })
+        .count())
+    ) {
+      const before = await page.locator('[data-slot="field"]').count();
+      await page
+        .getByRole("button", { name: "تحميل المزيد من الحقول", exact: true })
+        .click();
+      await expect
+        .poll(() => page.locator('[data-slot="field"]').count())
+        .toBeGreaterThan(before);
+    }
     await page
       .getByRole("textbox", { name: fields[0].label, exact: true })
       .fill("000CARD2");
     await page
       .getByRole("button", { name: "حفظ بيانات الطالب", exact: true })
       .click();
+    while (!(await page.getByText("000CARD2", { exact: true }).count())) {
+      const before = await page.locator("dl.student-data > div").count();
+      await page
+        .getByRole("button", { name: "تحميل المزيد من الحقول", exact: true })
+        .click();
+      await expect
+        .poll(() => page.locator("dl.student-data > div").count())
+        .toBeGreaterThan(before);
+    }
     await expect(page.getByText("000CARD2", { exact: true })).toBeVisible();
   } finally {
     for (const field of fields) {
@@ -471,6 +593,7 @@ test("definition and profile conflicts keep drafts, owner revocation blocks the 
   expect(race.map((row) => row.status).sort()).toEqual([200, 409]);
   student = race.find((row) => row.status === 200)!.body.student;
   await page.goto(`${origin}/admin/students/${student.id}/edit`);
+  await loadTextField(page, field.label);
   await page
     .getByRole("textbox", { name: field.label, exact: true })
     .fill("DRAFT-CUSTOM");
@@ -508,6 +631,14 @@ test("definition and profile conflicts keep drafts, owner revocation blocks the 
         exact: true,
       })
       .click();
+    await expect(
+      page.getByRole("button", {
+        name: "تحميل تعريفات الحقول الحالية",
+        exact: true,
+      }),
+    ).toBeEnabled();
+    await loadTextField(page, newField.body.field.label);
+    await loadTextField(page, field.label);
     await page
       .getByRole("textbox", { name: newField.body.field.label, exact: true })
       .fill("NEW-REQUIRED");
@@ -520,7 +651,7 @@ test("definition and profile conflicts keep drafts, owner revocation blocks the 
     await expect(page).toHaveURL(
       new RegExp(`/students/${student.id}\\?focus=edit$`),
     );
-    await expect(page.getByText("DRAFT-CUSTOM", { exact: true })).toBeVisible();
+    await expectStoredValue(page, student.id, field.id, "DRAFT-CUSTOM");
   } finally {
     const latest = (
       await (
@@ -565,6 +696,7 @@ test("definition and profile conflicts keep drafts, owner revocation blocks the 
     ).toBe(200);
     await signIn(staff, "staff");
     await staff.goto(`${origin}/admin/students/${student.id}/edit`);
+    await loadTextField(staff, field.label);
     await staff
       .getByRole("textbox", { name: field.label, exact: true })
       .fill("DENIED-DRAFT");
@@ -596,10 +728,7 @@ test("definition and profile conflicts keep drafts, owner revocation blocks the 
     await expect(
       staff.getByRole("textbox", { name: field.label, exact: true }),
     ).toHaveValue("DENIED-DRAFT");
-    const current = await (
-      await page.request.get(`${origin}/api/v1/center/students/${student.id}`)
-    ).json();
-    expect(current.students[0].custom_values[field.id]).toBe("DRAFT-CUSTOM");
+    await expectStoredValue(page, student.id, field.id, "DRAFT-CUSTOM");
   } finally {
     if (member)
       await write(page, `members/${member.id}/grants`, "PUT", {
@@ -608,7 +737,7 @@ test("definition and profile conflicts keep drafts, owner revocation blocks the 
       });
     await staff.close();
   }
-  await page.goto(`${origin}/admin/student-custom-fields`);
+  await locateDefinition(page, field.id);
   await page
     .getByRole("searchbox", { name: "بحث في حقول المركز", exact: true })
     .fill(field.label);

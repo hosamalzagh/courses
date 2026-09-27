@@ -37,6 +37,10 @@ export function StudentCustomFieldControls({
   const [label, setLabel] = useState("");
   const [type, setType] = useState<StudentCustomField["type"]>("text");
   const [position, setPosition] = useState("0");
+  const [active, setActive] = useState(true);
+  const [classification, setClassification] =
+    useState<StudentCustomField["classification"]>("general");
+  const [disabledOptions, setDisabledOptions] = useState<string[]>([]);
   const [required, setRequired] = useState(false);
   const [options, setOptions] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,7 +51,11 @@ export function StudentCustomFieldControls({
   const opener = useRef<string | null>(null);
   const dirty = Boolean(
     editor &&
-    (label !== editor.label ||
+    (active !== editor.active ||
+      classification !== editor.classification ||
+      JSON.stringify(disabledOptions) !==
+        JSON.stringify(editor.disabled_options) ||
+      label !== editor.label ||
       type !== editor.type ||
       required !== editor.required ||
       position !== String(editor.position) ||
@@ -56,6 +64,9 @@ export function StudentCustomFieldControls({
   function open(field: StudentCustomField, trigger?: HTMLButtonElement) {
     if (trigger) opener.current = trigger.id;
     setEditor(field);
+    setActive(field.active);
+    setClassification(field.classification);
+    setDisabledOptions(field.disabled_options);
     setLabel(field.label);
     setType(field.type);
     setPosition(String(field.position));
@@ -109,8 +120,15 @@ export function StudentCustomFieldControls({
           label: label.trim(),
           position: Number(position),
           required,
+          classification,
           ...(editor.revision
-            ? { revision: editor.revision }
+            ? {
+                revision: editor.revision,
+                active,
+                type,
+                options: choices,
+                disabled_options: disabledOptions,
+              }
             : { id: editor.id, type, options: choices }),
         },
       );
@@ -183,38 +201,92 @@ export function StudentCustomFieldControls({
                 required
                 focusOnMount
               />
-              {editor.revision ? (
-                <p>
-                  النوع: {customFieldTypeLabels[type]}
-                  {type === "select" ? ` — ${options}` : ""}
+              <ChoiceField
+                id={`${prefix}-classification`}
+                label="تصنيف الحقل"
+                value={classification}
+                onChange={(value) =>
+                  setClassification(
+                    value as StudentCustomField["classification"],
+                  )
+                }
+                disabled={busy}
+                error={errors.classification}
+                items={[
+                  { value: "general", label: "عام داخل الملف" },
+                  { value: "identity", label: "بيانات هوية مقيدة" },
+                ]}
+              />
+              <ChoiceField
+                id={`${prefix}-type`}
+                label="نوع الحقل"
+                value={type}
+                onChange={(value) => {
+                  setType(value as StudentCustomField["type"]);
+                  if (value !== "select") {
+                    setOptions("");
+                    setDisabledOptions([]);
+                  }
+                }}
+                disabled={busy || editor.used}
+                error={errors.type}
+                items={Object.entries(customFieldTypeLabels).map(
+                  ([value, label]) => ({ value, label }),
+                )}
+              />
+              {editor.used ? (
+                <p className="muted">
+                  استُعمل الحقل سابقًا. لتغيير النوع أنشئ حقلًا جديدًا؛ يبقى
+                  التاريخ محفوظًا.
                 </p>
-              ) : (
+              ) : null}
+              {type === "select" ? (
                 <>
-                  <ChoiceField
-                    id={`${prefix}-type`}
-                    label="نوع الحقل"
-                    value={type}
-                    onChange={(value) =>
-                      setType(value as StudentCustomField["type"])
-                    }
-                    disabled={busy}
-                    error={errors.type}
-                    items={Object.entries(customFieldTypeLabels).map(
-                      ([value, label]) => ({ value, label }),
-                    )}
+                  <FormField
+                    id={`${prefix}-options`}
+                    label="اختيارات القائمة"
+                    hint="افصل بعلامة |. أضف اختيارًا؛ عطّل القديم بدل حذفه."
+                    value={options}
+                    onChange={setOptions}
+                    error={errors.options}
                   />
-                  {type === "select" ? (
-                    <FormField
-                      id={`${prefix}-options`}
-                      label="اختيارات القائمة"
-                      hint="افصل بين كل اختيار وآخر بعلامة |. حتى 100 اختيار."
-                      value={options}
-                      onChange={setOptions}
-                      error={errors.options}
-                    />
-                  ) : null}
+                  {editor.revision
+                    ? editor.options.map((option) => (
+                        <FieldLabel
+                          className="flex items-center gap-2"
+                          key={option}
+                        >
+                          <Checkbox
+                            disabled={busy}
+                            checked={disabledOptions.includes(option)}
+                            onCheckedChange={(checked) =>
+                              setDisabledOptions((current) =>
+                                checked
+                                  ? [...current, option]
+                                  : current.filter((value) => value !== option),
+                              )
+                            }
+                          />
+                          تعطيل اختيار {option}
+                        </FieldLabel>
+                      ))
+                    : null}
                 </>
-              )}
+              ) : null}
+              {editor.revision ? (
+                <FieldLabel className="flex items-center gap-2">
+                  <Checkbox
+                    disabled={busy}
+                    checked={active}
+                    onCheckedChange={(checked) => setActive(Boolean(checked))}
+                  />
+                  الحقل فعال
+                </FieldLabel>
+              ) : null}
+              <p className="muted">
+                تعطيل الحقل أو الاختيار يحفظ القيم والتاريخ. حقول الهوية وقيمها
+                وتاريخها تحتاج صلاحية الهوية ضمن فروع الملف.
+              </p>
               <FormField
                 id={`${prefix}-position`}
                 label="الترتيب"
@@ -275,6 +347,10 @@ export function StudentCustomFieldControls({
                   position: 0,
                   options: [],
                   revision: 0,
+                  active: true,
+                  classification: "general",
+                  disabled_options: [],
+                  used: false,
                 },
                 event.currentTarget,
               )
@@ -298,6 +374,17 @@ export function StudentCustomFieldControls({
             key: "type",
             label: "النوع",
             render: (field) => customFieldTypeLabels[field.type],
+          },
+          {
+            key: "classification",
+            label: "التصنيف",
+            render: (field) =>
+              field.classification === "identity" ? "هوية مقيدة" : "عام",
+          },
+          {
+            key: "active",
+            label: "الحالة",
+            render: (field) => (field.active ? "فعال" : "معطل — القيم محفوظة"),
           },
           {
             key: "position",

@@ -11,6 +11,11 @@ class StudentIdentity
 {
     public const FIELDS = ['national_id', 'passport_number'];
 
+    public static function readableBranches(CenterPermissions $permissions): array
+    {
+        return array_values(array_filter(array_keys($permissions->branchRoles), fn (int $id): bool => $permissions->can('read', $id) && $permissions->can('students.identity', $id)));
+    }
+
     public static function canRead(CenterPermissions $permissions, array $branches): bool
     {
         return collect($branches)->contains(fn (int $id): bool => $permissions->can('read', $id) && $permissions->can('students.identity', $id));

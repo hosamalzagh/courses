@@ -113,6 +113,9 @@ class StudentCustomFieldsTest extends TestCase
         $payload = ['name' => 'ملف سابق للترحيل', 'branch_ids' => [$this->north], 'contacts' => [$contact], 'channels' => [], 'passport_number' => '000BEFORE', 'request_id' => (string) Str::uuid()];
         $student = $this->postJson("{$this->base}/students", $payload)->assertCreated()->json('student');
         $this->center->run(function (): void {
+            $lifecycleMigration = glob(database_path('migrations/tenant/*_add_student_custom_field_lifecycle.php'))[0];
+            (require $lifecycleMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($lifecycleMigration, PATHINFO_FILENAME))->delete();
             $path = glob(database_path('migrations/tenant/*_add_student_custom_fields.php'))[0];
             (require $path)->down();
             DB::table('migrations')->where('migration', pathinfo($path, PATHINFO_FILENAME))->delete();
@@ -198,6 +201,7 @@ class StudentCustomFieldsTest extends TestCase
         }
         $student = $this->postJson("{$this->base}/students", $payload)->assertCreated()->assertJsonPath('student.custom_values.'.$field['id'], 'ROLLBACK-CUSTOM')->json('student');
         $this->postJson("{$this->base}/students", $payload)->assertOk()->assertJsonPath('student.id', $student['id']);
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=custom-history")->assertOk()->assertJsonCount(1, 'custom_history.entries')->assertJsonPath('custom_history.entries.0.value', 'ROLLBACK-CUSTOM');
         $this->getJson("{$this->base}/student-workspace?q=".urlencode($payload['name']))->assertOk()->assertJsonCount(1, 'students');
         $audit = collect($this->getJson("{$this->base}/audit")->assertOk()->assertDontSee('ROLLBACK-CUSTOM')->json('entries'))->where('event', 'student.created')->values();
         $this->assertCount(1, $audit);
