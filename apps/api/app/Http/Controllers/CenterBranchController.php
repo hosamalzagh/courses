@@ -71,22 +71,29 @@ class CenterBranchController extends Controller
         $branch = Branch::findOrFail($branchId);
         abort_unless($this->permissions($request)->can('audit', $branch->id), 403);
 
-        $entries = DB::connection('tenant')->table('center_audit_logs')
+        $permissions = $this->permissions($request);
+        $query = DB::connection('tenant')->table('center_audit_logs')
             ->where('branch_id', $branch->id)
-            ->when(! $this->permissions($request)->can('finance.read', $branch->id),
+            ->when(! $permissions->can('finance.read', $branch->id),
                 fn ($query) => $query->whereNotIn('event', CenterAuditController::FINANCIAL_EVENTS))
-            ->when(! $this->permissions($request)->can('enrollment.manage', $branch->id),
+            ->when(! $permissions->can('enrollment.manage', $branch->id),
                 fn ($query) => $query->whereNotIn('event', CenterAuditController::ENROLLMENT_EVENTS))
-            ->when(! ($this->permissions($request)->can('attendance.record', $branch->id)
-                || $this->permissions($request)->can('attendance.correct', $branch->id)),
+            ->when(! ($permissions->can('attendance.record', $branch->id)
+                || $permissions->can('attendance.correct', $branch->id)),
                 fn ($query) => $query->whereNotIn('event', [
                     'student.attendance_note_created', 'student.attendance_note_updated',
-                ]))
-            ->orderByDesc('id')
+                ]));
+        if (! $permissions->isCenterManager()) {
+            $financialBranches = array_keys(array_filter($permissions->branchRoles,
+                fn ($roles) => in_array('finance.read', CenterPermissions::actions($roles), true)));
+            CenterAuditController::scopeRelatedBranchVisibility($query, $financialBranches);
+        }
+
+        $entries = $query->orderByDesc('id')
             ->limit(50)
             ->get();
 
-        return response()->json(['entries' => CenterAuditController::redactCopySources($entries, $this->permissions($request))]);
+        return response()->json(['entries' => CenterAuditController::redactCopySources($entries, $permissions)]);
     }
 
     private function permissions(Request $request): CenterPermissions

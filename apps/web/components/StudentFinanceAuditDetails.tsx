@@ -61,13 +61,15 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
     const allocations = Array.isArray(data.allocations) ? data.allocations as Record<string, unknown>[] : [];
     return <details><summary>تفاصيل تخصيص الدفعة</summary>
       <p>الدفعة: <bdi dir="ltr">{String(data.payment_id ?? "")}</bdi></p>
+      <p>فرع الاستلام: {String(data.source_branch_name ?? data.branch_id ?? "")}</p>
       <p>المتاح قبل: <bdi dir="ltr">{String(data.payment_available_before ?? "")}</bdi> — بعد: <bdi dir="ltr">{String(data.payment_available_after ?? "")} {String(data.currency ?? "")}</bdi></p>
-      {allocations.map((allocation) => <p key={String(allocation.id)}>رسوم <bdi dir="ltr">{String(allocation.fee_id ?? "")}</bdi>: <bdi dir="ltr">{String(allocation.amount ?? "")} {String(data.currency ?? "")}</bdi> — المستحق قبل: <bdi dir="ltr">{String(allocation.fee_due_before ?? "")}</bdi>، بعد: <bdi dir="ltr">{String(allocation.fee_due_after ?? "")}</bdi></p>)}
+      {allocations.map((allocation) => <p key={String(allocation.id)}>فرع الرسوم: {String(allocation.target_branch_name ?? allocation.target_branch_id ?? data.branch_id ?? "")} — رسوم <bdi dir="ltr">{String(allocation.fee_id ?? "")}</bdi>: <bdi dir="ltr">{String(allocation.amount ?? "")} {String(data.currency ?? "")}</bdi> — المستحق قبل: <bdi dir="ltr">{String(allocation.fee_due_before ?? "")}</bdi>، بعد: <bdi dir="ltr">{String(allocation.fee_due_after ?? "")}</bdi></p>)}
     </details>;
   }
   if (entry.event === "student.payment_allocation_reversed") {
     return <details><summary>تفاصيل عكس التخصيص</summary>
       <p>التخصيص: <bdi dir="ltr">{String(data.allocation_id ?? "")}</bdi> — المبلغ: <bdi dir="ltr">{String(data.amount ?? "")}</bdi></p>
+      <p>فرع الاستلام: <bdi dir="ltr">{String(entry.branch_id ?? "")}</bdi> — فرع الرسوم: <bdi dir="ltr">{String(Array.isArray(data.related_branch_ids) ? data.related_branch_ids[0] : entry.branch_id ?? "")}</bdi></p>
       <p>السبب: {String(data.reason ?? "")}</p>
       <p>المتاح قبل: <bdi dir="ltr">{String(data.payment_available_before ?? "")}</bdi> — بعد: <bdi dir="ltr">{String(data.payment_available_after ?? "")}</bdi></p>
       <p>المسدد قبل: <bdi dir="ltr">{String(data.fee_paid_before ?? "")}</bdi> — بعد: <bdi dir="ltr">{String(data.fee_paid_after ?? "")}</bdi></p>

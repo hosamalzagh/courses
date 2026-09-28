@@ -113,6 +113,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('students/{studentId}/allocations/{eventId}/note', [CenterStudentFinancialNoteController::class, 'allocation']);
         Route::put('students/{studentId}/allocations/{eventId}/note', [CenterStudentFinancialNoteController::class, 'saveAllocation']);
         Route::get('students/{studentId}/payments/{paymentId}/allocation-options', [CenterStudentAllocationController::class, 'options']);
+        Route::post('students/{studentId}/payments/{paymentId}/allocations/preview', [CenterStudentAllocationController::class, 'preview']);
         Route::post('students/{studentId}/payments/{paymentId}/allocations', [CenterStudentAllocationController::class, 'allocate']);
         Route::post('students/{studentId}/allocations/{allocationId}/reverse', [CenterStudentAllocationController::class, 'reverse']);
         Route::patch('financial-currency', [CenterStudentFinanceController::class, 'updateCurrency']);

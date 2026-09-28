@@ -27,14 +27,19 @@ class CenterStudentAllocationController extends Controller
         $permissions = $request->attributes->get('center_permissions');
         $page = (int) ($data['page'] ?? 1);
         $historyPage = (int) ($data['history_page'] ?? 1);
+        $readableBranches = array_keys(array_filter($permissions->branchRoles,
+            fn (array $roles): bool => in_array('finance.read', CenterPermissions::actions($roles), true)));
         $historyQuery = DB::connection('tenant')->table('student_payment_allocations as allocations')
             ->join('study_attempt_fees as fees', 'fees.id', '=', 'allocations.fee_id')
+            ->join('branches as target_branches', 'target_branches.id', '=', 'allocations.target_branch_id')
             ->leftJoin('student_payment_allocation_reversals as reversals', 'reversals.allocation_id', '=', 'allocations.id')
             ->whereColumn('allocations.payment_id', 'payments.id')->where('allocations.student_id', $studentId)
+            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.target_branch_id', $readableBranches))
             ->when(isset($data['allocation_id']), fn ($query) => $query->where('allocations.id', $data['allocation_id']))
             ->orderByDesc('allocations.created_at')->orderByDesc('allocations.id')
             ->offset(isset($data['allocation_id']) ? 0 : ($historyPage - 1) * 20)->limit(21)
-            ->select(['allocations.id', 'allocations.fee_id', 'allocations.currency', 'allocations.actor_name',
+            ->select(['allocations.id', 'allocations.fee_id', 'allocations.target_branch_id', 'target_branches.name as target_branch_name',
+                'allocations.currency', 'allocations.actor_name',
                 'allocations.created_at', 'fees.attempt_id', 'fees.created_at as fee_created_at',
                 'reversals.id as reversal_id', 'reversals.reason as reversal_reason',
                 'reversals.actor_name as reversed_by_name', 'reversals.created_at as reversed_at'])
@@ -42,8 +47,9 @@ class CenterStudentAllocationController extends Controller
             ->selectSub($this->originalFeeGroupName(), 'group_name');
         $payment = StudentPhotos::visibleStudent($studentId, $permissions, 'finance.read')
             ->join('student_payments as payments', 'payments.student_id', '=', 'students.id')
+            ->join('branches as source_branches', 'source_branches.id', '=', 'payments.branch_id')
             ->where('payments.id', $paymentId)
-            ->select(['payments.id', 'payments.branch_id', 'payments.amount', 'payments.currency',
+            ->select(['payments.id', 'payments.branch_id', 'source_branches.name as branch_name', 'payments.amount', 'payments.currency',
                 'students.financial_account_revision'])
             ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'payments.id')
                 ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'used_amount')
@@ -52,11 +58,18 @@ class CenterStudentAllocationController extends Controller
         abort_unless($payment && $permissions->can('finance.read', (int) $payment->branch_id), 404);
 
         $history = collect(json_decode($payment->history_rows ?? '[]'));
+        $eligibleBranches = $permissions->isCenterManager() ? null : array_values(array_filter(
+            array_keys($permissions->branchRoles),
+            fn (int|string $branchId): bool => (int) $branchId === (int) $payment->branch_id
+                || $this->canAllocateToBranch($permissions, (int) $payment->branch_id, (int) $branchId),
+        ));
         $fees = DB::connection('tenant')->table('study_attempt_fees as fees')
-            ->where('fees.student_id', $studentId)->where('fees.branch_id', $payment->branch_id)
+            ->join('branches as target_branches', 'target_branches.id', '=', 'fees.branch_id')
+            ->where('fees.student_id', $studentId)
+            ->when($eligibleBranches !== null, fn (Builder $query) => $query->whereIn('fees.branch_id', $eligibleBranches))
             ->orderByDesc('fees.created_at')->orderByDesc('fees.id')
             ->offset(($page - 1) * 20)->limit(21)
-            ->select(['fees.id', 'fees.attempt_id', 'fees.branch_id', 'fees.net_amount', 'fees.currency',
+            ->select(['fees.id', 'fees.attempt_id', 'fees.branch_id', 'target_branches.name as branch_name', 'fees.net_amount', 'fees.currency',
                 'fees.created_at as fee_created_at'])
             ->selectRaw(EffectiveStudyFees::amount('fees').' AS current_due')
             ->selectSub($this->originalFeeGroupName(), 'group_name')
@@ -64,7 +77,7 @@ class CenterStudentAllocationController extends Controller
                 ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'paid_amount')->get();
 
         return response()->json([
-            'payment' => ['id' => $payment->id, 'branch_id' => (int) $payment->branch_id,
+            'payment' => ['id' => $payment->id, 'branch_id' => (int) $payment->branch_id, 'branch_name' => $payment->branch_name,
                 'amount' => $payment->amount, 'currency' => $payment->currency,
                 'available_amount' => StudentMoney::format(StudentMoney::cents($payment->amount) - StudentMoney::cents($payment->used_amount))],
             'version' => StudentAccountVersion::forActor($studentId, $payment->financial_account_revision, $request->user()->id),
@@ -75,24 +88,39 @@ class CenterStudentAllocationController extends Controller
                 'paid_amount' => StudentMoney::format(StudentMoney::cents($row->paid_amount)),
                 'remaining_amount' => StudentMoney::format(StudentMoney::cents($row->current_due) - StudentMoney::cents($row->paid_amount)),
             ])->values(),
-            'history' => $history->take(20)->values(),
+            'history' => $history->take(20)->map(fn (object $row): array => [
+                ...(array) $row,
+                'can_correct' => $this->canCorrectAllocation($permissions, (int) $payment->branch_id,
+                    (int) $row->target_branch_id),
+            ])->values(),
             'pagination' => ['page' => $page, 'has_more' => $fees->count() > 20,
                 'history_page' => $historyPage, 'history_has_more' => $history->count() > 20],
         ])->header('Cache-Control', 'private, no-store');
     }
 
+    public function preview(Request $request, string $studentId, string $paymentId): JsonResponse
+    {
+        abort_unless(Str::isUuid($studentId) && Str::isUuid($paymentId), 404);
+        $data = $this->allocationData($request, false);
+        $permissions = $request->attributes->get('center_permissions');
+        $payment = $this->visiblePayment($studentId, $paymentId, $permissions);
+        abort_unless($permissions->can('payments.allocate', (int) $payment->branch_id), 403);
+        $student = StudentPhotos::visibleStudent($studentId, $permissions, 'payments.allocate')
+            ->first(['students.id', 'students.financial_account_revision']);
+        abort_unless($student, 404);
+        if (! hash_equals(StudentAccountVersion::forActor($studentId, $student->financial_account_revision, $request->user()->id), $data['version'])) {
+            $this->conflict('student_account_changed');
+        }
+        $plan = $this->allocationPlan($studentId, $payment, $data['targets'], $permissions);
+
+        return response()->json([...$plan, 'version' => $data['version']])->header('Cache-Control', 'private, no-store');
+    }
+
     public function allocate(Request $request, string $studentId, string $paymentId): JsonResponse
     {
         abort_unless(Str::isUuid($studentId) && Str::isUuid($paymentId), 404);
-        $data = $request->validate([
-            'targets' => ['required', 'array', 'min:1', 'max:20'],
-            'targets.*.attempt_id' => ['required', 'uuid', 'distinct'],
-            'targets.*.amount' => ['required', 'numeric', 'decimal:0,2', 'gt:0', 'max:9999999999.99', 'regex:/^\d{1,10}(?:\.\d{1,2})?$/'],
-            'version' => ['required', 'regex:/^[a-f0-9]{64}$/'],
-            'request_id' => ['required', 'uuid'],
-        ]);
-        $targets = array_map(fn (array $target): array => ['attempt_id' => $target['attempt_id'],
-            'amount' => StudentMoney::format(StudentMoney::cents($target['amount']))], $data['targets']);
+        $data = $this->allocationData($request, true);
+        $targets = $data['targets'];
         $hash = hash('sha256', json_encode([$studentId, $paymentId, $targets]));
 
         return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $studentId, $paymentId, $data, $targets, $hash): JsonResponse {
@@ -107,50 +135,35 @@ class CenterStudentAllocationController extends Controller
                 if ($existing->kind !== 'allocate' || $existing->request_hash !== $hash) {
                     $this->conflict('allocation_request_changed');
                 }
+                $saved = DB::connection('tenant')->table('student_payment_allocations')
+                    ->whereIn('id', json_decode($existing->allocation_ids, true))->get();
+                foreach ($saved as $allocation) {
+                    abort_unless($this->canAllocateToBranch($permissions, (int) $payment->branch_id,
+                        (int) $allocation->target_branch_id), 403);
+                }
 
-                return response()->json(['allocations' => DB::connection('tenant')->table('student_payment_allocations')
-                    ->whereIn('id', json_decode($existing->allocation_ids, true))->get(),
+                return response()->json(['allocations' => $saved,
                     'version' => StudentAccountVersion::forActor($studentId, $student->financial_account_revision, $request->user()->id)]);
             }
             if (! hash_equals(StudentAccountVersion::forActor($studentId, $student->financial_account_revision, $request->user()->id), $data['version'])) {
                 $this->conflict('student_account_changed');
             }
-            $sum = array_sum(array_map(fn (array $target): int => StudentMoney::cents($target['amount']), $targets));
-            $availableBefore = StudentMoney::cents($payment->amount) - $this->used($paymentId);
-            if ($sum > $availableBefore) {
-                $this->conflict('payment_not_available');
-            }
-            $fees = DB::connection('tenant')->table('study_attempt_fees')->where('student_id', $studentId)
-                ->where('branch_id', $payment->branch_id)
-                ->whereIn('attempt_id', array_column($targets, 'attempt_id'))
-                ->select(['id', 'attempt_id', 'net_amount', 'currency'])
-                ->selectRaw(EffectiveStudyFees::amount('study_attempt_fees').' AS current_due')
-                ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.fee_id', 'study_attempt_fees.id')
-                    ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'paid_amount')
-                ->get()->keyBy('attempt_id');
-            abort_unless($fees->count() === count($targets), 404);
+            $plan = $this->allocationPlan($studentId, $payment, $targets, $permissions);
             $ids = [];
             $rows = [];
             $auditAllocations = [];
-            foreach ($targets as $target) {
-                $fee = $fees->get($target['attempt_id']);
-                abort_unless($fee && $fee->currency === $payment->currency, 422, 'عملة الرسوم لا تطابق الدفعة.');
-                $amount = StudentMoney::cents($target['amount']);
-                $alreadyPaid = StudentMoney::cents($fee->paid_amount);
-                $dueBefore = StudentMoney::cents($fee->current_due) - $alreadyPaid;
-                if ($amount > $dueBefore) {
-                    $this->conflict('fee_already_paid');
-                }
+            foreach ($plan['targets'] as $target) {
                 $id = (string) Str::uuid();
                 $ids[] = $id;
                 $rows[] = ['id' => $id, 'student_id' => $studentId, 'payment_id' => $paymentId,
-                    'fee_id' => $fee->id, 'source_branch_id' => $payment->branch_id,
-                    'target_branch_id' => $payment->branch_id, 'amount' => $target['amount'],
+                    'fee_id' => $target['fee_id'], 'source_branch_id' => $payment->branch_id,
+                    'target_branch_id' => $target['branch_id'], 'amount' => $target['amount'],
                     'currency' => $payment->currency, 'actor_id' => $request->user()->id,
                     'actor_name' => $request->user()->name, 'submission_id' => $data['request_id'], 'created_at' => now()];
-                $auditAllocations[] = ['id' => $id, 'fee_id' => $fee->id, 'attempt_id' => $target['attempt_id'],
-                    'amount' => $target['amount'], 'fee_due_before' => StudentMoney::format($dueBefore),
-                    'fee_due_after' => StudentMoney::format($dueBefore - $amount)];
+                $auditAllocations[] = ['id' => $id, 'fee_id' => $target['fee_id'], 'attempt_id' => $target['attempt_id'],
+                    'target_branch_id' => $target['branch_id'], 'target_branch_name' => $target['branch_name'],
+                    'amount' => $target['amount'],
+                    'fee_due_before' => $target['remaining_before'], 'fee_due_after' => $target['remaining_after']];
             }
             DB::connection('tenant')->table('student_allocation_submissions')->insert([
                 'request_id' => $data['request_id'], 'student_id' => $studentId, 'kind' => 'allocate',
@@ -165,9 +178,11 @@ class CenterStudentAllocationController extends Controller
                 'actor_id' => $request->user()->id, 'branch_id' => $payment->branch_id,
                 'event' => 'student.payment_allocated',
                 'details' => json_encode(['student_id' => $studentId, 'payment_id' => $paymentId,
-                    'branch_id' => $payment->branch_id, 'allocations' => $auditAllocations,
-                    'payment_available_before' => StudentMoney::format($availableBefore),
-                    'payment_available_after' => StudentMoney::format($availableBefore - $sum),
+                    'branch_id' => $payment->branch_id, 'source_branch_name' => $payment->branch_name,
+                    'allocations' => $auditAllocations,
+                    'related_branch_ids' => array_values(array_unique(array_column($plan['targets'], 'branch_id'))),
+                    'payment_available_before' => $plan['source']['available_before'],
+                    'payment_available_after' => $plan['source']['available_after'],
                     'currency' => $payment->currency]),
                 'created_at' => now(),
             ]);
@@ -192,6 +207,8 @@ class CenterStudentAllocationController extends Controller
                 ->where('id', $allocationId)->where('student_id', $studentId)->first();
             abort_unless($allocation && $permissions->can('payments.correct', (int) $allocation->source_branch_id)
                 && $permissions->can('finance.read', (int) $allocation->target_branch_id), 404);
+            abort_unless($this->canCorrectAllocation($permissions, (int) $allocation->source_branch_id,
+                (int) $allocation->target_branch_id), 403);
             $student = StudentPhotos::visibleStudent($studentId, $permissions, 'payments.correct')
                 ->lockForUpdate()->first(['students.id', 'students.financial_account_revision']);
             abort_unless($student, 404);
@@ -234,6 +251,7 @@ class CenterStudentAllocationController extends Controller
                 'event' => 'student.payment_allocation_reversed',
                 'details' => json_encode(['student_id' => $studentId, 'allocation_id' => $allocationId,
                     'payment_id' => $allocation->payment_id, 'fee_id' => $allocation->fee_id,
+                    'related_branch_ids' => [(int) $allocation->target_branch_id],
                     'amount' => $allocation->amount, 'reason' => $reason,
                     'payment_available_before' => StudentMoney::format($availableBefore),
                     'payment_available_after' => StudentMoney::format($availableBefore + $amount),
@@ -249,11 +267,104 @@ class CenterStudentAllocationController extends Controller
 
     private function visiblePayment(string $studentId, string $paymentId, CenterPermissions $permissions): object
     {
-        $payment = DB::connection('tenant')->table('student_payments')->where('id', $paymentId)
-            ->where('student_id', $studentId)->first();
+        $payment = DB::connection('tenant')->table('student_payments as payments')
+            ->join('branches as source_branches', 'source_branches.id', '=', 'payments.branch_id')
+            ->where('payments.id', $paymentId)->where('payments.student_id', $studentId)
+            ->select(['payments.*', 'source_branches.name as branch_name'])->first();
         abort_unless($payment && $permissions->can('finance.read', (int) $payment->branch_id), 404);
 
         return $payment;
+    }
+
+    private function allocationData(Request $request, bool $withRequestId): array
+    {
+        $data = $request->validate([
+            'targets' => ['required', 'array', 'min:1', 'max:20'],
+            'targets.*.attempt_id' => ['required', 'uuid', 'distinct'],
+            'targets.*.amount' => ['required', 'numeric', 'decimal:0,2', 'gt:0', 'max:9999999999.99', 'regex:/^\d{1,10}(?:\.\d{1,2})?$/'],
+            'version' => ['required', 'regex:/^[a-f0-9]{64}$/'],
+            ...($withRequestId ? ['request_id' => ['required', 'uuid']] : []),
+        ]);
+        $data['targets'] = array_map(fn (array $target): array => ['attempt_id' => $target['attempt_id'],
+            'amount' => StudentMoney::format(StudentMoney::cents($target['amount']))], $data['targets']);
+
+        return $data;
+    }
+
+    private function canAllocateToBranch(CenterPermissions $permissions, int $sourceBranchId, int $targetBranchId): bool
+    {
+        if (! $permissions->can('payments.allocate', $sourceBranchId)) {
+            return false;
+        }
+        if ($sourceBranchId === $targetBranchId) {
+            return true;
+        }
+
+        return $permissions->can('finance.read', $sourceBranchId)
+            && $permissions->can('finance.read', $targetBranchId)
+            && $permissions->can('payments.allocate', $targetBranchId)
+            && $permissions->can('finance.approve', $sourceBranchId)
+            && $permissions->can('finance.approve', $targetBranchId);
+    }
+
+    private function canCorrectAllocation(CenterPermissions $permissions, int $sourceBranchId, int $targetBranchId): bool
+    {
+        if (! $permissions->can('payments.correct', $sourceBranchId)) {
+            return false;
+        }
+        if ($sourceBranchId === $targetBranchId) {
+            return true;
+        }
+
+        return $permissions->can('finance.read', $targetBranchId)
+            && $permissions->can('payments.correct', $targetBranchId)
+            && $permissions->can('finance.approve', $sourceBranchId)
+            && $permissions->can('finance.approve', $targetBranchId);
+    }
+
+    private function allocationPlan(string $studentId, object $payment, array $targets, CenterPermissions $permissions): array
+    {
+        $sum = array_sum(array_map(fn (array $target): int => StudentMoney::cents($target['amount']), $targets));
+        $availableBefore = StudentMoney::cents($payment->amount) - $this->used($payment->id);
+        if ($sum > $availableBefore) {
+            $this->conflict('payment_not_available');
+        }
+        $fees = DB::connection('tenant')->table('study_attempt_fees as fees')
+            ->join('branches as target_branches', 'target_branches.id', '=', 'fees.branch_id')
+            ->where('fees.student_id', $studentId)->whereIn('fees.attempt_id', array_column($targets, 'attempt_id'))
+            ->select(['fees.id', 'fees.attempt_id', 'fees.branch_id', 'target_branches.name as branch_name', 'fees.currency'])
+            ->selectRaw(EffectiveStudyFees::amount('fees').' AS current_due')
+            ->selectSub($this->originalFeeGroupName(), 'group_name')
+            ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.fee_id', 'fees.id')
+                ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'paid_amount')
+            ->get()->keyBy('attempt_id');
+        abort_unless($fees->count() === count($targets), 404);
+        $planned = [];
+        foreach ($targets as $target) {
+            $fee = $fees->get($target['attempt_id']);
+            abort_unless($fee && $permissions->can('finance.read', (int) $fee->branch_id), 404);
+            abort_unless($this->canAllocateToBranch($permissions, (int) $payment->branch_id, (int) $fee->branch_id), 403);
+            abort_unless($fee->currency === $payment->currency, 422, 'عملة الرسوم لا تطابق الدفعة.');
+            $amount = StudentMoney::cents($target['amount']);
+            $remaining = StudentMoney::cents($fee->current_due) - StudentMoney::cents($fee->paid_amount);
+            if ($amount > $remaining) {
+                $this->conflict('fee_already_paid');
+            }
+            $planned[] = ['attempt_id' => $target['attempt_id'], 'fee_id' => $fee->id,
+                'branch_id' => (int) $fee->branch_id, 'branch_name' => $fee->branch_name,
+                'group_name' => $fee->group_name,
+                'amount' => $target['amount'], 'remaining_before' => StudentMoney::format($remaining),
+                'remaining_after' => StudentMoney::format($remaining - $amount)];
+        }
+
+        return [
+            'source' => ['payment_id' => $payment->id, 'branch_id' => (int) $payment->branch_id,
+                'branch_name' => $payment->branch_name, 'currency' => $payment->currency,
+                'available_before' => StudentMoney::format($availableBefore),
+                'available_after' => StudentMoney::format($availableBefore - $sum)],
+            'targets' => $planned,
+            'cross_branch' => collect($planned)->contains(fn (array $target): bool => $target['branch_id'] !== (int) $payment->branch_id),
+        ];
     }
 
     private function originalFeeGroupName(): Builder
