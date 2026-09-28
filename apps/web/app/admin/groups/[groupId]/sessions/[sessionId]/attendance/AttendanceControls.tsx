@@ -20,7 +20,7 @@ type Action = { kind: "record" | "undo" | "close" | "correct" | "revoke"; key: s
 type Selection = { attemptId: string; mode: "record" | "undo" | "correct" };
 type NoteSelection = { entryId: string; entryRevision: number };
 type RevokePreview = { session_revision: number; group_revision: number; preview_token: string;
-  attendance: { total: number; counted: number; not_counted: number; absent: number; current_coverage_records: number } };
+  attendance: { total: number; counted: number; not_counted: number; absent: number; potential_coverage_records: number } };
 
 export function AttendanceControls({ context, search, linkedEntryId }: { context: AttendanceContext; search: string; linkedEntryId?: string }) {
   const router = useRouter();
@@ -249,7 +249,7 @@ export function AttendanceControls({ context, search, linkedEntryId }: { context
       <div id={`${titleId}-revoke-preview`} tabIndex={-1}>
       <h3>معاينة أثر إلغاء الاعتماد</h3>
       <p>سيخرج من تقارير الحضور والغياب {revokePreview.attendance.total.toLocaleString("ar-EG")} سجلًا: {revokePreview.attendance.counted.toLocaleString("ar-EG")} حاضر محتسب، {revokePreview.attendance.not_counted.toLocaleString("ar-EG")} حاضر غير محتسب، و{revokePreview.attendance.absent.toLocaleString("ar-EG")} غائب.</p>
-      <p>سيتأثر احتساب التغطية الحالي لما يصل إلى {revokePreview.attendance.current_coverage_records.toLocaleString("ar-EG")} حضور محتسب. سيبقى عدد متطلبات الخطة كما هو، ولن تُنقل أي محاولة أو تُعكس قرارات إتمام سابقة أو تُنشأ تسوية مالية تلقائيًا.</p>
+      <p>قد تتأثر التغطية لما يصل إلى {revokePreview.attendance.potential_coverage_records.toLocaleString("ar-EG")} واقعة حضور محتسب، بما فيها الحضور المنقول أو المعادل. سيبقى عدد متطلبات الخطة كما هو، ولن تُنقل أي محاولة أو تُعكس قرارات إتمام سابقة أو تُنشأ تسوية مالية تلقائيًا.</p>
       </div>
       <Field><FieldLabel htmlFor={`${titleId}-revoke-reason`}>سبب إلغاء الاعتماد</FieldLabel>
         <Textarea id={`${titleId}-revoke-reason`} value={revokeReason} onChange={event => setRevokeReason(event.target.value)} maxLength={1000} required disabled={busy} />

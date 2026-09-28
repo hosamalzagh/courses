@@ -7,7 +7,7 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
     'student.payment_note_created', 'student.payment_note_updated',
     'student.allocation_note_created', 'student.allocation_note_updated',
     'center.financial_currency_changed', 'student.enrolled', 'student.study_repeated', 'student.study_withdrawn',
-    'student.study_waitlisted', 'student.study_reattached'].includes(entry.event)) return null;
+    'student.study_waitlisted', 'student.study_reattached', 'student.study_transferred'].includes(entry.event)) return null;
   let details = entry.details;
   if (typeof details === "string") { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;
@@ -27,6 +27,18 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
       <p>الطالب: <bdi dir="ltr">{String(data.student_id ?? "")}</bdi> — المحاولة: <bdi dir="ltr">{String(data.attempt_id ?? "")}</bdi></p>
       <p>المجموعة: <bdi dir="ltr">{String(data.group_id ?? "")}</bdi> — تاريخ الانسحاب: <bdi dir="ltr">{String(data.withdrawn_on ?? "")}</bdi></p>
       <p>السبب: {String(data.reason ?? "")}</p>
+    </details>;
+  }
+  if (entry.event === "student.study_transferred") {
+    const before = data.before && typeof data.before === "object" && !Array.isArray(data.before)
+      ? data.before as Record<string, unknown> : null;
+    const after = data.after && typeof data.after === "object" && !Array.isArray(data.after)
+      ? data.after as Record<string, unknown> : null;
+    return <details><summary>تفاصيل نقل محاولة الدراسة</summary>
+      <p>الطالب: <bdi dir="ltr">{String(data.student_id ?? "")}</bdi> — المحاولة: <bdi dir="ltr">{String(data.attempt_id ?? "")}</bdi></p>
+      {before ? <p>السياق السابق: فرع <bdi dir="ltr">{String(before.branch_id ?? "")}</bdi>، مستوى <bdi dir="ltr">{String(before.level_id ?? "")}</bdi>، خطة <bdi dir="ltr">{String(before.plan_version_id ?? "")}</bdi>، مجموعة <bdi dir="ltr">{String(before.group_id ?? "انتظار")}</bdi></p> : null}
+      {after ? <p>الوجهة: فرع <bdi dir="ltr">{String(after.branch_id ?? "")}</bdi>، مستوى <bdi dir="ltr">{String(after.level_id ?? "")}</bdi>، خطة <bdi dir="ltr">{String(after.plan_version_id ?? "")}</bdi>، مجموعة <bdi dir="ltr">{String(after.group_id ?? "")}</bdi></p> : null}
+      <p>تاريخ النقل: <bdi dir="ltr">{String(data.transferred_on ?? "")}</bdi> — السبب: {String(data.reason ?? "")}</p>
     </details>;
   }
   if (entry.event === "student.study_waitlisted" || entry.event === "student.study_reattached") {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions, CenterPageActions } from "@/components/CenterShell";
@@ -17,6 +17,7 @@ import type { StudyEnrollmentContext, StudyAttemptNote } from "@/lib/server-cont
 import { StudyAttemptNoteEditor } from "./StudyAttemptNoteEditor";
 import { StudyWithdrawalEditor } from "./StudyWithdrawalEditor";
 import { StudyWaitlistEditor } from "./StudyWaitlistEditor";
+import { StudyTransferEditor, StudyTransferHistory } from "./StudyTransferEditor";
 
 export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: { initial: StudyEnrollmentContext; search: string; linkedAttemptId?: string }) {
   const router = useRouter();
@@ -44,6 +45,12 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
   const [withdrawalDirty, setWithdrawalDirty] = useState(false);
   const [openWaitlistId, setOpenWaitlistId] = useState<string | null>(null);
   const [waitlistDirty, setWaitlistDirty] = useState(false);
+  const [openTransferId, setOpenTransferId] = useState<string | null>(null);
+  const [openTransferHistoryId, setOpenTransferHistoryId] = useState<string | null>(null);
+  const [transferDirty, setTransferDirty] = useState(false);
+  const transferOpener = useRef<string | null>(null);
+  const transferHistoryOpener = useRef<string | null>(null);
+  const transferFocusPending = useRef<string | null>(null);
   const waitlistOpener = useRef<string | null>(null);
   const repeatOpener = useRef<string | null>(null);
   const withdrawalOpener = useRef<string | null>(null);
@@ -53,15 +60,23 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
   if (loadedInitial !== initial) {
     setLoadedInitial(initial); setCurrent(initial);
     if (current.student.id !== initial.student.id) {
-      setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason(""); setRepeatId(null); setOpenWithdrawalId(null); setOpenWaitlistId(null);
+      setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason(""); setRepeatId(null); setOpenWithdrawalId(null); setOpenWaitlistId(null); setOpenTransferId(null); setOpenTransferHistoryId(null);
     }
   }
+  useEffect(() => {
+    if (!transferFocusPending.current) return;
+    const id = transferFocusPending.current;
+    requestAnimationFrame(() => {
+      document.getElementById(id)?.focus();
+      transferFocusPending.current = null;
+    });
+  }, [initial]);
   const studentId = current.student.id;
   const selected = current.groups.find(group => group.id === groupId) ?? (selectedGroup?.id === groupId ? selectedGroup : undefined);
   const discountAllowed = Boolean(selected && (current.permissions.can_manage_center ||
     current.permissions.branch_actions?.[String(selected.branch_id)]?.includes("fees.discount")));
   const registrationDirty = Boolean(groupId || joinedOn || discount !== "0.00" || reason || repeatId);
-  const dirty = registrationDirty || noteDirty || withdrawalDirty || waitlistDirty;
+  const dirty = registrationDirty || noteDirty || withdrawalDirty || waitlistDirty || transferDirty;
   const path = `/admin/students/${studentId}/enrollments`;
   const query = new URLSearchParams({ page: String(current.pagination.page), groups_page: String(current.pagination.groups_page), ...(search ? { q: search } : {}), ...(linkedAttemptId ? { attempt_id: linkedAttemptId } : {}) });
   const endpoint = `students/${studentId}/enrollments?${query}`;
@@ -89,7 +104,17 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
     requestAnimationFrame(() => { if (waitlistOpener.current) document.getElementById(waitlistOpener.current)?.focus(); });
   }
 
-  function discard() { reset(); closeNote(); closeWithdrawal(); closeWaitlist(); }
+  function closeTransfer() {
+    setOpenTransferId(null); setTransferDirty(false);
+    requestAnimationFrame(() => { if (transferOpener.current) document.getElementById(transferOpener.current)?.focus(); });
+  }
+
+  function closeTransferHistory() {
+    setOpenTransferHistoryId(null);
+    requestAnimationFrame(() => { if (transferHistoryOpener.current) document.getElementById(transferHistoryOpener.current)?.focus(); });
+  }
+
+  function discard() { reset(); closeNote(); closeWithdrawal(); closeWaitlist(); closeTransfer(); closeTransferHistory(); }
 
   function openNote(attemptId: string) {
     if (openNoteId === attemptId) return;
@@ -102,7 +127,7 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
       attempt.id === attemptId ? { ...attempt, note } : attempt) }));
   }
 
-  async function reload() {
+  async function reload(successNotice?: string) {
     if (submitting.current) return;
     setBusy(true);
     try {
@@ -111,7 +136,7 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
       const fresh = await response.json() as StudyEnrollmentContext;
       setCurrent(fresh); setConflict(false); setUncertain(false); requestId.current = null;
       if (!fresh.groups.some(group => group.id === groupId)) { setGroupId(""); setSelectedGroup(null); }
-      setError(""); setNotice("حُمّلت المحاولات والأرصدة الحالية. راجع المجموعة والرسوم قبل إعادة المحاولة.");
+      setError(""); setNotice(successNotice ?? "حُمّلت المحاولات والأرصدة الحالية. راجع المجموعة والرسوم قبل إعادة المحاولة.");
       router.refresh();
     } catch { setError("تعذر تحميل أحدث بيانات التسجيل. تحقق من الاتصال وأعد المحاولة."); }
     finally { setBusy(false); }
@@ -193,7 +218,7 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
     </section>
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-    {conflict ? <CenterHeaderActions><Button disabled={busy} onClick={reload}>تحميل أحدث البيانات</Button></CenterHeaderActions> : null}
+    {conflict ? <CenterHeaderActions><Button disabled={busy} onClick={() => { void reload(); }}>تحميل أحدث البيانات</Button></CenterHeaderActions> : null}
     <section className="context-card form-stack" aria-labelledby={`${prefix}-title`}>
       <h2 id={`${prefix}-title`}>{repeatId ? "إعادة الدراسة بمحاولة جديدة" : "تسجيل محاولة دراسة"}</h2>
       <p className="muted">يثبت سعر المجموعة وخطتها عند التسجيل، حتى لو تغير السعر لاحقًا. تاريخ الانضمام لا يسقط محاضرات الخطة السابقة.</p>
@@ -241,26 +266,32 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
       serverPagination={{ page: current.pagination.page, hasMore: current.pagination.has_more, batchSize: 20,
         previousHref: page(current.pagination.page - 1),
         nextHref: page(current.pagination.page + 1) }}
-      searchText={row => `${row.group_name ?? "انتظار المستوى"} ${row.level_name} ${row.fee.net_amount} ${row.fee.current_due}`}
+      searchText={row => `${row.group_name ?? "انتظار المستوى"} ${row.level_name} ${row.fee?.net_amount ?? ""} ${row.fee?.current_due ?? ""}`}
       emptyMessage="لا توجد محاولات دراسة في فروع صلاحيتك." description="آخر ٢٠ محاولة في الدفعة الحالية. الرسوم المعتمدة محفوظة مع سبب الخصم والموظف."
       columns={[
         { key: "group", label: "المجموعة / المستوى", render: row => `${row.group_name ?? "انتظار المستوى"} — ${row.level_name}` },
         { key: "joined", label: "الانضمام", render: row => <bdi dir="ltr">{row.joined_on}</bdi> },
         { key: "status", label: "الحالة", render: row => <span>{row.status === "active" ? row.current_group_id ? "نشطة" : `انتظار منذ ${row.latest_waitlist?.entered_on ?? "—"}` : row.status === "withdrawn" ? `انسحب في ${row.withdrawal?.withdrawn_on ?? "—"}` : "مكتملة"}{row.repeated_from_attempt_id ? " — إعادة دراسة" : ""}{row.withdrawal ? <small className="muted"> — {row.withdrawal.reason} ({row.withdrawal.actor_name})</small> : null}</span> },
         { key: "requirements", label: "متطلبات الخطة", render: row => row.requirements_count.toLocaleString("ar-EG") },
-        { key: "fee", label: "المستحق الحالي", render: row => <span><bdi dir="ltr">{row.fee.current_due} {row.fee.currency}</bdi>{row.fee.current_due !== row.fee.net_amount ? <small className="muted"> (رسوم التسجيل {row.fee.net_amount})</small> : null}</span> },
-        { key: "actor", label: "سجلها", render: row => row.fee.actor_name },
+        { key: "fee", label: "المستحق الحالي", render: row => row.fee ? <span><bdi dir="ltr">{row.fee.current_due} {row.fee.currency}</bdi>{row.fee.current_due !== row.fee.net_amount ? <small className="muted"> (رسوم التسجيل {row.fee.net_amount})</small> : null}</span> : "من فرع خارج صلاحيتك" },
+        { key: "actor", label: "سجلها", render: row => row.fee?.actor_name ?? "محجوب" },
         { key: "note", label: "ملاحظة التسجيل", render: row => row.note ? <span>{row.note.important ? "★ " : ""}{row.note.body.slice(0, 80)}{row.note.body.length > 80 ? "…" : ""}</span> : "—" },
         { key: "actions", label: "الإجراءات", actions: true, render: row => {
           const canManageAttempt = current.permissions.can_manage_center ||
             current.permissions.branch_actions?.[String(row.branch_id)]?.includes("enrollment.manage");
-          const canManageNote = current.permissions.can_manage_center ||
-            current.permissions.branch_actions?.[String(row.event_branch_id)]?.includes("enrollment.manage");
-          if ((!canManageAttempt || (row.status !== "active" && row.has_repeat)) && !canManageNote) return <span className="muted">غير متاح</span>;
+          const canManageNote = row.event_branch_id !== null && (current.permissions.can_manage_center ||
+            current.permissions.branch_actions?.[String(row.event_branch_id)]?.includes("enrollment.manage"));
+          if (!canManageAttempt && !canManageNote) return <span className="muted">غير متاح</span>;
           return <div className="form-actions">
+            {canManageAttempt ? <Button id={`${prefix}-transfer-history-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
+              transferHistoryOpener.current = event.currentTarget.id; setOpenTransferId(null); setOpenTransferHistoryId(row.id);
+            }}>سجل النقل</Button> : null}
             {canManageAttempt && row.status === "active" ? <Button id={`${prefix}-waitlist-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
               waitlistOpener.current = event.currentTarget.id; setOpenWaitlistId(row.id);
             }}>{row.current_group_id ? "نقل إلى الانتظار" : "إعادة الإلحاق"}</Button> : null}
+            {canManageAttempt && row.status === "active" ? <Button id={`${prefix}-transfer-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
+              transferOpener.current = event.currentTarget.id; setOpenTransferHistoryId(null); setOpenTransferId(row.id);
+            }}>نقل إلى مجموعة أخرى</Button> : null}
             {canManageAttempt && row.status === "active" ? <Button id={`${prefix}-withdraw-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
               withdrawalOpener.current = event.currentTarget.id; setOpenWithdrawalId(row.id);
             }}>انسحاب</Button> : null}
@@ -288,5 +319,14 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
         onClose={closeWaitlist} onDirtyChange={setWaitlistDirty}
         onReload={() => { closeWaitlist(); void reload(); }}
         onSaved={() => { void reload(); setNotice("حُفظ قرار الانتظار أو الإلحاق دون رسوم أو تخصيص جديد."); }} /> : null}
+    {openTransferId && current.attempts.find(attempt => attempt.id === openTransferId) ?
+      <StudyTransferEditor key={openTransferId} studentId={studentId} attempt={current.attempts.find(attempt => attempt.id === openTransferId)!}
+        groups={current.groups} initialGroupsPage={current.pagination.groups_page} initialSearch={search}
+        groupsHasMore={current.pagination.groups_has_more} currency={current.student.currency} onClose={closeTransfer} onDirtyChange={setTransferDirty}
+        onReload={() => { closeTransfer(); void reload(); }}
+        onSaved={() => { transferFocusPending.current = transferOpener.current; void reload("حُفظ النقل في المحاولة نفسها دون رسوم أو تخصيص جديد."); }} /> : null}
+    {openTransferHistoryId && current.attempts.some(attempt => attempt.id === openTransferHistoryId) ?
+      <StudyTransferHistory key={openTransferHistoryId} studentId={studentId} attemptId={openTransferHistoryId}
+        onClose={closeTransferHistory} /> : null}
   </>;
 }

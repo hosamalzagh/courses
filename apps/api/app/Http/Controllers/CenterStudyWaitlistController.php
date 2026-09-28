@@ -34,7 +34,10 @@ class CenterStudyWaitlistController extends Controller
         abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
         $page = (int) ($data['page'] ?? 1);
         $historyPage = (int) ($data['history_page'] ?? 1);
+        $readableBranches = array_keys(array_filter($permissions->branchRoles,
+            fn (array $roles): bool => in_array('read', CenterPermissions::actions($roles), true)));
         $history = DB::connection('tenant')->table('study_attempt_waitlists')->where('attempt_id', $attemptId)
+            ->when(! $permissions->isCenterManager(), fn ($query) => $query->whereIn('branch_id', $readableBranches))
             ->orderByDesc('entered_on')->orderByDesc('created_at')->orderByDesc('id')
             ->offset(($historyPage - 1) * 20)->limit(21)->get();
         $groups = collect();
