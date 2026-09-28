@@ -154,6 +154,25 @@ class StudyCoverageTest extends TestCase
         $this->getJson("{$this->base}/groups/not-a-uuid/coverage")->assertNotFound();
     }
 
+    public function test_report_paginates_students_on_the_server_without_per_row_queries(): void
+    {
+        $group = $this->group($this->north, 3);
+        $last = null;
+        for ($index = 0; $index < 21; $index++) {
+            $last = $this->student();
+            $this->enroll($last['id'], $group, now('Africa/Cairo')->format('Y-m-d'));
+        }
+        $path = "{$this->base}/groups/{$group['id']}/coverage";
+        $first = $this->getJson($path)->assertOk()->assertJsonCount(20, 'students')
+            ->assertJsonPath('pagination.has_more', true);
+        $second = $this->getJson("{$path}?page=2")->assertOk()->assertJsonCount(1, 'students')
+            ->assertJsonPath('pagination.has_more', false);
+        $this->assertLessThanOrEqual(6, (int) $first->headers->get('X-Courses-Query-Count'));
+        $this->assertLessThanOrEqual(6, (int) $second->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$path}?q=".rawurlencode($last['name']))->assertOk()->assertJsonCount(1, 'students')
+            ->assertJsonPath('students.0.student_id', $last['id']);
+    }
+
     private function group(int $branchId, int $lectureCount): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => 'Coverage '.Str::random(5),
