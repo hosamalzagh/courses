@@ -806,6 +806,46 @@ class StudyEnrollmentTest extends TestCase
         $this->travelBack();
     }
 
+    public function test_withdrawal_cannot_move_a_recorded_attendance_outside_the_study_period(): void
+    {
+        $group = $this->group($this->north, '0.00');
+        $student = $this->student([$this->north]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($url)->json();
+        $attempt = $this->postJson($url, [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $workspace['student']['currency_revision'], 'joined_on' => '2026-09-26',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $workspace['student']['version'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $sessionId = (string) Str::uuid();
+        $this->center->run(function () use ($group, $attempt, $sessionId): void {
+            $lectureId = DB::table('plan_lectures')->where('plan_version_id', $group['plan_version_id'])->value('id');
+            DB::table('study_sessions')->insert([
+                'id' => $sessionId, 'group_id' => $group['id'], 'plan_lecture_id' => $lectureId,
+                'number' => 1, 'scheduled_at' => '2026-09-28 10:00:00+00', 'status' => 'held',
+                'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+            DB::table('study_attendance_entries')->insert([
+                'id' => (string) Str::uuid(), 'session_id' => $sessionId, 'attempt_id' => $attempt['id'],
+                'status' => 'counted', 'recorded_by' => $this->owner->id, 'recorded_at' => now(),
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        });
+        $this->travelTo(new \DateTimeImmutable('2026-09-29 10:00:00 UTC'));
+        $withdrawUrl = "{$url}/{$attempt['id']}/withdraw";
+        $payload = ['withdrawn_on' => '2026-09-27', 'reason' => 'انسحاب مؤرخ',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid()];
+        $this->postJson($withdrawUrl, $payload)->assertUnprocessable();
+        $this->postJson($withdrawUrl, [...$payload, 'withdrawn_on' => '2026-09-28',
+            'request_id' => (string) Str::uuid()])->assertUnprocessable();
+        $this->postJson($withdrawUrl, [...$payload, 'withdrawn_on' => '2026-09-29',
+            'request_id' => (string) Str::uuid()])->assertOk()->assertJsonPath('attempt.status', 'withdrawn');
+        $this->travelBack();
+    }
+
     public function test_withdrawal_requires_current_branch_grant_and_audit_failure_rolls_back(): void
     {
         $group = $this->group($this->north, '0.00');

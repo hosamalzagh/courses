@@ -263,6 +263,12 @@ class CenterStudyEnrollmentController extends Controller
                 ->where('attempt_id', $attemptId)->whereNull('left_on')->lockForUpdate()->first(['id', 'joined_on']);
             abort_unless($period, 409, 'لا توجد مجموعة نشطة لهذه المحاولة.');
             abort_if($data['withdrawn_on'] < $period->joined_on, 422, 'تاريخ الانسحاب يسبق الانضمام الحالي.');
+            $laterAttendance = DB::connection('tenant')->table('study_attendance_entries as entries')
+                ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
+                ->where('entries.attempt_id', $attemptId)->whereNotNull('entries.status')
+                ->whereRaw("(sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= ?::date", [$data['withdrawn_on']])
+                ->exists();
+            abort_if($laterAttendance, 422, 'تاريخ الانسحاب يسبق حضورًا مسجلًا أو يوافق يومه.');
             $now = now();
             DB::connection('tenant')->table('study_attempt_group_periods')->where('id', $period->id)->update(['left_on' => $data['withdrawn_on']]);
             DB::connection('tenant')->table('study_attempts')->where('id', $attemptId)->update([

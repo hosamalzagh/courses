@@ -20,8 +20,7 @@ class CenterRestoreTest extends TestCase
 
     public function test_restoring_alpha_keeps_beta_and_central_identity_and_removes_orphan_grants(): void
     {
-        $testDatabase = config('database.connections.central.database');
-        abort_unless($testDatabase === 'courses_test_central' || preg_match('/^courses_issue[0-9]+_test_central$/', $testDatabase) === 1, 500);
+        abort_unless(config('database.connections.central.database') === 'courses_test_central', 500);
         Artisan::call('migrate:fresh', ['--database' => 'central', '--force' => true]);
         Mail::fake();
         $platformOwner = User::factory()->platformOwner()->create();

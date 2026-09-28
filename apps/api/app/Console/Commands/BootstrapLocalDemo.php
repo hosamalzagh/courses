@@ -21,8 +21,7 @@ class BootstrapLocalDemo extends Command
     {
         $database = config('database.connections.central.database');
         if (! ((app()->environment('local') && $database === 'courses_central')
-            || (app()->runningUnitTests() && ($database === 'courses_test_central'
-                || preg_match('/^courses_issue[0-9]+_test_central$/', $database) === 1)))) {
+            || (app()->runningUnitTests() && $database === 'courses_test_central'))) {
             $this->error('This command is restricted to the local courses_central database.');
 
             return self::FAILURE;
