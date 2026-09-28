@@ -134,14 +134,17 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
           : `راجع آخر إدخال للطالب ${selectedRow.name}، ثم أكد التراجع من إجراءات أعلى الصفحة.`}
       </div> : null}
     </section>
-    <DataTable id={`attendance-${session.id}`} title="كشف الطلاب المستحقين" description="يعرض الطلاب المرتبطين بالمجموعة في تاريخ المحاضرة فقط." rows={current.students}
+    <DataTable id={`attendance-${session.id}`} title="كشف الطلاب المستحقين" description="يعرض الطلاب المرتبطين بالمجموعة وقت المحاضرة، مع فترات الإيقاف المستبعدة من الحضور والغياب." rows={current.students}
       rowKey={row => row.attempt_id} searchText={row => `${row.name} ${row.student_number}`} emptyMessage="لا يوجد طلاب مستحقون لهذه المحاضرة."
       serverSearch={{ value: search, onSearch: value => router.push(attendanceUrl(1, value)) }}
       columns={[
         { key: "student", label: "الطالب", render: row => <Link href={`/admin/students/${row.student_id}`}>{row.name}</Link> },
         { key: "number", label: "رقم الطالب", render: row => row.student_number.toLocaleString("ar-EG") },
-        { key: "status", label: "الحضور", render: row => row.status === "counted" ? "حاضر محتسب" : row.status === "not_counted" ? "حاضر غير محتسب" : row.status === "absent" ? "غائب" : "غير مسجل" },
-        { key: "actions", label: "الإجراءات", actions: true, render: row => canRecord && !row.status
+        { key: "status", label: "الحضور", render: row => row.suspended_at
+          ? <span>مستبعد بسبب الإيقاف<br /><small>من {formatSessionTime(row.suspended_at)}{row.lifted_at ? ` إلى ${formatSessionTime(row.lifted_at)}` : " إلى الآن"}</small></span>
+          : row.status === "counted" ? "حاضر محتسب" : row.status === "not_counted" ? "حاضر غير محتسب" : row.status === "absent" ? "غائب"
+          : row.student_status === "suspended" ? "ملف الطالب موقوف حاليًا" : "غير مسجل" },
+        { key: "actions", label: "الإجراءات", actions: true, render: row => canRecord && !row.status && !row.suspended_at && row.student_status === "active"
           ? <Button id={`${titleId}-${row.attempt_id}-record`} disabled={busy || conflict} onClick={() => select(row, "record")}>تسجيل الحضور</Button>
           : open && current.can_undo_own && row.entry_id && row.recorded_by === current.user.id && current.last_own_attempt_id === row.attempt_id && row.status !== "absent"
             ? <Button id={`${titleId}-${row.attempt_id}-undo`} disabled={busy || conflict}

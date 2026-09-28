@@ -10,7 +10,7 @@ trait CleansCenterDatabases
 {
     protected function tearDown(): void
     {
-        if (app()->environment('testing') && config('database.connections.central.database') === 'courses_test_central') {
+        if (app()->environment('testing') && in_array(config('database.connections.central.database'), ['courses_test_central', 'courses_test_central_issue70'], true)) {
             tenancy()->end();
             DB::purge('tenant');
 

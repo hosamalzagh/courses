@@ -74,6 +74,9 @@ class CenterStudyAttendanceController extends Controller
             $this->open($session, (int) $data['revision']);
             $eligible = $this->roster($session)->where('attempts.id', $data['attempt_id'])->first();
             abort_unless($eligible, 404);
+            if ($eligible->student_status === 'suspended' || $eligible->suspended_at !== null) {
+                $this->conflict('student_suspended_for_session');
+            }
             abort_if($eligible->status !== null, 409, 'سجل الحضور تغير؛ حمّل أحدث البيانات.');
             $now = now();
             $entryId = $eligible->entry_id ?? (string) Str::uuid();
@@ -152,8 +155,10 @@ class CenterStudyAttendanceController extends Controller
                     ->where('session_id', $sessionId)->where('status', 'absent')->count()]);
             }
             $this->open($session, (int) $data['revision']);
-            $unrecorded = $this->roster($session)->whereNull('entries.status')
-                ->get(['attempts.id as attempt_id', 'entries.id as entry_id']);
+            $pending = $this->roster($session)->whereNull('entries.status')
+                ->addSelect('session_suspensions.id as suspension_id')->get();
+            $unrecorded = $pending->filter(fn ($student) => $student->suspension_id === null);
+            $suspended = $pending->filter(fn ($student) => $student->suspension_id !== null);
             $now = now();
             foreach ($unrecorded->pluck('entry_id')->filter()->chunk(500) as $ids) {
                 DB::connection('tenant')->table('study_attendance_entries')->whereIn('id', $ids->all())
@@ -168,6 +173,13 @@ class CenterStudyAttendanceController extends Controller
             foreach ($newEntries->values()->chunk(500) as $entries) {
                 DB::connection('tenant')->table('study_attendance_entries')->insert($entries->all());
             }
+            foreach ($suspended->filter(fn ($student) => $student->entry_id === null)->values()->chunk(500) as $students) {
+                DB::connection('tenant')->table('study_attendance_entries')->insert($students->map(fn ($student): array => [
+                    'id' => (string) Str::uuid(), 'session_id' => $sessionId, 'attempt_id' => $student->attempt_id,
+                    'status' => null, 'revision' => 1, 'recorded_by' => null, 'recorded_at' => null,
+                    'created_at' => $now, 'updated_at' => $now,
+                ])->all());
+            }
             DB::connection('tenant')->table('study_sessions')->where('id', $sessionId)->update([
                 'status' => 'held', 'closed_at' => $now, 'closed_by' => $request->user()->id,
                 'revision' => $session->revision + 1, 'updated_at' => $now,
@@ -177,6 +189,7 @@ class CenterStudyAttendanceController extends Controller
             $this->audit($request->user()->id, (int) $session->branch_id, 'study_attendance.closed', [
                 'group_id' => $groupId, 'session_id' => $sessionId,
                 'absent_count' => $unrecorded->count(),
+                'suspended_count' => $suspended->count(),
                 'absent_attempt_ids' => $unrecorded->take(20)->pluck('attempt_id')->all(),
             ]);
 
@@ -222,26 +235,27 @@ class CenterStudyAttendanceController extends Controller
             ->leftJoin('study_attendance_entries as entries', function ($join) use ($session): void {
                 $join->on('entries.attempt_id', '=', 'attempts.id')->where('entries.session_id', $session->id);
             })
-            ->select(['attempts.id as attempt_id', 'students.id as student_id', 'students.name', 'students.student_number',
-                'students.status as student_status', 'entries.id as entry_id', 'entries.status',
-                'entries.revision as entry_revision', 'entries.recorded_by']);
-        if ($session->closed_at) {
-            return $roster->whereNotNull('entries.id');
-        }
-
-        return $roster
+            ->leftJoin('student_suspensions as session_suspensions', function ($join) use ($session): void {
+                $join->on('session_suspensions.student_id', '=', 'students.id')
+                    ->where('session_suspensions.suspended_at', '<=', $session->scheduled_at)
+                    ->where(fn ($period) => $period->whereNull('session_suspensions.lifted_at')
+                        ->orWhere('session_suspensions.lifted_at', '>', $session->scheduled_at));
+            })
             ->whereExists(function ($query) use ($session, $date): void {
                 $query->selectRaw('1')->from('study_attempt_group_periods as periods')
                     ->whereColumn('periods.attempt_id', 'attempts.id')->where('periods.group_id', $session->group_id)
                     ->where('periods.joined_on', '<=', $date)
                     ->where(fn ($query) => $query->whereNull('periods.left_on')->orWhere('periods.left_on', '>', $date));
             })
-            ->whereNotExists(function ($query) use ($session): void {
-                $query->selectRaw('1')->from('student_suspensions as suspensions')
-                    ->whereColumn('suspensions.student_id', 'students.id')
-                    ->where('suspensions.suspended_at', '<=', $session->scheduled_at)
-                    ->where(fn ($query) => $query->whereNull('suspensions.lifted_at')->orWhere('suspensions.lifted_at', '>', $session->scheduled_at));
-            });
+            ->select(['attempts.id as attempt_id', 'students.id as student_id', 'students.name', 'students.student_number',
+                'students.status as student_status', 'entries.id as entry_id', 'entries.status',
+                'entries.revision as entry_revision', 'entries.recorded_by',
+                'session_suspensions.suspended_at', 'session_suspensions.lifted_at']);
+        if ($session->closed_at) {
+            return $roster->whereNotNull('entries.id');
+        }
+
+        return $roster;
     }
 
     private function open(object $session, int $revision): void
