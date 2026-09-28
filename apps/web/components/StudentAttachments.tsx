@@ -210,6 +210,7 @@ function StudentAttachmentManagement({ student, attachment, revision, onRevision
   const formId = useId();
   const fileInput = useRef<HTMLInputElement>(null);
   const titleInput = useRef<HTMLInputElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   const running = useRef(false);
   const lastKind = useRef<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -229,6 +230,7 @@ function StudentAttachmentManagement({ student, attachment, revision, onRevision
   const [loadingVersions, setLoadingVersions] = useState(true);
   const dirty = Boolean(file) || classification !== current.classification || title !== current.title;
 
+  useEffect(() => { heading.current?.focus(); }, []);
   useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
 
   useEffect(() => {
@@ -332,7 +334,7 @@ function StudentAttachmentManagement({ student, attachment, revision, onRevision
   }
 
   return <section className="context-card form-stack" aria-label={`نسخ وإجراءات ${current.title}`}>
-    <h2>نسخ {current.title}</h2>
+    <h2 ref={heading} tabIndex={-1}>نسخ {current.title}</h2>
     <p>النسخة الحالية رقم {current.current_version.toLocaleString("ar-EG")}{current.archived_at ? " — مؤرشفة" : ""}. يراجع الخادم صلاحية الملف وتصنيف كل نسخة عند كل فتح.</p>
     {loadingVersions ? <p role="status">جارٍ تحميل النسخ…</p> : versions.length ? <ul className="form-stack">
       {versions.map(version => <li key={version.id} className="flex flex-wrap items-center gap-2">

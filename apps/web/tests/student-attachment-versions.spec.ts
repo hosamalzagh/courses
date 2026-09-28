@@ -47,6 +47,7 @@ test("replacement, history, archive and restoration work through the employee UI
   await page.getByRole("button", { name: "رفع المرفقات", exact: true }).click();
   await expect(page.getByRole("button", { name: "نسخ وإجراءات student" })).toBeVisible();
   await page.getByRole("button", { name: "نسخ وإجراءات student" }).click();
+  await expect(page.getByRole("heading", { name: "نسخ student" })).toBeFocused();
   await expect(page.getByText("نسخة ١", { exact: false })).toBeVisible();
   await page.getByLabel("عنوان الوثيقة").fill("عنوان لم يُحفظ");
   await page.getByRole("button", { name: "إغلاق النسخ" }).click();

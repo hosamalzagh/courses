@@ -55,6 +55,12 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (DB::table('student_attachment_versions')->exists()
+            || DB::table('student_attachment_operations')->exists()
+            || DB::table('student_attachments')->whereNotNull('archived_at')->exists()) {
+            throw new RuntimeException('Cannot roll back attachment version history after versioning, classification or archiving has been used.');
+        }
+
         Schema::dropIfExists('student_attachment_operations');
         Schema::dropIfExists('student_attachment_versions');
         Schema::table('student_attachments', function (Blueprint $table): void {

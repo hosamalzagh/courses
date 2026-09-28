@@ -204,6 +204,15 @@ class StudentAttachmentTest extends TestCase
         $this->getJson("{$url}/versions")->assertNotFound();
         $this->asUser($this->owner);
         $this->postJson("{$url}/archive", ['request_id' => (string) Str::uuid(), 'attachment_revision' => 3])->assertOk()->assertJsonPath('attachment_revision', 4);
+        $this->putJson("{$this->base}/members/{$this->membership->id}/grants", [
+            'center_roles' => ['center_admin'], 'branch_roles' => [$this->north => ['registration', 'student_identity']],
+        ])->assertOk();
+        $this->asUser($this->staff);
+        $this->get('http://alpha.courses.test'.$generalVersion['preview_url'])->assertOk();
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $this->get('http://alpha.courses.test'.$generalVersion['preview_url'])->assertNotFound();
+        $this->asUser($this->owner);
         $this->getJson("{$this->base}/students/{$student['id']}?tab=attachments")->assertOk()->assertJsonCount(0, 'attachments.entries');
         $this->getJson("{$this->base}/students/{$student['id']}?tab=attachments&attachments_status=archived")->assertOk()->assertJsonCount(1, 'attachments.entries');
         $this->asUser($this->staff);
@@ -231,12 +240,31 @@ class StudentAttachmentTest extends TestCase
         $student = $this->student();
         $attachment = $this->upload($student['id']);
         $this->center->run(function (): void {
+            // Recreate the legacy state: the old schema had neither history nor operation ledger.
+            DB::table('student_attachment_versions')->delete();
+            DB::table('student_attachment_operations')->delete();
             $path = glob(database_path('migrations/tenant/*_version_student_attachments.php'))[0];
             (require $path)->down();
             DB::table('migrations')->where('migration', pathinfo($path, PATHINFO_FILENAME))->delete();
         });
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
         $this->getJson("{$this->base}/students/{$student['id']}/attachments/{$attachment['id']}/versions")->assertOk()->assertJsonCount(1, 'versions')->assertJsonPath('versions.0.version', 1);
+    }
+
+    public function test_rollback_refuses_to_discard_attachment_history(): void
+    {
+        $student = $this->student();
+        $attachment = $this->upload($student['id']);
+        $this->center->run(function () use ($attachment): void {
+            $path = glob(database_path('migrations/tenant/*_version_student_attachments.php'))[0];
+            try {
+                (require $path)->down();
+                $this->fail('A rollback must not discard attachment version history.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString('Cannot roll back attachment version history', $exception->getMessage());
+            }
+            $this->assertSame(1, DB::table('student_attachment_versions')->where('attachment_id', $attachment['id'])->count());
+        });
     }
 
     public function test_attachment_pages_stay_bounded_with_a_longer_list(): void
