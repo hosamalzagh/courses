@@ -19,6 +19,7 @@ use App\Http\Controllers\CenterStudentProfileChoiceController;
 use App\Http\Controllers\CenterStudentSearchController;
 use App\Http\Controllers\CenterStudentStatusController;
 use App\Http\Controllers\CenterStudyGroupController;
+use App\Http\Controllers\CenterStudySessionController;
 use App\Http\Controllers\CenterStudyEnrollmentController;
 use App\Http\Middleware\MeasureCenterQueries;
 use App\Http\Middleware\RequireCenterMember;
@@ -134,6 +135,10 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::post('groups', [CenterStudyGroupController::class, 'store']);
         Route::post('groups/{groupId}/start', [CenterStudyGroupController::class, 'start']);
         Route::patch('groups/{groupId}/settings', [CenterStudyGroupController::class, 'updateSettings']);
+        Route::get('groups/{groupId}/sessions', [CenterStudySessionController::class, 'workspace']);
+        Route::post('groups/{groupId}/sessions/preview', [CenterStudySessionController::class, 'preview']);
+        Route::post('groups/{groupId}/sessions', [CenterStudySessionController::class, 'store']);
+        Route::patch('groups/{groupId}/sessions/{sessionId}/postpone', [CenterStudySessionController::class, 'postpone']);
         Route::post('branches', [CenterBranchController::class, 'store']);
         Route::get('branches/{branchId}', [CenterBranchController::class, 'show']);
         Route::patch('branches/{branchId}', [CenterBranchController::class, 'update']);

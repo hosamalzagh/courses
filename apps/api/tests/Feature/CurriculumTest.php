@@ -147,6 +147,9 @@ class CurriculumTest extends TestCase
     public function test_curriculum_migration_supports_existing_and_new_centers_without_linking_their_data(): void
     {
         $this->center->run(function (): void {
+            $sessionsMigration = glob(database_path('migrations/tenant/*_create_study_sessions.php'))[0];
+            (require $sessionsMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($sessionsMigration, PATHINFO_FILENAME))->delete();
             $attemptsMigration = glob(database_path('migrations/tenant/*_create_study_attempts.php'))[0];
             (require $attemptsMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($attemptsMigration, PATHINFO_FILENAME))->delete();

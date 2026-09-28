@@ -18,6 +18,7 @@ export function getAdminHeader(path: string, context: CenterContext): { title: s
     "/admin/members": { title: "موظفو المركز", description: "الدعوات والعضويات وأدوار كل فرع." },
   };
   if (path.startsWith("/admin/curriculum/")) return { ...headers["/admin/curriculum"], title: "خطة المستوى" };
+  if (/^\/admin\/groups\/[^/]+\/sessions$/.test(path)) return { title: "جدول محاضرات المجموعة", description: "مواعيد المجموعة مرقمة ومرتبطة بمحاضرات إصدار الخطة المعتمد. التوقيت بتوقيت القاهرة." };
   if (path === "/admin/students/new") return { title: 'إنشاء ملف طالب', description: 'ابدأ بالاسم وفرع مصرح به، ثم استكمل البيانات الاختيارية.' };
   if (path.endsWith('/account') && path.startsWith('/admin/students/')) return { title: 'حساب الطالب', description: 'الدفعات المقدمة غير مخصصة لمجموعة بعد. المبالغ المعروضة ضمن فروع صلاحيتك فقط.' };
   if (path.endsWith('/enrollments') && path.startsWith('/admin/students/')) return { title: 'تسجيل الطالب', description: 'محاولات الدراسة ورسومها حسب فروع صلاحيتك، دون تخصيص الدفعات تلقائيًا.' };
