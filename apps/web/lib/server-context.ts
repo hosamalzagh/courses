@@ -2,6 +2,7 @@ import { cache } from "react";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import type { CurriculumContext } from "./curriculum";
+import type { ContentEquivalenceContext } from "./content-equivalences";
 import type { AttendanceContext, CoverageContext, GroupContext, SessionContext } from "./groups";
 
 export type Branch = { id: number; name: string; slug: string; address: string | null };
@@ -166,6 +167,10 @@ export function loadCurriculumWorkspace(query = "", levelId?: string): Promise<C
   return fetchCenterPayload<CurriculumContext>(`${levelId ? `levels/${encodeURIComponent(levelId)}` : "curriculum-workspace"}${query ? `?${query}` : ""}`);
 }
 
+export function loadContentEquivalences(query = ""): Promise<ContentEquivalenceContext | CenterAccessFailure> {
+  return fetchCenterPayload<ContentEquivalenceContext>(`content-equivalences${query ? `?${query}` : ""}`);
+}
+
 export function loadGroupWorkspace(query = "", groupId?: string): Promise<GroupContext | CenterAccessFailure> {
   return fetchCenterPayload<GroupContext>(`${groupId ? `groups/${encodeURIComponent(groupId)}` : "group-workspace"}${query ? `?${query}` : ""}`);
 }
@@ -216,6 +221,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   if (studentEnrollments) return loadStudyEnrollments(decodeURIComponent(studentEnrollments[1]), query(["page", "groups_page", "q", "attempt_id"]));
   if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q", "identifier"]));
   if (path === "/admin/curriculum") return loadCurriculumWorkspace(query(["courses_page", "stages_page", "levels_page", "branches_page"]));
+  if (path === "/admin/equivalences") return loadContentEquivalences(query(["page", "q"]));
   if (path === "/admin/groups") return loadGroupWorkspace(query(["page", "levels_page", "instructors_page"]));
   const groupCoverage = path.match(/^\/admin\/groups\/([^/]+)\/coverage$/);
   if (groupCoverage) return loadGroupCoverage(decodeURIComponent(groupCoverage[1]), query(["page", "q"]));

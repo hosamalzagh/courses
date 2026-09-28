@@ -4,6 +4,7 @@ use App\Http\Controllers\CenterAbsenceReviewController;
 use App\Http\Controllers\CenterAuditController;
 use App\Http\Controllers\CenterAuthController;
 use App\Http\Controllers\CenterBranchController;
+use App\Http\Controllers\CenterContentEquivalenceController;
 use App\Http\Controllers\CenterCurriculumController;
 use App\Http\Controllers\CenterInstructorController;
 use App\Http\Controllers\CenterMemberController;
@@ -140,6 +141,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::post('instructors', [CenterInstructorController::class, 'store']);
         Route::patch('instructors/{instructorId}', [CenterInstructorController::class, 'update']);
         Route::get('curriculum-workspace', [CenterCurriculumController::class, 'workspace']);
+        Route::get('content-equivalences', [CenterContentEquivalenceController::class, 'workspace']);
+        Route::post('content-equivalences', [CenterContentEquivalenceController::class, 'store']);
         Route::get('curriculum/submissions/{requestId}', [CenterCurriculumController::class, 'submission']);
         Route::get('levels/{levelId}', [CenterCurriculumController::class, 'workspace']);
         Route::post('courses', [CenterCurriculumController::class, 'storeCourse']);
