@@ -70,7 +70,7 @@ class CenterStudySessionController extends Controller
                     $this->conflict('session_request_changed');
                 }
 
-                return response()->json(['sessions' => $this->sessions($groupId)->whereIn('sessions.id', json_decode($existing->session_ids, true))->get(),
+                return response()->json(['sessions' => $this->sessions($groupId)->whereIn('sessions.id', json_decode($existing->session_ids, true))->orderBy('sessions.number')->get(),
                     'group_revision' => $group['revision']])
                     ->header('Cache-Control', 'private, no-store');
             }
@@ -102,7 +102,7 @@ class CenterStudySessionController extends Controller
                 'group_id' => $groupId, 'session_ids' => $ids, 'sessions' => $prepared,
             ]);
 
-            return response()->json(['sessions' => $this->sessions($groupId)->whereIn('sessions.id', $ids)->get(),
+            return response()->json(['sessions' => $this->sessions($groupId)->whereIn('sessions.id', $ids)->orderBy('sessions.number')->get(),
                 'group_revision' => $group['revision'] + 1], 201)->header('Cache-Control', 'private, no-store');
         });
     }
@@ -171,6 +171,228 @@ class CenterStudySessionController extends Controller
         });
     }
 
+    public function cancelPreview(Request $request, string $groupId, string $sessionId): JsonResponse
+    {
+        abort_unless(Str::isUuid($groupId) && Str::isUuid($sessionId), 404);
+        $permissions = $request->attributes->get('center_permissions');
+        $group = $this->group($groupId, $permissions);
+        abort_unless($permissions->can('curriculum.manage', $group['branch_id']), 403);
+        $session = $this->session($groupId, $sessionId);
+
+        return response()->json($this->cancellationPreview($group, $session))->header('Cache-Control', 'private, no-store');
+    }
+
+    public function cancel(Request $request, string $groupId, string $sessionId): JsonResponse
+    {
+        abort_unless(Str::isUuid($groupId) && Str::isUuid($sessionId), 404);
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'min:3', 'max:1000'],
+            'decision' => ['required', 'in:academic,financial,none'],
+            'group_revision' => ['required', 'integer', 'min:1'],
+            'session_revision' => ['required', 'integer', 'min:1'],
+            'preview_token' => ['required', 'string', 'size:64'],
+            'request_id' => ['required', 'uuid'],
+        ]);
+        $reason = trim($data['reason']);
+        abort_if(mb_strlen($reason) < 3, 422, 'أدخل سبب إلغاء الموعد.');
+        $hash = hash('sha256', json_encode([$groupId, $sessionId, $reason, $data['decision'], $data['preview_token']]));
+
+        return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $groupId, $sessionId, $data, $reason, $hash): JsonResponse {
+            $group = $this->group($groupId, $permissions, true);
+            abort_unless($permissions->can('curriculum.manage', $group['branch_id']), 403);
+            $previous = DB::connection('tenant')->table('study_session_submissions')->where('request_id', $data['request_id'])->first();
+            if ($previous) {
+                abort_unless($previous->group_id === $groupId && (int) $previous->actor_id === $request->user()->id, 403);
+                if ($previous->kind !== 'cancel' || $previous->request_hash !== $hash) {
+                    $this->conflict('session_request_changed');
+                }
+
+                return response()->json(['session' => $this->sessions($groupId)->where('sessions.id', $sessionId)->firstOrFail(),
+                    'group_revision' => $group['revision']])->header('Cache-Control', 'private, no-store');
+            }
+            $session = $this->session($groupId, $sessionId, true);
+            if ($group['revision'] !== (int) $data['group_revision'] || (int) $session->revision !== (int) $data['session_revision']) {
+                $this->conflict('session_changed');
+            }
+            $preview = $this->cancellationPreview($group, $session);
+            if (! hash_equals($preview['preview_token'], $data['preview_token'])) {
+                $this->conflict('cancel_preview_changed');
+            }
+            $now = now();
+            $actor = $request->user();
+            DB::connection('tenant')->table('study_sessions')->where('id', $sessionId)->update([
+                'status' => 'cancelled', 'revision' => $session->revision + 1,
+                'cancelled_at' => $now, 'cancelled_by' => $actor->id, 'cancelled_by_name' => $actor->name,
+                'cancellation_reason' => $reason, 'compensation_decision' => $data['decision'], 'updated_at' => $now,
+            ]);
+            DB::connection('tenant')->table('study_groups')->where('id', $groupId)->update([
+                'revision' => $group['revision'] + 1, 'updated_at' => $now,
+            ]);
+            DB::connection('tenant')->table('study_session_submissions')->insert([
+                'request_id' => $data['request_id'], 'group_id' => $groupId, 'kind' => 'cancel',
+                'request_hash' => $hash, 'actor_id' => $actor->id, 'session_ids' => json_encode([$sessionId]),
+                'created_at' => $now,
+            ]);
+            $this->audit($actor->id, $group['branch_id'], 'study_session.cancelled', [
+                'group_id' => $groupId, 'session_id' => $sessionId,
+                'plan_lecture_id' => $session->plan_lecture_id, 'scheduled_at' => $session->scheduled_at,
+                'reason' => $reason, 'decision' => $data['decision'], 'before' => 'planned', 'after' => 'cancelled',
+            ]);
+
+            return response()->json(['session' => $this->sessions($groupId)->where('sessions.id', $sessionId)->firstOrFail(),
+                'group_revision' => $group['revision'] + 1])->header('Cache-Control', 'private, no-store');
+        });
+    }
+
+    public function replacementPreview(Request $request, string $groupId, string $sessionId): JsonResponse
+    {
+        abort_unless(Str::isUuid($groupId) && Str::isUuid($sessionId), 404);
+        $data = $this->replacementData($request);
+        $permissions = $request->attributes->get('center_permissions');
+        $group = $this->group($groupId, $permissions);
+        abort_unless($permissions->can('curriculum.manage', $group['branch_id']), 403);
+        $session = $this->session($groupId, $sessionId);
+
+        return response()->json($this->prepareReplacement($group, $session, $data))->header('Cache-Control', 'private, no-store');
+    }
+
+    public function replacement(Request $request, string $groupId, string $sessionId): JsonResponse
+    {
+        abort_unless(Str::isUuid($groupId) && Str::isUuid($sessionId), 404);
+        $data = $this->replacementData($request);
+        $extra = $request->validate([
+            'group_revision' => ['required', 'integer', 'min:1'],
+            'session_revision' => ['required', 'integer', 'min:1'],
+            'preview_token' => ['required', 'string', 'size:64'],
+            'request_id' => ['required', 'uuid'],
+        ]);
+        $hash = hash('sha256', json_encode([$groupId, $sessionId, $data, $extra['preview_token']]));
+
+        return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $groupId, $sessionId, $data, $extra, $hash): JsonResponse {
+            $group = $this->group($groupId, $permissions, true);
+            abort_unless($permissions->can('curriculum.manage', $group['branch_id']), 403);
+            $previous = DB::connection('tenant')->table('study_session_submissions')->where('request_id', $extra['request_id'])->first();
+            if ($previous) {
+                abort_unless($previous->group_id === $groupId && (int) $previous->actor_id === $request->user()->id, 403);
+                if ($previous->kind !== 'replacement' || $previous->request_hash !== $hash) {
+                    $this->conflict('session_request_changed');
+                }
+                $id = json_decode($previous->session_ids, true)[0];
+
+                return response()->json(['session' => $this->sessions($groupId)->where('sessions.id', $id)->firstOrFail(),
+                    'group_revision' => $group['revision']])->header('Cache-Control', 'private, no-store');
+            }
+            $session = $this->session($groupId, $sessionId, true);
+            if (DB::connection('tenant')->table('study_sessions')->where('replaces_session_id', $sessionId)->exists()) {
+                $this->conflict('replacement_exists');
+            }
+            if ($group['revision'] !== (int) $extra['group_revision'] || (int) $session->revision !== (int) $extra['session_revision']) {
+                $this->conflict('session_changed');
+            }
+            $prepared = $this->prepareReplacement($group, $session, $data);
+            if (! hash_equals($prepared['preview_token'], $extra['preview_token'])) {
+                $this->conflict('replacement_preview_changed');
+            }
+            $id = (string) Str::uuid();
+            $now = now();
+            $actor = $request->user();
+            DB::connection('tenant')->table('study_sessions')->insert([
+                'id' => $id, 'group_id' => $groupId, 'plan_lecture_id' => $session->plan_lecture_id,
+                'replaces_session_id' => $sessionId, 'number' => $prepared['number'],
+                'title' => $data['title'], 'scheduled_at' => $prepared['scheduled_at'],
+                'status' => 'planned', 'revision' => 1,
+                'created_by' => $actor->id, 'created_by_name' => $actor->name,
+                'created_at' => $now, 'updated_at' => $now,
+            ]);
+            DB::connection('tenant')->table('study_groups')->where('id', $groupId)->update([
+                'revision' => $group['revision'] + 1, 'updated_at' => $now,
+            ]);
+            DB::connection('tenant')->table('study_session_submissions')->insert([
+                'request_id' => $extra['request_id'], 'group_id' => $groupId, 'kind' => 'replacement',
+                'request_hash' => $hash, 'actor_id' => $actor->id, 'session_ids' => json_encode([$id]),
+                'created_at' => $now,
+            ]);
+            $this->audit($actor->id, $group['branch_id'], 'study_session.replacement_scheduled', [
+                'group_id' => $groupId, 'cancelled_session_id' => $sessionId, 'replacement_session_id' => $id,
+                'plan_lecture_id' => $session->plan_lecture_id, 'number' => $prepared['number'],
+                'scheduled_at' => $prepared['scheduled_at'], 'decision' => $session->compensation_decision,
+            ]);
+
+            return response()->json(['session' => $this->sessions($groupId)->where('sessions.id', $id)->firstOrFail(),
+                'group_revision' => $group['revision'] + 1], 201)->header('Cache-Control', 'private, no-store');
+        });
+    }
+
+    private function cancellationPreview(array $group, object $session): array
+    {
+        if ($group['status'] === 'completed' || $session->status !== 'planned' || $session->closed_at !== null) {
+            $this->conflict('session_changed');
+        }
+        if (DB::connection('tenant')->table('study_attendance_entries')->where('session_id', $session->id)->exists()) {
+            $this->conflict('session_has_attendance');
+        }
+
+        return ['group_revision' => $group['revision'], 'session_revision' => (int) $session->revision,
+            'plan_lecture_number' => (int) $session->plan_lecture_number, 'required_count' => $group['required_count'],
+            'scheduled_at' => $session->scheduled_at,
+            'preview_token' => hash('sha256', json_encode([$session->id, $session->revision, $group['revision'],
+                $session->status, $session->scheduled_at, $group['required_count']]))];
+    }
+
+    private function replacementData(Request $request): array
+    {
+        $data = $request->validate([
+            'start_at' => ['required', 'date_format:Y-m-d\\TH:i'],
+            'title' => ['nullable', 'string', 'max:255'],
+        ]);
+        $data['title'] = trim($data['title'] ?? '') ?: null;
+        $this->time($data['start_at']);
+
+        return $data;
+    }
+
+    private function prepareReplacement(array $group, object $session, array $data): array
+    {
+        if ($group['status'] === 'completed' || $session->status !== 'cancelled' || $session->cancelled_at === null
+            || $session->compensation_decision !== 'academic') {
+            $this->conflict('session_changed');
+        }
+        $db = DB::connection('tenant');
+        if ($db->table('study_sessions')->where('replaces_session_id', $session->id)->exists()) {
+            $this->conflict('replacement_exists');
+        }
+        if ($db->table('study_sessions')->where('group_id', $group['id'])
+            ->where('plan_lecture_id', $session->plan_lecture_id)->where('status', '<>', 'cancelled')->exists()) {
+            $this->conflict('requirement_already_scheduled');
+        }
+        $time = $this->time($data['start_at']);
+        $utc = $time->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:sP');
+        if ($db->table('study_sessions')->where('group_id', $group['id'])->where('status', '<>', 'cancelled')
+            ->where('scheduled_at', $utc)->exists()) {
+            $this->conflict('session_time_taken');
+        }
+        $number = (int) $db->table('study_sessions')->where('group_id', $group['id'])->max('number') + 1;
+
+        return ['group_revision' => $group['revision'], 'session_revision' => (int) $session->revision,
+            'number' => $number, 'plan_lecture_number' => (int) $session->plan_lecture_number,
+            'scheduled_at' => $utc, 'local_at' => $time->format('Y-m-d\\TH:i'), 'title' => $data['title'],
+            'preview_token' => hash('sha256', json_encode([$session->id, $session->revision, $group['revision'],
+                $utc, $data['title'], $number, $session->plan_lecture_id]))];
+    }
+
+    private function session(string $groupId, string $sessionId, bool $lock = false): object
+    {
+        $query = DB::connection('tenant')->table('study_sessions as sessions')
+            ->join('plan_lectures as lectures', 'lectures.id', '=', 'sessions.plan_lecture_id')
+            ->where('sessions.id', $sessionId)->where('sessions.group_id', $groupId)
+            ->select(['sessions.*', 'lectures.number as plan_lecture_number']);
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+
+        return $query->firstOrFail();
+    }
+
     private function scheduleData(Request $request): array
     {
         $data = $request->validate([
@@ -202,7 +424,9 @@ class CenterStudySessionController extends Controller
             ->orderBy('number')->get(['id', 'number', 'title']);
         $existing = $db->table('study_sessions')->where('group_id', $groupId)->where('status', '!=', 'cancelled')
             ->get(['plan_lecture_id', 'scheduled_at']);
-        $occupied = $existing->pluck('plan_lecture_id')->all();
+        $occupied = $db->table('study_sessions')->where('group_id', $groupId)
+            ->where(fn (Builder $query) => $query->where('status', '<>', 'cancelled')->orWhereNotNull('cancelled_at'))
+            ->pluck('plan_lecture_id')->all();
         $available = $requirements->reject(fn ($lecture) => in_array($lecture->id, $occupied, true))->values();
         if ($data['kind'] === 'single') {
             $selected = $available->firstWhere('number', (int) $data['plan_lecture_number']);
@@ -239,7 +463,8 @@ class CenterStudySessionController extends Controller
             ->select(['groups.id', 'groups.name', 'groups.status', 'groups.revision', 'groups.plan_version_id',
                 'courses.branch_id', 'levels.name as level_name'])
             ->selectRaw("COALESCE((SELECT json_agg(json_build_object('number', number, 'title', title, 'content', content) ORDER BY number) FROM (SELECT number, title, content FROM plan_lectures WHERE plan_version_id = groups.plan_version_id ORDER BY number LIMIT 200) AS plan), '[]'::json) AS requirements");
-        $query->selectRaw("COALESCE((SELECT json_agg(lecture_number ORDER BY lecture_number) FROM (SELECT DISTINCT lectures.number AS lecture_number FROM study_sessions AS sessions JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id WHERE sessions.group_id = groups.id AND sessions.status <> 'cancelled' ORDER BY lecture_number LIMIT 200) AS scheduled), '[]'::json) AS scheduled_requirements");
+        $query->selectRaw("COALESCE((SELECT json_agg(lecture_number ORDER BY lecture_number) FROM (SELECT DISTINCT lectures.number AS lecture_number FROM study_sessions AS sessions JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id WHERE sessions.group_id = groups.id AND (sessions.status <> 'cancelled' OR sessions.cancelled_at IS NOT NULL) ORDER BY lecture_number LIMIT 200) AS scheduled), '[]'::json) AS scheduled_requirements");
+        $query->selectRaw('(SELECT count(*) FROM plan_lectures WHERE plan_version_id = groups.plan_version_id) AS required_count');
         if ($lock) {
             $query->lockForUpdate();
         }
@@ -247,6 +472,7 @@ class CenterStudySessionController extends Controller
         abort_unless($row && $permissions->can('read', (int) $row->branch_id), 404);
 
         return [...(array) $row, 'revision' => (int) $row->revision, 'branch_id' => (int) $row->branch_id,
+            'required_count' => (int) $row->required_count,
             'requirements' => json_decode($row->requirements, true),
             'scheduled_requirements' => json_decode($row->scheduled_requirements, true),
             'can_manage' => $permissions->can('curriculum.manage', (int) $row->branch_id)];
@@ -256,9 +482,14 @@ class CenterStudySessionController extends Controller
     {
         return DB::connection('tenant')->table('study_sessions as sessions')
             ->join('plan_lectures as lectures', 'lectures.id', '=', 'sessions.plan_lecture_id')
+            ->leftJoin('study_sessions as replacements', 'replacements.replaces_session_id', '=', 'sessions.id')
+            ->leftJoin('study_sessions as originals', 'originals.id', '=', 'sessions.replaces_session_id')
             ->where('sessions.group_id', $groupId)
             ->select(['sessions.id', 'sessions.number', 'sessions.title', 'sessions.scheduled_at',
-                'sessions.status', 'sessions.revision', 'sessions.revoked_at',
+                'sessions.status', 'sessions.revision', 'sessions.revoked_at', 'sessions.cancelled_at',
+                'sessions.cancelled_by_name', 'sessions.cancellation_reason', 'sessions.compensation_decision',
+                'sessions.replaces_session_id', 'originals.number as replaces_session_number',
+                'replacements.id as replacement_id', 'replacements.number as replacement_number',
                 'lectures.number as plan_lecture_number', 'lectures.content']);
     }
 

@@ -25,13 +25,17 @@ export type GroupContext = CenterContext & {
 export type StudySession = {
   id: string; number: number; title: string | null; scheduled_at: string;
   status: "planned" | "held" | "cancelled"; revision: number; revoked_at: string | null;
+  cancelled_at: string | null; cancelled_by_name: string | null;
+  cancellation_reason: string | null; compensation_decision: "academic" | "financial" | "none" | null;
+  replaces_session_id: string | null; replaces_session_number: number | null;
+  replacement_id: string | null; replacement_number: number | null;
   plan_lecture_number: number; content: string;
 };
 export type SessionContext = CenterContext & {
   group: { id: string; name: string; status: StudyGroup["status"]; revision: number;
     plan_version_id: string; branch_id: number; level_name: string; can_manage: boolean;
     requirements: { number: number; title: string | null; content: string }[];
-    scheduled_requirements: number[] };
+    scheduled_requirements: number[]; required_count: number };
   sessions: StudySession[];
   pagination: { page: number; has_more: boolean };
 };

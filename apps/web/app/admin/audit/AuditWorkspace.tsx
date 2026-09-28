@@ -56,6 +56,8 @@ const eventNames: Record<string, string> = {
   "study_group.settings_updated": "تعديل إعدادات مجموعة",
   "study_sessions.scheduled": "جدولة محاضرات مجموعة",
   "study_session.postponed": "تأجيل محاضرة مجموعة",
+  "study_session.cancelled": "إلغاء موعد محاضرة قبل انعقادها",
+  "study_session.replacement_scheduled": "جدولة بديل لموعد ملغى",
   "study_attendance.recorded": "تسجيل حضور طالب",
   "study_attendance.undone": "التراجع عن حضور طالب",
   "study_attendance.closed": "إغلاق كشف حضور محاضرة",

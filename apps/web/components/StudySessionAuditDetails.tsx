@@ -4,7 +4,7 @@ import { PrefetchLink as Link } from "@/components/PrefetchLink";
 
 export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
   const attendance = entry.event.startsWith("study_attendance.");
-  if (!attendance && entry.event !== "study_sessions.scheduled" && entry.event !== "study_session.postponed" && entry.event !== "study_session.revoked") return null;
+  if (!attendance && !["study_sessions.scheduled", "study_session.postponed", "study_session.revoked", "study_session.cancelled", "study_session.replacement_scheduled"].includes(entry.event)) return null;
   let details = entry.details;
   if (typeof details === "string") { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;
@@ -53,6 +53,16 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
         سجلات الحضور المتأثرة: {typeof (data.impact as { attendance?: { total?: number } }).attendance?.total === "number"
           ? (data.impact as { attendance: { total: number } }).attendance.total.toLocaleString("ar-EG") : "—"}
       </p> : null}
+    </> : null}
+    {entry.event === "study_session.cancelled" ? <>
+      <p>الموعد الملغى: <bdi dir="ltr">{typeof data.session_id === "string" ? data.session_id : "غير مسجل"}</bdi> · الوقت الأصلي: {date(data.scheduled_at)}</p>
+      <p>قرار التعويض: {data.decision === "academic" ? "بديل أكاديمي" : data.decision === "financial" ? "مراجعة مالية" : "دون تعويض"} · يبقى متطلب الخطة معتمدًا.</p>
+      {typeof data.reason === "string" ? <p>السبب: {data.reason}</p> : null}
+    </> : null}
+    {entry.event === "study_session.replacement_scheduled" ? <>
+      <p>الموعد الملغى: <bdi dir="ltr">{typeof data.cancelled_session_id === "string" ? data.cancelled_session_id : "غير مسجل"}</bdi></p>
+      <p>الموعد البديل: <bdi dir="ltr">{typeof data.replacement_session_id === "string" ? data.replacement_session_id : "غير مسجل"}</bdi> · {date(data.scheduled_at)}</p>
+      <p>بقي متطلب الخطة نفسه والقرار الأكاديمي محفوظًا دون إجراء مالي آلي.</p>
     </> : null}
   </details>;
 }
