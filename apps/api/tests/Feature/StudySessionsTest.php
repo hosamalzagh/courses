@@ -251,6 +251,9 @@ class StudySessionsTest extends TestCase
         $this->center->run(function () use ($recorded): void {
             $this->assertSame(21, DB::table('study_attendance_entries')->where('status', 'absent')->count());
             $this->assertSame(3, DB::table('study_attendance_entries')->where('id', $recorded['id'])->value('revision'));
+            $details = json_decode(DB::table('center_audit_logs')->where('event', 'study_attendance.closed')->value('details'), true);
+            $this->assertSame(21, $details['absent_count']);
+            $this->assertCount(20, $details['absent_attempt_ids']);
         });
     }
 

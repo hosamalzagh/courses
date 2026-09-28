@@ -28,10 +28,13 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   if (loadedContext !== context) {
+    const sameRevision = context.session.id === current.session.id && context.session.revision === current.session.revision;
     setLoadedContext(context);
-    setCurrent(context);
-    setConflict(false);
-    setSelected(null);
+    if (context.session.id !== current.session.id || context.session.revision >= current.session.revision) {
+      setCurrent(context);
+      setConflict(false);
+      if (!sameRevision || (selected && !context.students.some(row => row.attempt_id === selected.attemptId))) setSelected(null);
+    }
   }
 
   const { group, session } = current;

@@ -172,7 +172,8 @@ class CenterStudyAttendanceController extends Controller
             $this->saveSubmission($data['request_id'], $sessionId, 'close', $hash, $request->user()->id, null);
             $this->audit($request->user()->id, (int) $session->branch_id, 'study_attendance.closed', [
                 'group_id' => $groupId, 'session_id' => $sessionId,
-                'absent_attempt_ids' => $unrecorded->pluck('attempt_id')->all(),
+                'absent_count' => $unrecorded->count(),
+                'absent_attempt_ids' => $unrecorded->take(20)->pluck('attempt_id')->all(),
             ]);
 
             return response()->json(['session' => ['id' => $sessionId, 'status' => 'held', 'closed_at' => $now,
