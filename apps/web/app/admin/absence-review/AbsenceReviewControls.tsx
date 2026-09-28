@@ -2,7 +2,7 @@
 
 import { useId, useRef, useState, type FormEvent, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
-import { AbsenceBulkWaitlist, AbsenceSelectionCell } from "./AbsenceBulkWaitlist";
+import { AbsenceBulkWaitlist, AbsenceSelectionCell, MAX_BULK_SELECTION } from "./AbsenceBulkWaitlist";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions } from "@/components/CenterShell";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
@@ -68,7 +68,8 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   function setSelectedAttemptIds(next: SetStateAction<string[]>) {
     setSelection(current => {
       const ids = current.scope === selectionScope ? current.ids : [];
-      return { scope: selectionScope, ids: typeof next === "function" ? next(ids) : next };
+      const requested = typeof next === "function" ? next(ids) : next;
+      return { scope: selectionScope, ids: requested.slice(0, MAX_BULK_SELECTION) };
     });
   }
   const enrollmentScopeId = (["group_id", "level_id", "stage_id", "course_id"] as const)
@@ -254,6 +255,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
           const allowed = row.student_status === "active" && (context.permissions.can_manage_center ||
             context.permissions.branch_actions?.[String(row.branch_id)]?.includes("enrollment.manage"));
           return allowed ? <AbsenceSelectionCell row={row} selected={selectedAttemptIds.includes(row.id)}
+            disabled={selectedAttemptIds.length >= MAX_BULK_SELECTION && !selectedAttemptIds.includes(row.id)}
             onToggle={(id, checked) => setSelectedAttemptIds(current => checked ? [...new Set([...current, id])] : current.filter(value => value !== id))} /> : "—";
         } },
         { key: "student", label: "الطالب", render: row => <Link href={`/admin/students/${row.student_id}`}>{row.student_name} · {row.student_number.toLocaleString("ar-EG")}</Link> },

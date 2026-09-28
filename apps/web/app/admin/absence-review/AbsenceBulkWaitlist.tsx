@@ -25,6 +25,7 @@ type BatchResult = {
   items: BatchItem[];
   pagination: { page: number; has_more: boolean };
 };
+export const MAX_BULK_SELECTION = 200;
 
 function todayInCairo() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
@@ -135,7 +136,7 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
             <NativeSelectOption value="selected">طلاب محددون ({selected.length.toLocaleString("ar-EG")})</NativeSelectOption>
             <NativeSelectOption value="all">كل المؤهلين في نطاق التقرير</NativeSelectOption>
           </NativeSelect>
-          <FieldDescription>الاختيار اليدوي يشمل الطلاب المحددين من الدفعة المعروضة. اختيار الكل يشمل كل صفحات النطاق.</FieldDescription>
+          <FieldDescription>الاختيار اليدوي يشمل حتى ٢٠٠ طالب من الدفعات المعروضة. اختيار الكل يشمل كل صفحات النطاق.</FieldDescription>
         </Field>
         <Field><FieldLabel htmlFor="bulk-entered-on">تاريخ بدء الانتظار</FieldLabel>
           <Input id="bulk-entered-on" type="date" value={enteredOn} max={todayInCairo()} disabled={Boolean(busy)}
@@ -148,10 +149,11 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
       </FieldGroup>
       <p className="muted">النطاق الحالي: {scopeParts}</p>
       {mode === "selected" && selectableIds.length > 0 ? <FieldLabel className="flex items-center gap-2">
-        <Checkbox checked={allPageSelected} disabled={Boolean(busy)} onCheckedChange={checked =>
+        <Checkbox checked={allPageSelected} disabled={Boolean(busy) || (selected.length >= MAX_BULK_SELECTION && !allPageSelected)} onCheckedChange={checked =>
           onSelectionChange(checked ? [...new Set([...selected, ...selectableIds])] : selected.filter(id => !selectableIds.includes(id)))} />
         تحديد كل الطلاب القابلين للاختيار في الدفعة المحمّلة ({selectableIds.length.toLocaleString("ar-EG")})
       </FieldLabel> : null}
+      {mode === "selected" && selected.length >= MAX_BULK_SELECTION ? <p role="status">وصلت إلى الحد الأقصى للاختيار اليدوي: ٢٠٠ طالب. يمكنك إلغاء اختيار طالب أو استخدام كل المؤهلين في النطاق.</p> : null}
       {mode === "selected" && pageStudents.length > 0 ? <p className="muted">المحددون في الدفعة: {pageStudents.length.toLocaleString("ar-EG")}</p> : null}
       <CenterHeaderActions><Button form={formId} type="submit" variant="primary" busy={busy === "preview"} disabled={Boolean(busy) || (mode === "selected" && selected.length === 0)}>معاينة النقل</Button></CenterHeaderActions>
     </form>
@@ -181,7 +183,7 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
   </section>;
 }
 
-export function AbsenceSelectionCell({ row, selected, onToggle }: { row: AbsenceStudent; selected: boolean; onToggle: (id: string, checked: boolean) => void }) {
-  return <Checkbox checked={selected} onCheckedChange={checked => onToggle(row.id, Boolean(checked))}
+export function AbsenceSelectionCell({ row, selected, disabled, onToggle }: { row: AbsenceStudent; selected: boolean; disabled: boolean; onToggle: (id: string, checked: boolean) => void }) {
+  return <Checkbox checked={selected} disabled={disabled} onCheckedChange={checked => onToggle(row.id, Boolean(checked))}
     aria-label={`اختيار ${row.student_name} للنقل إلى الانتظار`} />;
 }
