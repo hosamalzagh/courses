@@ -35,8 +35,12 @@ export function NavigationHistoryTracker() {
   return null;
 }
 
-export function UnsavedChangesGuard({ dirty, guardHistory = false, blockDiscard = false, onDiscard }: {
-  dirty: boolean; guardHistory?: boolean; blockDiscard?: boolean; onDiscard?: () => void;
+export function UnsavedChangesGuard({ dirty, guardHistory = false, blockDiscard = false,
+  blockDiscardTitle = "تحقق من اعتماد التسوية أولًا",
+  blockDiscardDescription = "تعذر التأكد من اعتماد التسوية. عد إلى المحرر واستخدم التحقق من الاعتماد قبل مغادرة الصفحة.",
+  onDiscard }: {
+  dirty: boolean; guardHistory?: boolean; blockDiscard?: boolean;
+  blockDiscardTitle?: string; blockDiscardDescription?: string; onDiscard?: () => void;
 }) {
   const router = useRouter();
   const [destination, setDestination] = useState<string | null>(null);
@@ -94,8 +98,8 @@ export function UnsavedChangesGuard({ dirty, guardHistory = false, blockDiscard 
     };
   }, [dirty]);
 
-  if (destination && dirty && blockDiscard) return <ConfirmationDialog title="تحقق من اعتماد التسوية أولًا"
-    description="تعذر التأكد من اعتماد التسوية. عد إلى المحرر واستخدم التحقق من الاعتماد قبل مغادرة الصفحة."
+  if (destination && dirty && blockDiscard) return <ConfirmationDialog title={blockDiscardTitle}
+    description={blockDiscardDescription}
     cancelLabel="العودة للتحقق" onCancel={() => { historyDelta.current = null; setDestination(null); }} />;
 
   return destination && dirty ? <ConfirmationDialog title="مغادرة دون حفظ" description="لديك بيانات لم تُحفظ. يمكنك إلغاء المغادرة ومتابعة تعديلها، أو مغادرة الصفحة دون حفظها." confirmLabel="مغادرة دون حفظ" onCancel={() => { historyDelta.current = null; setDestination(null); }} onConfirm={() => {

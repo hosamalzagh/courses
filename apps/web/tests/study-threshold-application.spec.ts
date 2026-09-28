@@ -95,7 +95,20 @@ test("selected existing attempts keep their threshold until reviewed and approve
     await expect(owner.getByRole("textbox", { name: "سبب التطبيق" })).toHaveValue("قرار أكاديمي موثق بعد مراجعة نسبة المجموعة");
     await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة أثر النسبة" }).click();
     await expect(owner.getByText(/٨٠٪ \(٨ محاضرات\) ← ٦٠٪ \(٦ محاضرات\)/)).toBeVisible();
+    let releaseApproval!: () => void;
+    const approvalGate = new Promise<void>(resolve => { releaseApproval = resolve; });
+    await owner.route(`**/api/v1/center/groups/${groupId}/completion-threshold`, async route => {
+      if (route.request().method() !== "POST") { await route.continue(); return; }
+      const response = await route.fetch();
+      await approvalGate;
+      await route.fulfill({ response });
+    });
     await owner.locator("header.center-topbar").getByRole("button", { name: "اعتماد التطبيق على المختارين" }).click();
+    await expect(owner.locator('header.center-topbar button[aria-busy="true"]').last()).toBeVisible();
+    await owner.locator("header.center-topbar").getByRole("link", { name: "جدول محاضرات المجموعة" }).click();
+    await expect(owner.getByRole("alertdialog", { name: "انتظر نتيجة اعتماد النسبة" })).toBeVisible();
+    await owner.getByRole("button", { name: "العودة للتحقق" }).click();
+    releaseApproval();
     await expect(owner.getByText("تم تطبيق نسبة الإتمام على التسجيلات المختارة وحفظ قرارها في سجل التدقيق.")).toBeVisible();
     await expect(owner.getByText("حد هذه المحاولة: ٦٠%", { exact: false })).toBeVisible();
     await owner.goto(`${origin}/admin/audit`);

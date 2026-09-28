@@ -104,6 +104,12 @@ class StudyEnrollmentTest extends TestCase
             $this->assertSame(60, DB::table('study_attempts')->where('id', $attempts[0]['id'])->value('completion_threshold'));
             $this->assertSame(80, DB::table('study_attempts')->where('id', $attempts[1]['id'])->value('completion_threshold'));
             $this->assertSame(1, DB::table('study_attempt_threshold_history')->count());
+            try {
+                (require database_path('migrations/tenant/2026_09_29_045000_create_attempt_threshold_decisions.php'))->down();
+                $this->fail('Rollback must preserve recorded threshold decisions.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString('Cannot roll back', $exception->getMessage());
+            }
         });
         $this->grant([$this->north => ['academic_admin', 'branch_auditor']]);
         $this->asUser($this->staff);

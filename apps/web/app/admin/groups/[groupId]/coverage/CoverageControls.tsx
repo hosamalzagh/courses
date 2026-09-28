@@ -110,7 +110,9 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   };
 
   return <>
-    <UnsavedChangesGuard dirty={dirty} guardHistory />
+    <UnsavedChangesGuard dirty={dirty || busy} guardHistory blockDiscard={busy}
+      blockDiscardTitle="انتظر نتيجة اعتماد النسبة"
+      blockDiscardDescription="طلب اعتماد النسبة قيد التنفيذ. ابق في الصفحة حتى تظهر نتيجته؛ المغادرة الآن قد تترك حالة القرار غير واضحة." />
     {pendingNavigation ? <ConfirmationDialog title="مغادرة دون تطبيق" description="اخترت تسجيلات أو أدخلت سببًا لتغيير نسبة الإتمام ولم تعتمد القرار. هل تريد الانتقال والتخلي عن المعاينة؟" confirmLabel="الانتقال دون تطبيق" onCancel={() => { setPendingNavigation(null); requestAnimationFrame(() => navigationFocus.current?.focus()); }} onConfirm={() => { const next = pendingNavigation; setPendingNavigation(null); setSelected([]); setReason(""); setPreview(null); router.push(next); }} /> : null}
     <CenterPageActions context={context} actions={<><Link href={`/admin/groups/${group.id}/sessions`}>جدول محاضرات المجموعة</Link><Link href="/admin/groups">العودة للمجموعات</Link></>} />
     <p className="muted">{group.name} · المطلوب {group.required_count.toLocaleString("ar-EG")} محاضرة · حد التسجيلات الجديدة {group.completion_threshold.toLocaleString("ar-EG")}%.</p>
