@@ -66,7 +66,7 @@ export type StudentSearchResult = { id: string; student_number: number; name: st
 export type StudentSearchContext = CenterContext & { policy: StudentSearchPolicy; students: StudentSearchResult[]; pagination: { page: number; has_more: boolean }; can_search: boolean };
 export type StudentPayment = { id: string; branch_id: number; branch_name?: string; amount: string; allocated_amount: string; available_amount: string; currency: string; method: string; received_on: string; actor_name: string; created_at: string };
 export type StudentAccountContext = CenterContext & {
-  account: { student_id: string; student_name: string; student_number: number; version: string; currency: string | null; currency_revision: number; currency_locked: boolean; received_total: string; due_total: string; paid_total: string; available_balance: string; debt: string };
+  account: { student_id: string; student_name: string; student_number: number; student_status: 'active' | 'suspended'; version: string; currency: string | null; currency_revision: number; currency_locked: boolean; received_total: string; due_total: string; paid_total: string; allocated_total: string; available_balance: string; debt: string };
   recordable_branches: { id: number; name: string }[];
   payments: StudentPayment[];
   pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean };
