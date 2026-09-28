@@ -216,9 +216,13 @@ class StudyAbsenceReviewTest extends TestCase
             $this->enroll($student['id'], $scope['group']);
         }
         $reportQueries = 0;
-        DB::listen(function ($query) use (&$reportQueries): void {
+        $boundedFetches = 0;
+        DB::listen(function ($query) use (&$reportQueries, &$boundedFetches): void {
             if (str_contains($query->sql, 'WITH candidates AS')) {
                 $reportQueries++;
+            }
+            if (str_contains($query->sql, 'FETCH FORWARD 50 FROM bulk_waitlist_report')) {
+                $boundedFetches++;
             }
         });
         $preview = $this->postJson("{$this->base}/absence-review/waitlist-batches", [
@@ -227,6 +231,7 @@ class StudyAbsenceReviewTest extends TestCase
         ])->assertCreated()->assertJsonPath('batch.total', 51)->assertJsonCount(50, 'items');
 
         $this->assertSame(1, $reportQueries);
+        $this->assertSame(3, $boundedFetches);
         $this->getJson("{$this->base}/absence-review/waitlist-batches/{$preview->json('batch.id')}?page=2")
             ->assertOk()->assertJsonCount(1, 'items');
     }

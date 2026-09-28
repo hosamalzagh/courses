@@ -148,29 +148,36 @@ class CenterAbsenceReviewController extends Controller
 
             $seen = [];
             $count = 0;
-            $scopedRows = $this->report($permissions, $scope, $selected ?: null, true);
-            foreach (array_chunk($scopedRows, 50) as $visible) {
-                foreach ($visible as $row) {
-                    $seen[$row['id']] = true;
-                }
-                $manageable = array_values(array_filter($visible, fn (array $row) => $row['student_status'] === 'active' && $permissions->can('enrollment.manage', (int) $row['branch_id'])));
-                $eligible = $this->previewEligibleIds($manageable, $data['entered_on']);
-                $items = [];
-                foreach ($manageable as $row) {
-                    if (! isset($eligible[$row['id']])) {
-                        continue;
+            [$sql, $bindings] = $this->reportQuery($permissions, $scope, $selected ?: null, true);
+            $tenant = DB::connection('tenant');
+            $tenant->statement('DECLARE bulk_waitlist_report NO SCROLL CURSOR FOR '.$sql, $bindings);
+            try {
+                while ($visible = array_map(fn ($row) => (array) $row,
+                    $tenant->select('FETCH FORWARD 50 FROM bulk_waitlist_report'))) {
+                    foreach ($visible as $row) {
+                        $seen[$row['id']] = true;
                     }
-                    $items[] = [
-                        'batch_id' => $batchId, 'attempt_id' => $row['id'], 'student_id' => $row['student_id'],
-                        'branch_id' => $row['branch_id'], 'group_id' => $row['current_group_id'],
-                        'attempt_revision' => $row['attempt_revision'], 'student_name' => $row['student_name'],
-                        'student_number' => $row['student_number'], 'status' => 'pending',
-                    ];
+                    $manageable = array_values(array_filter($visible, fn (array $row) => $row['student_status'] === 'active' && $permissions->can('enrollment.manage', (int) $row['branch_id'])));
+                    $eligible = $this->previewEligibleIds($manageable, $data['entered_on']);
+                    $items = [];
+                    foreach ($manageable as $row) {
+                        if (! isset($eligible[$row['id']])) {
+                            continue;
+                        }
+                        $items[] = [
+                            'batch_id' => $batchId, 'attempt_id' => $row['id'], 'student_id' => $row['student_id'],
+                            'branch_id' => $row['branch_id'], 'group_id' => $row['current_group_id'],
+                            'attempt_revision' => $row['attempt_revision'], 'student_name' => $row['student_name'],
+                            'student_number' => $row['student_number'], 'status' => 'pending',
+                        ];
+                    }
+                    if ($items !== []) {
+                        DB::connection('tenant')->table('study_waitlist_batch_items')->insert($items);
+                        $count += count($items);
+                    }
                 }
-                if ($items !== []) {
-                    DB::connection('tenant')->table('study_waitlist_batch_items')->insert($items);
-                    $count += count($items);
-                }
+            } finally {
+                $tenant->statement('CLOSE bulk_waitlist_report');
             }
             abort_if($selected !== [] && count($seen) !== count($selected), 422, 'تغير نطاق التقرير أو لم تعد بعض الحالات ظاهرة. حدّث الصفحة وراجع الاختيار.');
             abort_if($selected !== [] && $count !== count($selected), 422, 'بعض الطلاب المحددين غير مؤهلين للنقل في التاريخ المختار أو لا تملك صلاحية تسجيلهم. راجع الاختيار والتاريخ.');
@@ -388,6 +395,13 @@ SQL;
 
     private function report(CenterPermissions $permissions, array $data, ?array $attemptIds = null, bool $allRows = false): array
     {
+        [$sql, $bindings] = $this->reportQuery($permissions, $data, $attemptIds, $allRows);
+
+        return array_map(fn ($row) => (array) $row, DB::connection('tenant')->select($sql, $bindings));
+    }
+
+    private function reportQuery(CenterPermissions $permissions, array $data, ?array $attemptIds = null, bool $allRows = false): array
+    {
         $scope = $this->scopeSql($permissions, 'courses.branch_id');
         $periodScope = $this->scopeSql($permissions, 'period_courses.branch_id');
         $pagination = $allRows ? '' : 'OFFSET ? LIMIT 51';
@@ -477,7 +491,7 @@ SQL;
             $bindings[] = ((int) ($data['page'] ?? 1) - 1) * 50;
         }
 
-        return array_map(fn ($row) => (array) $row, DB::connection('tenant')->select($sql, $bindings));
+        return [$sql, $bindings];
     }
 
     private function scopeSql(CenterPermissions $permissions, string $column): array
