@@ -215,6 +215,10 @@ class StudySessionsTest extends TestCase
         $after = $this->getJson($attendance)->assertOk()->assertJsonCount(2, 'students')->json('students');
         $this->assertSame('counted', collect($after)->firstWhere('student_id', $first['id'])['status']);
         $this->assertSame('absent', collect($after)->firstWhere('student_id', $second['id'])['status']);
+        $this->center->run(fn () => DB::table('study_attempt_group_periods')->where('attempt_id', $firstAttempt)
+            ->update(['left_on' => $scheduled->format('Y-m-d')]));
+        $historicalRoster = $this->getJson($attendance)->assertOk()->assertJsonCount(2, 'students')->json('students');
+        $this->assertSame('counted', collect($historicalRoster)->firstWhere('student_id', $first['id'])['status']);
         $backdated = $this->student();
         $this->enroll($backdated['id'], $group, now('Africa/Cairo')->subDay()->format('Y-m-d'));
         $closedRoster = $this->getJson($attendance)->assertOk()->assertJsonCount(2, 'students')->json('students');

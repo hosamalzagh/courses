@@ -241,12 +241,6 @@ class CenterStudyAttendanceController extends Controller
                     ->where(fn ($period) => $period->whereNull('session_suspensions.lifted_at')
                         ->orWhere('session_suspensions.lifted_at', '>', $session->scheduled_at));
             })
-            ->whereExists(function ($query) use ($session, $date): void {
-                $query->selectRaw('1')->from('study_attempt_group_periods as periods')
-                    ->whereColumn('periods.attempt_id', 'attempts.id')->where('periods.group_id', $session->group_id)
-                    ->where('periods.joined_on', '<=', $date)
-                    ->where(fn ($query) => $query->whereNull('periods.left_on')->orWhere('periods.left_on', '>', $date));
-            })
             ->select(['attempts.id as attempt_id', 'students.id as student_id', 'students.name', 'students.student_number',
                 'students.status as student_status', 'entries.id as entry_id', 'entries.status',
                 'entries.revision as entry_revision', 'entries.recorded_by',
@@ -255,7 +249,12 @@ class CenterStudyAttendanceController extends Controller
             return $roster->whereNotNull('entries.id');
         }
 
-        return $roster;
+        return $roster->whereExists(function ($query) use ($session, $date): void {
+            $query->selectRaw('1')->from('study_attempt_group_periods as periods')
+                ->whereColumn('periods.attempt_id', 'attempts.id')->where('periods.group_id', $session->group_id)
+                ->where('periods.joined_on', '<=', $date)
+                ->where(fn ($query) => $query->whereNull('periods.left_on')->orWhere('periods.left_on', '>', $date));
+        });
     }
 
     private function open(object $session, int $revision): void
