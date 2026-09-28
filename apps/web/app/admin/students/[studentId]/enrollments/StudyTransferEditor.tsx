@@ -26,7 +26,8 @@ type HistoryContext = { branch_id: number; branch_name: string; level_id: string
   plan_version_id: string; plan_version: number; group_id: string | null; group_name: string | null };
 type History = { id: string; transferred_on: string; from: HistoryContext | null;
   to: HistoryContext | null;
-  reason: string | null; actor_name: string | null; credited_count: number; required_count: number };
+  reason: string | null; actor_name: string | null; credited_count: number; required_count: number;
+  credited_lectures: { id: string; number: number }[] | null; missing_lectures: { id: string; number: number }[] | null };
 
 function TransferHistoryView({ history, page, hasMore, loading, onPage }: {
   history: History[]; page: number; hasMore: boolean; loading: boolean; onPage: (page: number) => void;
@@ -42,6 +43,9 @@ function TransferHistoryView({ history, page, hasMore, loading, onPage }: {
         { key: "destination", label: "الوجهة", render: row => row.to
           ? `${row.to.branch_name} — ${row.to.level_name} — خطة ${row.to.plan_version} — ${row.to.group_name ?? "انتظار"}` : "سياق محجوب" },
         { key: "coverage", label: "التغطية عند النقل", render: row => `${row.credited_count}/${row.required_count}` },
+        { key: "lectures", label: "تفصيل المتطلبات وقت النقل", render: row => row.credited_lectures && row.missing_lectures
+          ? `المحتسب: ${row.credited_lectures.map(lecture => lecture.number).join("، ") || "لا يوجد"}؛ الناقص: ${row.missing_lectures.map(lecture => lecture.number).join("، ") || "لا يوجد"}`
+          : "تفصيل غير محفوظ" },
         { key: "reason", label: "السبب", render: row => row.reason ?? "محجوب" },
       ]} />
     {page > 1 || hasMore ? <div className="form-actions">

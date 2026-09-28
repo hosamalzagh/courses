@@ -144,6 +144,9 @@ test('moves an active attempt across branches with a reviewed preview and denies
     const history = owner.getByRole('region', { name: 'سجل نقل المحاولة' });
     await expect(history.getByRole('table', { name: /سجل النقل/ })).toBeVisible();
     await expect(history.getByText('انتقل إلى الفرع الجنوبي')).toBeVisible();
+    await expect(history.getByText('المحتسب: لا يوجد؛ الناقص: 1')).toBeVisible();
+    const savedHistory = await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/transfer/history`)).json();
+    expect(savedHistory.history[0].missing_lectures).toEqual([{ id: target.plan.lectures[0].id, number: 1 }]);
     await signIn(staff, 'staff');
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).status()).toBe(404);
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/transfer/history`)).status()).toBe(404);

@@ -148,6 +148,8 @@ class CenterStudyTransferController extends Controller
                 'to_plan_version_id' => $preview['to']['plan_version_id'], 'to_group_id' => $data['group_id'],
                 'transferred_on' => $data['transferred_on'], 'approval_ids' => json_encode($preview['approval_ids']),
                 'credited_count' => $preview['credited_count'], 'required_count' => $preview['required_count'],
+                'credited_lectures' => json_encode($preview['credited_lectures']),
+                'missing_lectures' => json_encode($preview['missing_lectures']),
                 'reason' => $data['reason'], 'actor_id' => $request->user()->id, 'actor_name' => $request->user()->name,
                 'request_id' => $data['request_id'], 'request_hash' => $requestHash, 'created_at' => $now,
             ]);
@@ -285,6 +287,7 @@ SQL, [$data['transferred_on']]);
             $group->id, $group->revision, $group->plan_version_id, $group->branch_id,
             $group->completion_threshold,
             $data['transferred_on'], $sourceIds, $approvalIds, $targetLectures->pluck('id')->all(),
+            $creditedLectures->pluck('id')->all(), $missingLectures->pluck('id')->all(),
             $row->financial_account_revision, $balance]));
 
         return [
@@ -294,6 +297,8 @@ SQL, [$data['transferred_on']]);
                 'level_name' => $group->level_name, 'plan_version_id' => $group->plan_version_id,
                 'plan_version' => (int) $group->plan_version, 'completion_threshold' => (int) $group->completion_threshold],
             'required_count' => $targetLectures->count(), 'credited_count' => $creditedLectures->count(),
+            'credited_lectures' => $creditedLectures->map(fn (object $lecture): array => ['id' => $lecture->id, 'number' => $lecture->number])->values()->all(),
+            'missing_lectures' => $missingLectures->map(fn (object $lecture): array => ['id' => $lecture->id, 'number' => $lecture->number])->values()->all(),
             'credited_numbers' => $creditedLectures->pluck('number')->all(),
             'missing_numbers' => $missingLectures->pluck('number')->all(),
             'approval_ids' => $approvalIds, 'equivalence_ready' => $directApproval,
@@ -320,7 +325,9 @@ SQL, [$data['transferred_on']]);
             'transferred_on' => $row->transferred_on,
             'reason' => $sourceVisible && $permissions->can('read', (int) $row->to_branch_id) ? $row->reason : null,
             'actor_name' => $sourceVisible && $permissions->can('read', (int) $row->to_branch_id) ? $row->actor_name : null,
-            'credited_count' => (int) $row->credited_count, 'required_count' => (int) $row->required_count];
+            'credited_count' => (int) $row->credited_count, 'required_count' => (int) $row->required_count,
+            'credited_lectures' => $row->credited_lectures === null ? null : json_decode($row->credited_lectures, true),
+            'missing_lectures' => $row->missing_lectures === null ? null : json_decode($row->missing_lectures, true)];
     }
 
     private function historyPage(string $attemptId, CenterPermissions $permissions, int $page): array
