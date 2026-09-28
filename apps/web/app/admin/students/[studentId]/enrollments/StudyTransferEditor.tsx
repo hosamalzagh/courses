@@ -28,8 +28,8 @@ type History = { id: string; transferred_on: string; from: HistoryContext | null
   to: HistoryContext | null;
   reason: string | null; actor_name: string | null; credited_count: number; required_count: number };
 
-export function StudyTransferEditor({ studentId, attempt, groups, groupsHasMore, currency, onClose, onSaved, onReload, onDirtyChange }: {
-  studentId: string; attempt: Attempt; groups: Group[]; groupsHasMore: boolean; currency: string | null;
+export function StudyTransferEditor({ studentId, attempt, groups, initialGroupsPage, initialSearch, groupsHasMore, currency, onClose, onSaved, onReload, onDirtyChange }: {
+  studentId: string; attempt: Attempt; groups: Group[]; initialGroupsPage: number; initialSearch: string; groupsHasMore: boolean; currency: string | null;
   onClose: () => void; onSaved: () => void; onReload: () => void; onDirtyChange: (dirty: boolean) => void;
 }) {
   const prefix = useId();
@@ -37,9 +37,9 @@ export function StudyTransferEditor({ studentId, attempt, groups, groupsHasMore,
   const [groupId, setGroupId] = useState("");
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [choices, setChoices] = useState(groups);
-  const [search, setSearch] = useState("");
-  const [query, setQuery] = useState("");
-  const [groupsPage, setGroupsPage] = useState(1);
+  const [search, setSearch] = useState(initialSearch);
+  const [query, setQuery] = useState(initialSearch);
+  const [groupsPage, setGroupsPage] = useState(initialGroupsPage);
   const [hasMoreGroups, setHasMoreGroups] = useState(groupsHasMore);
   const [loadingGroups, setLoadingGroups] = useState(false);
   const initialChoicesLoaded = useRef(false);

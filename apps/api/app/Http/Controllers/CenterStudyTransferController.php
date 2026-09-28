@@ -213,7 +213,8 @@ COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     FROM content_equivalences AS approvals
     WHERE approvals.target_plan_version_id = groups.plan_version_id
       OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
-          WHERE transfers.attempt_id = attempts.id AND jsonb_exists(transfers.approval_ids, approvals.id::text))), '[]'::json) AS approvals
+          WHERE transfers.attempt_id = attempts.id
+            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json) AS approvals
 SQL)
             ->selectRaw(<<<'SQL'
 EXISTS (SELECT 1 FROM study_attendance_entries AS entries

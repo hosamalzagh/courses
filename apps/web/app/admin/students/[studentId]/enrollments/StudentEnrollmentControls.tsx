@@ -311,7 +311,8 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
         onSaved={() => { void reload(); setNotice("حُفظ قرار الانتظار أو الإلحاق دون رسوم أو تخصيص جديد."); }} /> : null}
     {openTransferId && current.attempts.find(attempt => attempt.id === openTransferId) ?
       <StudyTransferEditor key={openTransferId} studentId={studentId} attempt={current.attempts.find(attempt => attempt.id === openTransferId)!}
-        groups={current.groups} groupsHasMore={current.pagination.groups_has_more} currency={current.student.currency} onClose={closeTransfer} onDirtyChange={setTransferDirty}
+        groups={current.groups} initialGroupsPage={current.pagination.groups_page} initialSearch={search}
+        groupsHasMore={current.pagination.groups_has_more} currency={current.student.currency} onClose={closeTransfer} onDirtyChange={setTransferDirty}
         onReload={() => { closeTransfer(); void reload(); }}
         onSaved={() => { transferFocusPending.current = transferOpener.current; void reload("حُفظ النقل في المحاولة نفسها دون رسوم أو تخصيص جديد."); }} /> : null}
   </>;

@@ -1734,16 +1734,19 @@ class StudyEnrollmentTest extends TestCase
         $lectures = $this->center->run(fn () => DB::table('plan_lectures')
             ->whereIn('plan_version_id', [$source['plan_version_id'], $middle['plan_version_id'], $target['plan_version_id']])
             ->pluck('id', 'plan_version_id')->all());
-        $this->center->run(function () use ($source, $attempt, $lectures): void {
+        [$sessionId, $entryId] = $this->center->run(function () use ($source, $attempt, $lectures): array {
             $sessionId = (string) Str::uuid();
+            $entryId = (string) Str::uuid();
             DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $source['id'],
                 'plan_lecture_id' => $lectures[$source['plan_version_id']], 'number' => 1,
                 'scheduled_at' => '2026-09-27 08:00:00+00', 'status' => 'held', 'closed_at' => now(),
                 'closed_by' => $this->owner->id, 'created_by' => $this->owner->id,
                 'created_by_name' => $this->owner->name, 'created_at' => now(), 'updated_at' => now()]);
-            DB::table('study_attendance_entries')->insert(['id' => (string) Str::uuid(),
-                'session_id' => $sessionId, 'attempt_id' => $attempt['id'], 'status' => 'counted',
+            DB::table('study_attendance_entries')->insert(['id' => $entryId,
+                'session_id' => $sessionId, 'attempt_id' => $attempt['id'], 'status' => 'absent',
                 'recorded_by' => $this->owner->id, 'recorded_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+
+            return [$sessionId, $entryId];
         });
         foreach ([[$source, $middle], [$middle, $target]] as [$from, $to]) {
             $this->postJson("{$this->base}/content-equivalences", [
@@ -1754,17 +1757,27 @@ class StudyEnrollmentTest extends TestCase
             ])->assertCreated();
         }
         $transferUrl = "{$url}/{$attempt['id']}/transfer";
-        foreach ([[$middle, '2026-09-28'], [$target, '2026-09-29']] as [$destination, $date]) {
+        foreach ([[$middle, '2026-09-28', 0], [$target, '2026-09-29', 1]] as [$destination, $date, $credited]) {
             $preview = $this->getJson("{$transferUrl}/preview?".http_build_query([
                 'group_id' => $destination['id'], 'transferred_on' => $date,
-            ]))->assertOk()->assertJsonPath('preview.credited_count', 1)
+            ]))->assertOk()->assertJsonPath('preview.credited_count', $credited)
                 ->assertJsonPath('preview.equivalence_ready', true)->json('preview');
             $this->postJson($transferUrl, [
                 'group_id' => $destination['id'], 'group_revision' => $destination['revision'],
                 'transferred_on' => $date, 'revision' => $preview['revision'],
                 'preview_hash' => $preview['hash'], 'reason' => 'نقل مع الاحتفاظ بالمحتسب',
                 'request_id' => (string) Str::uuid(),
-            ])->assertCreated()->assertJsonPath('transfer.credited_count', 1);
+            ])->assertCreated()->assertJsonPath('transfer.credited_count', $credited);
+            if ($destination['id'] === $middle['id']) {
+                $this->center->run(fn () => $this->assertSame('[]', DB::table('study_attempt_transfers')
+                    ->where('attempt_id', $attempt['id'])->value('approval_ids')));
+                $this->postJson("{$this->base}/groups/{$source['id']}/sessions/{$sessionId}/attendance/{$entryId}/correct", [
+                    'status' => 'counted', 'reason' => 'تصحيح حضور قديم', 'revision' => 1,
+                    'entry_revision' => 1, 'request_id' => (string) Str::uuid(),
+                ])->assertOk();
+                $this->getJson("{$this->base}/groups/{$middle['id']}/coverage")
+                    ->assertOk()->assertJsonPath('students.0.covered_count', 1);
+            }
         }
         $coverage = $this->getJson("{$this->base}/groups/{$target['id']}/coverage")
             ->assertOk()->assertJsonPath('students.0.covered_count', 1)

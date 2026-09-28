@@ -119,6 +119,13 @@ test('moves an active attempt across branches with a reviewed preview and denies
     await expect(owner.getByText('نقل محاولة الدراسة بين المجموعات أو الفروع').first()).toBeVisible();
     await owner.getByText('تفاصيل نقل محاولة الدراسة').first().click();
     await expect(owner.getByText(/انتقل إلى الفرع الجنوبي/).first()).toBeVisible();
+    await owner.goto(`${origin}/admin/students/${studentId}/enrollments?groups_page=2`);
+    await expect(owner.getByRole('table', { name: 'محاولات الدراسة' })).toBeVisible();
+    await owner.locator(`[id$="-transfer-${attemptId}"]`).click();
+    const laterPageEditor = owner.getByRole('region', { name: 'نقل الطالب بين المجموعات والفروع' });
+    await expect(laterPageEditor.getByRole('button', { name: 'المجموعات السابقة' })).toBeEnabled();
+    await laterPageEditor.getByRole('button', { name: 'المجموعات السابقة' }).click();
+    await expect(laterPageEditor.getByLabel('مجموعة الوجهة').locator('option', { hasText: source.group.name })).toHaveCount(1);
     await signIn(staff, 'staff');
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).status()).toBe(404);
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/transfer/preview?group_id=${source.group.id}&transferred_on=2026-09-29`)).status()).toBe(404);
