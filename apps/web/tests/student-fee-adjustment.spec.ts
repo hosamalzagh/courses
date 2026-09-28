@@ -75,7 +75,9 @@ test("withdrawal fee settlement and correction preserve money, permissions, audi
     expect(await html.text()).toContain("1000.00");
     const adjustmentQueryRoute = `**/api/v1/center/students/${studentId}/fees/${attempt.fee.id}/adjustments?*`;
     let simulateRevokedApproval = false;
+    let simulateRevokedRead = false;
     await owner.route(adjustmentQueryRoute, async route => {
+      if (simulateRevokedRead) { await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ message: "Forbidden" }) }); return; }
       const response = await route.fetch();
       const detail = await response.json();
       await route.fulfill({ response, json: { ...detail, can_approve: simulateRevokedApproval ? false : detail.can_approve,
@@ -113,8 +115,17 @@ test("withdrawal fee settlement and correction preserve money, permissions, audi
     await expect(owner.getByLabel("المستحق الجديد (EGP)")).toBeDisabled();
     await expect(owner.getByLabel("سبب التسوية أو التصحيح")).toBeDisabled();
     await expect(owner.getByRole("button", { name: "قرارات أقدم" })).toBeDisabled();
-    const recoveryKey = `courses:fee-adjustment:${workspace.center.id}:${workspace.user.id}:${studentId}`;
-    expect(await owner.evaluate(key => localStorage.getItem(key), recoveryKey)).not.toBeNull();
+    const recoveryPrefix = `courses:fee-adjustment:${workspace.center.id}:${workspace.user.id}:${studentId}:`;
+    const recoveryKey = await owner.evaluate(prefix => Object.keys(localStorage).find(key => key.startsWith(prefix)) ?? null, recoveryPrefix);
+    expect(recoveryKey).not.toBeNull();
+    const pendingId = await owner.evaluate(key => JSON.parse(localStorage.getItem(key!)!).request_id as string, recoveryKey);
+    expect(recoveryKey).toBe(`${recoveryPrefix}${pendingId}`);
+    const secondRequestId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    const secondRecoveryKey = `${recoveryPrefix}${secondRequestId}`;
+    await owner.evaluate(({ first, second, requestId }) => {
+      const pending = JSON.parse(localStorage.getItem(first)!);
+      localStorage.setItem(second, JSON.stringify({ ...pending, request_id: requestId, reason: "طلب متزامن مستقل" }));
+    }, { first: recoveryKey!, second: secondRecoveryKey, requestId: secondRequestId });
     await owner.locator('a[href="/admin"]').first().click();
     await expect(owner.getByRole("alertdialog")).toContainText("تحقق من اعتماد التسوية أولًا");
     await expect(owner.getByRole("button", { name: "مغادرة دون حفظ" })).toHaveCount(0);
@@ -129,10 +140,23 @@ test("withdrawal fee settlement and correction preserve money, permissions, audi
     await owner.reload();
     await expect(owner.getByRole("button", { name: "معاينة الأثر" })).toHaveCount(0);
     await expect(owner.getByRole("button", { name: "التحقق من الاعتماد" })).toBeVisible();
+    simulateRevokedRead = true;
+    await owner.reload();
+    await expect(owner.getByRole("button", { name: "إرجاء التحقق" })).toBeVisible();
+    await owner.getByRole("button", { name: "إرجاء التحقق" }).click();
+    await expect(owner.getByRole("button", { name: "استئناف التحقق من الطلب 1" })).toBeVisible();
+    await expect(owner.getByRole("button", { name: "استئناف التحقق من الطلب 2" })).toBeVisible();
+    expect(await owner.evaluate(key => localStorage.getItem(key!), recoveryKey)).not.toBeNull();
+    simulateRevokedRead = false;
+    await owner.getByRole("button", { name: "استئناف التحقق من الطلب 1" }).click();
+    await expect(owner.getByRole("button", { name: "التحقق من الاعتماد" })).toBeVisible();
     await owner.getByRole("button", { name: "التحقق من الاعتماد" }).click();
     await owner.getByRole("button", { name: "تأكيد التسوية" }).click();
     await expect(owner.getByRole("button", { name: "تسوية أو تصحيح" })).toBeFocused();
-    expect(await owner.evaluate(key => localStorage.getItem(key), recoveryKey)).toBeNull();
+    expect(await owner.evaluate(key => localStorage.getItem(key!), recoveryKey)).toBeNull();
+    expect(await owner.evaluate(key => localStorage.getItem(key), secondRecoveryKey)).not.toBeNull();
+    await owner.evaluate(key => localStorage.removeItem(key), secondRecoveryKey);
+    await owner.reload();
     await owner.unroute(adjustmentQueryRoute);
     const settled = await (await owner.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
     expect(settled.account).toMatchObject({ due_total: "800.00", paid_total: "800.00", available_balance: "100.00" });

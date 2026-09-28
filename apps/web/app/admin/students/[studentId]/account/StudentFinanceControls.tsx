@@ -13,7 +13,7 @@ import { Field, FieldError, FieldGroup, FieldLabel, FieldSet } from "@/component
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { buttonVariants } from "@/components/ui/button";
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from "@/lib/client-api";
-import { feeAdjustmentRecoveryKey, readPendingFeeAdjustment } from "@/lib/fee-adjustment-recovery";
+import { feeAdjustmentRecoveryPrefix, listPendingFeeAdjustments } from "@/lib/fee-adjustment-recovery";
 import type { StudentAccountContext } from "@/lib/server-context";
 import { paymentMethodLabels } from "@/lib/student-finance";
 import { StudentPaymentAllocations } from "./StudentPaymentAllocations";
@@ -57,7 +57,8 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
     initial.payments.some(payment => payment.id === paymentId) ? paymentId! : null);
   const [allocationDirty, setAllocationDirty] = useState(false);
   const [selectedFeeId, setSelectedFeeId] = useState<string | null>(null);
-  const [restoredFeeId, setRestoredFeeId] = useState<string | null>(null);
+  const [selectedRecoveryKey, setSelectedRecoveryKey] = useState<string | null>(null);
+  const [pendingFees, setPendingFees] = useState<ReturnType<typeof listPendingFeeAdjustments>>([]);
   const [feeDirty, setFeeDirty] = useState(false);
   const [feeUncertain, setFeeUncertain] = useState(false);
   const submitting = useRef(false);
@@ -70,14 +71,15 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   }
 
   const studentId = current.account.student_id;
-  const feeRecoveryKey = feeAdjustmentRecoveryKey(current.center.id, current.user.id, studentId);
+  const feeRecoveryPrefix = feeAdjustmentRecoveryPrefix(current.center.id, current.user.id, studentId);
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      const pending = readPendingFeeAdjustment(feeRecoveryKey);
-      if (pending) { setRestoredFeeId(pending.fee_id); setSelectedFeeId(pending.fee_id); }
+      const pending = listPendingFeeAdjustments(feeRecoveryPrefix);
+      setPendingFees(pending);
+      if (pending[0]) { setSelectedRecoveryKey(pending[0].key); setSelectedFeeId(pending[0].pending.fee_id); }
     }, 0);
     return () => window.clearTimeout(timeout);
-  }, [feeRecoveryKey]);
+  }, [feeRecoveryPrefix]);
   const accountPath = `students/${studentId}/account?${new URLSearchParams({
     page: String(current.pagination.page), branches_page: String(current.pagination.branches_page),
     fees_page: String(current.pagination.fees_page), ...(search ? { q: search } : {}),
@@ -90,7 +92,8 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   const dirty = Boolean((currency && currency !== current.account.currency) || paymentDirty || allocationDirty || feeDirty);
   const selectedPayment = current.payments.find((item) => item.id === selectedPaymentId);
   const selectedFee = current.fees.find((item) => item.id === selectedFeeId) ??
-    (restoredFeeId && restoredFeeId === selectedFeeId ? { id: restoredFeeId, group_name: null, currency: current.account.currency ?? "" } : undefined);
+    (pendingFees.some(entry => entry.key === selectedRecoveryKey && entry.pending.fee_id === selectedFeeId) && selectedFeeId
+      ? { id: selectedFeeId, group_name: null, currency: current.account.currency ?? "" } : undefined);
 
   function focus(field: string) {
     requestAnimationFrame(() => document.getElementById(`${formPrefix}-${field}`)?.focus());
@@ -241,12 +244,22 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
         { key: "due", label: "المستحق الحالي", render: row => <bdi dir="ltr">{row.current_due} {row.currency}</bdi> },
         { key: "paid", label: "المسدد", render: row => <bdi dir="ltr">{row.paid_amount} {row.currency}</bdi> },
         { key: "actions", label: "الإجراءات", actions: true, render: row =>
-          <Button id={`${formPrefix}-fee-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedFeeId(row.id); setSelectedPaymentId(null); }}>
+          <Button id={`${formPrefix}-fee-${row.id}`} disabled={busy || dirty} onClick={() => {
+            setSelectedRecoveryKey(pendingFees.find(entry => entry.pending.fee_id === row.id)?.key ?? null);
+            setSelectedFeeId(row.id); setSelectedPaymentId(null);
+          }}>
             {row.can_approve ? "تسوية أو تصحيح" : "عرض سجل الرسوم"}
           </Button> },
       ]} />
-    {selectedFee ? <StudentFeeAdjustmentEditor key={selectedFee.id} studentId={studentId} fee={selectedFee} recoveryKey={feeRecoveryKey}
-      onClose={() => { setSelectedFeeId(null); setRestoredFeeId(null); setFeeDirty(false); setFeeUncertain(false);
+    {pendingFees.length && !selectedFee ? <>
+      <InlineNotice tone="warning">هناك {pendingFees.length.toLocaleString("ar-EG")} طلب رسوم لم تُعرف نتيجته بعد. بيانات التحقق محفوظة لهذا المستخدم على الجهاز.</InlineNotice>
+      <CenterHeaderActions>{pendingFees.map((entry, index) => <Button key={entry.key} onClick={() => {
+        setSelectedRecoveryKey(entry.key); setSelectedFeeId(entry.pending.fee_id);
+      }}>استئناف التحقق من الطلب {index + 1}</Button>)}</CenterHeaderActions>
+    </> : null}
+    {selectedFee ? <StudentFeeAdjustmentEditor key={`${selectedFee.id}:${selectedRecoveryKey ?? "new"}`} studentId={studentId} fee={selectedFee}
+      recoveryPrefix={feeRecoveryPrefix} restoredKey={selectedRecoveryKey}
+      onClose={() => { setSelectedFeeId(null); setSelectedRecoveryKey(null); setPendingFees(listPendingFeeAdjustments(feeRecoveryPrefix)); setFeeDirty(false); setFeeUncertain(false);
         requestAnimationFrame(() => (document.getElementById(`${formPrefix}-fee-${selectedFee.id}`) ?? document.getElementById("center-content"))?.focus()); }} onChanged={refreshAfterAllocation}
       onDirtyChange={setFeeDirty} onUncertainChange={setFeeUncertain} /> : null}
     <CenterHeaderActions>

@@ -10,7 +10,7 @@ import { InlineNotice } from "@/components/InlineNotice";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { centerRequest, newSubmissionId, responseMessage } from "@/lib/client-api";
-import { readPendingFeeAdjustment, type PendingFeeAdjustment } from "@/lib/fee-adjustment-recovery";
+import { feeAdjustmentRecoveryKey, readPendingFeeAdjustment, type PendingFeeAdjustment } from "@/lib/fee-adjustment-recovery";
 import type { StudentFee } from "@/lib/server-context";
 
 type Balance = { received_total: string; due_total: string; paid_total: string; allocated_total: string; available_balance: string; debt: string };
@@ -23,8 +23,8 @@ type Detail = { fee: { id: string; attempt_id: string; branch_id: number; status
   account: Balance; latest_active_adjustment_id: string | null; history: Adjustment[];
   pagination: { history_page: number; history_has_more: boolean }; preview: Preview | null };
 
-export function StudentFeeAdjustmentEditor({ studentId, fee, recoveryKey, onClose, onChanged, onDirtyChange, onUncertainChange }: {
-  studentId: string; fee: Pick<StudentFee, "id" | "group_name" | "currency">; recoveryKey: string;
+export function StudentFeeAdjustmentEditor({ studentId, fee, recoveryPrefix, restoredKey, onClose, onChanged, onDirtyChange, onUncertainChange }: {
+  studentId: string; fee: Pick<StudentFee, "id" | "group_name" | "currency">; recoveryPrefix: string; restoredKey: string | null;
   onClose: () => void; onChanged: () => Promise<void>;
   onDirtyChange: (dirty: boolean) => void; onUncertainChange: (uncertain: boolean) => void;
 }) {
@@ -39,6 +39,7 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, recoveryKey, onClos
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [uncertain, setUncertain] = useState(false);
+  const [recoveryBlocked, setRecoveryBlocked] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [cancel, setCancel] = useState(false);
   const [error, setError] = useState("");
@@ -52,15 +53,15 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, recoveryKey, onClos
     setLoading(true); setError("");
     try {
       const response = await centerRequest(`${path}?history_page=${page}`, "GET");
-      if (!response.ok) { setError(await responseMessage(response)); return false; }
-      setDetail(await response.json() as Detail); setConflict(false); return true;
+      if (!response.ok) { if (response.status === 403 || response.status === 404) setRecoveryBlocked(true); setError(await responseMessage(response)); return false; }
+      setDetail(await response.json() as Detail); setConflict(false); setRecoveryBlocked(false); return true;
     } catch { setError("تعذر تحميل سجل الرسوم. تحقق من الاتصال وأعد المحاولة."); return false; }
     finally { setLoading(false); }
   }, [path]);
   useEffect(() => { const timeout = window.setTimeout(() => { void load(); }, 0); return () => window.clearTimeout(timeout); }, [load]);
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      const pending = readPendingFeeAdjustment(recoveryKey);
+      const pending = restoredKey ? readPendingFeeAdjustment(restoredKey) : null;
       if (!pending || pending.fee_id !== fee.id) return;
       pendingRequest.current = pending; requestId.current = pending.request_id;
       setNewDue(pending.new_due); setReason(pending.reason); setReplacesId(pending.replaces_adjustment_id);
@@ -68,7 +69,7 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, recoveryKey, onClos
       setNotice("هناك تسوية سابقة لم تُعرف نتيجتها. تحقق من الاعتماد بالمفتاح نفسه قبل أي قرار جديد.");
     }, 0);
     return () => window.clearTimeout(timeout);
-  }, [fee.id, recoveryKey]);
+  }, [fee.id, restoredKey]);
   useEffect(() => {
     const frame = requestAnimationFrame(() => document.getElementById(`${prefix}-title`)?.focus());
     return () => cancelAnimationFrame(frame);
@@ -109,6 +110,7 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, recoveryKey, onClos
       version: detail.version, request_id: requestId.current,
     } : null;
     if (!payload) { setError("تعذر استعادة طلب التسوية. حمّل حساب الطالب وراجع تاريخ الرسوم."); return; }
+    const recoveryKey = feeAdjustmentRecoveryKey(recoveryPrefix, payload.request_id);
     if (!uncertain) {
       try { localStorage.setItem(recoveryKey, JSON.stringify(payload)); }
       catch { setError("تعذر حفظ بيانات التحقق في هذا المتصفح. فعّل تخزين الموقع قبل اعتماد التسوية."); return; }
@@ -119,7 +121,8 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, recoveryKey, onClos
     try {
       const response = await centerRequest(path, "POST", payload);
       if (!response.ok) {
-        if (response.status >= 500) {
+        if (response.status >= 500 || response.status === 403 || response.status === 404) {
+          if (response.status === 403 || response.status === 404) setRecoveryBlocked(true);
           setUncertain(true); setError("تعذر التأكد من الاعتماد. تحقق من النتيجة بالمفتاح نفسه قبل أي قرار جديد.");
           return;
         }
@@ -154,6 +157,7 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, recoveryKey, onClos
         if (success) requestAnimationFrame(() => document.getElementById(`${prefix}-title`)?.focus());
       })}>إعادة تحميل سجل الرسوم</Button>
       <Button disabled={uncertain} onClick={onClose}>إغلاق محرر الرسوم</Button>
+      {uncertain && recoveryBlocked ? <Button onClick={onClose}>إرجاء التحقق</Button> : null}
     </CenterHeaderActions> : null}
     {detail ? <>
       <p>الرسوم المسجلة: <bdi dir="ltr">{detail.fee.net_amount} {currency}</bdi> — المستحق الحالي: <strong><bdi dir="ltr">{detail.fee.current_due} {currency}</bdi></strong> — المسدد: <bdi dir="ltr">{detail.fee.paid_amount} {currency}</bdi></p>
@@ -181,6 +185,7 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, recoveryKey, onClos
         {(detail.can_approve && preview) || uncertain ? <Button variant="primary" disabled={busy || conflict} onClick={() => setConfirm(true)}>{uncertain ? "التحقق من الاعتماد" : replacesId ? "اعتماد التصحيح" : "اعتماد التسوية"}</Button> : null}
         {detail.can_approve && replacesId ? <Button disabled={busy || uncertain} onClick={() => { setReplacesId(null); setDetail(current => current ? { ...current, preview: null } : current); }}>إلغاء وضع التصحيح</Button> : null}
         <Button disabled={busy || uncertain} onClick={() => dirty ? setCancel(true) : onClose()}>إغلاق محرر الرسوم</Button>
+        {uncertain && recoveryBlocked ? <Button disabled={busy} onClick={onClose}>إرجاء التحقق</Button> : null}
         {conflict ? <Button disabled={busy} onClick={() => void load()}>تحميل أحدث الرسوم</Button> : null}
       </CenterHeaderActions>
       <DataTable id="student-fee-adjustments" title="تاريخ قرارات الرسوم" rows={detail.history} rowKey={row => row.id}
