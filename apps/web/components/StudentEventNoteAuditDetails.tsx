@@ -9,6 +9,7 @@ export function StudentEventNoteAuditDetails({ entry }: { entry: AuditEntry }) {
   const data = details as Record<string, unknown>;
   return <details><summary>تفاصيل ملاحظة {attendance ? "الحضور" : "التسجيل"}</summary>
     <p>الطالب: <bdi dir="ltr">{String(data.student_id ?? "")}</bdi> — {attendance ? "واقعة الحضور" : "المحاولة"}: <bdi dir="ltr">{String(attendance ? data.entry_id ?? "" : data.attempt_id ?? "")}</bdi></p>
+    {attendance ? <p>مراجعة واقعة الحضور: {String(data.entry_revision ?? "")}</p> : null}
     <p>نسخة {String(data.revision ?? "")} — {data.important ? "مهمة" : "عادية"}. نص الملاحظة متاح من الحدث المصرح به فقط.</p>
   </details>;
 }

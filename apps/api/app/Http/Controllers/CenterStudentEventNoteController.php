@@ -143,7 +143,8 @@ class CenterStudentEventNoteController extends Controller
             }
 
             return $this->persist($request, $db, 'attendance:'.$entry->revision, $entryId, $entry->student_id,
-                (int) $entry->branch_id, $data, $hash, ['entry_id' => $entryId, 'session_id' => $sessionId]);
+                (int) $entry->branch_id, $data, $hash, ['entry_id' => $entryId,
+                    'entry_revision' => (int) $entry->revision, 'session_id' => $sessionId]);
         });
     }
 

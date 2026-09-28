@@ -575,6 +575,9 @@ class StudySessionsTest extends TestCase
         $this->center->run(function (): void {
             $this->assertSame(2, DB::table('student_event_notes')->where('event_type', 'like', 'attendance:%')->count());
             $this->assertSame(2, DB::table('student_event_note_revisions')->count());
+            $occurrences = DB::table('center_audit_logs')->where('event', 'student.attendance_note_created')
+                ->orderBy('id')->pluck('details')->map(fn ($details) => json_decode($details, true)['entry_revision'])->all();
+            $this->assertSame([1, 3], $occurrences);
         });
     }
 

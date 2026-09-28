@@ -180,6 +180,10 @@ test("attendance and closed absence notes keep versions, importance and event pe
       request_id: crypto.randomUUID() }, "PUT")).status).toBe(404);
     await staff.reload();
     await expect(staff.getByText("حضر مع مراجعة الواجب")).toHaveCount(0);
+    await owner.goto(`${origin}/admin/audit`);
+    await expect(owner.getByText("إضافة ملاحظة على حضور أو غياب الطالب").first()).toBeVisible();
+    await owner.getByText("تفاصيل ملاحظة الحضور").first().click();
+    await expect(owner.getByText("مراجعة واقعة الحضور: 1").first()).toBeVisible();
   } finally {
     await owner.close(); await staff.close();
   }
