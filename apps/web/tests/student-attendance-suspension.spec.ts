@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const origin = process.env.COURSES_ISSUE70_BROWSER_URL;
+const php = process.env.COURSES_PHP_BIN ?? (process.platform === "darwin" ? "php85" : "php");
 test.skip(!origin, "Requires the isolated issue70 database and browser fixture.");
 test.setTimeout(90_000);
 const credentialsFile = path.resolve(process.cwd(), "../api/storage/app/private/issue70-browser-credentials.json");
@@ -23,7 +24,7 @@ async function write(page: Page, route: string, payload: object, method = "POST"
 
 function setSessionTime(centerId: string, groupId: string, sessionId: string, first: boolean) {
   const expression = first ? "now('Africa/Cairo')->subMinutes(2)" : "now('Africa/Cairo')->addSeconds(2)";
-  execFileSync("php85", ["artisan", "tinker", "--no-interaction", "--execute=" + String.raw`
+  execFileSync(php, ["artisan", "tinker", "--no-interaction", "--execute=" + String.raw`
     if (config('database.connections.central.database') !== 'courses_test_central_issue70') throw new \RuntimeException('Unexpected database');
     \App\Models\Center::findOrFail(getenv('COURSES_TEST_CENTER'))->run(function () {
       if (getenv('COURSES_TEST_FIRST') === '1') \Illuminate\Support\Facades\DB::table('study_groups')->where('id', getenv('COURSES_TEST_GROUP'))->update(['started_at' => now('Africa/Cairo')->subDay()->format('Y-m-d H:i:s.uP')]);
@@ -131,6 +132,10 @@ test("suspended student stays visible without attendance or automatic absence ac
   const secondHistory = await page.request.get(`${origin}/api/v1/center/${secondRoute}`);
   expect(Number(secondHistory.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
   expect((await secondHistory.json()).students[0].status).toBeNull();
+  await page.goto(`${origin}/admin/audit`);
+  const closureAudit = page.getByRole("row").filter({ hasText: "إغلاق كشف حضور محاضرة" }).first();
+  await closureAudit.getByText("تفاصيل حضور المحاضرة").click();
+  await expect(closureAudit).toContainText("استُبعد ١ طالب بسبب الإيقاف دون تسجيل حضور أو غياب");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
   await page.getByRole("button", { name: "القائمة" }).click();

@@ -305,8 +305,13 @@ class StudySessionsTest extends TestCase
         ])->assertOk()->assertJsonPath('absent_count', 1);
         $stale = $this->getJson($second)->assertOk()->json();
         $this->assertNull(collect($stale['students'])->firstWhere('student_id', $student['id'])['suspended_at']);
+        $late = $this->student();
         $this->postJson("{$this->base}/students/{$student['id']}/status", [
             'status' => 'suspended', 'reason' => 'إيقاف بين المحاضرتين',
+            'status_revision' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->postJson("{$this->base}/students/{$late['id']}/status", [
+            'status' => 'suspended', 'reason' => 'إيقاف قبل الانضمام المتأخر',
             'status_revision' => 1, 'request_id' => (string) Str::uuid(),
         ])->assertOk();
         $this->travelTo($firstAt->copy()->addWeek()->addHour());
@@ -329,6 +334,12 @@ class StudySessionsTest extends TestCase
             'status' => 'active', 'reason' => 'انتهاء الإيقاف',
             'status_revision' => 2, 'request_id' => (string) Str::uuid(),
         ])->assertOk();
+        $this->postJson("{$this->base}/students/{$late['id']}/status", [
+            'status' => 'active', 'reason' => 'الالتحاق لاحقًا',
+            'status_revision' => 2, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $group['revision'] = 3;
+        $this->enroll($late['id'], $group, now('Africa/Cairo')->subWeeks(3)->format('Y-m-d'));
         $afterLift = collect($this->getJson($second)->assertOk()->json('students'))->firstWhere('student_id', $student['id']);
         $this->assertNotNull($afterLift['suspended_at']);
         $this->assertNotNull($afterLift['lifted_at']);
@@ -346,6 +357,16 @@ class StudySessionsTest extends TestCase
                 ->where('details->session_id', $sessions[1]['id'])->value('details'), true);
             $this->assertSame(1, $details['suspended_count']);
         });
+        $migration = require database_path('migrations/tenant/2026_09_28_180003_backfill_suspended_closed_attendance.php');
+        $this->center->run(function () use ($migration, $sessions, $attempt): void {
+            DB::table('study_attendance_entries')->where('session_id', $sessions[1]['id'])
+                ->where('attempt_id', $attempt)->delete();
+            $migration->up();
+            $this->assertSame(1, DB::table('study_attendance_entries')->where('session_id', $sessions[1]['id'])
+                ->where('attempt_id', $attempt)->whereNull('status')->count());
+            $this->assertSame(2, DB::table('study_attendance_entries')->where('session_id', $sessions[1]['id'])->count());
+        });
+        $this->getJson($second)->assertOk()->assertJsonCount(2, 'students');
     }
 
     public function test_cancelled_session_cannot_record_or_close_attendance(): void

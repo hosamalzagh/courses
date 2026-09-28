@@ -17,11 +17,13 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
     const status = (value: unknown) => typeof value === "string" ? statuses[value] ?? value : "غير مسجل";
     const absentIds = Array.isArray(data.absent_attempt_ids) ? data.absent_attempt_ids.filter((value): value is string => typeof value === "string") : [];
     const absentCount = typeof data.absent_count === "number" && Number.isInteger(data.absent_count) ? data.absent_count : absentIds.length;
+    const suspendedCount = typeof data.suspended_count === "number" && Number.isInteger(data.suspended_count) ? data.suspended_count : 0;
     return <details><summary>تفاصيل حضور المحاضرة</summary>
       <p>المجموعة: <bdi dir="ltr">{groupId || "غير مسجلة"}</bdi> — المحاضرة: <bdi dir="ltr">{sessionId || "غير مسجلة"}</bdi></p>
       {groupId && sessionId ? <p><Link href={`/admin/groups/${encodeURIComponent(groupId)}/sessions/${encodeURIComponent(sessionId)}/attendance`}>فتح كشف الحضور</Link></p> : null}
       {entry.event === "study_attendance.closed" ? <>
         <p>اعتمد الغياب لـ {absentCount.toLocaleString("ar-EG")} طالب مستحق غير مسجل.</p>
+        {suspendedCount > 0 ? <p>استُبعد {suspendedCount.toLocaleString("ar-EG")} طالب بسبب الإيقاف دون تسجيل حضور أو غياب.</p> : null}
         {absentIds.length ? <p>معرّفات المحاولات: {absentIds.slice(0, 20).join("، ")}{absentCount > 20 ? `، و${(absentCount - 20).toLocaleString("ar-EG")} أخرى` : ""}</p> : null}
       </> : <>
         <p>المحاولة: <bdi dir="ltr">{typeof data.attempt_id === "string" ? data.attempt_id : "غير مسجلة"}</bdi></p>
