@@ -100,6 +100,10 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
     await owner.getByLabel("النطاق المراد تعديله").selectOption(`courses:${course.body.course.id}`);
     await owner.getByLabel("نوع القاعدة").selectOption("total");
     await owner.getByLabel("الحد").fill("1");
+    await owner.getByRole("searchbox", { name: "البحث في الفروع والكورسات والمراحل والمستويات والمجموعات" }).fill(hidden.body.course.name);
+    await owner.getByRole("button", { name: "بحث في النطاقات" }).click();
+    await expect(owner.getByLabel("النطاق المراد تعديله")).toHaveValue(`courses:${course.body.course.id}`);
+    await expect(owner.getByRole("button", { name: "إلغاء التعديل" })).toBeVisible();
     await owner.getByRole("button", { name: "حفظ قاعدة الغياب" }).click();
     await expect(owner.getByText("حُفظت قاعدة الغياب وأُعيد حساب التقرير الحالي.")).toBeVisible();
     await owner.getByLabel("نوع القاعدة").selectOption("consecutive");
@@ -119,7 +123,7 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
     await expect(owner.getByText(student.body.student.name)).toBeVisible();
     await expect(owner.getByRole("row").filter({ hasText: student.body.student.name }).getByRole("cell", { name: "يحتاج مراجعة" })).toBeVisible();
     await expect(owner.locator(`#absence-branch option[value="${south}"]`)).toHaveCount(1);
-    const arabicNumber = Number(student.body.student.student_number).toLocaleString("ar-EG", { useGrouping: false });
+    const arabicNumber = Number(student.body.student.student_number).toLocaleString("ar-EG");
     await owner.getByRole("searchbox", { name: "بحث في طلاب الغياب" }).fill(arabicNumber);
     await owner.getByRole("button", { name: "بحث في جميع طلاب الغياب" }).click();
     await expect(owner).toHaveURL(/q=/);

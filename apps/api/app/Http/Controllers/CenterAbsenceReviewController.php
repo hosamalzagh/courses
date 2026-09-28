@@ -255,6 +255,7 @@ SQL;
         $search = trim($data['q'] ?? '') ?: null;
         $digits = $search === null ? null : strtr($search,
             array_combine(mb_str_split('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹'), str_split('01234567890123456789')));
+        $digits = $digits === null ? null : str_replace([',', '٬'], '', $digits);
         $number = $digits !== null && ctype_digit($digits) && strlen($digits) <= 18 ? $digits : null;
         $bindings = [...$bindings, $search, $search, $number, $number];
         $bindings = [...$bindings, ...$periodScope['bindings']];

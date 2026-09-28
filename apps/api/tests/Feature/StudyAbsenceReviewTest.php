@@ -67,8 +67,11 @@ class StudyAbsenceReviewTest extends TestCase
         $all->assertJsonPath('students.0.consecutive_absences', 1)
             ->assertJsonPath('students.0.total_absences', 3)
             ->assertJsonPath('students.0.needs_review', false);
-        $arabicNumber = strtr((string) $student['student_number'], array_combine(str_split('0123456789'), mb_str_split('٠١٢٣٤٥٦٧٨٩')));
+        $this->center->run(fn () => DB::table('students')->where('id', $student['id'])->update(['student_number' => 1234]));
+        $arabicNumber = '١٬٢٣٤';
         $this->getJson("{$this->base}/absence-review?view=all&q=".urlencode($arabicNumber))->assertOk()
+            ->assertJsonCount(1, 'students')->assertJsonPath('students.0.student_id', $student['id']);
+        $this->getJson("{$this->base}/absence-review?view=all&q=".urlencode('1,234'))->assertOk()
             ->assertJsonCount(1, 'students')->assertJsonPath('students.0.student_id', $student['id']);
         $this->assertLessThanOrEqual(6, (int) $all->headers->get('X-Courses-Query-Count'));
         $this->getJson("{$this->base}/absence-review?branch_id={$this->north}")->assertOk()->assertJsonCount(0, 'students');

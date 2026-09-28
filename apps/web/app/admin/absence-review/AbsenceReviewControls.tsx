@@ -138,8 +138,10 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
       const response = await centerRequest(`absence-options?${query}`, "GET");
       if (!response.ok) { setOptionError(await responseMessage(response)); return; }
       const result = (await response.json()) as { options: AbsenceOption[]; branches: Branch[] };
-      setExtraOptions(current => page === 1 ? result.options : [...current, ...result.options]);
-      setExtraBranches(current => page === 1 ? result.branches : [...current, ...result.branches]);
+      setExtraOptions(current => [...new Map([...current, ...result.options]
+        .map(option => [`${option.kind}:${option.id}`, option])).values()]);
+      setExtraBranches(current => [...new Map([...current, ...result.branches]
+        .map(branch => [branch.id, branch])).values()]);
       setOptionPage(result.options.length || result.branches.length ? page : 0);
     } catch { setOptionError("تعذر البحث في النطاقات."); }
     finally { setLoadingOptions(false); }
