@@ -303,7 +303,7 @@ class CenterStudyEnrollmentController extends Controller
     private function attempts(string $studentId, CenterPermissions $permissions): Builder
     {
         return DB::connection('tenant')->table('study_attempts')
-            ->join('study_groups', 'study_groups.id', '=', 'study_attempts.current_group_id')
+            ->leftJoin('study_groups', 'study_groups.id', '=', 'study_attempts.current_group_id')
             ->join('levels', 'levels.id', '=', 'study_attempts.level_id')
             ->join('study_attempt_fees as fees', 'fees.attempt_id', '=', 'study_attempts.id')
             ->leftJoin('study_attempt_withdrawals as withdrawal', 'withdrawal.attempt_id', '=', 'study_attempts.id')
@@ -325,6 +325,7 @@ class CenterStudyEnrollmentController extends Controller
                 'withdrawal.withdrawn_on', 'withdrawal.reason as withdrawal_reason', 'withdrawal.actor_name as withdrawal_actor_name'])
             ->selectRaw('(SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id) AS requirements_count')
             ->selectRaw('CASE WHEN EXISTS (SELECT 1 FROM study_attempts AS repeated WHERE repeated.repeated_from_attempt_id = study_attempts.id) THEN 1 ELSE 0 END AS has_repeat')
+            ->selectRaw("(SELECT row_to_json(waitlist) FROM (SELECT id, from_group_id, to_group_id, entered_on, left_on, reason, entered_by_name, left_by_name FROM study_attempt_waitlists WHERE attempt_id = study_attempts.id ORDER BY entered_on DESC, created_at DESC LIMIT 1) AS waitlist) AS latest_waitlist")
             ->addSelect(['fees.id as fee_id', 'fees.original_price', 'fees.discount', 'fees.net_amount',
                 'fees.currency', 'fees.discount_reason', 'fees.actor_name', 'fees.branch_id as event_branch_id',
                 'note.id as note_id', 'note.body as note_body', 'note.important as note_important',
@@ -344,6 +345,7 @@ class CenterStudyEnrollmentController extends Controller
             'created_at' => $row->created_at,
             'group_name' => $row->group_name, 'level_name' => $row->level_name,
             'requirements_count' => (int) $row->requirements_count,
+            'latest_waitlist' => $row->latest_waitlist === null ? null : json_decode($row->latest_waitlist, true),
             'fee' => ['id' => $row->fee_id, 'original_price' => $row->original_price,
                 'discount' => $row->discount, 'net_amount' => $row->net_amount,
                 'currency' => $row->currency, 'discount_reason' => $row->discount_reason,
