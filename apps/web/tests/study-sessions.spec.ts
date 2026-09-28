@@ -102,6 +102,9 @@ test("schedule preview, confirmation, postponement and branch permissions throug
     await expect(staff.getByText("جدول المجموعة متاح للقراءة.")).toBeVisible();
     await expect(staff.getByRole("button", { name: "معاينة المواعيد" })).toHaveCount(0);
     expect((await staff.request.get(`${origin}/api/v1/center/groups/${group.body.group.id}/sessions`)).status()).toBe(200);
+    expect((await write(staff, `groups/${group.body.group.id}/sessions/preview`, "POST", {
+      kind: "single", revision: 3, start_at: local, plan_lecture_number: 3,
+    })).status).toBe(403);
     const hidden = await write(owner, "courses", "POST", { branch_id: south.id, name: `مخفي ${stamp}`, request_id: crypto.randomUUID() });
     expect(hidden.status).toBe(201);
     const hiddenStage = await write(owner, `courses/${hidden.body.course.id}/stages`, "POST", { name: "مرحلة مخفية", request_id: crypto.randomUUID() });
@@ -116,6 +119,9 @@ test("schedule preview, confirmation, postponement and branch permissions throug
       name: `مجموعة مخفية ${stamp}`, approved_price: "0.00", instructor_ids: [hiddenInstructor.body.instructor.id], request_id: crypto.randomUUID() });
     expect(hiddenGroup.status).toBe(201);
     expect((await staff.request.get(`${origin}/api/v1/center/groups/${hiddenGroup.body.group.id}/sessions`)).status()).toBe(404);
+    expect((await write(staff, `groups/${hiddenGroup.body.group.id}/sessions`, "POST", {
+      kind: "single", revision: 1, start_at: local, plan_lecture_number: 1, request_id: crypto.randomUUID(),
+    })).status).toBe(404);
     await staff.goto(`${origin}/admin/groups/${hiddenGroup.body.group.id}/sessions`);
     await expect(staff.getByText(`مجموعة مخفية ${stamp}`)).toHaveCount(0);
     await owner.setViewportSize({ width: 390, height: 844 });

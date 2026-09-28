@@ -68,7 +68,8 @@ class CenterStudySessionController extends Controller
                 abort_unless($existing->group_id === $groupId && $existing->actor_id === $request->user()->id, 403);
                 if ($existing->request_hash !== $hash) $this->conflict('session_request_changed');
 
-                return response()->json(['sessions' => $this->sessions($groupId)->whereIn('sessions.id', json_decode($existing->session_ids, true))->get()])
+                return response()->json(['sessions' => $this->sessions($groupId)->whereIn('sessions.id', json_decode($existing->session_ids, true))->get(),
+                    'group_revision' => $group['revision']])
                     ->header('Cache-Control', 'private, no-store');
             }
             if ($group['revision'] !== (int) $data['revision'] || $group['status'] === 'completed') {
@@ -124,7 +125,8 @@ class CenterStudySessionController extends Controller
                 abort_unless($existing->group_id === $groupId && $existing->actor_id === $request->user()->id, 403);
                 if ($existing->request_hash !== $hash) $this->conflict('session_request_changed');
 
-                return response()->json(['session' => $this->sessions($groupId)->where('sessions.id', $sessionId)->firstOrFail()])
+                return response()->json(['session' => $this->sessions($groupId)->where('sessions.id', $sessionId)->firstOrFail(),
+                    'group_revision' => $group['revision']])
                     ->header('Cache-Control', 'private, no-store');
             }
             $session = DB::connection('tenant')->table('study_sessions')->where('id', $sessionId)->where('group_id', $groupId)
@@ -229,12 +231,14 @@ class CenterStudySessionController extends Controller
             ->select(['groups.id', 'groups.name', 'groups.status', 'groups.revision', 'groups.plan_version_id',
                 'courses.branch_id', 'levels.name as level_name'])
             ->selectRaw("COALESCE((SELECT json_agg(json_build_object('number', number, 'title', title, 'content', content) ORDER BY number) FROM (SELECT number, title, content FROM plan_lectures WHERE plan_version_id = groups.plan_version_id ORDER BY number LIMIT 200) AS plan), '[]'::json) AS requirements");
+        $query->selectRaw("COALESCE((SELECT json_agg(lecture_number ORDER BY lecture_number) FROM (SELECT DISTINCT lectures.number AS lecture_number FROM study_sessions AS sessions JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id WHERE sessions.group_id = groups.id AND sessions.status <> 'cancelled' ORDER BY lecture_number LIMIT 200) AS scheduled), '[]'::json) AS scheduled_requirements");
         if ($lock) $query->lockForUpdate();
         $row = $query->first();
         abort_unless($row && $permissions->can('read', (int) $row->branch_id), 404);
 
         return [...(array) $row, 'revision' => (int) $row->revision, 'branch_id' => (int) $row->branch_id,
             'requirements' => json_decode($row->requirements, true),
+            'scheduled_requirements' => json_decode($row->scheduled_requirements, true),
             'can_manage' => $permissions->can('curriculum.manage', (int) $row->branch_id)];
     }
 

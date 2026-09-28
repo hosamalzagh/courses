@@ -30,7 +30,8 @@ export type StudySession = {
 export type SessionContext = CenterContext & {
   group: { id: string; name: string; status: StudyGroup["status"]; revision: number;
     plan_version_id: string; branch_id: number; level_name: string; can_manage: boolean;
-    requirements: { number: number; title: string | null; content: string }[] };
+    requirements: { number: number; title: string | null; content: string }[];
+    scheduled_requirements: number[] };
   sessions: StudySession[];
   pagination: { page: number; has_more: boolean };
 };

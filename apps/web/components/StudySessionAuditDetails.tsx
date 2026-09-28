@@ -1,4 +1,5 @@
 import type { AuditEntry } from "@/lib/server-context";
+import { formatSessionTime } from "@/lib/session-time";
 
 export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
   if (entry.event !== "study_sessions.scheduled" && entry.event !== "study_session.postponed") return null;
@@ -6,8 +7,7 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
   if (typeof details === "string") { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;
   const data = details as Record<string, unknown>;
-  const date = (value: unknown) => typeof value === "string"
-    ? new Date(value.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00")).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" }) : "غير مسجل";
+  const date = (value: unknown) => typeof value === "string" ? formatSessionTime(value) : "غير مسجل";
   return <details><summary>عرض تغيير جدول المحاضرات</summary>
     <p>المجموعة: <bdi>{typeof data.group_id === "string" ? data.group_id : "غير مسجلة"}</bdi></p>
     {entry.event === "study_sessions.scheduled" && Array.isArray(data.sessions) ? <ul>{data.sessions.map((value, index) => {

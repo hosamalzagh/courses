@@ -9,17 +9,15 @@ import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
 import { PrefetchLink as Link } from "@/components/PrefetchLink";
 import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { centerRequest, newSubmissionId, responseMessage } from "@/lib/client-api";
+import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from "@/lib/client-api";
 import type { SessionContext, StudySession } from "@/lib/groups";
+import { formatSessionTime, parseSessionTime } from "@/lib/session-time";
 
 type Draft = { kind: "single" | "weekly"; start_at: string; count: string; interval_weeks: string; plan_lecture_number: string; title: string };
 type Preview = { group_revision: number; sessions: { number: number; plan_lecture_number: number; title: string | null; local_at: string }[] };
 const initialDraft: Draft = { kind: "single", start_at: "", count: "1", interval_weeks: "1", plan_lecture_number: "", title: "" };
-const cairo = new Intl.DateTimeFormat("ar-EG", { timeZone: "Africa/Cairo", dateStyle: "medium", timeStyle: "short" });
-function sessionDate(value: string) { return new Date(value.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00")); }
-function dateLabel(value: string) { return cairo.format(sessionDate(value)); }
 
 export function SessionControls({ context }: { context: SessionContext }) {
   const router = useRouter();
@@ -37,14 +35,23 @@ export function SessionControls({ context }: { context: SessionContext }) {
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
   const dirty = Boolean(preview || draft.start_at || draft.title || selected || postponeAt || reason);
   const prefix = `groups/${group.id}/sessions`;
-  const available = group.requirements.filter(requirement => !sessions.some(session => session.status !== "cancelled" && session.plan_lecture_number === requirement.number));
+  const available = group.requirements.filter(requirement => !group.scheduled_requirements.includes(requirement.number));
 
   function changeDraft(change: Partial<Draft>) {
     setDraft(current => ({ ...current, ...change }));
-    setPreview(null); setRequestId(newSubmissionId()); setError("");
+    setPreview(null); setRequestId(newSubmissionId()); setError(""); setFieldErrors({});
+  }
+
+  function showValidation(errors: Record<string, string>) {
+    setFieldErrors(errors);
+    const key = Object.keys(errors)[0];
+    const input = ({ start_at: "start", plan_lecture_number: "requirement", count: "count", interval_weeks: "interval",
+      title: "title", scheduled_at: "postpone", reason: "reason" } as Record<string, string>)[key];
+    if (input) requestAnimationFrame(() => document.getElementById(`${formId}-${input}`)?.focus());
   }
 
   function scheduleBody() {
@@ -54,11 +61,13 @@ export function SessionControls({ context }: { context: SessionContext }) {
   }
 
   async function reload() {
-    const response = await centerRequest(prefix, "GET");
+    const response = await centerRequest(`${prefix}?page=${context.pagination.page}`, "GET");
     if (!response.ok) throw new Error(await responseMessage(response));
     const current = (await response.json()) as SessionContext;
     setGroup(current.group); setSessions(current.sessions);
-    setPreview(null); setSelected(null); setConflict(false);
+    setPreview(null);
+    setSelected(previous => previous ? current.sessions.find(item => item.id === previous.id) ?? null : null);
+    setConflict(false);
     router.refresh();
   }
 
@@ -69,6 +78,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
       const response = await centerRequest(`${prefix}/preview`, "POST", scheduleBody());
       if (!response.ok) {
         if (response.status === 409) setConflict(true);
+        if (response.status === 422) showValidation(await responseFieldErrors(response));
         setError(await responseMessage(response)); return;
       }
       setPreview((await response.json()) as Preview);
@@ -84,11 +94,13 @@ export function SessionControls({ context }: { context: SessionContext }) {
       const response = await centerRequest(prefix, "POST", { ...scheduleBody(), request_id: requestId });
       if (!response.ok) {
         if (response.status === 409) { setConflict(true); setPreview(null); }
+        if (response.status === 422) showValidation(await responseFieldErrors(response));
         setError(await responseMessage(response)); return;
       }
       const result = (await response.json()) as { sessions: StudySession[]; group_revision?: number };
       setSessions(current => [...current, ...result.sessions.filter(item => !current.some(existing => existing.id === item.id))]);
-      if (result.group_revision) setGroup(current => ({ ...current, revision: result.group_revision! }));
+      setGroup(current => ({ ...current, revision: result.group_revision ?? current.revision,
+        scheduled_requirements: [...new Set([...current.scheduled_requirements, ...result.sessions.map(item => item.plan_lecture_number)])] }));
       setDraft(initialDraft); setPreview(null); setRequestId(newSubmissionId());
       setNotice("حُفظت المواعيد وربطت بمحاضرات الخطة المعتمدة.");
       router.refresh();
@@ -105,6 +117,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
       });
       if (!response.ok) {
         if (response.status === 409) setConflict(true);
+        if (response.status === 422) showValidation(await responseFieldErrors(response));
         setError(await responseMessage(response)); return;
       }
       const result = (await response.json()) as { session: StudySession; group_revision?: number };
@@ -128,7 +141,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
     <section className="context-card form-stack" aria-labelledby={`${formId}-heading`}>
       <h2 id={`${formId}-heading`}>{group.name} · {group.level_name}</h2>
       <p>محاضرات الخطة المعتمدة: {group.requirements.length.toLocaleString("ar-EG")} · غير المجدولة: {available.length.toLocaleString("ar-EG")}.</p>
-      {group.can_manage && group.status !== "completed" && available.length ? <>
+      {group.can_manage && group.status !== "completed" && available.length ? <form id={`${formId}-schedule`} noValidate className="form-stack" onSubmit={event => { event.preventDefault(); if (preview) void confirm(); else void review(); }}>
         <h3>إضافة مواعيد</h3>
         <Field>
           <FieldLabel htmlFor={`${formId}-kind`}>طريقة الإضافة</FieldLabel>
@@ -139,42 +152,43 @@ export function SessionControls({ context }: { context: SessionContext }) {
           <FieldDescription>تستهلك كل إضافة محاضرة موجودة من إصدار الخطة؛ لا ترفع العدد المعتمد.</FieldDescription>
         </Field>
         {draft.kind === "single" ? <>
-          <Field><FieldLabel htmlFor={`${formId}-requirement`}>محاضرة الخطة</FieldLabel>
+          <Field data-invalid={Boolean(fieldErrors.plan_lecture_number)}><FieldLabel htmlFor={`${formId}-requirement`}>محاضرة الخطة</FieldLabel>
             <NativeSelect id={`${formId}-requirement`} value={draft.plan_lecture_number} disabled={busy || conflict} onChange={event => changeDraft({ plan_lecture_number: event.target.value })}>
               <NativeSelectOption value="">اختر محاضرة غير مجدولة</NativeSelectOption>
               {available.map(item => <NativeSelectOption key={item.number} value={String(item.number)}>{item.number.toLocaleString("ar-EG")} · {item.title || item.content}</NativeSelectOption>)}
             </NativeSelect>
+            {fieldErrors.plan_lecture_number ? <FieldError>{fieldErrors.plan_lecture_number}</FieldError> : null}
           </Field>
-          <FormField id={`${formId}-title`} label="عنوان الموعد (اختياري)" value={draft.title} onChange={title => changeDraft({ title })} disabled={busy || conflict} />
+          <FormField id={`${formId}-title`} label="عنوان الموعد (اختياري)" value={draft.title} onChange={title => changeDraft({ title })} error={fieldErrors.title} disabled={busy || conflict} />
         </> : <>
-          <FormField id={`${formId}-count`} label="عدد المواعيد" value={draft.count} onChange={count => changeDraft({ count })} type="number" direction="ltr" disabled={busy || conflict} hint={`حتى ٢٠ موعدًا، ضمن ${available.length.toLocaleString("ar-EG")} محاضرة غير مجدولة.`} />
-          <FormField id={`${formId}-interval`} label="الفاصل بالأسابيع" value={draft.interval_weeks} onChange={interval_weeks => changeDraft({ interval_weeks })} type="number" direction="ltr" disabled={busy || conflict} hint="من أسبوع إلى أربعة أسابيع." />
+          <FormField id={`${formId}-count`} label="عدد المواعيد" value={draft.count} onChange={count => changeDraft({ count })} type="number" direction="ltr" error={fieldErrors.count} disabled={busy || conflict} hint={`حتى ٢٠ موعدًا، ضمن ${available.length.toLocaleString("ar-EG")} محاضرة غير مجدولة.`} />
+          <FormField id={`${formId}-interval`} label="الفاصل بالأسابيع" value={draft.interval_weeks} onChange={interval_weeks => changeDraft({ interval_weeks })} type="number" direction="ltr" error={fieldErrors.interval_weeks} disabled={busy || conflict} hint="من أسبوع إلى أربعة أسابيع." />
         </>}
-        <FormField id={`${formId}-start`} label={draft.kind === "weekly" ? "بداية أول موعد بتوقيت القاهرة" : "موعد المحاضرة بتوقيت القاهرة"} value={draft.start_at} onChange={start_at => changeDraft({ start_at })} type="datetime-local" direction="ltr" disabled={busy || conflict} required />
-        <CenterHeaderActions><Button variant="primary" busy={busy} disabled={conflict || !draft.start_at || (draft.kind === "single" && !draft.plan_lecture_number)} onClick={() => void review()}>معاينة المواعيد</Button></CenterHeaderActions>
+        <FormField id={`${formId}-start`} label={draft.kind === "weekly" ? "بداية أول موعد بتوقيت القاهرة" : "موعد المحاضرة بتوقيت القاهرة"} value={draft.start_at} onChange={start_at => changeDraft({ start_at })} type="datetime-local" direction="ltr" error={fieldErrors.start_at} disabled={busy || conflict} required />
+        {!preview ? <CenterHeaderActions><Button form={`${formId}-schedule`} type="submit" variant="primary" busy={busy} disabled={conflict || !draft.start_at || (draft.kind === "single" && !draft.plan_lecture_number)}>معاينة المواعيد</Button></CenterHeaderActions> : null}
         {preview ? <section className="form-stack" aria-labelledby={`${formId}-preview`}>
           <h3 id={`${formId}-preview`} tabIndex={-1}>تأكيد المواعيد</h3>
           <ol>{preview.sessions.map(item => <li key={item.number}>موعد {item.number.toLocaleString("ar-EG")} · محاضرة الخطة {item.plan_lecture_number.toLocaleString("ar-EG")} · <bdi dir="ltr">{item.local_at.replace("T", " ")}</bdi> القاهرة{item.title ? ` · ${item.title}` : ""}</li>)}</ol>
           <p>راجع الترتيب والمواعيد قبل الحفظ؛ سيتحقق النظام من الحالة مجددًا عند التأكيد.</p>
-          <CenterHeaderActions><Button variant="primary" busy={busy} disabled={conflict} onClick={() => void confirm()}>تأكيد وحفظ {preview.sessions.length.toLocaleString("ar-EG")} موعد</Button><Button disabled={busy} onClick={() => setPreview(null)}>إلغاء المعاينة</Button></CenterHeaderActions>
+          <CenterHeaderActions><Button form={`${formId}-schedule`} type="submit" variant="primary" busy={busy} disabled={conflict}>تأكيد وحفظ {preview.sessions.length.toLocaleString("ar-EG")} موعد</Button><Button disabled={busy} onClick={() => setPreview(null)}>إلغاء المعاينة</Button></CenterHeaderActions>
         </section> : null}
-      </> : group.status === "completed" ? <p>المجموعة مكتملة؛ جدولها متاح للقراءة فقط.</p> : !group.can_manage ? <p>جدول المجموعة متاح للقراءة. تعديل المواعيد يتطلب صلاحية إدارة المنهج في الفرع.</p> : <p>جُدولت جميع محاضرات الخطة المعتمدة.</p>}
+      </form> : group.status === "completed" ? <p>المجموعة مكتملة؛ جدولها متاح للقراءة فقط.</p> : !group.can_manage ? <p>جدول المجموعة متاح للقراءة. تعديل المواعيد يتطلب صلاحية إدارة المنهج في الفرع.</p> : <p>جُدولت جميع محاضرات الخطة المعتمدة.</p>}
     </section>
-    {selected ? <section className="context-card form-stack" aria-label={`تأجيل الموعد ${selected.number}`}>
+    {selected ? <form id={`${formId}-postpone-form`} noValidate className="context-card form-stack" aria-label={`تأجيل الموعد ${selected.number}`} onSubmit={event => { event.preventDefault(); void postpone(); }}>
       <h2>تأجيل الموعد {selected.number.toLocaleString("ar-EG")}</h2>
-      <p>الوقت الحالي: {dateLabel(selected.scheduled_at)} · محاضرة الخطة {selected.plan_lecture_number.toLocaleString("ar-EG")}.</p>
-      <FormField id={`${formId}-postpone`} label="الموعد الجديد بتوقيت القاهرة" value={postponeAt} onChange={value => { setPostponeAt(value); setPostponeId(newSubmissionId()); }} type="datetime-local" direction="ltr" disabled={busy || conflict} required focusOnMount />
-      <FormField id={`${formId}-reason`} label="سبب التأجيل (اختياري)" value={reason} onChange={value => { setReason(value); setPostponeId(newSubmissionId()); }} disabled={busy || conflict} />
-      <CenterHeaderActions><Button variant="primary" busy={busy} disabled={conflict || !postponeAt} onClick={() => void postpone()}>حفظ التأجيل</Button><Button disabled={busy} onClick={() => { const id = selected.id; setSelected(null); setPostponeAt(""); setReason(""); requestAnimationFrame(() => document.getElementById(`postpone-${id}`)?.focus()); }}>إلغاء</Button></CenterHeaderActions>
-    </section> : null}
+      <p>الوقت الحالي: {formatSessionTime(selected.scheduled_at)} · محاضرة الخطة {selected.plan_lecture_number.toLocaleString("ar-EG")}.</p>
+      <FormField id={`${formId}-postpone`} label="الموعد الجديد بتوقيت القاهرة" value={postponeAt} onChange={value => { setPostponeAt(value); setPostponeId(newSubmissionId()); setFieldErrors({}); }} type="datetime-local" direction="ltr" error={fieldErrors.scheduled_at} disabled={busy || conflict} required focusOnMount />
+      <FormField id={`${formId}-reason`} label="سبب التأجيل (اختياري)" value={reason} onChange={value => { setReason(value); setPostponeId(newSubmissionId()); setFieldErrors({}); }} error={fieldErrors.reason} disabled={busy || conflict} />
+      <CenterHeaderActions><Button form={`${formId}-postpone-form`} type="submit" variant="primary" busy={busy} disabled={conflict || !postponeAt}>حفظ التأجيل</Button><Button disabled={busy} onClick={() => { const id = selected.id; setSelected(null); setPostponeAt(""); setReason(""); requestAnimationFrame(() => document.getElementById(`postpone-${id}`)?.focus()); }}>إلغاء</Button></CenterHeaderActions>
+    </form> : null}
     <DataTable id="study-sessions" title="مواعيد المحاضرات" description="كل موعد يحتفظ برقمه ومحاضرة خطته. الأوقات بتوقيت القاهرة." rows={sessions} rowKey={item => item.id} searchText={item => `${item.number} ${item.plan_lecture_number} ${item.title ?? ""} ${item.content}`} emptyMessage="لم تُجدول محاضرات لهذه المجموعة بعد."
       columns={[
         { key: "number", label: "الموعد", render: item => item.number.toLocaleString("ar-EG") },
         { key: "requirement", label: "محاضرة الخطة", render: item => `${item.plan_lecture_number.toLocaleString("ar-EG")} · ${item.content}` },
         { key: "title", label: "العنوان", render: item => item.title || "—" },
-        { key: "time", label: "الموعد بتوقيت القاهرة", render: item => dateLabel(item.scheduled_at) },
+        { key: "time", label: "الموعد بتوقيت القاهرة", render: item => formatSessionTime(item.scheduled_at) },
         { key: "status", label: "الحالة", render: item => item.status === "planned" ? "مخطط" : item.status === "held" ? "أُقيمت" : "ملغاة" },
-        { key: "actions", label: "الإجراءات", actions: true, render: item => group.can_manage && group.status !== "completed" && item.status === "planned" && sessionDate(item.scheduled_at).getTime() > Date.now()
+        { key: "actions", label: "الإجراءات", actions: true, render: item => group.can_manage && group.status !== "completed" && item.status === "planned" && parseSessionTime(item.scheduled_at).getTime() > Date.now()
           ? <Button id={`postpone-${item.id}`} disabled={busy} onClick={() => { setSelected(item); setPostponeAt(""); setReason(""); setPostponeId(newSubmissionId()); setError(""); }}>تأجيل</Button> : "—" },
       ]}
       serverPagination={{ page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 20,

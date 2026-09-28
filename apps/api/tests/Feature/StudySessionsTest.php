@@ -59,7 +59,8 @@ class StudySessionsTest extends TestCase
         $saved = $this->postJson($path, [...$payload, 'request_id' => $requestId])->assertCreated()
             ->assertJsonCount(2, 'sessions')->assertJsonPath('group_revision', 2)->json('sessions');
         $this->assertSame(strtotime($preview[0]['scheduled_at']), strtotime($saved[0]['scheduled_at']));
-        $this->postJson($path, [...$payload, 'request_id' => $requestId])->assertOk()->assertJsonCount(2, 'sessions');
+        $this->postJson($path, [...$payload, 'request_id' => $requestId])->assertOk()->assertJsonCount(2, 'sessions')
+            ->assertJsonPath('group_revision', 2);
         $this->postJson($path, [...$payload, 'count' => 1, 'request_id' => $requestId])
             ->assertConflict()->assertJsonPath('code', 'session_request_changed');
         $this->postJson($path, [...$payload, 'request_id' => (string) Str::uuid()])
@@ -82,7 +83,8 @@ class StudySessionsTest extends TestCase
         $moved = $this->patchJson("{$path}/{$saved[0]['id']}/postpone", $move)->assertOk()
             ->assertJsonPath('session.revision', 2)->json('session');
         $this->assertNotSame($saved[0]['scheduled_at'], $moved['scheduled_at']);
-        $this->patchJson("{$path}/{$saved[0]['id']}/postpone", $move)->assertOk()->assertJsonPath('session.revision', 2);
+        $this->patchJson("{$path}/{$saved[0]['id']}/postpone", $move)->assertOk()->assertJsonPath('session.revision', 2)
+            ->assertJsonPath('group_revision', 4);
         $this->patchJson("{$path}/{$saved[0]['id']}/postpone", [...$move, 'request_id' => (string) Str::uuid()])
             ->assertConflict()->assertJsonPath('code', 'session_changed');
         $this->center->run(function () use ($saved): void {
@@ -90,6 +92,22 @@ class StudySessionsTest extends TestCase
             $this->assertSame(1, DB::table('center_audit_logs')->where('event', 'study_session.postponed')->count());
             $this->assertSame(1, DB::table('study_sessions')->where('id', $saved[0]['id'])->where('revision', 2)->count());
         });
+    }
+
+    public function test_scheduled_requirement_summary_remains_complete_after_session_pagination(): void
+    {
+        $group = $this->group($this->north, 'Paged', 22);
+        $path = "{$this->base}/groups/{$group['id']}/sessions";
+        $start = now('Africa/Cairo')->addDays(14)->setTime(16, 0)->format('Y-m-d\TH:i');
+        $this->postJson($path, ['kind' => 'weekly', 'revision' => 1, 'start_at' => $start,
+            'count' => 20, 'interval_weeks' => 1, 'request_id' => (string) Str::uuid()])->assertCreated();
+        $this->postJson($path, ['kind' => 'single', 'revision' => 2,
+            'start_at' => now('Africa/Cairo')->addDays(160)->setTime(17, 0)->format('Y-m-d\TH:i'),
+            'plan_lecture_number' => 21, 'request_id' => (string) Str::uuid()])->assertCreated();
+        $page = $this->getJson("{$path}?page=2")->assertOk()->assertJsonCount(1, 'sessions')
+            ->assertJsonCount(21, 'group.scheduled_requirements')->assertJsonPath('group.scheduled_requirements.0', 1)
+            ->assertJsonPath('group.scheduled_requirements.20', 21)->assertJsonPath('group.requirements.21.number', 22);
+        $this->assertLessThanOrEqual(6, (int) $page->headers->get('X-Courses-Query-Count'));
     }
 
     public function test_branch_grants_and_held_sessions_prevent_cross_branch_changes(): void
@@ -122,7 +140,7 @@ class StudySessionsTest extends TestCase
             'plan_lecture_number' => 2, 'request_id' => (string) Str::uuid()])->assertForbidden();
     }
 
-    private function group(int $branchId, string $name): array
+    private function group(int $branchId, string $name, int $lectureCount = 3): array
     {
         $course = $this->postJson("{$this->base}/courses", [
             'branch_id' => $branchId, 'name' => $name, 'request_id' => (string) Str::uuid(),
@@ -132,11 +150,7 @@ class StudySessionsTest extends TestCase
         ])->assertCreated()->json('stage');
         $level = $this->postJson("{$this->base}/stages/{$stage['id']}/levels", [
             'name' => 'Level', 'request_id' => (string) Str::uuid(),
-            'lectures' => [
-                ['number' => 1, 'content' => 'First', 'planned_hours' => 1],
-                ['number' => 2, 'content' => 'Second', 'planned_hours' => 1],
-                ['number' => 3, 'content' => 'Third', 'planned_hours' => 1],
-            ],
+            'lectures' => array_map(fn ($number) => ['number' => $number, 'content' => "Lecture {$number}", 'planned_hours' => 1], range(1, $lectureCount)),
         ])->assertCreated()->json('level');
         $instructor = $this->postJson("{$this->base}/instructors", [
             'name' => "Teacher {$name}", 'branch_ids' => [$branchId], 'request_id' => (string) Str::uuid(),
