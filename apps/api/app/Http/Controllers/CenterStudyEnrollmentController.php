@@ -166,6 +166,12 @@ class CenterStudyEnrollmentController extends Controller
                     ->where('attempt_id', $previous->id)->max('left_on');
                 abort_if($endedOn === null || $data['joined_on'] < $endedOn, 422,
                     'تاريخ إعادة الدراسة يسبق انتهاء المحاولة السابقة.');
+                $latestEnd = DB::connection('tenant')->table('study_attempt_group_periods as periods')
+                    ->join('study_attempts as attempts', 'attempts.id', '=', 'periods.attempt_id')
+                    ->where('attempts.student_id', $studentId)->where('attempts.level_id', $group->level_id)
+                    ->max('periods.left_on');
+                abort_if($data['joined_on'] < $latestEnd, 422,
+                    'تاريخ إعادة الدراسة يتداخل مع محاولة أخرى في المستوى نفسه.');
                 abort_if(DB::connection('tenant')->table('study_attempts')->where('repeated_from_attempt_id', $previous->id)->exists(), 409,
                     'أُنشئت محاولة إعادة دراسة لهذا التسجيل بالفعل.');
             }

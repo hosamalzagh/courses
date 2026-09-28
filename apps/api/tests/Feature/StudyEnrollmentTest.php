@@ -815,6 +815,43 @@ class StudyEnrollmentTest extends TestCase
         }
     }
 
+    public function test_repeat_of_legacy_unlinked_attempt_cannot_overlap_a_later_attempt(): void
+    {
+        $group = $this->group($this->north, '100.00');
+        $student = $this->student([$this->north]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $initial = $this->getJson($url)->json();
+        $payload = ['group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $initial['student']['currency_revision'], 'discount' => '0.00',
+            'discount_reason' => null];
+        $first = $this->postJson($url, [...$payload, 'joined_on' => '2026-09-20',
+            'version' => $initial['student']['version'], 'request_id' => (string) Str::uuid()])
+            ->assertCreated()->json('attempt');
+        $this->postJson("{$url}/{$first['id']}/withdraw", ['withdrawn_on' => '2026-09-21',
+            'reason' => 'محاولة أولى منتهية', 'revision' => $first['revision'],
+            'request_id' => (string) Str::uuid()])->assertOk();
+        $afterFirst = $this->getJson($url)->json();
+        $second = $this->postJson($url, [...$payload, 'joined_on' => '2026-09-22',
+            'repeated_from_attempt_id' => $first['id'], 'version' => $afterFirst['student']['version'],
+            'request_id' => (string) Str::uuid()])->assertCreated()->json('attempt');
+        $this->postJson("{$url}/{$second['id']}/withdraw", ['withdrawn_on' => '2026-09-25',
+            'reason' => 'محاولة ثانية منتهية', 'revision' => $second['revision'],
+            'request_id' => (string) Str::uuid()])->assertOk();
+
+        // Older attempts may predate the repeat lineage column and have no link.
+        $this->center->run(fn () => DB::table('study_attempts')->where('id', $second['id'])
+            ->update(['repeated_from_attempt_id' => null]));
+        $fresh = $this->getJson($url)->json();
+        $this->postJson($url, [...$payload, 'joined_on' => '2026-09-23',
+            'repeated_from_attempt_id' => $first['id'], 'version' => $fresh['student']['version'],
+            'request_id' => (string) Str::uuid()])->assertUnprocessable();
+        $this->center->run(fn () => $this->assertSame(2, DB::table('study_attempts')->count()));
+        $this->postJson($url, [...$payload, 'joined_on' => '2026-09-25',
+            'repeated_from_attempt_id' => $first['id'], 'version' => $fresh['student']['version'],
+            'request_id' => (string) Str::uuid()])->assertCreated();
+    }
+
     public function test_repeat_lineage_prevents_rollback_even_without_a_withdrawal(): void
     {
         $group = $this->group($this->north, '0.00');
