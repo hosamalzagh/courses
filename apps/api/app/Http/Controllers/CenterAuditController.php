@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\CenterPermissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -26,6 +27,10 @@ class CenterAuditController extends Controller
                 fn ($roles) => in_array('branch_auditor', $roles, true)));
             abort_if($auditableBranches === [], 403);
             $query->whereIn('branch_id', $auditableBranches);
+            $financialBranches = array_keys(array_filter($permissions->branchRoles,
+                fn ($roles) => in_array('finance.read', CenterPermissions::actions($roles), true)));
+            $query->where(fn ($scope) => $scope->where('event', '!=', 'student.payment_recorded')
+                ->orWhereIn('branch_id', $financialBranches));
         }
 
         return $query->orderByDesc('id')->limit(50)->get();

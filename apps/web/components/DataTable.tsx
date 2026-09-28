@@ -21,12 +21,15 @@ type Props<T> = {
   rowKey: (row: T) => string | number; searchText: (row: T) => string;
   emptyMessage: string; action?: ReactNode; filters?: { label: string; value: string; matches: (row: T) => boolean }[];
   expanded?: (row: T) => ReactNode; rowClassName?: string;
+  pageSize?: number; serverSearch?: { value: string; onSearch: (value: string) => void };
 };
-const pageSize = 10;
 
 
-export function DataTable<T>({ id, title, description, rows, columns, rowKey, searchText, emptyMessage, action, filters = [], expanded, rowClassName }: Props<T>) {
+export function DataTable<T>({ id, title, description, rows, columns, rowKey, searchText, emptyMessage, action, filters = [], expanded, rowClassName, pageSize = 10, serverSearch }: Props<T>) {
+  const serverSearchValue = serverSearch?.value;
+  const hasServerSearch = Boolean(serverSearch);
   const [search, setSearch] = useState("");
+  const [loadedServerSearch, setLoadedServerSearch] = useState(serverSearchValue);
   const [filter, setFilter] = useState("");
   const [page, setPage] = useState(1);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
@@ -42,11 +45,14 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
   const shownColumns = preferences.ordered.map((key) => columns.find((column) => column.key === key)!).filter((column) => !preferences.hidden.includes(column.key));
   const [ready, setReady] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  if (loadedServerSearch !== serverSearchValue) {
+    setLoadedServerSearch(serverSearchValue); setSearch(serverSearchValue ?? ""); setPage(1);
+  }
 
   useEffect(() => {
     function restore() {
       const params = new URLSearchParams(location.search);
-      setSearch(params.get(`${id}-q`) ?? "");
+      setSearch(hasServerSearch ? serverSearchValue ?? "" : params.get(`${id}-q`) ?? "");
       setFilter(params.get(`${id}-filter`) ?? "");
       setPage(Math.max(1, Number(params.get(`${id}-page`)) || 1));
       setColumnFilters(Object.fromEntries(filterKeys.split("|").filter(Boolean).map((key) => [key, params.get(`${id}-f-${key}`) ?? ""])));
@@ -55,11 +61,11 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
     restore();
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
-  }, [id, filterKeys]);
+  }, [id, filterKeys, serverSearchValue, hasServerSearch]);
 
   const activeFilter = filters.find((item) => item.value === filter);
   const query = search.trim().toLocaleLowerCase("ar-EG");
-  const visible = rows.filter((row) => (!query || searchText(row).toLocaleLowerCase("ar-EG").includes(query)) && (!activeFilter || activeFilter.matches(row)) && filterable.every((column) => {
+  const visible = rows.filter((row) => (hasServerSearch || !query || searchText(row).toLocaleLowerCase("ar-EG").includes(query)) && (!activeFilter || activeFilter.matches(row)) && filterable.every((column) => {
     const value = columnFilters[column.key]?.trim().toLocaleLowerCase("ar-EG");
     return !value || column.filterText!(row).toLocaleLowerCase("ar-EG").includes(value);
   }));
@@ -76,18 +82,18 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
     url.searchParams.delete(`${id}-density`);
     for (const key of [...url.searchParams.keys()]) if (key.startsWith(`${id}-f-`)) url.searchParams.delete(key);
     for (const column of filterable) if (columnFilters[column.key]?.trim()) url.searchParams.set(`${id}-f-${column.key}`, columnFilters[column.key].trim());
-    for (const [key, value] of Object.entries({ q: search, filter: activeFilter?.value ?? "", page: currentPage > 1 ? String(currentPage) : "" })) {
+    for (const [key, value] of Object.entries({ ...(hasServerSearch ? {} : { q: search }), filter: activeFilter?.value ?? "", page: currentPage > 1 ? String(currentPage) : "" })) {
       if (value) url.searchParams.set(`${id}-${key}`, value); else url.searchParams.delete(`${id}-${key}`);
     }
     if (url.href !== location.href) window.history.replaceState(window.history.state, "", url);
-  }, [id, search, activeFilter?.value, page, currentPage, columnFilters, filterable, ready]);
+  }, [id, search, activeFilter?.value, page, currentPage, columnFilters, filterable, ready, hasServerSearch]);
 
   function closeFilters() { setFiltersOpen(false); }
 
   return <section className="data-panel" aria-labelledby={`${id}-title`} data-density="compact">
     <div className="table-heading"><div><h2 id={`${id}-title`}>{title}<span className="record-count">{rows.length.toLocaleString("ar-EG")}</span></h2>{description ? <p className="muted">{description}</p> : null}</div>{action}</div>
     <div className="table-toolbar">
-      <InputGroup className="max-w-sm"><label className="sr-only" htmlFor={`${id}-search`}>بحث في {title}</label><InputGroupInput ref={input} id={`${id}-search`} type="search" value={search} placeholder={`بحث في ${title}…`} onChange={(event) => { setSearch(event.target.value); setPage(1); }} />{search ? <InputGroupAddon align="inline-end"><InputGroupButton type="button" aria-label={`مسح البحث في ${title}`} onClick={() => { setSearch(""); setPage(1); input.current?.focus(); }}>×</InputGroupButton></InputGroupAddon> : null}</InputGroup>
+      <form className="w-full max-w-sm" role="search" onSubmit={(event) => { event.preventDefault(); serverSearch?.onSearch(search.trim()); }}><InputGroup><label className="sr-only" htmlFor={`${id}-search`}>بحث في {title}</label><InputGroupInput ref={input} id={`${id}-search`} type="search" value={search} placeholder={`${serverSearch ? "بحث في جميع" : "بحث في"} ${title}…`} onChange={(event) => { setSearch(event.target.value); setPage(1); }} />{search ? <InputGroupAddon align="inline-end"><InputGroupButton type="button" aria-label={`مسح البحث في ${title}`} onClick={() => { setSearch(""); setPage(1); serverSearch?.onSearch(""); input.current?.focus(); }}>×</InputGroupButton></InputGroupAddon> : null}{serverSearch ? <InputGroupAddon align="inline-end"><InputGroupButton type="submit" aria-label={`بحث في جميع ${title}`}>بحث</InputGroupButton></InputGroupAddon> : null}</InputGroup></form>
       <div className="table-tools">
         <TablePopover id={`${id}-columns`} label="الأعمدة" scope={title} title={`الأعمدة المعروضة — ${title}`}>
           <>

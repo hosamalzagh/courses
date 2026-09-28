@@ -11,6 +11,7 @@ use App\Http\Controllers\CenterSettingsController;
 use App\Http\Controllers\CenterStudentAttachmentController;
 use App\Http\Controllers\CenterStudentController;
 use App\Http\Controllers\CenterStudentCustomFieldController;
+use App\Http\Controllers\CenterStudentFinanceController;
 use App\Http\Controllers\CenterStudentNumberingController;
 use App\Http\Controllers\CenterStudentPhotoController;
 use App\Http\Controllers\CenterStudentProfileChoiceController;
@@ -79,6 +80,9 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::post('student-profile-choices', [CenterStudentProfileChoiceController::class, 'store']);
         Route::patch('student-profile-choices/{choiceId}', [CenterStudentProfileChoiceController::class, 'update']);
         Route::get('student-workspace', [CenterStudentController::class, 'workspace']);
+        Route::get('students/{studentId}/account', [CenterStudentFinanceController::class, 'account']);
+        Route::post('students/{studentId}/payments', [CenterStudentFinanceController::class, 'recordPayment']);
+        Route::patch('financial-currency', [CenterStudentFinanceController::class, 'updateCurrency']);
         Route::get('student-search-workspace', [CenterStudentSearchController::class, 'workspace']);
         Route::patch('student-search-policy', [CenterStudentSearchController::class, 'updatePolicy']);
         Route::get('students/similar', [CenterStudentController::class, 'similar']);

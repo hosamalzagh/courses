@@ -63,6 +63,13 @@ export type InstructorContext = CenterContext & { instructors: Instructor[]; pag
 export type StudentSearchPolicy = { enabled: boolean; revision: number; default_sharing_enabled: boolean };
 export type StudentSearchResult = { id: string; student_number: number; name: string; phone: string | null; within_scope: boolean };
 export type StudentSearchContext = CenterContext & { policy: StudentSearchPolicy; students: StudentSearchResult[]; pagination: { page: number; has_more: boolean }; can_search: boolean };
+export type StudentPayment = { id: string; branch_id: number; branch_name?: string; amount: string; currency: string; method: string; received_on: string; actor_name: string; created_at: string };
+export type StudentAccountContext = CenterContext & {
+  account: { student_id: string; student_name: string; student_number: number; version: string; currency: string | null; currency_revision: number; currency_locked: boolean; available_balance: string };
+  recordable_branches: { id: number; name: string }[];
+  payments: StudentPayment[];
+  pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean };
+};
 
 export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable" | "student_unavailable";
 
@@ -124,6 +131,10 @@ export function loadStudentWorkspace(query = "", studentId?: string): Promise<St
   return fetchCenterPayload<StudentContext>(`${studentId ? `students/${encodeURIComponent(studentId)}` : "student-workspace"}${query ? `?${query}` : ""}`);
 }
 
+export function loadStudentAccount(studentId: string, query = ""): Promise<StudentAccountContext | CenterAccessFailure> {
+  return fetchCenterPayload<StudentAccountContext>(`students/${encodeURIComponent(studentId)}/account${query ? `?${query}` : ""}`);
+}
+
 export function loadInstructorWorkspace(query = "", instructorId?: string): Promise<InstructorContext | CenterAccessFailure> {
   return fetchCenterPayload<InstructorContext>(`${instructorId ? `instructors/${encodeURIComponent(instructorId)}` : "instructor-workspace"}${query ? `?${query}` : ""}`);
 }
@@ -164,6 +175,8 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   if (path === "/admin/students/new") return loadStudentWorkspace();
   const studentEdit = path.match(/^\/admin\/students\/([^/]+)\/edit$/);
   if (studentEdit) return loadStudentWorkspace("", decodeURIComponent(studentEdit[1]));
+  const studentAccount = path.match(/^\/admin\/students\/([^/]+)\/account$/);
+  if (studentAccount) return loadStudentAccount(decodeURIComponent(studentAccount[1]), query(["page", "branches_page", "q"]));
   if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q", "identifier"]));
   if (path === "/admin/curriculum") return loadCurriculumWorkspace(query(["courses_page", "stages_page", "levels_page", "branches_page"]));
   if (path === "/admin/groups") return loadGroupWorkspace(query(["page", "levels_page", "instructors_page"]));

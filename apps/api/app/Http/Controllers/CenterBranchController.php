@@ -73,6 +73,8 @@ class CenterBranchController extends Controller
 
         $entries = DB::connection('tenant')->table('center_audit_logs')
             ->where('branch_id', $branch->id)
+            ->when(! $this->permissions($request)->can('finance.read', $branch->id),
+                fn ($query) => $query->where('event', '!=', 'student.payment_recorded'))
             ->orderByDesc('id')
             ->limit(50)
             ->get();
