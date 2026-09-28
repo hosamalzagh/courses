@@ -139,6 +139,33 @@ class StudentAttachmentTest extends TestCase
         $this->get('http://alpha.courses.test'.$identity['download_url'])->assertForbidden();
     }
 
+    public function test_upload_retry_rechecks_current_identity_and_archive_visibility(): void
+    {
+        $student = $this->student();
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $payload = $this->payload((string) Str::uuid(), 1, [
+            ['title' => 'General document', 'classification' => 'general', 'file' => $this->image()],
+        ]);
+        $attachment = $this->post("{$this->base}/students/{$student['id']}/attachments", $payload, ['Accept' => 'application/json'])
+            ->assertCreated()->json('attachments.0');
+        $this->asUser($this->owner);
+        $this->patchJson("{$this->base}/students/{$student['id']}/attachments/{$attachment['id']}/classification", [
+            'request_id' => (string) Str::uuid(), 'attachment_revision' => 2, 'classification' => 'identity',
+        ])->assertOk();
+        $this->asUser($this->staff);
+        $this->post("{$this->base}/students/{$student['id']}/attachments", $payload, ['Accept' => 'application/json'])->assertForbidden();
+        $this->grant([$this->north => ['registration', 'student_identity']]);
+        $this->asUser($this->staff);
+        $this->post("{$this->base}/students/{$student['id']}/attachments", $payload, ['Accept' => 'application/json'])->assertOk();
+        $this->asUser($this->owner);
+        $this->postJson("{$this->base}/students/{$student['id']}/attachments/{$attachment['id']}/archive", [
+            'request_id' => (string) Str::uuid(), 'attachment_revision' => 3,
+        ])->assertOk();
+        $this->asUser($this->staff);
+        $this->post("{$this->base}/students/{$student['id']}/attachments", $payload, ['Accept' => 'application/json'])->assertForbidden();
+    }
+
     public function test_existing_center_migration_preserves_student_and_request(): void
     {
         $student = $this->student();

@@ -229,6 +229,7 @@ function StudentAttachmentManagement({ student, attachment, revision, onRevision
   const [hasMore, setHasMore] = useState(false);
   const [loadingVersions, setLoadingVersions] = useState(true);
   const dirty = Boolean(file) || classification !== current.classification || title !== current.title;
+  const canEdit = student.can_manage && (current.classification !== "identity" || student.can_manage_identity);
 
   useEffect(() => { heading.current?.focus(); }, []);
   useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
@@ -343,7 +344,7 @@ function StudentAttachmentManagement({ student, attachment, revision, onRevision
         <a className={buttonVariants({ variant: "outline", size: "sm" })} href={version.download_url}>تنزيل النسخة {version.version}</a>
       </li>)}
     </ul> : <p>لا توجد نسخ متاحة.</p>}
-    {student.can_manage && !current.archived_at ? <>
+    {canEdit && !current.archived_at ? <>
       <form id={formId} onSubmit={event => { event.preventDefault(); void mutate("replace"); }} className="form-stack" noValidate aria-label={`استبدال ${current.title}`}>
         <FieldGroup>
           <Field data-disabled={busy}>
@@ -368,9 +369,9 @@ function StudentAttachmentManagement({ student, attachment, revision, onRevision
     {error ? <FieldError role="alert">{error}</FieldError> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     <CenterHeaderActions>
-      {student.can_manage && !current.archived_at ? <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || !file}>حفظ نسخة جديدة</Button> : null}
-      {student.can_manage && !current.archived_at && classification !== current.classification ? <Button disabled={busy || conflict} onClick={() => void mutate("classification")}>حفظ التصنيف</Button> : null}
-      {student.can_manage && !current.archived_at ? <Button disabled={busy || conflict} onClick={() => setConfirmArchive(true)}>أرشفة الوثيقة</Button> : null}
+      {canEdit && !current.archived_at ? <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || !file}>حفظ نسخة جديدة</Button> : null}
+      {canEdit && !current.archived_at && classification !== current.classification ? <Button disabled={busy || conflict} onClick={() => void mutate("classification")}>حفظ التصنيف</Button> : null}
+      {canEdit && !current.archived_at ? <Button disabled={busy || conflict} onClick={() => setConfirmArchive(true)}>أرشفة الوثيقة</Button> : null}
       {canRestore && current.archived_at ? <Button disabled={busy || conflict} onClick={() => void mutate("restore")}>استعادة الوثيقة</Button> : null}
       {conflict ? <Button disabled={busy} onClick={() => void reload()}>تحميل أحدث المرفقات</Button> : null}
       {versionPage > 1 ? <Button disabled={busy} onClick={() => { setLoadingVersions(true); setVersionPage(page => page - 1); }}>النسخ السابقة</Button> : null}

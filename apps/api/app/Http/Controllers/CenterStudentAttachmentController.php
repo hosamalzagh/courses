@@ -54,6 +54,9 @@ class CenterStudentAttachmentController extends Controller
                 if ($existing->isNotEmpty()) {
                     abort_unless($existing->first()->student_id === $studentId && $existing->first()->actor_id === $request->user()->id, 403);
                     $this->requireCurrent($existing->count() === count($items) && $existing->first()->request_hash === $hash);
+                    abort_unless($existing->every(fn ($row): bool => ($row->archived_at === null || $permissions->isCenterManager())
+                        && (($row->classification !== 'identity' && $row->content_classification !== 'identity')
+                            || StudentIdentity::canManage($permissions, $branches))), 403);
 
                     return response()->json(['attachments' => $existing->map(fn ($row): array => StudentAttachments::payload($row)), 'attachment_revision' => $student->attachment_revision]);
                 }

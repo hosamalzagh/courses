@@ -159,3 +159,39 @@ test("reclassification and grant revocation block a previously opened historical
     await staff.close();
   }
 });
+
+test("identity attachment controls require management and identity access in the same branch", async ({ browser }) => {
+  const owner = await browser.newPage();
+  const staff = await browser.newPage();
+  try {
+    await signIn(owner);
+    await signIn(staff, "staff");
+    const workspace = await (await owner.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+    const north = workspace.branches.find((branch: { slug: string }) => branch.slug === "north");
+    const south = workspace.branches.find((branch: { slug: string }) => branch.slug === "south");
+    const created = await write(owner, "students", "POST", {
+      name: `وثيقة فرعين ${Date.now()}`, branch_ids: [north.id, south.id], request_id: crypto.randomUUID(),
+    });
+    expect(created.status).toBe(201);
+    const student = created.body.student;
+    await owner.goto(`${origin}/admin/students/${student.id}?tab=attachments`);
+    await owner.getByLabel("اختر صورًا أو PDF").setInputFiles(image);
+    await owner.getByLabel("تصنيف student.png").selectOption("identity");
+    await owner.getByRole("button", { name: "رفع المرفقات", exact: true }).click();
+    await expect(owner.getByRole("button", { name: "نسخ وإجراءات student" })).toBeVisible();
+    const grant = await write(owner, `members/${credentials.staff.membership_id}/grants`, "PUT", {
+      center_roles: [], branch_roles: { [north.id]: ["registration"], [south.id]: ["branch_viewer", "student_identity"] },
+    });
+    expect(grant.status).toBe(200);
+    await staff.goto(`${origin}/admin/students/${student.id}?tab=attachments`);
+    await expect(staff.getByRole("button", { name: "نسخ وإجراءات student" })).toBeVisible();
+    await staff.getByRole("button", { name: "نسخ وإجراءات student" }).click();
+    await expect(staff.getByRole("heading", { name: "نسخ student" })).toBeFocused();
+    await expect(staff.getByLabel("ملف النسخة الجديدة")).toHaveCount(0);
+    await expect(staff.getByRole("button", { name: "أرشفة الوثيقة" })).toHaveCount(0);
+    await expect(staff.getByRole("link", { name: "تنزيل النسخة 1" })).toBeVisible();
+  } finally {
+    await owner.close();
+    await staff.close();
+  }
+});
