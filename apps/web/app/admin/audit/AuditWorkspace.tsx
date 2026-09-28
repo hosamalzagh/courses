@@ -67,6 +67,8 @@ const eventNames: Record<string, string> = {
   "study_attendance.closed": "إغلاق كشف حضور محاضرة",
   "study_attendance.corrected": "تصحيح حضور في كشف مغلق",
   "study_session.revoked": "إلغاء اعتماد محاضرة منعقدة",
+  "study_session.teaching_recorded": "تسجيل التدريس الفعلي لمحاضرة",
+  "study_session.teaching_corrected": "تصحيح التدريس الفعلي لمحاضرة",
   "study_attendance.suspension_backfilled": "إضافة استثناءات إيقاف إلى كشف مغلق",
   "study_absence.rule_changed": "تعديل قاعدة تنبيه الغياب",
 };

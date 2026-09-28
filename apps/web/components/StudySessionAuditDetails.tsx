@@ -4,12 +4,30 @@ import { PrefetchLink as Link } from "@/components/PrefetchLink";
 
 export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
   const attendance = entry.event.startsWith("study_attendance.");
-  if (!attendance && !["study_sessions.scheduled", "study_session.postponed", "study_session.revoked", "study_session.cancelled", "study_session.replacement_scheduled"].includes(entry.event)) return null;
+  const teaching = entry.event === "study_session.teaching_recorded" || entry.event === "study_session.teaching_corrected";
+  if (!attendance && !teaching && !["study_sessions.scheduled", "study_session.postponed", "study_session.revoked", "study_session.cancelled", "study_session.replacement_scheduled"].includes(entry.event)) return null;
   let details = entry.details;
   if (typeof details === "string") { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;
   const data = details as Record<string, unknown>;
   const date = (value: unknown) => typeof value === "string" ? formatSessionTime(value) : "غير مسجل";
+  if (teaching) {
+    const groupId = typeof data.group_id === "string" ? data.group_id : "";
+    const sessionId = typeof data.session_id === "string" ? data.session_id : "";
+    const rows = (value: unknown) => Array.isArray(value) ? value.filter((item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === "object" && !Array.isArray(item)) : [];
+    const list = (value: unknown) => <ul>{rows(value).map((item, index) => <li key={index}>
+      {typeof item.instructor_name === "string" ? item.instructor_name : typeof item.instructor_id === "string" ? item.instructor_id : "محاضر غير مسجل"}
+      {" "}· من الدقيقة {typeof item.start_minute === "number" ? item.start_minute.toLocaleString("ar-EG") : "—"}
+      {" "}لمدة {typeof item.duration_minutes === "number" ? item.duration_minutes.toLocaleString("ar-EG") : "—"} دقيقة
+    </li>)}</ul>;
+    return <details><summary>تفاصيل التدريس الفعلي</summary>
+      <p>المحاضرة: <bdi dir="ltr">{sessionId || "غير مسجلة"}</bdi></p>
+      {groupId && sessionId ? <p><Link href={`/admin/groups/${encodeURIComponent(groupId)}/sessions/${encodeURIComponent(sessionId)}/teaching`}>فتح سجل التدريس</Link></p> : null}
+      <p>قبل:</p>{list(data.before)}<p>بعد:</p>{list(data.after)}
+      {typeof data.reason === "string" ? <p>سبب التصحيح: {data.reason}</p> : null}
+    </details>;
+  }
   if (attendance) {
     const groupId = typeof data.group_id === "string" ? data.group_id : "";
     const sessionId = typeof data.session_id === "string" ? data.session_id : "";
