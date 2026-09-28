@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions, CenterPageActions } from "@/components/CenterShell";
@@ -62,6 +62,7 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   const [completionBusy, setCompletionBusy] = useState(false);
   const [completionError, setCompletionError] = useState("");
   const [completionNotice, setCompletionNotice] = useState("");
+  const [completionUncertain, setCompletionUncertain] = useState(false);
   if (loadedContext !== context) {
     setLoadedContext(context);
     setSelected([]);
@@ -79,6 +80,7 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   const completeGroup = group.status === "started";
   const dirty = selectedOnPage.length > 0 || Boolean(preview) || reason.length > 0 || completionSelection.length > 0 || Boolean(completionPreview);
   const anyBusy = busy || completionBusy;
+  useEffect(() => { if (completionError) completionErrorRef.current?.focus(); }, [completionError]);
   const base = `/admin/groups/${group.id}/coverage`;
   const thresholdPath = `groups/${group.id}/completion-threshold`;
   const completionPayload = () => ({ complete_group: completeGroup, decisions: completionSelection.map(([attempt_id, exception_reason]) =>
@@ -88,15 +90,15 @@ export function CoverageControls({ context, search }: { context: CoverageContext
     return code && completionErrors[code] ? completionErrors[code] : responseMessage(response);
   }
   async function reviewCompletion() {
-    if (anyBusy || (!completeGroup && !completionSelection.length)) return;
+    if (anyBusy || completionUncertain || (!completeGroup && !completionSelection.length)) return;
     setCompletionBusy(true); setCompletionError(""); setCompletionNotice(""); setCompletionPreview(null);
     try {
       const response = await centerRequest(`groups/${group.id}/completion-preview`, "POST", completionPayload());
-      if (!response.ok) { setCompletionError(await completionMessage(response)); completionErrorRef.current?.focus(); return; }
+      if (!response.ok) { setCompletionError(await completionMessage(response)); return; }
       const data = await response.json() as CompletionPreview;
       setCompletionPreview({ data, draftKey: completionDraftKey, requestId: newSubmissionId() });
       requestAnimationFrame(() => completionPreviewRef.current?.focus());
-    } catch { setCompletionError("تعذرت معاينة الإتمام. حاول مرة أخرى."); completionErrorRef.current?.focus(); }
+    } catch { setCompletionError("تعذرت معاينة الإتمام. حاول مرة أخرى."); }
     finally { setCompletionBusy(false); }
   }
   async function confirmCompletion() {
@@ -107,14 +109,15 @@ export function CoverageControls({ context, search }: { context: CoverageContext
         ...completionPayload(), group_revision: completionPreview.data.group.revision,
         preview_token: completionPreview.data.preview_token, request_id: completionPreview.requestId,
       });
-      if (!response.ok) { setCompletionError(await completionMessage(response)); completionErrorRef.current?.focus(); return; }
+      setCompletionUncertain(false);
+      if (!response.ok) { setCompletionError(await completionMessage(response)); return; }
       setCompletionNotice(completeGroup ? "اكتملت المجموعة، وحُفظت قرارات الطلاب المختارين." : "حُفظ اعتماد إتمام الطلاب المختارين.");
       setCompletionSelected({}); setCompletionPreview(null); router.refresh();
-    } catch { setCompletionError("انقطع الاتصال أثناء الاعتماد. أعد المحاولة بالطلب نفسه للتحقق من النتيجة."); completionErrorRef.current?.focus(); }
+    } catch { setCompletionUncertain(true); setCompletionError("انقطع الاتصال أثناء الاعتماد. أعد المحاولة بالطلب نفسه للتحقق من النتيجة."); }
     finally { setCompletionBusy(false); }
   }
   function navigate(href: string) {
-    if (anyBusy) return;
+    if (anyBusy || completionUncertain) return;
     if (dirty) {
       navigationFocus.current = document.activeElement as HTMLElement;
       setPendingNavigation(href);
@@ -177,13 +180,13 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   };
 
   return <>
-    <UnsavedChangesGuard dirty={dirty || anyBusy} guardHistory blockDiscard={anyBusy}
+    <UnsavedChangesGuard dirty={dirty || anyBusy} guardHistory blockDiscard={anyBusy || completionUncertain}
       blockDiscardTitle="انتظر نتيجة الطلب"
       blockDiscardDescription="طلب اعتماد قيد التنفيذ. ابق في الصفحة حتى تظهر نتيجته؛ المغادرة الآن قد تترك حالة القرار غير واضحة." />
     {pendingNavigation ? <ConfirmationDialog title="مغادرة دون تطبيق" description="لديك اختيار أو معاينة لم تُعتمد. هل تريد الانتقال والتخلي عنها؟" confirmLabel="الانتقال دون تطبيق" onCancel={() => { setPendingNavigation(null); requestAnimationFrame(() => navigationFocus.current?.focus()); }} onConfirm={() => { const next = pendingNavigation; setPendingNavigation(null); setSelected([]); setReason(""); setPreview(null); setCompletionSelected({}); setCompletionPreview(null); router.push(next); }} /> : null}
     <CenterPageActions context={context} actions={<>
       {group.can_complete && group.status !== "waiting" ? <>
-        <Button type="button" disabled={anyBusy || (!completeGroup && !completionSelection.length)} busy={completionBusy && !completionPreview} onClick={() => void reviewCompletion()}>
+        <Button type="button" disabled={anyBusy || completionUncertain || (!completeGroup && !completionSelection.length)} busy={completionBusy && !completionPreview} onClick={() => void reviewCompletion()}>
           {completeGroup ? "معاينة إكمال المجموعة" : "معاينة اعتماد الطلاب"}
         </Button>
         {completionPreview ? <Button type="button" variant="primary" disabled={anyBusy || completionPreview.draftKey !== completionDraftKey ||

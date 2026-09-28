@@ -318,6 +318,55 @@ class StudyCoverageTest extends TestCase
         });
     }
 
+    public function test_completion_keeps_counted_coverage_from_the_previous_group_after_reattachment(): void
+    {
+        $first = $this->group($this->north, 1);
+        $second = $this->postJson("{$this->base}/groups", [
+            'level_id' => $first['level_id'], 'plan_version_id' => $first['plan_version_id'],
+            'name' => 'Later group', 'approved_price' => '0.00',
+            'instructor_ids' => array_column($first['instructors'], 'id'), 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $student = $this->student();
+        $attempt = $this->enroll($student['id'], $first, now('Africa/Cairo')->format('Y-m-d'));
+        $this->center->run(function () use ($first, $attempt, $second): void {
+            $lecture = DB::table('plan_lectures')->where('plan_version_id', $first['plan_version_id'])->firstOrFail();
+            $sessionId = (string) Str::uuid();
+            DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $first['id'],
+                'plan_lecture_id' => $lecture->id, 'number' => 1, 'scheduled_at' => now()->subDay(),
+                'status' => 'held', 'revision' => 2, 'created_by' => $this->owner->id,
+                'created_by_name' => $this->owner->name, 'closed_at' => now(), 'closed_by' => $this->owner->id,
+                'created_at' => now(), 'updated_at' => now()]);
+            DB::table('study_attendance_entries')->insert(['id' => (string) Str::uuid(), 'session_id' => $sessionId,
+                'attempt_id' => $attempt['id'], 'status' => 'counted', 'revision' => 1,
+                'recorded_by' => $this->owner->id, 'recorded_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+        });
+        $enrollments = "{$this->base}/students/{$student['id']}/enrollments";
+        $this->postJson("{$enrollments}/{$attempt['id']}/waitlist", [
+            'entered_on' => now('Africa/Cairo')->format('Y-m-d'), 'reason' => 'بانتظار المجموعة التالية',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $revision = $this->getJson($enrollments)->assertOk()->json('attempts.0.revision');
+        $this->postJson("{$enrollments}/{$attempt['id']}/reattach", [
+            'group_id' => $second['id'], 'group_revision' => $second['revision'],
+            'joined_on' => now('Africa/Cairo')->format('Y-m-d'), 'revision' => $revision,
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->center->run(fn () => DB::table('study_groups')->where('id', $second['id'])->update(['status' => 'started']));
+        $coverage = $this->getJson("{$this->base}/groups/{$second['id']}/coverage")->assertOk()
+            ->assertJsonPath('students.0.covered_count', 1)->assertJsonPath('students.0.eligible', true);
+        $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
+        $selection = ['complete_group' => true, 'decisions' => [['attempt_id' => $attempt['id']]]];
+        $preview = $this->postJson("{$this->base}/groups/{$second['id']}/completion-preview", $selection)
+            ->assertOk()->assertJsonPath('students.0.covered_count', 1)
+            ->assertJsonPath('students.0.exceptional', false)->json();
+        $this->postJson("{$this->base}/groups/{$second['id']}/completion", [
+            ...$selection, 'group_revision' => $preview['group']['revision'],
+            'preview_token' => $preview['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->center->run(fn () => $this->assertSame(1,
+            (int) DB::table('study_attempt_completion_decisions')->where('attempt_id', $attempt['id'])->value('covered_count')));
+    }
+
     private function group(int $branchId, int $lectureCount): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => 'Coverage '.Str::random(5),
