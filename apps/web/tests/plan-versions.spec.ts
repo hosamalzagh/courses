@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 import { existsSync, readFileSync } from "node:fs";
 
 test.skip(!process.env.COURSES_PLAN_CREDENTIALS || !process.env.COURSES_PLAN_QUERY_LOG,
@@ -48,7 +48,7 @@ test("plan versions preserve history, show their difference and enforce current 
     const stage = await write(owner, `courses/${course.body.course.id}/stages`, { name: "المرحلة الأولى", request_id: crypto.randomUUID() });
     expect(stage.status).toBe(201);
     const level = await write(owner, `stages/${stage.body.stage.id}/levels`, {
-      name: "مستوى الإصدارات", request_id: crypto.randomUUID(),
+      name: `مستوى الإصدارات ${stamp}`, request_id: crypto.randomUUID(),
       lectures: [{ number: 1, content: "الحروف", title: null, planned_hours: 2 }],
     });
     expect(level.status).toBe(201);
@@ -139,6 +139,18 @@ test("plan versions preserve history, show their difference and enforce current 
     await expect(owner).toHaveURL(/versions_page=2/);
     await expect(history.getByRole("row", { name: /الإصدار ١/ })).toBeVisible();
     await expect(owner.getByRole("button", { name: "الصفحة السابقة في إصدارات خطة المستوى" })).toBeDisabled();
+    await owner.goto(`${origin}/admin/curriculum?tab=levels`);
+    await owner.getByRole("searchbox", { name: "بحث في المستويات وخططها" }).fill(String(stamp));
+    await owner.getByRole("button", { name: "إنشاء إصدار جديد" }).click();
+    await owner.getByRole("textbox", { name: "محتوى المحاضرة 1" }).fill("حفظ دون وصول الرد");
+    const loseResponse = async (route: Route) => { await route.fetch(); await route.abort(); };
+    await owner.route(`**/levels/${levelId}/plan-versions`, loseResponse);
+    await owner.getByRole("button", { name: "حفظ الإصدار الجديد" }).click();
+    await expect(owner.getByRole("button", { name: "تحميل البيانات الحالية للمنهج" })).toBeVisible();
+    await owner.unroute(`**/levels/${levelId}/plan-versions`, loseResponse);
+    await owner.getByRole("button", { name: "تحميل البيانات الحالية للمنهج" }).click();
+    await expect(owner).toHaveURL(/tab=levels/);
+    await expect(owner.getByRole("table", { name: /المستويات وخططها/ }).getByText("الإصدار ٢٢")).toBeVisible();
     await owner.goto(`${origin}/admin/audit`);
     await expect(owner.getByText("إنشاء إصدار خطة المستوى").first()).toBeVisible();
     await owner.getByText("عرض تغيير المنهج").first().click();

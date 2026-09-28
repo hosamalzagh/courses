@@ -253,7 +253,8 @@ export function CurriculumControls({ context, detail = false, section = 'courses
       if (editor.kind === 'plan') open({ kind: 'plan', level: data.levels[0] }, true);
       else {
         close(); setNotice('السجل حُفظ سابقًا. راجع السجل في الجدول؛ لن يُنشأ سجل آخر.');
-        if (!detail) openSection(data.kind === 'stages' ? 'stages' : data.kind === 'levels' ? 'levels' : 'courses');
+        if (!detail) openSection(editor.kind === 'new-version' || data.kind === 'levels' ? 'levels'
+          : data.kind === 'stages' ? 'stages' : 'courses');
       }
       if (editor.kind === 'new-version' && detail) showLatestPlan();
       else router.refresh();
@@ -358,7 +359,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
         rows={detailLevel.plan_history} rowKey={row => row.id} searchText={row => `${row.version} ${row.lecture_count}`}
         emptyMessage='لا توجد إصدارات في هذه الدفعة.' columns={[
           { key: 'version', label: 'الإصدار', render: row => `الإصدار ${row.version.toLocaleString('ar-EG')}${row.version === detailLevel.plan.version ? ' · معروض' : ''}` },
-          { key: 'created', label: 'تاريخ الحفظ', render: row => new Date(row.created_at).toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' }) },
+          { key: 'created', label: 'تاريخ الحفظ', render: row => new Date(row.created_at.replace(' ', 'T') + 'Z').toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' }) },
           { key: 'size', label: 'المتطلبات', render: row => `${row.lecture_count.toLocaleString('ar-EG')} محاضرة · ${row.planned_hours.toLocaleString('ar-EG')} ساعة` },
           { key: 'used', label: 'الاستخدام', render: row => row.used_at ? 'مرتبط بدراسة' : 'غير مستخدم' },
           { key: 'actions', label: 'العرض', actions: true, render: row => <Link href={versionHref(row.version)} aria-current={row.version === detailLevel.plan.version ? 'page' : undefined}>عرض الإصدار</Link> },
