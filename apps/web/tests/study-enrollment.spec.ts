@@ -77,6 +77,12 @@ test("enrolls through the employee page and preserves SSR, credit, RTL, and the 
   await page.getByLabel("تاريخ الانضمام الفعلي").fill("2026-09-28");
   await page.getByLabel("الخصم").fill("200.00");
   await page.getByLabel("سبب الخصم").fill("منحة معتمدة");
+  await page.getByRole("searchbox", { name: "بحث في المجموعات المتاحة للتسجيل" }).fill("مجموعة أخرى");
+  await page.getByRole("button", { name: "بحث في جميع المجموعات المتاحة للتسجيل" }).click();
+  await expect(page.getByRole("alertdialog")).toContainText("بيانات تسجيل لم تُحفظ");
+  await page.getByRole("button", { name: "إلغاء", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "المجموعة الأساسية" })).toHaveValue(createdGroup.id);
+  await expect(page.getByLabel("سبب الخصم")).toHaveValue("منحة معتمدة");
   await page.getByRole("button", { name: "تسجيل الطالب والرسوم" }).click();
   await expect(page.getByText("سُجلت المحاولة ورسومها معًا", { exact: false })).toBeVisible();
   await expect(page.getByText("1300.00 EGP").first()).toBeVisible();

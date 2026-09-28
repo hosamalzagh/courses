@@ -4,6 +4,7 @@ import { useId, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions, CenterPageActions } from "@/components/CenterShell";
+import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { DataTable } from "@/components/DataTable";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
@@ -29,11 +30,14 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [pendingSearch, setPendingSearch] = useState<string | null>(null);
   const requestId = useRef<string | null>(null);
   const submitting = useRef(false);
   if (loadedInitial !== initial) {
     setLoadedInitial(initial); setCurrent(initial);
-    if (groupId && !initial.groups.some(group => group.id === groupId)) setGroupId("");
+    if (groupId && !initial.groups.some(group => group.id === groupId)) {
+      setGroupId(""); setJoinedOn(""); setDiscount("0.00"); setReason("");
+    }
   }
   const studentId = current.student.id;
   const selected = current.groups.find(group => group.id === groupId);
@@ -110,10 +114,18 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
 
   const page = (number: number) => `${path}?${new URLSearchParams({ page: String(number), groups_page: String(current.pagination.groups_page), ...(search ? { q: search } : {}) })}`;
   const groupsPage = (number: number) => `${path}?${new URLSearchParams({ page: String(current.pagination.page), groups_page: String(number), ...(search ? { q: search } : {}) })}`;
+  function searchGroups(value: string) {
+    const href = `${path}?${new URLSearchParams({ page: String(current.pagination.page), groups_page: "1", ...(value ? { q: value } : {}) })}`;
+    if (dirty) { setPendingSearch(href); return; }
+    router.push(href);
+  }
 
   return <>
     <CenterPageActions context={current} />
-    <UnsavedChangesGuard dirty={dirty} guardHistory />
+    <UnsavedChangesGuard dirty={dirty} guardHistory onDiscard={reset} />
+    {pendingSearch ? <ConfirmationDialog title="مغادرة دون حفظ" description="لديك بيانات تسجيل لم تُحفظ. هل تريد مسحها والبحث عن مجموعات أخرى؟" confirmLabel="مسح البيانات والبحث" onCancel={() => setPendingSearch(null)} onConfirm={() => {
+      reset(); router.push(pendingSearch); setPendingSearch(null);
+    }} /> : null}
     <section className="context-card form-stack" aria-label="ملخص التسجيل والرصيد">
       <h2>{current.student.name} — رقم {current.student.student_number.toLocaleString("ar-EG")}</h2>
       <p>المديونية في فروع صلاحيتك: <strong><bdi dir="ltr">{current.balance.debt} {current.student.currency ?? ""}</bdi></strong></p>
@@ -152,7 +164,7 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
       serverPagination={{ page: current.pagination.groups_page, hasMore: current.pagination.groups_has_more, batchSize: 50,
         previousHref: groupsPage(current.pagination.groups_page - 1),
         nextHref: groupsPage(current.pagination.groups_page + 1) }}
-      serverSearch={{ value: search, onSearch: value => router.push(`${path}?${new URLSearchParams({ page: String(current.pagination.page), groups_page: "1", ...(value ? { q: value } : {}) })}`) }}
+      serverSearch={{ value: search, onSearch: searchGroups }}
       searchText={row => `${row.name} ${row.level_name} ${row.branch_name}`}
       emptyMessage="لا توجد مجموعات في فروع تسجيل الطالب ضمن هذه الدفعة." description="ابحث باسم المجموعة، ثم اخترها في نموذج التسجيل. تظهر حتى ٥٠ مجموعة في الدفعة."
       columns={[
