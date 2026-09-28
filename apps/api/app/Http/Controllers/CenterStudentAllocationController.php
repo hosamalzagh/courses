@@ -21,7 +21,8 @@ class CenterStudentAllocationController extends Controller
     {
         abort_unless(Str::isUuid($studentId) && Str::isUuid($paymentId), 404);
         $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
-            'history_page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
+            'history_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'allocation_id' => ['sometimes', 'uuid']]);
         $permissions = $request->attributes->get('center_permissions');
         $page = (int) ($data['page'] ?? 1);
         $historyPage = (int) ($data['history_page'] ?? 1);
@@ -29,8 +30,9 @@ class CenterStudentAllocationController extends Controller
             ->join('study_attempt_fees as fees', 'fees.id', '=', 'allocations.fee_id')
             ->leftJoin('student_payment_allocation_reversals as reversals', 'reversals.allocation_id', '=', 'allocations.id')
             ->whereColumn('allocations.payment_id', 'payments.id')->where('allocations.student_id', $studentId)
+            ->when(isset($data['allocation_id']), fn ($query) => $query->where('allocations.id', $data['allocation_id']))
             ->orderByDesc('allocations.created_at')->orderByDesc('allocations.id')
-            ->offset(($historyPage - 1) * 20)->limit(21)
+            ->offset(isset($data['allocation_id']) ? 0 : ($historyPage - 1) * 20)->limit(21)
             ->select(['allocations.id', 'allocations.fee_id', 'allocations.currency', 'allocations.actor_name',
                 'allocations.created_at', 'fees.attempt_id', 'fees.created_at as fee_created_at',
                 'reversals.id as reversal_id', 'reversals.reason as reversal_reason',

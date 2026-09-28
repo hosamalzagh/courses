@@ -60,7 +60,8 @@ final class StudentEventNotes
             })
             ->select(['notes.id', 'notes.event_type', 'notes.event_id', 'notes.branch_id', 'notes.body',
                 'notes.important', 'notes.revision', 'notes.updated_by_name', 'notes.updated_at',
-                'attendance.session_id', 'attendance_group.id as group_id']);
+                'attendance.session_id', 'attendance_group.id as group_id'])
+            ->selectRaw('COALESCE(payment.id, allocation.payment_id) as payment_id');
     }
 
     private static function branches(CenterPermissions $permissions, string $action): ?array

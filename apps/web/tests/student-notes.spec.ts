@@ -77,15 +77,42 @@ test("the note tab and short summary follow event permissions after each grant c
     expect(payment.status).toBe(201);
     expect((await write(owner, `students/${studentId}/payments/${payment.body.payment.id}/note`,
       { body: "مراجعة دفعة الطالب", important: true, revision: 0, request_id: crypto.randomUUID() }, "PUT")).status).toBe(201);
+    const allocationOptions = await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/payments/${payment.body.payment.id}/allocation-options`)).json();
+    const allocation = await write(owner, `students/${studentId}/payments/${payment.body.payment.id}/allocations`, {
+      targets: [{ attempt_id: attempt.body.attempt.id, amount: "20.00" }], version: allocationOptions.version,
+      request_id: crypto.randomUUID(),
+    });
+    expect(allocation.status).toBe(201);
+    const allocationId = allocation.body.allocations[0].id;
+    expect((await write(owner, `students/${studentId}/allocations/${allocationId}/note`,
+      { body: "مراجعة تخصيص الطالب", important: true, revision: 0, request_id: crypto.randomUUID() }, "PUT")).status).toBe(201);
 
     await owner.goto(`${origin}/admin/students/${studentId}`);
     await expect(owner.getByRole("region", { name: "الملاحظات المهمة" })).toBeVisible();
     const summary = owner.getByRole("region", { name: "الملاحظات المهمة" });
-    await expect(summary.getByRole("link")).toHaveCount(3);
+    await expect(summary.getByRole("link")).toHaveCount(4);
     await expect(summary).not.toContainText(longNote);
     await owner.getByRole("link", { name: "الملاحظات", exact: true }).click();
     await expect(owner.getByRole("region", { name: "ملاحظات أحداث الطالب" })).toContainText("مراجعة دفعة الطالب");
+    await expect(owner.getByRole("region", { name: "ملاحظات أحداث الطالب" })).toContainText("مراجعة تخصيص الطالب");
     await expect(owner.getByRole("region", { name: "ملاحظات أحداث الطالب" })).toContainText("متابعة التسجيل");
+    await owner.getByRole("article").filter({ hasText: "مراجعة دفعة الطالب" })
+      .getByRole("link", { name: "فتح الحدث الأصلي" }).click();
+    await expect(owner).toHaveURL(new RegExp(`payment_id=${payment.body.payment.id}`));
+    await expect(owner.getByRole("region", { name: "ملاحظة الدفعة", exact: false })).toContainText("مراجعة دفعة الطالب");
+    const paymentAccount = await owner.request.get(`${origin}/api/v1/center/students/${studentId}/account?payment_id=${payment.body.payment.id}`);
+    expect(Number(paymentAccount.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+    expect((await paymentAccount.json()).payments.map((item: { id: string }) => item.id)).toEqual([payment.body.payment.id]);
+    await owner.goto(`${origin}/admin/students/${studentId}?tab=notes`);
+    await owner.getByRole("article").filter({ hasText: "مراجعة تخصيص الطالب" })
+      .getByRole("link", { name: "فتح الحدث الأصلي" }).click();
+    await expect(owner).toHaveURL(new RegExp(`payment_id=${payment.body.payment.id}.*allocation_id=${allocationId}`));
+    await expect(owner.getByRole("region", { name: "ملاحظة التخصيص", exact: false })).toContainText("مراجعة تخصيص الطالب");
+    await owner.goto(`${origin}/admin/students/${studentId}?tab=enrollment-notes`);
+    await expect(owner.getByRole("heading", { name: "ملاحظات التسجيل الدراسي" })).toBeVisible();
+    await owner.getByRole("button", { name: "عرض تاريخ التعديل" }).click();
+    await expect(owner.getByText("نسخة ١", { exact: true })).toBeVisible();
+    await owner.goto(`${origin}/admin/students/${studentId}?tab=notes`);
     const measured = await owner.request.get(`${origin}/api/v1/center/students/${studentId}?tab=notes`);
     expect(Number(measured.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
     await owner.setViewportSize({ width: 390, height: 844 });

@@ -20,8 +20,8 @@ function cents(value: string): number {
   return Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
 }
 
-export function StudentPaymentAllocations({ studentId, payment, onClose, onChanged, onDirtyChange }: {
-  studentId: string; payment: StudentPayment; onClose: () => void; onChanged: () => Promise<void>; onDirtyChange: (dirty: boolean) => void;
+export function StudentPaymentAllocations({ studentId, payment, focusNote, onClose, onChanged, onDirtyChange }: {
+  studentId: string; payment: StudentPayment; focusNote?: string; onClose: () => void; onChanged: () => Promise<void>; onDirtyChange: (dirty: boolean) => void;
 }) {
   const prefix = useId();
   const formId = `${prefix}-allocation-form`;
@@ -47,12 +47,16 @@ export function StudentPaymentAllocations({ studentId, payment, onClose, onChang
   const load = useCallback(async (page = 1, historyPage = 1) => {
     setLoading(true); setError("");
     try {
-      const response = await centerRequest(`${path}/allocation-options?${new URLSearchParams({ page: String(page), history_page: String(historyPage) })}`, "GET");
+      const response = await centerRequest(`${path}/allocation-options?${new URLSearchParams({ page: String(page), history_page: String(historyPage),
+        ...(focusNote && focusNote !== "payment" ? { allocation_id: focusNote } : {}) })}`, "GET");
       if (!response.ok) { setError(await responseMessage(response)); return; }
-      setOptions(await response.json() as Options); setConflict(false);
+      const result = await response.json() as Options;
+      setOptions(result); setConflict(false);
+      if (focusNote === "payment") setSelectedNote({ type: "payment", id: payment.id, label: "الدفعة" });
+      else if (focusNote && result.history.some(row => row.id === focusNote)) setSelectedNote({ type: "allocation", id: focusNote, label: "التخصيص" });
     } catch { setError("تعذر تحميل التخصيصات. تحقق من الاتصال وأعد المحاولة."); }
     finally { setLoading(false); }
-  }, [path]);
+  }, [path, payment.id, focusNote]);
 
   useEffect(() => { const timeout = window.setTimeout(() => { void load(); }, 0); return () => window.clearTimeout(timeout); }, [load]);
   useEffect(() => { onDirtyChange(dirty || uncertain); return () => onDirtyChange(false); }, [dirty, uncertain, onDirtyChange]);
