@@ -64,6 +64,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
     "branch_id", "course_id", "stage_id", "level_id", "group_id", "view", "q",
   ] as const).map(key => filters[key] ?? ""));
   const [selection, setSelection] = useState({ scope: selectionScope, ids: [] as string[] });
+  const [bulkDraftDirty, setBulkDraftDirty] = useState(false);
   const selectedAttemptIds = selection.scope === selectionScope ? selection.ids : [];
   function setSelectedAttemptIds(next: SetStateAction<string[]>) {
     setSelection(current => {
@@ -110,7 +111,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   for (const branch of branches) branchNameCounts.set(branch.name, (branchNameCounts.get(branch.name) ?? 0) + 1);
 
   function navigate(next: Record<FilterKey, string>) {
-    if (dirty) { setPendingNavigation(next); return; }
+    if (dirty || bulkDraftDirty) { setPendingNavigation(next); return; }
     performNavigation(next);
   }
 
@@ -195,8 +196,8 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   const pageHref = (page: number) => { const query = new URLSearchParams(baseQuery); query.set("page", String(page)); return `/admin/absence-review?${query}`; };
 
   return <div className="form-stack" dir="rtl">
-    <UnsavedChangesGuard dirty={dirty} guardHistory />
-    {pendingNavigation ? <ConfirmationDialog title="مغادرة دون حفظ" description="غيّرت قاعدة الغياب ولم تحفظها. هل تريد تطبيق نطاق آخر دون حفظ التغيير؟" confirmLabel="تطبيق النطاق دون حفظ" onCancel={() => setPendingNavigation(null)} onConfirm={() => { const next = pendingNavigation; setPendingNavigation(null); performNavigation(next); }} /> : null}
+    <UnsavedChangesGuard dirty={dirty || bulkDraftDirty} guardHistory />
+    {pendingNavigation ? <ConfirmationDialog title="مغادرة دون حفظ" description="لديك تعديل في قاعدة الغياب أو مسودة نقل لم تُحفظ. هل تريد تطبيق نطاق آخر دون حفظ التغيير؟" confirmLabel="تطبيق النطاق دون حفظ" onCancel={() => setPendingNavigation(null)} onConfirm={() => { const next = pendingNavigation; setPendingNavigation(null); performNavigation(next); }} /> : null}
     {pendingRule !== null ? <ConfirmationDialog title="تغيير النطاق دون حفظ" description="غيّرت قاعدة الغياب ولم تحفظها. هل تريد فتح قاعدة أخرى دون حفظ التغيير؟" confirmLabel="فتح قاعدة أخرى" onCancel={() => { setPendingRule(null); ruleSelect.current?.focus(); }} onConfirm={() => { const next = pendingRule; setPendingRule(null); selectRuleNow(next); ruleSelect.current?.focus(); }} /> : null}
     <section className="data-panel form-stack" aria-labelledby="absence-filters-title">
       <h2 id="absence-filters-title">نطاق التقرير</h2>
@@ -242,7 +243,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
       </CenterHeaderActions>
     </section> : null}
 
-    {canBulkWaitlist ? <AbsenceBulkWaitlist context={context} filters={filters} selected={selectedAttemptIds} onSelectionChange={setSelectedAttemptIds} /> : null}
+    {canBulkWaitlist ? <AbsenceBulkWaitlist context={context} filters={filters} selected={selectedAttemptIds} onSelectionChange={setSelectedAttemptIds} onDirtyChange={setBulkDraftDirty} /> : null}
     <DataTable id="absence-review" title="طلاب الغياب" description="العداد التشغيلي يخص فترة الارتباط الحالية؛ الغياب السابق محفوظ للتاريخ." rows={context.students}
       rowKey={row => row.id} searchText={row => `${row.student_name} ${row.student_number}`} emptyMessage="لا توجد حالات ضمن هذا النطاق."
       serverSearch={{ value: filters.q ?? "", onSearch: q => navigate({

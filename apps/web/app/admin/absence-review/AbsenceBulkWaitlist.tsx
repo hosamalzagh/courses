@@ -31,14 +31,18 @@ function todayInCairo() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
-export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionChange }: {
+export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionChange, onDirtyChange }: {
   context: AbsenceContext; filters: Record<string, string>; selected: string[]; onSelectionChange: (ids: string[]) => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<"selected" | "all">("selected");
   const formId = useId();
   const [enteredOn, setEnteredOn] = useState(todayInCairo);
   const [reason, setReason] = useState("");
+  const draftKey = JSON.stringify([mode, enteredOn, reason, selected]);
+  const [savedDraftKey, setSavedDraftKey] = useState(() => JSON.stringify(["selected", todayInCairo(), "", []]));
+  useEffect(() => { onDirtyChange(draftKey !== savedDraftKey); }, [draftKey, savedDraftKey, onDirtyChange]);
   const [result, setResult] = useState<BatchResult | null>(null);
   const [busy, setBusy] = useState<"preview" | "execute" | "load" | null>(null);
   const [error, setError] = useState("");
@@ -93,6 +97,7 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
       if (!response.ok) { setError(await responseMessage(response)); errorRef.current?.focus(); return; }
       const next = await response.json() as BatchResult;
       setResult(next);
+      setSavedDraftKey(draftKey);
       const url = new URL(window.location.href);
       url.searchParams.set("bulk_batch", next.batch.id);
       window.history.replaceState(window.history.state, "", url);
@@ -118,6 +123,7 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
     } catch { setError("انقطع الاتصال أثناء التنفيذ. ما تم حفظه ظاهر أدناه؛ اضغط استكمال التنفيذ لإعادة الفحص دون تكرار النقل."); errorRef.current?.focus(); }
     finally {
       onSelectionChange([]);
+      setSavedDraftKey(JSON.stringify([mode, enteredOn, reason, []]));
       router.refresh();
       setBusy(null);
     }
@@ -154,6 +160,7 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
         تحديد كل الطلاب القابلين للاختيار في الدفعة المحمّلة ({selectableIds.length.toLocaleString("ar-EG")})
       </FieldLabel> : null}
       {mode === "selected" && selected.length >= MAX_BULK_SELECTION ? <p role="status">وصلت إلى الحد الأقصى للاختيار اليدوي: ٢٠٠ طالب. يمكنك إلغاء اختيار طالب أو استخدام كل المؤهلين في النطاق.</p> : null}
+      {mode === "selected" && selected.length > 0 ? <Button disabled={Boolean(busy)} onClick={() => onSelectionChange([])}>مسح الاختيار ({selected.length.toLocaleString("ar-EG")})</Button> : null}
       {mode === "selected" && pageStudents.length > 0 ? <p className="muted">المحددون في الدفعة: {pageStudents.length.toLocaleString("ar-EG")}</p> : null}
       <CenterHeaderActions><Button form={formId} type="submit" variant="primary" busy={busy === "preview"} disabled={Boolean(busy) || (mode === "selected" && selected.length === 0)}>معاينة النقل</Button></CenterHeaderActions>
     </form>
