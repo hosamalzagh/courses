@@ -57,6 +57,7 @@ export async function responseMessage(response: Response): Promise<string> {
     if (data.code === "student_number_code_collision") return "الرقم التالي يتعارض مع باركود إضافي محفوظ. راجع مسؤول المركز لتعديل الرمز أو بداية التسلسل؛ لم يُنشأ الملف ولم تتغير أرقام الطلاب.";
     if (data.code === "student_code_settings_changed") return "تغير إعداد الباركود الإضافي. حمّل الإعداد الحالي ثم أعد المحاولة.";
     if (data.code === "student_numbering_exhausted") return "وصل ترقيم الطلاب إلى الحد الأقصى. تواصل مع مسؤول المركز قبل إنشاء ملف جديد.";
+    if (data.code === "student_suspended_for_session") return "ملف الطالب موقوف حاليًا أو كان موقوفًا وقت المحاضرة؛ لا يمكن تسجيل حضوره. حمّل أحدث كشف.";
     if (data.code === "last_active_owner") {
       return "لا يمكن إيقاف آخر مالك نشط للمركز أو إزالة دوره. أضف مالكًا آخر أولًا.";
     }

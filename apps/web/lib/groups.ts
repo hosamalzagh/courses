@@ -41,6 +41,7 @@ export type AttendanceRow = {
   student_status: "active" | "suspended"; entry_id: string | null;
   status: "counted" | "not_counted" | "absent" | null;
   entry_revision: number | null; recorded_by: number | null;
+  suspended_at: string | null; lifted_at: string | null;
 };
 
 export type AttendanceContext = CenterContext & {

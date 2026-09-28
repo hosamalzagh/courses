@@ -186,6 +186,11 @@ class StudySessionsTest extends TestCase
         ])->assertOk();
         $requestId = (string) Str::uuid();
         $payload = ['attempt_id' => $firstAttempt, 'status' => 'counted', 'revision' => 1, 'request_id' => $requestId];
+        $this->postJson($attendance, $payload)->assertConflict()->assertJsonPath('code', 'student_suspended_for_session');
+        $this->postJson("{$this->base}/students/{$first['id']}/status", [
+            'status' => 'active', 'reason' => 'فك الإيقاف قبل تسجيل حضور سابق',
+            'status_revision' => 2, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
         $recorded = $this->postJson($attendance, $payload)->assertCreated()->assertJsonPath('revision', 2)->json('entry');
         $this->postJson($attendance, $payload)->assertOk()->assertJsonPath('entry.id', $recorded['id']);
         $this->grant([$this->north => ['attendance']]);
@@ -210,6 +215,10 @@ class StudySessionsTest extends TestCase
         $after = $this->getJson($attendance)->assertOk()->assertJsonCount(2, 'students')->json('students');
         $this->assertSame('counted', collect($after)->firstWhere('student_id', $first['id'])['status']);
         $this->assertSame('absent', collect($after)->firstWhere('student_id', $second['id'])['status']);
+        $this->center->run(fn () => DB::table('study_attempt_group_periods')->where('attempt_id', $firstAttempt)
+            ->update(['left_on' => $scheduled->format('Y-m-d')]));
+        $historicalRoster = $this->getJson($attendance)->assertOk()->assertJsonCount(2, 'students')->json('students');
+        $this->assertSame('counted', collect($historicalRoster)->firstWhere('student_id', $first['id'])['status']);
         $backdated = $this->student();
         $this->enroll($backdated['id'], $group, now('Africa/Cairo')->subDay()->format('Y-m-d'));
         $closedRoster = $this->getJson($attendance)->assertOk()->assertJsonCount(2, 'students')->json('students');
@@ -272,6 +281,110 @@ class StudySessionsTest extends TestCase
             $this->assertSame(21, $details['absent_count']);
             $this->assertCount(20, $details['absent_attempt_ids']);
         });
+    }
+
+    public function test_suspension_period_excludes_only_covered_sessions_and_lifting_preserves_history(): void
+    {
+        $group = $this->group($this->north, 'Suspension attendance');
+        $firstAt = now('Africa/Cairo')->addDays(14)->setTime(16, 0);
+        $sessions = $this->postJson("{$this->base}/groups/{$group['id']}/sessions", [
+            'kind' => 'weekly', 'revision' => 1, 'start_at' => $firstAt->format('Y-m-d\TH:i'),
+            'count' => 2, 'interval_weeks' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions');
+        $group['revision'] = 2;
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $student = $this->student();
+        $other = $this->student();
+        $this->enroll($student['id'], $group, now('Africa/Cairo')->format('Y-m-d'));
+        $this->enroll($other['id'], $group, now('Africa/Cairo')->format('Y-m-d'));
+        $this->postJson("{$this->base}/groups/{$group['id']}/start", ['revision' => 2])->assertOk();
+        $first = "{$this->base}/groups/{$group['id']}/sessions/{$sessions[0]['id']}/attendance";
+        $second = "{$this->base}/groups/{$group['id']}/sessions/{$sessions[1]['id']}/attendance";
+        $attempt = collect($this->getJson($first)->assertOk()->json('students'))->firstWhere('student_id', $student['id'])['attempt_id'];
+        $this->travelTo($firstAt->copy()->addHour());
+        $this->postJson($first, ['attempt_id' => $attempt, 'status' => 'counted',
+            'revision' => 1, 'request_id' => (string) Str::uuid()])->assertCreated();
+        $this->postJson("{$this->base}/groups/{$group['id']}/sessions/{$sessions[0]['id']}/close", [
+            'revision' => 2, 'request_id' => (string) Str::uuid(),
+        ])->assertOk()->assertJsonPath('absent_count', 1);
+        $stale = $this->getJson($second)->assertOk()->json();
+        $this->assertNull(collect($stale['students'])->firstWhere('student_id', $student['id'])['suspended_at']);
+        $late = $this->student();
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'suspended', 'reason' => 'إيقاف بين المحاضرتين',
+            'status_revision' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->postJson("{$this->base}/students/{$late['id']}/status", [
+            'status' => 'suspended', 'reason' => 'إيقاف قبل الانضمام المتأخر',
+            'status_revision' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->travelTo($firstAt->copy()->addWeek()->addHour());
+        $requestId = (string) Str::uuid();
+        $payload = ['attempt_id' => $attempt, 'status' => 'counted', 'revision' => $stale['session']['revision'], 'request_id' => $requestId];
+        $this->postJson($second, $payload)->assertConflict()->assertJsonPath('code', 'student_suspended_for_session');
+        $this->postJson($second, $payload)->assertConflict()->assertJsonPath('code', 'student_suspended_for_session');
+        $covered = $this->getJson($second)->assertOk()->assertJsonCount(2, 'students');
+        $this->assertLessThanOrEqual(6, (int) $covered->headers->get('X-Courses-Query-Count'));
+        $row = collect($covered->json('students'))->firstWhere('student_id', $student['id']);
+        $this->assertNotNull($row['suspended_at']);
+        $this->assertNull($row['status']);
+        $closeRequestId = (string) Str::uuid();
+        $closePayload = ['revision' => 1, 'request_id' => $closeRequestId];
+        $this->postJson("{$this->base}/groups/{$group['id']}/sessions/{$sessions[1]['id']}/close", $closePayload)
+            ->assertOk()->assertJsonPath('absent_count', 1);
+        $this->postJson("{$this->base}/groups/{$group['id']}/sessions/{$sessions[1]['id']}/close", $closePayload)
+            ->assertOk()->assertJsonPath('absent_count', 1);
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'active', 'reason' => 'انتهاء الإيقاف',
+            'status_revision' => 2, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->postJson("{$this->base}/students/{$late['id']}/status", [
+            'status' => 'active', 'reason' => 'الالتحاق لاحقًا',
+            'status_revision' => 2, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $group['revision'] = 3;
+        $this->enroll($late['id'], $group, now('Africa/Cairo')->subWeeks(3)->format('Y-m-d'));
+        $afterLift = collect($this->getJson($second)->assertOk()->json('students'))->firstWhere('student_id', $student['id']);
+        $this->assertNotNull($afterLift['suspended_at']);
+        $this->assertNotNull($afterLift['lifted_at']);
+        $this->assertNull($afterLift['status']);
+        $this->assertSame('counted', collect($this->getJson($first)->assertOk()->json('students'))
+            ->firstWhere('student_id', $student['id'])['status']);
+        $this->center->run(function () use ($sessions, $attempt): void {
+            $this->assertSame(1, DB::table('study_attendance_entries')->where('session_id', $sessions[1]['id'])
+                ->where('attempt_id', $attempt)->whereNull('status')->whereNull('recorded_by')->count());
+            $this->assertSame(1, DB::table('study_attendance_entries')->where('session_id', $sessions[1]['id'])
+                ->where('status', 'absent')->count());
+            $this->assertSame(1, DB::table('center_audit_logs')->where('event', 'study_attendance.closed')
+                ->where('details->session_id', $sessions[1]['id'])->count());
+            $details = json_decode(DB::table('center_audit_logs')->where('event', 'study_attendance.closed')
+                ->where('details->session_id', $sessions[1]['id'])->value('details'), true);
+            $this->assertSame(1, $details['suspended_count']);
+        });
+        $migration = require database_path('migrations/tenant/2026_09_28_180003_backfill_suspended_closed_attendance.php');
+        $this->center->run(function () use ($migration, $sessions, $attempt): void {
+            DB::table('study_attendance_entries')->where('session_id', $sessions[1]['id'])
+                ->where('attempt_id', $attempt)->delete();
+            $closureAudit = DB::table('center_audit_logs')->where('event', 'study_attendance.closed')
+                ->where('details->session_id', $sessions[1]['id']);
+            $legacyDetails = json_decode($closureAudit->value('details'), true);
+            unset($legacyDetails['suspended_count']);
+            $closureAudit->update(['details' => json_encode($legacyDetails)]);
+            $migration->up();
+            $this->assertSame(1, DB::table('study_attendance_entries')->where('session_id', $sessions[1]['id'])
+                ->where('attempt_id', $attempt)->whereNull('status')->count());
+            $this->assertSame(2, DB::table('study_attendance_entries')->where('session_id', $sessions[1]['id'])->count());
+            $backfillAudit = DB::table('center_audit_logs')->where('event', 'study_attendance.suspension_backfilled')
+                ->where('details->session_id', $sessions[1]['id']);
+            $this->assertSame(1, $backfillAudit->count());
+            $this->assertSame(1, json_decode($backfillAudit->value('details'), true)['suspended_count']);
+            $originalDetails = DB::table('center_audit_logs')->where('event', 'study_attendance.closed')
+                ->where('details->session_id', $sessions[1]['id'])->value('details');
+            $this->assertArrayNotHasKey('suspended_count', json_decode($originalDetails, true));
+            $migration->up();
+            $this->assertSame(1, $backfillAudit->count());
+        });
+        $this->getJson($second)->assertOk()->assertJsonCount(2, 'students');
     }
 
     public function test_cancelled_session_cannot_record_or_close_attendance(): void
