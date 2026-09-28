@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions, CenterPageActions } from "@/components/CenterShell";
@@ -35,6 +35,8 @@ export function TeachingControls({ context }: { context: TeachingContext }) {
   const prefix = useId();
   const [current, setCurrent] = useState(context);
   const [draft, setDraft] = useState(() => draftFrom(context.session.segments));
+  const draftRef = useRef(draft);
+  useEffect(() => { draftRef.current = draft; }, [draft]);
   const [reason, setReason] = useState("");
   const [options, setOptions] = useState<Instructor[]>([]);
   const [search, setSearch] = useState("");
@@ -75,7 +77,11 @@ export function TeachingControls({ context }: { context: TeachingContext }) {
       const response = await centerRequest(`group-instructor-options?${params}`, "GET");
       if (!response.ok) throw new Error(await responseMessage(response));
       const found = await response.json() as InstructorPage;
-      setOptions(previous => page === 1 ? found.instructors : [...previous, ...found.instructors]);
+      setOptions(previous => {
+        const selected = new Set(draftRef.current.map(row => row.instructorId));
+        const retained = page === 1 ? previous.filter(item => selected.has(item.id)) : previous;
+        return [...new Map([...retained, ...found.instructors].map(item => [item.id, item])).values()];
+      });
       setOptionPage(page); setOptionMore(found.pagination.has_more);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "تعذر البحث عن المحاضرين.");

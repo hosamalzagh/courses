@@ -9,6 +9,6 @@ export async function TeachingPageData({ params }: { params: Promise<{ groupId: 
   const context = await loadGroupTeaching(groupId, sessionId);
   if (typeof context === "string") return <CenterAccessState state={context} />;
   return <CenterPage context={context} path={`/admin/groups/${groupId}/sessions/${sessionId}/teaching`}>
-    <TeachingControls context={context} />
+    <TeachingControls key={context.session.id} context={context} />
   </CenterPage>;
 }
