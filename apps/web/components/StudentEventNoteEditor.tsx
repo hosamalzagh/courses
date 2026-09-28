@@ -12,12 +12,15 @@ import { centerRequest, newSubmissionId, responseMessage } from "@/lib/client-ap
 import type { StudyAttemptNote } from "@/lib/server-context";
 
 type NoteVersion = { revision: number; body: string; important: boolean; actor_name: string; created_at: string };
-type Detail = { entry_revision?: number; note: (StudyAttemptNote & { created_by_name: string; created_at: string; updated_at: string }) | null;
+type Detail = { entry_revision?: number; can_edit?: boolean; note: (StudyAttemptNote & { created_by_name: string; created_at: string; updated_at: string }) | null;
   versions: NoteVersion[]; pagination: { page: number; has_more: boolean; next_before_revision: number | null } };
 export function StudentEventNoteEditor({ path, title, description, onClose, onSaved, onDirtyChange, onOccurrenceChanged,
-  expectedEntryRevision, canEdit = true, hideActions = false }: {
+  expectedEntryRevision, canEdit = true, hideActions = false,
+  closeLabel = "إلغاء", resetAction = false, emptyMessage = "لا توجد ملاحظة لهذا الحضور.",
+  savedMessage = "حُفظت الملاحظة ونسخة تعديلها دون تغيير الواقعة.", historyLabel = "نسخ تعديل الملاحظة" }: {
   path: string; title: string; description: string; onClose: () => void; canEdit?: boolean; hideActions?: boolean;
   expectedEntryRevision?: number;
+  closeLabel?: string; resetAction?: boolean; emptyMessage?: string; savedMessage?: string; historyLabel?: string;
   onSaved: (note: StudyAttemptNote) => void; onDirtyChange: (dirty: boolean) => void;
   onOccurrenceChanged?: () => Promise<void>;
 }) {
@@ -37,9 +40,10 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
   const requestId = useRef<string | null>(null);
   const submitting = useRef(false);
   const dirty = detail !== null && (body !== (detail.note?.body ?? "") || important !== (detail.note?.important ?? false));
+  const editable = canEdit && detail?.can_edit !== false;
 
   useEffect(() => { requestAnimationFrame(() => document.getElementById(`${prefix}-heading`)?.focus()); }, [prefix]);
-  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => { onDirtyChange(dirty || uncertain); }, [dirty, uncertain, onDirtyChange]);
   useEffect(() => {
     let active = true;
     centerRequest(path, "GET").then(async response => {
@@ -101,7 +105,7 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitting.current || !detail || conflict || (!dirty && !uncertain)) return;
+    if (submitting.current || !detail || !editable || conflict || (!dirty && !uncertain)) return;
     const trimmed = body.trim();
     if (!trimmed || trimmed.length > 2000) {
       setError("اكتب ملاحظة من ١ إلى ٢٠٠٠ حرف.");
@@ -132,7 +136,7 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
       const result = await response.json() as { note: StudyAttemptNote };
       onSaved(result.note);
       requestId.current = null; setUncertain(false); setConflict(false); setStaleOccurrence(false);
-      setNotice("حُفظت الملاحظة ونسخة تعديلها دون تغيير الواقعة.");
+      setNotice(savedMessage);
       setDetail(previous => previous ? { ...previous, note: result.note as Detail["note"] } : previous);
       setBody(result.note.body); setImportant(result.note.important);
       router.refresh();
@@ -155,12 +159,12 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     {loading ? <><p role="status">جارٍ تحميل الملاحظة…</p>{!hideActions ? <CenterHeaderActions>
-      <Button onClick={onClose}>إلغاء</Button>
+      <Button onClick={onClose}>{closeLabel}</Button>
     </CenterHeaderActions> : null}</> : !detail ? !hideActions ? <CenterHeaderActions>
       <Button disabled={busy} onClick={reload}>{staleOccurrence ? "تحميل الواقعة الحالية" : "إعادة المحاولة"}</Button>
-      <Button disabled={busy} onClick={onClose}>إلغاء</Button>
+      <Button disabled={busy} onClick={onClose}>{closeLabel}</Button>
     </CenterHeaderActions> : null : <>
-      {canEdit ? <form id={formId} onSubmit={save} noValidate className="form-stack">
+      {editable ? <form id={formId} onSubmit={save} noValidate className="form-stack">
         <Field data-invalid={Boolean(error && !conflict)}>
           <FieldLabel htmlFor={`${prefix}-body`}>نص الملاحظة</FieldLabel>
           <Textarea id={`${prefix}-body`} value={body} maxLength={2000} disabled={busy || uncertain}
@@ -170,13 +174,18 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
         </Field>
         <FieldLabel className="flex items-center gap-2"><Checkbox checked={important} disabled={busy || uncertain}
           onCheckedChange={value => { setImportant(value === true); requestId.current = null; }} />ملاحظة مهمة</FieldLabel>
-      </form> : detail.note ? <p>{detail.note.body}{detail.note.important ? " · مهمة" : ""}</p> : <p>لا توجد ملاحظة لهذا الحضور.</p>}
+      </form> : detail.note ? <p>{detail.note.body}{detail.note.important ? " · مهمة" : ""}</p> : <p>{emptyMessage}</p>}
       {!hideActions ? <CenterHeaderActions>
-        {canEdit ? <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || (!dirty && !uncertain)}>{uncertain ? "التحقق من الحفظ" : detail.note ? "حفظ تعديل الملاحظة" : "إضافة الملاحظة"}</Button> : null}
+        {editable ? <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || (!dirty && !uncertain)}>{uncertain ? "التحقق من الحفظ" : detail.note ? "حفظ تعديل الملاحظة" : "إضافة الملاحظة"}</Button> : null}
         {conflict ? <Button disabled={busy} onClick={reload}>{staleOccurrence ? "تحميل الواقعة الحالية" : "تحميل أحدث نسخة"}</Button> : null}
-        <Button disabled={busy} onClick={onClose}>{uncertain ? "تجاهل المسودة" : "إلغاء"}</Button>
+        {resetAction && editable && (dirty || uncertain || conflict) ? <Button disabled={busy} onClick={() => {
+          setBody(detail.note?.body ?? ""); setImportant(detail.note?.important ?? false);
+          setConflict(false); setStaleOccurrence(false); setUncertain(false); setError(""); requestId.current = null;
+          document.getElementById(`${prefix}-body`)?.focus();
+        }}>إلغاء التعديل</Button> : null}
+        <Button disabled={busy || (resetAction && (dirty || uncertain))} onClick={onClose}>{resetAction ? closeLabel : uncertain ? "تجاهل المسودة" : closeLabel}</Button>
       </CenterHeaderActions> : null}
-      {detail.note ? <section aria-label="نسخ تعديل الملاحظة"><h4>تاريخ التعديل</h4>
+      {detail.note ? <section aria-label={historyLabel}><h4>تاريخ التعديل</h4>
         <ol>{detail.versions.map(version => <li key={version.revision}>
           <strong>نسخة {version.revision.toLocaleString("ar-EG")}</strong> — {version.actor_name} — <time>{version.created_at}</time>
           {version.important ? <span> · مهمة</span> : null}<p>{version.body}</p>

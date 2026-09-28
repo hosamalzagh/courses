@@ -255,9 +255,10 @@ test("edits payment and allocation notes while financial permissions hide other 
   }, "PUT");
   expect(concurrent.status).toBe(200);
   await page.getByRole("button", { name: "عرض نسخ أقدم" }).click();
-  await expect(page.getByText("نسخة ١", { exact: true })).toBeVisible();
+  await expect(page.getByText("نسخة ١", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("نسخة ٢", { exact: true })).toHaveCount(1);
   await page.getByRole("button", { name: "حفظ تعديل الملاحظة" }).click();
-  await expect(page.getByText("تغيرت الملاحظة. حمّل أحدث نسخة وقارنها قبل الحفظ.")).toBeVisible();
+  await expect(page.getByText("تغيرت الملاحظة منذ فتحها. حمّل أحدث نسخة قبل الحفظ.")).toBeVisible();
   const preserved = await (await page.request.get(`${origin}/api/v1/center/${paymentNotePath}`)).json();
   expect(preserved.note.body).toBe("تعديل موظف آخر");
   await page.getByRole("button", { name: "إلغاء التعديل" }).click();

@@ -36,7 +36,8 @@ class CenterStudentFinancialNoteController extends Controller
     private function show(Request $request, string $studentId, string $eventId, string $type): JsonResponse
     {
         abort_unless(Str::isUuid($studentId) && Str::isUuid($eventId), 404);
-        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
+        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'before_revision' => ['sometimes', 'integer', 'min:1']]);
         $permissions = $request->attributes->get('center_permissions');
         $event = $this->event($studentId, $eventId, $type, $permissions, false, true);
         $this->authorize($permissions, $event, $type);
@@ -50,14 +51,18 @@ class CenterStudentFinancialNoteController extends Controller
         abort_unless($note === null || ($note->student_id === $studentId && (int) $note->branch_id === (int) $event->branch_id), 409);
         $page = (int) ($data['page'] ?? 1);
         $versions = $note === null ? collect() : DB::connection('tenant')->table('student_event_note_revisions')
-            ->where('note_id', $note->id)->orderByDesc('revision')->offset(($page - 1) * 20)->limit(21)
+            ->where('note_id', $note->id)
+            ->when(isset($data['before_revision']), fn ($query) => $query->where('revision', '<', $data['before_revision']))
+            ->orderByDesc('revision')->offset(isset($data['before_revision']) ? 0 : ($page - 1) * 20)->limit(21)
             ->get(['revision', 'body', 'important', 'actor_name', 'created_at']);
+        $visibleVersions = $versions->take(20)->values();
 
         return response()->json([
             'note' => $note === null ? null : $this->present($note),
             'can_edit' => $this->canEdit($request->attributes->get('center_permissions'), $event, $type),
-            'versions' => $versions->take(20)->values(),
-            'pagination' => ['page' => $page, 'has_more' => $versions->count() > 20],
+            'versions' => $visibleVersions,
+            'pagination' => ['page' => $page, 'has_more' => $versions->count() > 20,
+                'next_before_revision' => $versions->count() > 20 ? $visibleVersions->last()->revision : null],
         ])->header('Cache-Control', 'private, no-store');
     }
 
