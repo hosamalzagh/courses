@@ -203,6 +203,12 @@ class StudyAbsenceReviewTest extends TestCase
             'entered_on' => $today, 'reason' => 'فحص الصلاحيات',
         ])->assertCreated();
         $batchId = $preview->json('batch.id');
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $staffBatchId = $this->postJson("{$this->base}/absence-review/waitlist-batches", [
+            'selection_mode' => 'selected', 'attempt_ids' => [$attemptId], 'branch_id' => $this->north, 'view' => 'all',
+            'entered_on' => $today, 'reason' => 'معاينة موظف التسجيل',
+        ])->assertCreated()->json('batch.id');
         $this->grant([$this->north => ['branch_viewer']]);
         $this->asUser($this->staff);
         $this->postJson("{$this->base}/absence-review/waitlist-batches", [
@@ -211,6 +217,8 @@ class StudyAbsenceReviewTest extends TestCase
         ])->assertNotFound();
         $this->getJson("{$this->base}/absence-review/waitlist-batches/{$batchId}")->assertNotFound();
         $this->postJson("{$this->base}/absence-review/waitlist-batches/{$batchId}/execute")->assertNotFound();
+        $this->getJson("{$this->base}/absence-review/waitlist-batches/{$staffBatchId}")->assertNotFound();
+        $this->postJson("{$this->base}/absence-review/waitlist-batches/{$staffBatchId}/execute")->assertNotFound();
         $this->asUser($this->owner);
         $this->getJson("{$this->base}/absence-review/waitlist-batches/{$batchId}")->assertOk();
     }

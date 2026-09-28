@@ -288,7 +288,7 @@ class CenterAbsenceReviewController extends Controller
         $branches = DB::connection('tenant')->table('study_waitlist_batch_items')
             ->where('batch_id', $batchId)->distinct()->pluck('branch_id');
         foreach ($branches as $branchId) {
-            abort_unless($permissions->can('enrollment.manage', (int) $branchId), 403);
+            abort_unless($permissions->can('enrollment.manage', (int) $branchId), 404);
         }
 
         return $batch;

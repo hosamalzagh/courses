@@ -102,6 +102,7 @@ test("bulk preview, individual outcome, forbidden branch, and SSR budget", async
     await expect(owner.getByRole("region", { name: "نتائج النقل الجماعي" })).toContainText(people[0].name);
     await owner.getByRole("button", { name: "تأكيد نقل المؤهلين" }).click();
     await expect(owner.getByText("اكتمل نقل ١ طالب إلى الانتظار.")).toBeVisible();
+    await expect(owner.getByRole("checkbox", { name: `اختيار ${people[0].name} للنقل إلى الانتظار` })).toHaveCount(0);
     await owner.reload();
     await expect(owner.getByRole("row").filter({ hasText: people[0].name })).toHaveCount(1);
     await expect(owner.getByRole("region", { name: "نتائج النقل الجماعي" })).toContainText("نُقل إلى الانتظار");
@@ -115,6 +116,7 @@ test("bulk preview, individual outcome, forbidden branch, and SSR budget", async
     await expect(owner.getByText("الإجمالي: ١ · نُقل: ٠ · استُبعد: ٠ · ينتظر التنفيذ: ١")).toBeVisible();
     await owner.getByRole("button", { name: "تأكيد نقل المؤهلين" }).click();
     await expect(owner.getByText("اكتمل نقل ١ طالب إلى الانتظار.")).toBeVisible();
+    await expect(owner.getByRole("checkbox", { name: `اختيار ${people[1].name} للنقل إلى الانتظار` })).toHaveCount(0);
     await owner.goto(url);
     await expect(owner.getByText("لا توجد حالات ضمن هذا النطاق.")).toBeVisible();
     await owner.goto(`${origin}/admin/audit`);

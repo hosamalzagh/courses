@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions } from "@/components/CenterShell";
 import { InlineNotice } from "@/components/InlineNotice";
@@ -32,6 +33,7 @@ function todayInCairo() {
 export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionChange }: {
   context: AbsenceContext; filters: Record<string, string>; selected: string[]; onSelectionChange: (ids: string[]) => void;
 }) {
+  const router = useRouter();
   const [mode, setMode] = useState<"selected" | "all">("selected");
   const formId = useId();
   const [enteredOn, setEnteredOn] = useState(todayInCairo);
@@ -113,7 +115,11 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
         ? `اكتمل النقل جزئيًا: نُقل ${current.batch.moved.toLocaleString("ar-EG")} واستُبعد ${current.batch.skipped.toLocaleString("ar-EG")}. راجع سبب كل حالة أدناه.`
         : `اكتمل نقل ${current.batch.moved.toLocaleString("ar-EG")} طالب إلى الانتظار.`);
     } catch { setError("انقطع الاتصال أثناء التنفيذ. ما تم حفظه ظاهر أدناه؛ اضغط استكمال التنفيذ لإعادة الفحص دون تكرار النقل."); errorRef.current?.focus(); }
-    finally { setBusy(null); }
+    finally {
+      onSelectionChange([]);
+      router.refresh();
+      setBusy(null);
+    }
   }
 
   const resultScope = result ? scopeDescription(result.batch.scope) : "";
