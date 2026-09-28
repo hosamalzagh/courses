@@ -83,8 +83,17 @@ class ContentEquivalenceTest extends TestCase
             ->assertJsonPath('approvals.0.target_lectures.1.content', 'Reading');
         $this->assertLessThanOrEqual(6, (int) $workspace->headers->get('X-Courses-Query-Count'));
         $this->assertNotNull($workspace->headers->get('X-Courses-Query-Count'));
-        $this->center->run(function () use ($saved): void {
+        $this->center->run(function () use ($saved, $source, $target): void {
             $this->assertSame(1, DB::table('content_equivalences')->count());
+            $this->assertSame(2, DB::table('study_plan_versions')->whereIn('id', [$source['plan']['id'], $target['plan']['id']])
+                ->whereNotNull('used_at')->count());
+            try {
+                DB::transaction(fn () => DB::table('plan_lectures')->where('id', $source['plan']['lectures'][0]['id'])
+                    ->update(['content' => 'Changed after approval']));
+                $this->fail('An approved source lecture must be immutable.');
+            } catch (QueryException $exception) {
+                $this->assertStringContainsString('Used study plan is immutable', $exception->getMessage());
+            }
             try {
                 DB::table('content_equivalences')->where('id', $saved['id'])->update(['reason' => 'Silent rewrite']);
                 $this->fail('Approved equivalence must be immutable.');
@@ -103,6 +112,11 @@ class ContentEquivalenceTest extends TestCase
                 $this->assertSame($log->branch_id === $this->north ? 'Letters' : 'Alphabet', $local['lectures'][0]['content']);
             }
         });
+        $this->actingAs($this->owner, 'web')->withSession(['center_id' => $this->center->id]);
+        $this->patchJson("{$this->base}/levels/{$source['id']}/first-plan", [
+            'revision' => 1, 'plan_version_id' => $source['plan']['id'],
+            'lectures' => [['number' => 1, 'content' => 'Changed after approval', 'planned_hours' => 1]],
+        ])->assertConflict()->assertJsonPath('code', 'plan_used');
         $this->grant([$this->north => ['branch_viewer']]);
         $this->asStaff();
         $this->getJson($path)->assertOk()->assertJsonCount(0, 'approvals');

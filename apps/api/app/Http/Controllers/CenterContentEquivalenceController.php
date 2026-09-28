@@ -151,6 +151,8 @@ SQL)
                     'request_id' => $data['request_id'], 'request_hash' => $requestHash,
                     'mapping_hash' => $mappingHash,
                 ];
+                DB::connection('tenant')->table('study_plan_versions')
+                    ->whereIn('id', [$source->id, $target->id])->whereNull('used_at')->update(['used_at' => $time]);
                 DB::connection('tenant')->table('content_equivalences')->insert($record);
                 $sourceLectures = array_values(array_filter(json_decode($source->lectures, true),
                     fn (array $lecture): bool => in_array($lecture['id'], $sourceIds, true)));

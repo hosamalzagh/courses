@@ -52,7 +52,7 @@ test('whole-lecture equivalence approval is scoped, auditable and recoverable', 
           { number: 2, content: 'محتوى ثان', planned_hours: 2 },
         ] });
       expect(level.status).toBe(201);
-      return level.body.level as { plan: { id: string; lectures: { id: string }[] } };
+      return level.body.level as { id: string; plan: { id: string; lectures: { id: string }[] } };
     }
     const firstBranch = await write(owner, 'branches', { name: `فرع مصدر ${stamp}`, slug: `eq-source-${stamp}` });
     const secondBranch = await write(owner, 'branches', { name: `فرع وجهة ${stamp}`, slug: `eq-target-${stamp}` });
@@ -86,6 +86,10 @@ test('whole-lecture equivalence approval is scoped, auditable and recoverable', 
     await owner.getByRole('table', { name: 'سجل اعتمادات معادلة المحتوى' })
       .getByText('عرض المحاضرات المعتمدة').first().click();
     await expect(owner.getByRole('table', { name: 'سجل اعتمادات معادلة المحتوى' }).getByText('محتوى أول').first()).toBeVisible();
+    const attemptedRewrite = await write(owner, `levels/${source.id}/first-plan`, { revision: 1,
+      plan_version_id: source.plan.id, lectures: [{ number: 1, content: 'تغيير بعد الاعتماد', planned_hours: 1 }] }, 'PATCH');
+    expect(attemptedRewrite.status).toBe(409);
+    expect(attemptedRewrite.body.code).toBe('plan_used');
     await owner.getByRole('button', { name: 'تفعيل الوضع الداكن' }).click();
     await expect(owner.locator('html')).toHaveAttribute('data-theme', 'dark');
     await owner.setViewportSize({ width: 390, height: 844 });
