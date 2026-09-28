@@ -74,10 +74,12 @@ test("withdrawal fee settlement and correction preserve money, permissions, audi
     const html = await owner.request.get(`${origin}/admin/students/${studentId}/account`);
     expect(await html.text()).toContain("1000.00");
     const adjustmentQueryRoute = `**/api/v1/center/students/${studentId}/fees/${attempt.fee.id}/adjustments?*`;
+    let simulateRevokedApproval = false;
     await owner.route(adjustmentQueryRoute, async route => {
       const response = await route.fetch();
       const detail = await response.json();
-      await route.fulfill({ response, json: { ...detail, pagination: { ...detail.pagination, history_has_more: true } } });
+      await route.fulfill({ response, json: { ...detail, can_approve: simulateRevokedApproval ? false : detail.can_approve,
+        pagination: { ...detail.pagination, history_has_more: true } } });
     });
     const initialLoadRoute = `**/api/v1/center/students/${studentId}/fees/${attempt.fee.id}/adjustments?history_page=1`;
     let remainingInitialFailures = 2;
@@ -122,6 +124,10 @@ test("withdrawal fee settlement and correction preserve money, permissions, audi
     await expect(owner.getByRole("heading", { name: new RegExp("تسوية رسوم") })).toBeVisible();
     await expect(owner.getByLabel("المستحق الجديد (EGP)")).toHaveValue("800.00");
     await expect(owner.getByLabel("سبب التسوية أو التصحيح")).toHaveValue("تسوية بعد الانسحاب");
+    await expect(owner.getByRole("button", { name: "التحقق من الاعتماد" })).toBeVisible();
+    simulateRevokedApproval = true;
+    await owner.reload();
+    await expect(owner.getByRole("button", { name: "معاينة الأثر" })).toHaveCount(0);
     await expect(owner.getByRole("button", { name: "التحقق من الاعتماد" })).toBeVisible();
     await owner.getByRole("button", { name: "التحقق من الاعتماد" }).click();
     await owner.getByRole("button", { name: "تأكيد التسوية" }).click();

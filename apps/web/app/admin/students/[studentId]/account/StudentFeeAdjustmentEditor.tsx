@@ -178,7 +178,7 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, recoveryKey, onClos
       </section> : null}
       <CenterHeaderActions>
         {detail.can_approve ? <Button form={formId} type="submit" disabled={busy || conflict || uncertain} busy={busy}>معاينة الأثر</Button> : null}
-        {detail.can_approve && (preview || uncertain) ? <Button variant="primary" disabled={busy || conflict} onClick={() => setConfirm(true)}>{uncertain ? "التحقق من الاعتماد" : replacesId ? "اعتماد التصحيح" : "اعتماد التسوية"}</Button> : null}
+        {(detail.can_approve && preview) || uncertain ? <Button variant="primary" disabled={busy || conflict} onClick={() => setConfirm(true)}>{uncertain ? "التحقق من الاعتماد" : replacesId ? "اعتماد التصحيح" : "اعتماد التسوية"}</Button> : null}
         {detail.can_approve && replacesId ? <Button disabled={busy || uncertain} onClick={() => { setReplacesId(null); setDetail(current => current ? { ...current, preview: null } : current); }}>إلغاء وضع التصحيح</Button> : null}
         <Button disabled={busy || uncertain} onClick={() => dirty ? setCancel(true) : onClose()}>إغلاق محرر الرسوم</Button>
         {conflict ? <Button disabled={busy} onClick={() => void load()}>تحميل أحدث الرسوم</Button> : null}

@@ -78,7 +78,6 @@ class CenterStudentFeeAdjustmentController extends Controller
                 ->lockForUpdate()->first(['students.id', 'students.financial_account_revision']);
             abort_unless($student, 404);
             $fee = $this->visibleFee($studentId, $feeId, $permissions);
-            abort_unless($permissions->can('finance.approve', (int) $fee->branch_id), 403);
             $existing = DB::connection('tenant')->table('study_fee_adjustment_submissions')
                 ->where('request_id', $data['request_id'])->first();
             if ($existing !== null) {
@@ -92,6 +91,7 @@ class CenterStudentFeeAdjustmentController extends Controller
                     ->where('submission_id', $data['request_id'])->orderBy('sequence')->get(),
                     'version' => StudentAccountVersion::forActor($studentId, $student->financial_account_revision, $request->user()->id)]);
             }
+            abort_unless($permissions->can('finance.approve', (int) $fee->branch_id), 403);
             if (! hash_equals(StudentAccountVersion::forActor($studentId, $student->financial_account_revision, $request->user()->id), $data['version'])) {
                 $this->conflict('student_account_changed');
             }

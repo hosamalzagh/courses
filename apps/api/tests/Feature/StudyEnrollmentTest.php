@@ -1132,9 +1132,15 @@ class StudyEnrollmentTest extends TestCase
         $this->asUser($this->staff);
         $preview = $this->getJson("{$northPath}?new_due=50.00")->assertOk()->assertJsonPath('can_approve', true);
         $this->assertLessThanOrEqual(6, (int) $preview->headers->get('X-Courses-Query-Count'));
-        $this->postJson($northPath, ['new_due' => '50.00', 'reason' => 'قرار مالي صريح',
+        $approvedPayload = ['new_due' => '50.00', 'reason' => 'قرار مالي صريح',
             'replaces_adjustment_id' => null, 'version' => $preview->json('version'),
-            'request_id' => (string) Str::uuid()])->assertCreated();
+            'request_id' => (string) Str::uuid()];
+        $approved = $this->postJson($northPath, $approvedPayload)->assertCreated()->json('adjustments.0');
+        $this->grant([$this->north => ['accounting']]);
+        $this->asUser($this->staff);
+        $this->postJson($northPath, $approvedPayload)->assertOk()
+            ->assertJsonPath('adjustments.0.id', $approved['id']);
+        $this->postJson($northPath, [...$approvedPayload, 'request_id' => (string) Str::uuid()])->assertForbidden();
         $this->getJson($southPath)->assertNotFound();
         $this->center->run(fn () => $this->assertSame(1, DB::table('center_audit_logs')
             ->where('event', 'student.fee_settled')->where('branch_id', $this->north)->count()));
