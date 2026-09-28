@@ -33,6 +33,8 @@ const eventNames: Record<string, string> = {
   "student.enrolled": "تسجيل طالب ورسوم محاولة الدراسة",
   "student.study_repeated": "إعادة دراسة الطالب بمحاولة ورسوم جديدتين",
   "student.study_withdrawn": "انسحاب الطالب من محاولة الدراسة",
+  "student.study_waitlisted": "نقل الطالب إلى انتظار المستوى",
+  "student.study_reattached": "إعادة إلحاق الطالب بالمحاولة نفسها",
   "student.study_attempt_note_created": "إضافة ملاحظة على تسجيل الطالب",
   "student.study_attempt_note_updated": "تعديل ملاحظة تسجيل الطالب",
   "student.attendance_note_created": "إضافة ملاحظة على حضور أو غياب الطالب",
