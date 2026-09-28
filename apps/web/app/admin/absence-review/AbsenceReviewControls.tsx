@@ -1,12 +1,14 @@
 "use client";
 
-import { useId, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions } from "@/components/CenterShell";
+import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { DataTable } from "@/components/DataTable";
 import { InlineNotice } from "@/components/InlineNotice";
 import { PrefetchLink as Link } from "@/components/PrefetchLink";
+import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -26,6 +28,8 @@ function ruleText(mode: string | null, limit: number | null): string {
 export function AbsenceReviewControls({ context, filters }: { context: AbsenceContext; filters: Record<string, string> }) {
   const router = useRouter();
   const formId = useId();
+  const ruleSelect = useRef<HTMLSelectElement>(null);
+  const limitInput = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState<Record<FilterKey, string>>({
     branch_id: filters.branch_id ?? "", course_id: filters.course_id ?? "", stage_id: filters.stage_id ?? "",
     level_id: filters.level_id ?? "", group_id: filters.group_id ?? "", view: filters.view ?? "review", q: filters.q ?? "",
@@ -42,29 +46,53 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   const [optionPage, setOptionPage] = useState(0);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [optionError, setOptionError] = useState("");
+  const [pendingNavigation, setPendingNavigation] = useState<Record<FilterKey, string> | null>(null);
+  const [pendingRule, setPendingRule] = useState<string | null>(null);
   const options = [...context.options, ...extraOptions.filter(option => !context.options.some(initial => initial.kind === option.kind && initial.id === option.id))];
-  const selected = options.find(option => `${option.kind}:${option.id}` === ruleKey);
+  const [savedRules, setSavedRules] = useState<Record<string, Pick<AbsenceOption, "absence_mode" | "absence_limit" | "absence_revision">>>({});
+  const selectedOption = options.find(option => `${option.kind}:${option.id}` === ruleKey);
+  const localRule = savedRules[ruleKey];
+  const selected = selectedOption && localRule && localRule.absence_revision >= selectedOption.absence_revision
+    ? { ...selectedOption, ...localRule } : selectedOption;
+  const proposedLimit = mode === "consecutive" || mode === "total" ? Number(limit) || null : null;
+  const dirty = Boolean(selected && (mode !== (selected.absence_mode ?? "inherit") || proposedLimit !== selected.absence_limit));
   const canManage = (branchId: number) => context.permissions.can_manage_center || context.permissions.branch_actions?.[String(branchId)]?.includes("curriculum.manage");
   const editable = options.filter(option => canManage(option.branch_id));
   const branches = Array.from(new Map(options.map(option => [option.branch_id, option.branch_name])).entries());
 
   function navigate(next: Record<FilterKey, string>) {
+    if (dirty) { setPendingNavigation(next); return; }
+    performNavigation(next);
+  }
+
+  function performNavigation(next: Record<FilterKey, string>) {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(next)) if (value) query.set(key, value);
     router.push(`/admin/absence-review${query.size ? `?${query}` : ""}`);
   }
 
   function selectRule(key: string) {
+    if (key !== ruleKey && dirty) { setPendingRule(key); return; }
+    selectRuleNow(key);
+  }
+
+  function selectRuleNow(key: string) {
     const option = options.find(item => `${item.kind}:${item.id}` === key);
     setRuleKey(key); setMode(option?.absence_mode ?? "inherit"); setLimit(option?.absence_limit?.toString() ?? "");
     setError(""); setNotice(""); setConflict(false);
+  }
+
+  function cancelRule() {
+    setMode(selected?.absence_mode ?? "inherit"); setLimit(selected?.absence_limit?.toString() ?? "");
+    setError(""); setNotice(""); setConflict(false);
+    ruleSelect.current?.focus();
   }
 
   async function saveRule(event: FormEvent) {
     event.preventDefault();
     if (!selected || busy) return;
     if ((mode === "consecutive" || mode === "total") && (!/^[1-9]\d*$/.test(limit) || Number(limit) > 999)) {
-      setError("أدخل حدًا بين ١ و٩٩٩ غيابًا."); return;
+      setError("أدخل حدًا بين ١ و٩٩٩ غيابًا."); limitInput.current?.focus(); return;
     }
     setBusy(true); setError(""); setNotice("");
     try {
@@ -74,9 +102,13 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
       });
       if (!response.ok) {
         if (response.status === 409) { setConflict(true); setError("تغيرت القاعدة في جلسة أخرى. حدّث الصفحة ثم راجع القيمة الحالية."); }
-        else setError(await responseMessage(response));
+        else { setError(await responseMessage(response)); if (response.status === 422) limitInput.current?.focus(); }
         return;
       }
+      const result = (await response.json()) as { rule: { mode: AbsenceOption["absence_mode"]; limit: number | null; revision: number } };
+      setSavedRules(current => ({ ...current, [ruleKey]: {
+        absence_mode: result.rule.mode, absence_limit: result.rule.limit, absence_revision: result.rule.revision,
+      } }));
       setNotice("حُفظت قاعدة الغياب وأُعيد حساب التقرير الحالي.");
       router.refresh();
     } catch {
@@ -111,6 +143,9 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   const pageHref = (page: number) => { const query = new URLSearchParams(baseQuery); query.set("page", String(page)); return `/admin/absence-review?${query}`; };
 
   return <div className="form-stack" dir="rtl">
+    <UnsavedChangesGuard dirty={dirty} guardHistory />
+    {pendingNavigation ? <ConfirmationDialog title="مغادرة دون حفظ" description="غيّرت قاعدة الغياب ولم تحفظها. هل تريد تطبيق نطاق آخر دون حفظ التغيير؟" confirmLabel="تطبيق النطاق دون حفظ" onCancel={() => setPendingNavigation(null)} onConfirm={() => { const next = pendingNavigation; setPendingNavigation(null); performNavigation(next); }} /> : null}
+    {pendingRule !== null ? <ConfirmationDialog title="تغيير النطاق دون حفظ" description="غيّرت قاعدة الغياب ولم تحفظها. هل تريد فتح قاعدة أخرى دون حفظ التغيير؟" confirmLabel="فتح قاعدة أخرى" onCancel={() => { setPendingRule(null); ruleSelect.current?.focus(); }} onConfirm={() => { const next = pendingRule; setPendingRule(null); selectRuleNow(next); ruleSelect.current?.focus(); }} /> : null}
     <section className="data-panel form-stack" aria-labelledby="absence-filters-title">
       <h2 id="absence-filters-title">نطاق التقرير</h2>
       <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); void findOptions(1); }}>
@@ -138,15 +173,19 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
       <p className="muted">تُطبق قاعدة المجموعة أولًا، ثم المستوى، فالمرحلة، فالكورس. التعطيل الصريح يوقف التنبيه لهذا النطاق.</p>
       <form id={formId} className="form-stack" onSubmit={saveRule}>
         <FieldGroup className="grid gap-3 md:grid-cols-3">
-          <Field><FieldLabel htmlFor="absence-rule-scope">النطاق المراد تعديله</FieldLabel><NativeSelect id="absence-rule-scope" value={ruleKey} onChange={event => selectRule(event.target.value)}><NativeSelectOption value="">اختر النطاق</NativeSelectOption>{editable.map(option => <NativeSelectOption key={`${option.kind}:${option.id}`} value={`${option.kind}:${option.id}`}>{labels[option.kind]}: {option.name} · {option.branch_name}</NativeSelectOption>)}</NativeSelect></Field>
+          <Field><FieldLabel htmlFor="absence-rule-scope">النطاق المراد تعديله</FieldLabel><NativeSelect ref={ruleSelect} id="absence-rule-scope" value={ruleKey} onChange={event => selectRule(event.target.value)}><NativeSelectOption value="">اختر النطاق</NativeSelectOption>{editable.map(option => <NativeSelectOption key={`${option.kind}:${option.id}`} value={`${option.kind}:${option.id}`}>{labels[option.kind]}: {option.name} · {option.branch_name}</NativeSelectOption>)}</NativeSelect></Field>
           <Field><FieldLabel htmlFor="absence-rule-mode">نوع القاعدة</FieldLabel><NativeSelect id="absence-rule-mode" value={mode} disabled={!selected} onChange={event => { setMode(event.target.value); setError(""); }}><NativeSelectOption value="inherit" disabled={selected?.kind === "courses"}>موروثة</NativeSelectOption><NativeSelectOption value="consecutive">غياب متتالٍ</NativeSelectOption><NativeSelectOption value="total">غياب إجمالي</NativeSelectOption><NativeSelectOption value="disabled">تعطيل التنبيه</NativeSelectOption></NativeSelect></Field>
-          <Field><FieldLabel htmlFor="absence-rule-limit">الحد</FieldLabel><Input id="absence-rule-limit" type="number" min={1} max={999} value={limit} disabled={!selected || mode === "inherit" || mode === "disabled"} onChange={event => setLimit(event.target.value)} aria-invalid={Boolean(error)} /><FieldDescription>من ١ إلى ٩٩٩ غيابًا عند اختيار المتتالي أو الإجمالي.</FieldDescription></Field>
+          <Field><FieldLabel htmlFor="absence-rule-limit">الحد</FieldLabel><Input ref={limitInput} id="absence-rule-limit" type="number" min={1} max={999} value={limit} disabled={!selected || mode === "inherit" || mode === "disabled"} onChange={event => setLimit(event.target.value)} aria-invalid={Boolean(error)} /><FieldDescription>من ١ إلى ٩٩٩ غيابًا عند اختيار المتتالي أو الإجمالي.</FieldDescription></Field>
         </FieldGroup>
         {selected ? <p className="muted">القيمة الحالية: {ruleText(selected.absence_mode, selected.absence_limit)}</p> : null}
-        {error ? <InlineNotice tone="error">{error} {conflict ? <Button onClick={() => router.refresh()}>تحديث الصفحة</Button> : null}</InlineNotice> : null}
+        {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
         {notice ? <InlineNotice>{notice}</InlineNotice> : null}
       </form>
-      <CenterHeaderActions><Button form={formId} type="submit" variant="primary" busy={busy} disabled={!selected || conflict}>حفظ قاعدة الغياب</Button></CenterHeaderActions>
+      <CenterHeaderActions>
+        <Button form={formId} type="submit" variant="primary" busy={busy} disabled={!selected || conflict || !dirty}>حفظ قاعدة الغياب</Button>
+        {selected && dirty ? <Button onClick={cancelRule} disabled={busy}>إلغاء التعديل</Button> : null}
+        {conflict ? <Button onClick={() => window.location.reload()}>تحديث القاعدة</Button> : null}
+      </CenterHeaderActions>
     </section> : null}
 
     <DataTable id="absence-review" title="طلاب الغياب" description="العداد التشغيلي يخص فترة الارتباط الحالية؛ الغياب السابق محفوظ للتاريخ." rows={context.students}

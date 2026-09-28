@@ -74,9 +74,15 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
       kind: "single", revision: 1, start_at: start, plan_lecture_number: 1, request_id: crypto.randomUUID(),
     });
     expect(session.status).toBe(201);
+    expect((await write(owner, `groups/${group.body.group.id}/start`, { revision: session.body.group_revision })).status).toBe(200);
     execFileSync("/Users/Shared/DBngin/postgresql/18.4_arm/bin/psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_ABSENCE_DB_PORT!, "-U", "postgres",
       "-d", `courses_center_${centerId}`, "-c",
-      `UPDATE study_sessions SET scheduled_at = now() - interval '1 hour', status = 'held', closed_at = now() WHERE id = '${session.body.sessions[0].id}'; INSERT INTO study_attendance_entries(id, session_id, attempt_id, status, revision, created_at, updated_at) VALUES (gen_random_uuid(), '${session.body.sessions[0].id}', '${saved.body.attempt.id}', 'absent', 1, now(), now())`], { stdio: "ignore" });
+      `UPDATE study_groups SET started_at = now() - interval '2 days' WHERE id = '${group.body.group.id}'; UPDATE study_sessions SET scheduled_at = now() - interval '1 hour' WHERE id = '${session.body.sessions[0].id}'`], { stdio: "ignore" });
+    const closed = await write(owner, `groups/${group.body.group.id}/sessions/${session.body.sessions[0].id}/close`, {
+      revision: 1, request_id: crypto.randomUUID(),
+    });
+    expect(closed.status).toBe(200);
+    expect(closed.body.absent_count).toBe(1);
 
     const direct = await owner.request.get(`${origin}/api/v1/center/absence-review?view=all`);
     expect(direct.status(), await direct.text()).toBe(200);
@@ -95,9 +101,23 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
     await owner.getByLabel("الحد").fill("1");
     await owner.getByRole("button", { name: "حفظ قاعدة الغياب" }).click();
     await expect(owner.getByText("حُفظت قاعدة الغياب وأُعيد حساب التقرير الحالي.")).toBeVisible();
+    await owner.getByLabel("نوع القاعدة").selectOption("consecutive");
+    await owner.getByRole("button", { name: "حفظ قاعدة الغياب" }).click();
+    await expect(owner.getByText("حُفظت قاعدة الغياب وأُعيد حساب التقرير الحالي.")).toBeVisible();
+    await expect(owner.getByText("تغيرت القاعدة في جلسة أخرى.")).toHaveCount(0);
+    await owner.getByLabel("الحد").fill("0");
+    await owner.getByRole("button", { name: "حفظ قاعدة الغياب" }).click();
+    await expect(owner.getByLabel("الحد")).toBeFocused();
+    await owner.getByRole("button", { name: "إلغاء التعديل" }).click();
+    await expect(owner.getByLabel("النطاق المراد تعديله")).toBeFocused();
+    await owner.goto(`${origin}/admin/audit`);
+    await expect(owner.getByText("تعديل قاعدة تنبيه الغياب").first()).toBeVisible();
+    await owner.getByText("عرض تغيير قاعدة الغياب").first().click();
+    await expect(owner.getByText("بعد: ١ غياب متتالٍ").first()).toBeVisible();
     await owner.goto(`${origin}/admin/absence-review`);
     await expect(owner.getByText(student.body.student.name)).toBeVisible();
     await expect(owner.getByRole("row").filter({ hasText: student.body.student.name }).getByRole("cell", { name: "يحتاج مراجعة" })).toBeVisible();
+    await expect(owner.locator("html")).toHaveAttribute("data-theme", "light");
     await owner.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
     await expect(owner.locator("html")).toHaveAttribute("data-theme", "dark");
     await owner.setViewportSize({ width: 390, height: 844 });

@@ -167,10 +167,9 @@ SQL;
         $periodScope = $this->scopeSql($permissions, 'period_courses.branch_id');
         $sql = <<<SQL
 WITH candidates AS (
- SELECT attempts.id, attempts.student_id, attempts.status, students.name AS student_name, students.student_number,
-   courses.branch_id, branches.name AS branch_name, courses.id AS course_id, courses.name AS course_name,
-   stages.id AS stage_id, stages.name AS stage_name, levels.id AS level_id, levels.name AS level_name,
-   study_groups.id AS group_id, study_groups.name AS group_name,
+ SELECT attempts.id, attempts.student_id, students.name AS student_name, students.student_number,
+   courses.branch_id, branches.name AS branch_name, courses.name AS course_name,
+   stages.name AS stage_name, levels.name AS level_name, study_groups.name AS group_name,
    COALESCE(study_groups.absence_mode, levels.absence_mode, stages.absence_mode, courses.absence_mode) AS effective_mode,
    CASE WHEN study_groups.absence_mode IS NOT NULL THEN study_groups.absence_limit
         WHEN levels.absence_mode IS NOT NULL THEN levels.absence_limit
@@ -223,7 +222,10 @@ WITH candidates AS (
           ELSE COALESCE(stats.consecutive_absences, 0) END >= c.effective_limit) AS needs_review
  FROM candidates c LEFT JOIN stats ON stats.attempt_id = c.id
 )
-SELECT * FROM calculated WHERE (?::text = 'all' OR needs_review)
+SELECT id, student_id, student_name, student_number, branch_id, branch_name, course_name, stage_name,
+  level_name, group_name, effective_mode, effective_limit, total_absences, consecutive_absences,
+  historical_absences, needs_review
+FROM calculated WHERE (?::text = 'all' OR needs_review)
 ORDER BY student_name, student_number, id OFFSET ? LIMIT 51
 SQL;
         $bindings = $scope['bindings'];
