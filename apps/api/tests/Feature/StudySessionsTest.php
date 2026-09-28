@@ -688,6 +688,12 @@ class StudySessionsTest extends TestCase
         $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
         $student = $this->student();
         $this->enroll($student['id'], $group, now('Africa/Cairo')->format('Y-m-d'));
+        $suspended = $this->student();
+        $this->enroll($suspended['id'], $group, now('Africa/Cairo')->format('Y-m-d'));
+        $this->postJson("{$this->base}/students/{$suspended['id']}/status", [
+            'status' => 'suspended', 'reason' => 'إيقاف قبل المحاضرة',
+            'status_revision' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
         $this->postJson("{$this->base}/groups/{$group['id']}/start", ['revision' => 2])->assertOk();
         $this->travelTo($scheduled->copy()->addHour());
         $path = "{$this->base}/groups/{$group['id']}/sessions/{$session['id']}";
@@ -696,9 +702,9 @@ class StudySessionsTest extends TestCase
         $workspace = $this->getJson("{$path}/attendance")->assertOk()->assertJsonPath('can_correct', true)
             ->assertJsonPath('can_revoke', true);
         $this->assertLessThanOrEqual(6, (int) $workspace->headers->get('X-Courses-Query-Count'));
-        $row = $workspace->json('students.0');
-        $this->getJson("{$this->base}/absence-review?view=all&group_id={$group['id']}")->assertOk()
-            ->assertJsonPath('students.0.total_absences', 1);
+        $row = collect($workspace->json('students'))->firstWhere('student_id', $student['id']);
+        $absences = $this->getJson("{$this->base}/absence-review?view=all&group_id={$group['id']}")->assertOk()->json('students');
+        $this->assertSame(1, collect($absences)->firstWhere('student_id', $student['id'])['total_absences']);
         $correct = ['status' => 'counted', 'reason' => 'ثبت الحضور من كشف الورق',
             'revision' => 2, 'entry_revision' => $row['entry_revision'], 'request_id' => (string) Str::uuid()];
         $this->grant([$this->north => ['attendance']]);
@@ -718,12 +724,18 @@ class StudySessionsTest extends TestCase
             ->assertOk()->assertJsonPath('revision', 3);
         $this->postJson("{$path}/attendance/{$row['entry_id']}/correct", [...$correct, 'request_id' => (string) Str::uuid()])
             ->assertConflict()->assertJsonPath('code', 'session_changed');
-        $coverage = $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk();
-        $this->assertSame(1, $coverage->json('students.0.covered_count'));
-        $this->getJson("{$this->base}/absence-review?view=all&group_id={$group['id']}")->assertOk()
-            ->assertJsonPath('students.0.total_absences', 0);
+        $coverage = $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk()->json('students');
+        $this->assertSame(1, collect($coverage)->firstWhere('student_id', $student['id'])['covered_count']);
+        $absences = $this->getJson("{$this->base}/absence-review?view=all&group_id={$group['id']}")->assertOk()->json('students');
+        $this->assertSame(0, collect($absences)->firstWhere('student_id', $student['id'])['total_absences']);
         $preview = $this->getJson("{$path}/revoke-preview")->assertOk()
-            ->assertJsonPath('attendance.counted', 1)->assertJsonPath('attendance.current_coverage_records', 1)->json();
+            ->assertJsonPath('attendance.total', 1)->assertJsonPath('attendance.counted', 1)
+            ->assertJsonPath('attendance.current_coverage_records', 1)->json();
+        $staleSchedule = ['kind' => 'weekly', 'revision' => $preview['group_revision'],
+            'start_at' => now('Africa/Cairo')->addDays(2)->setTime(17, 0)->format('Y-m-d\TH:i'),
+            'count' => 1, 'interval_weeks' => 1];
+        $this->postJson("{$this->base}/groups/{$group['id']}/sessions/preview", $staleSchedule)
+            ->assertOk()->assertJsonPath('sessions.0.plan_lecture_number', 2);
         $revoke = ['reason' => 'لقاء غير صالح للاعتماد', 'session_revision' => $preview['session_revision'],
             'group_revision' => $preview['group_revision'], 'preview_token' => $preview['preview_token'],
             'request_id' => (string) Str::uuid()];
@@ -741,11 +753,16 @@ class StudySessionsTest extends TestCase
         }
         $this->center->run(fn () => $this->assertSame('held', DB::table('study_sessions')->where('id', $session['id'])->value('status')));
         $this->postJson("{$path}/revoke", $revoke)->assertOk()->assertJsonPath('session.status', 'cancelled');
+        $this->center->run(fn () => $this->assertSame($preview['group_revision'] + 1,
+            DB::table('study_groups')->where('id', $group['id'])->value('revision')));
+        $this->postJson("{$this->base}/groups/{$group['id']}/sessions", [
+            ...$staleSchedule, 'request_id' => (string) Str::uuid(),
+        ])->assertConflict()->assertJsonPath('code', 'group_changed');
         $this->postJson("{$path}/revoke", $revoke)->assertOk();
         $this->postJson("{$path}/revoke", [...$revoke, 'request_id' => (string) Str::uuid()])
             ->assertConflict()->assertJsonPath('code', 'session_changed');
-        $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk()
-            ->assertJsonPath('students.0.covered_count', 0);
+        $coverage = $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk()->json('students');
+        $this->assertSame(0, collect($coverage)->firstWhere('student_id', $student['id'])['covered_count']);
         $this->center->run(function () use ($session, $row): void {
             $saved = DB::table('study_sessions')->where('id', $session['id'])->first();
             $this->assertSame('cancelled', $saved->status);

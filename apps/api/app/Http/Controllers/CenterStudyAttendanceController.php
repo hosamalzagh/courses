@@ -303,6 +303,9 @@ class CenterStudyAttendanceController extends Controller
                 'revoked_at' => $now, 'revoked_by' => $request->user()->id,
                 'revoke_reason' => $reason, 'updated_at' => $now,
             ]);
+            DB::connection('tenant')->table('study_groups')->where('id', $groupId)->update([
+                'revision' => $session->group_revision + 1, 'updated_at' => $now,
+            ]);
             DB::connection('tenant')->table('study_session_submissions')->insert([
                 'request_id' => $data['request_id'], 'group_id' => $groupId, 'kind' => 'revoke',
                 'request_hash' => $hash, 'actor_id' => $request->user()->id,
@@ -324,7 +327,8 @@ class CenterStudyAttendanceController extends Controller
         $stats = DB::connection('tenant')->table('study_attendance_entries as entries')
             ->leftJoin('study_attempts as attempts', 'attempts.id', '=', 'entries.attempt_id')
             ->where('entries.session_id', $session->id)
-            ->selectRaw("COUNT(*) AS total, COUNT(*) FILTER (WHERE entries.status = 'counted') AS counted,
+            ->selectRaw("COUNT(*) FILTER (WHERE entries.status IS NOT NULL) AS total,
+                COUNT(*) FILTER (WHERE entries.status = 'counted') AS counted,
                 COUNT(*) FILTER (WHERE entries.status = 'not_counted') AS not_counted,
                 COUNT(*) FILTER (WHERE entries.status = 'absent') AS absent,
                 COUNT(*) FILTER (WHERE entries.status = 'counted' AND attempts.current_group_id = ?
