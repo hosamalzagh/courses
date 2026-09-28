@@ -780,12 +780,17 @@ class StudyEnrollmentTest extends TestCase
         $hiddenHistory = $this->getJson("{$url}/allocation-options")->assertOk()->assertJsonCount(0, 'history');
         $this->assertStringNotContainsString($attempt['id'], $hiddenHistory->getContent());
         $this->assertStringNotContainsString('student.payment_allocated', $this->getJson("{$this->base}/audit")->assertOk()->getContent());
+        $sourceAudit = $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk();
+        $this->assertStringNotContainsString('student.payment_allocated', $sourceAudit->getContent());
+        $this->assertStringNotContainsString($attempt['id'], $sourceAudit->getContent());
         $this->postJson("{$url}/allocations", $request)->assertForbidden();
         $this->grant([$this->north => ['accounting', 'branch_auditor'], $this->south => ['accounting']]);
         $this->asUser($this->staff);
         $this->getJson("{$url}/allocation-options")->assertOk()->assertJsonCount(1, 'history')
             ->assertJsonPath('history.0.can_correct', false);
         $this->assertStringContainsString('student.payment_allocated', $this->getJson("{$this->base}/audit")->assertOk()->getContent());
+        $this->assertStringContainsString('student.payment_allocated',
+            $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent());
         $allocationId = $this->center->run(fn () => DB::table('student_payment_allocations')->value('id'));
         $reverseUrl = "{$this->base}/students/{$student['id']}/allocations/{$allocationId}/reverse";
         $this->postJson($reverseUrl, ['reason' => 'تصحيح', 'version' => $this->getJson($accountUrl)->json('account.version'),
@@ -798,6 +803,11 @@ class StudyEnrollmentTest extends TestCase
             'request_id' => (string) Str::uuid()])->assertCreated();
         $this->getJson($accountUrl)->assertJsonPath('account.available_balance', '100.00')
             ->assertJsonPath('account.paid_total', '0.00');
+        $this->grant([$this->north => ['accounting', 'branch_auditor']]);
+        $this->asUser($this->staff);
+        $sourceAudit = $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent();
+        $this->assertStringNotContainsString('student.payment_allocated', $sourceAudit);
+        $this->assertStringNotContainsString('student.payment_allocation_reversed', $sourceAudit);
     }
 
     public function test_cross_branch_credit_settlement_releases_only_the_excess_to_its_source(): void
@@ -846,10 +856,15 @@ class StudyEnrollmentTest extends TestCase
         $this->grant([$this->south => ['accounting', 'branch_auditor', 'financial_approval']]);
         $this->asUser($this->staff);
         $this->assertStringNotContainsString('student.fee_settled', $this->getJson("{$this->base}/audit")->assertOk()->getContent());
+        $targetAudit = $this->getJson("{$this->base}/branches/{$this->south}/audit")->assertOk()->getContent();
+        $this->assertStringNotContainsString('student.fee_settled', $targetAudit);
+        $this->assertStringNotContainsString($payment['id'], $targetAudit);
         $this->getJson("{$feeUrl}?new_due=40.00")->assertForbidden();
         $this->grant([$this->north => ['accounting'], $this->south => ['accounting', 'branch_auditor', 'financial_approval']]);
         $this->asUser($this->staff);
         $this->assertStringContainsString('student.fee_settled', $this->getJson("{$this->base}/audit")->assertOk()->getContent());
+        $this->assertStringContainsString('student.fee_settled',
+            $this->getJson("{$this->base}/branches/{$this->south}/audit")->assertOk()->getContent());
     }
 
     public function test_suspended_incomplete_student_can_pay_and_allocate_existing_debt_with_current_branch_grants(): void
