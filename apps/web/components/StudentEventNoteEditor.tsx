@@ -14,8 +14,8 @@ import type { StudyAttemptNote } from "@/lib/server-context";
 type NoteVersion = { revision: number; body: string; important: boolean; actor_name: string; created_at: string };
 type Detail = { entry_revision?: number; note: (StudyAttemptNote & { created_by_name: string; created_at: string; updated_at: string }) | null;
   versions: NoteVersion[]; pagination: { page: number; has_more: boolean } };
-export function StudentEventNoteEditor({ path, title, description, onClose, onSaved, onDirtyChange, canEdit = true }: {
-  path: string; title: string; description: string; onClose: () => void; canEdit?: boolean;
+export function StudentEventNoteEditor({ path, title, description, onClose, onSaved, onDirtyChange, canEdit = true, hideActions = false }: {
+  path: string; title: string; description: string; onClose: () => void; canEdit?: boolean; hideActions?: boolean;
   onSaved: (note: StudyAttemptNote) => void; onDirtyChange: (dirty: boolean) => void;
 }) {
   const router = useRouter();
@@ -133,12 +133,12 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
     <p className="muted">{description}</p>
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-    {loading ? <><p role="status">جارٍ تحميل الملاحظة…</p><CenterHeaderActions>
+    {loading ? <><p role="status">جارٍ تحميل الملاحظة…</p>{!hideActions ? <CenterHeaderActions>
       <Button onClick={onClose}>إلغاء</Button>
-    </CenterHeaderActions></> : !detail ? <CenterHeaderActions>
+    </CenterHeaderActions> : null}</> : !detail ? !hideActions ? <CenterHeaderActions>
       <Button disabled={busy} onClick={reload}>إعادة المحاولة</Button>
       <Button disabled={busy} onClick={onClose}>إلغاء</Button>
-    </CenterHeaderActions> : <>
+    </CenterHeaderActions> : null : <>
       {canEdit ? <form id={formId} onSubmit={save} noValidate className="form-stack">
         <Field data-invalid={Boolean(error && !conflict)}>
           <FieldLabel htmlFor={`${prefix}-body`}>نص الملاحظة</FieldLabel>
@@ -150,11 +150,11 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
         <FieldLabel className="flex items-center gap-2"><Checkbox checked={important} disabled={busy || uncertain}
           onCheckedChange={value => { setImportant(value === true); requestId.current = null; }} />ملاحظة مهمة</FieldLabel>
       </form> : detail.note ? <p>{detail.note.body}{detail.note.important ? " · مهمة" : ""}</p> : <p>لا توجد ملاحظة لهذا الحضور.</p>}
-      <CenterHeaderActions>
+      {!hideActions ? <CenterHeaderActions>
         {canEdit ? <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || (!dirty && !uncertain)}>{uncertain ? "التحقق من الحفظ" : detail.note ? "حفظ تعديل الملاحظة" : "إضافة الملاحظة"}</Button> : null}
         {conflict ? <Button disabled={busy} onClick={reload}>{staleOccurrence ? "تحميل الواقعة الحالية" : "تحميل أحدث نسخة"}</Button> : null}
         <Button disabled={busy} onClick={onClose}>{uncertain ? "تجاهل المسودة" : "إلغاء"}</Button>
-      </CenterHeaderActions>
+      </CenterHeaderActions> : null}
       {detail.note ? <section aria-label="نسخ تعديل الملاحظة"><h4>تاريخ التعديل</h4>
         <ol>{detail.versions.map(version => <li key={version.revision}>
           <strong>نسخة {version.revision.toLocaleString("ar-EG")}</strong> — {version.actor_name} — <time>{version.created_at}</time>

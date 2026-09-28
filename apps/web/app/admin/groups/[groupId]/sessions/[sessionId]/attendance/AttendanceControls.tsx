@@ -118,7 +118,11 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
   }
 
   function closeNote() {
-    if (noteDirty && !discardNote) { setDiscardNote(true); return; }
+    if (noteDirty) { setDiscardNote(true); return; }
+    discardSelectedNote();
+  }
+
+  function discardSelectedNote() {
     const target = selectedNote ? `${titleId}-${selectedNote}-note` : "";
     setSelectedNote(null); setNoteDirty(false); setDiscardNote(false);
     requestAnimationFrame(() => document.getElementById(target)?.focus());
@@ -143,7 +147,7 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
       onClick={() => void action("close", session.id, `${path}/close`, {})}>تأكيد الإغلاق</Button>
       <Button disabled={busy} onClick={() => { setConfirmClose(false); requestAnimationFrame(() => document.getElementById(`${titleId}-close`)?.focus()); }}>إلغاء</Button></CenterHeaderActions> : null}
     {conflict ? <CenterHeaderActions><Button disabled={busy} onClick={() => void reload().then(() => setNotice("حُمّل أحدث كشف؛ راجع الحالة قبل إعادة الإجراء.")).catch(failure => setError(failure instanceof Error ? failure.message : "تعذر التحديث."))}>تحميل أحدث البيانات</Button></CenterHeaderActions> : null}
-    {discardNote ? <CenterHeaderActions><Button variant="danger" onClick={closeNote}>تجاهل التعديلات</Button>
+    {discardNote ? <CenterHeaderActions><Button variant="danger" onClick={discardSelectedNote}>تجاهل التعديلات</Button>
       <Button onClick={() => setDiscardNote(false)}>متابعة التعديل</Button></CenterHeaderActions> : null}
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
@@ -160,7 +164,7 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
     {noteRow ? <StudentEventNoteEditor key={noteRow.entry_id} path={`${path}/attendance/${noteRow.entry_id}/note`}
       title={`ملاحظة ${noteRow.status === "absent" ? "غياب" : "حضور"} ${noteRow.name}`}
       description="الملاحظة اختيارية وترتبط بواقعة الحضور أو الغياب. لا تغير الحالة أو الاحتساب أو إغلاق المحاضرة، ولا تحل محل سبب تصحيح إلزامي."
-      canEdit={canEditNote} onClose={closeNote} onDirtyChange={setNoteDirty}
+      canEdit={canEditNote} hideActions={discardNote} onClose={closeNote} onDirtyChange={setNoteDirty}
       onSaved={note => setCurrent(previous => ({ ...previous, students: previous.students.map(row => row.entry_id === noteRow.entry_id
         ? { ...row, note_body: note.body, note_important: note.important } : row) }))} /> : null}
     <DataTable id={`attendance-${session.id}`} title="كشف الطلاب المستحقين" description="يعرض الطلاب المرتبطين بالمجموعة وقت المحاضرة، مع فترات الإيقاف المستبعدة من الحضور والغياب." rows={current.students}

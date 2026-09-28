@@ -190,6 +190,10 @@ test("attendance and closed absence notes keep versions, importance and event pe
     expect((await deniedRetry).status()).toBe(404);
     await expect(staff.getByRole("button", { name: "إلغاء", exact: true })).toBeEnabled();
     await staff.getByRole("button", { name: "إلغاء", exact: true }).click();
+    await expect(staff.getByRole("button", { name: "إلغاء", exact: true })).toHaveCount(0);
+    await staff.getByRole("button", { name: "متابعة التعديل" }).click();
+    await expect(staff.getByRole("textbox", { name: "نص الملاحظة" })).toHaveValue("مسودة قبل سحب المنحة");
+    await staff.getByRole("button", { name: "إلغاء", exact: true }).click();
     await staff.getByRole("button", { name: "تجاهل التعديلات" }).click();
     await expect(staff.getByRole("heading", { name: new RegExp(`ملاحظة غياب ${students[1].name}`) })).toHaveCount(0);
     expect((await staff.request.get(`${origin}/api/v1/center/${path}/${entryId}/note`)).status()).toBe(404);
