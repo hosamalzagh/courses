@@ -12,7 +12,8 @@ import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from "@/lib/client-api";
-import type { StudyEnrollmentContext } from "@/lib/server-context";
+import type { StudyEnrollmentContext, StudyAttemptNote } from "@/lib/server-context";
+import { StudyAttemptNoteEditor } from "./StudyAttemptNoteEditor";
 
 export function StudentEnrollmentControls({ initial, search }: { initial: StudyEnrollmentContext; search: string }) {
   const router = useRouter();
@@ -21,6 +22,7 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
   const [loadedInitial, setLoadedInitial] = useState(initial);
   const [current, setCurrent] = useState(initial);
   const [groupId, setGroupId] = useState("");
+  const [selectedGroup, setSelectedGroup] = useState<StudyEnrollmentContext["groups"][number] | null>(null);
   const [joinedOn, setJoinedOn] = useState("");
   const [discount, setDiscount] = useState("0.00");
   const [reason, setReason] = useState("");
@@ -31,28 +33,51 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
   const [notice, setNotice] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [pendingSearch, setPendingSearch] = useState<string | null>(null);
+  const [openNoteId, setOpenNoteId] = useState<string | null>(null);
+  const [pendingNoteId, setPendingNoteId] = useState<string | null>(null);
+  const [noteDirty, setNoteDirty] = useState(false);
+  const noteOpener = useRef<string | null>(null);
   const requestId = useRef<string | null>(null);
   const submitting = useRef(false);
   if (loadedInitial !== initial) {
     setLoadedInitial(initial); setCurrent(initial);
-    if (groupId && !initial.groups.some(group => group.id === groupId)) {
-      setGroupId(""); setJoinedOn(""); setDiscount("0.00"); setReason("");
+    if (current.student.id !== initial.student.id) {
+      setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason("");
     }
   }
   const studentId = current.student.id;
-  const selected = current.groups.find(group => group.id === groupId);
+  const selected = current.groups.find(group => group.id === groupId) ?? (selectedGroup?.id === groupId ? selectedGroup : undefined);
   const discountAllowed = Boolean(selected && (current.permissions.can_manage_center ||
     current.permissions.branch_actions?.[String(selected.branch_id)]?.includes("fees.discount")));
-  const dirty = Boolean(groupId || joinedOn || discount !== "0.00" || reason);
+  const registrationDirty = Boolean(groupId || joinedOn || discount !== "0.00" || reason);
+  const dirty = registrationDirty || noteDirty;
   const path = `/admin/students/${studentId}/enrollments`;
   const query = new URLSearchParams({ page: String(current.pagination.page), groups_page: String(current.pagination.groups_page), ...(search ? { q: search } : {}) });
   const endpoint = `students/${studentId}/enrollments?${query}`;
   const focus = (field: string) => requestAnimationFrame(() => document.getElementById(`${prefix}-${field}`)?.focus());
 
   function reset() {
-    setGroupId(""); setJoinedOn(""); setDiscount("0.00"); setReason("");
+    setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason("");
     setFieldErrors({}); setError(""); setConflict(false); setUncertain(false); requestId.current = null;
     focus("group_id");
+  }
+
+  function closeNote() {
+    setOpenNoteId(null); setNoteDirty(false);
+    requestAnimationFrame(() => { if (noteOpener.current) document.getElementById(noteOpener.current)?.focus(); });
+  }
+
+  function discard() { reset(); closeNote(); }
+
+  function openNote(attemptId: string) {
+    if (openNoteId === attemptId) return;
+    if (noteDirty) { setPendingNoteId(attemptId); return; }
+    setOpenNoteId(attemptId);
+  }
+
+  function noteSaved(attemptId: string, note: StudyAttemptNote) {
+    setCurrent(previous => ({ ...previous, attempts: previous.attempts.map(attempt =>
+      attempt.id === attemptId ? { ...attempt, note } : attempt) }));
   }
 
   async function reload() {
@@ -63,7 +88,7 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
       if (!response.ok) { setError(await responseMessage(response)); return; }
       const fresh = await response.json() as StudyEnrollmentContext;
       setCurrent(fresh); setConflict(false); setUncertain(false); requestId.current = null;
-      if (!fresh.groups.some(group => group.id === groupId)) setGroupId("");
+      if (!fresh.groups.some(group => group.id === groupId)) { setGroupId(""); setSelectedGroup(null); }
       setError(""); setNotice("حُمّلت المحاولات والأرصدة الحالية. راجع المجموعة والرسوم قبل إعادة المحاولة.");
       router.refresh();
     } catch { setError("تعذر تحميل أحدث بيانات التسجيل. تحقق من الاتصال وأعد المحاولة."); }
@@ -125,9 +150,12 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
 
   return <>
     <CenterPageActions context={current} />
-    <UnsavedChangesGuard dirty={dirty} guardHistory onDiscard={reset} />
+    <UnsavedChangesGuard dirty={dirty} guardHistory onDiscard={discard} />
     {pendingSearch ? <ConfirmationDialog title="مغادرة دون حفظ" description="لديك بيانات تسجيل لم تُحفظ. هل تريد مسحها والبحث عن مجموعات أخرى؟" confirmLabel="مسح البيانات والبحث" onCancel={() => setPendingSearch(null)} onConfirm={() => {
-      reset(); router.push(pendingSearch); setPendingSearch(null);
+      discard(); router.push(pendingSearch); setPendingSearch(null);
+    }} /> : null}
+    {pendingNoteId ? <ConfirmationDialog title="تغيير الملاحظة دون حفظ" description="لديك تعديل ملاحظة لم يُحفظ. هل تريد مسحه وفتح ملاحظة تسجيل أخرى؟" confirmLabel="مسح التعديل وفتح الأخرى" onCancel={() => setPendingNoteId(null)} onConfirm={() => {
+      setOpenNoteId(pendingNoteId); setNoteDirty(false); setPendingNoteId(null);
     }} /> : null}
     <section className="context-card form-stack" aria-label="ملخص التسجيل والرصيد">
       <h2>{current.student.name} — رقم {current.student.student_number.toLocaleString("ar-EG")}</h2>
@@ -147,9 +175,14 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
       <form id={formId} onSubmit={save} noValidate><FieldGroup>
         <Field data-invalid={Boolean(fieldErrors.group_id)}>
           <FieldLabel htmlFor={`${prefix}-group_id`}>المجموعة الأساسية</FieldLabel>
-          <NativeSelect id={`${prefix}-group_id`} value={groupId} onChange={event => { setGroupId(event.target.value); setFieldErrors({}); }} aria-invalid={Boolean(fieldErrors.group_id)}>
+          <NativeSelect id={`${prefix}-group_id`} value={groupId} onChange={event => {
+            setGroupId(event.target.value); setSelectedGroup(current.groups.find(group => group.id === event.target.value) ?? null); setFieldErrors({});
+          }} aria-invalid={Boolean(fieldErrors.group_id)}>
             <NativeSelectOption value="">اختر مجموعة</NativeSelectOption>
             {current.groups.map(group => <NativeSelectOption key={group.id} value={group.id}>{group.branch_name} — {group.level_name} — {group.name} ({group.approved_price} {current.student.currency ?? ""})</NativeSelectOption>)}
+            {selectedGroup && !current.groups.some(group => group.id === selectedGroup.id) ? <NativeSelectOption value={selectedGroup.id}>
+              {selectedGroup.branch_name} — {selectedGroup.level_name} — {selectedGroup.name} ({selectedGroup.approved_price} {current.student.currency ?? ""})
+            </NativeSelectOption> : null}
           </NativeSelect>
           {fieldErrors.group_id ? <FieldError id={`${prefix}-group_id-error`}>{fieldErrors.group_id}</FieldError> : null}
         </Field>
@@ -160,7 +193,7 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
       {selected ? <p>السعر الأصلي <bdi dir="ltr">{selected.approved_price}</bdi> — الصافي بعد الخصم <strong><bdi dir="ltr">{Math.max(0, Number(selected.approved_price) - (Number(discount) || 0)).toFixed(2)} {current.student.currency ?? ""}</bdi></strong></p> : null}
       <CenterHeaderActions>
         <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || !current.student.currency || current.student.status !== "active"}>{uncertain ? "التحقق من التسجيل" : "تسجيل الطالب والرسوم"}</Button>
-        <Button disabled={busy || uncertain || !dirty} onClick={reset}>إلغاء البيانات</Button>
+        <Button disabled={busy || uncertain || !registrationDirty} onClick={reset}>إلغاء البيانات</Button>
       </CenterHeaderActions>
     </section>
     <DataTable id="enrollment-group-choices" title="المجموعات المتاحة للتسجيل" rows={current.groups} rowKey={row => row.id}
@@ -188,6 +221,15 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
         { key: "requirements", label: "متطلبات الخطة", render: row => row.requirements_count.toLocaleString("ar-EG") },
         { key: "fee", label: "الرسوم بعد الخصم", render: row => <bdi dir="ltr">{row.fee.net_amount} {row.fee.currency}</bdi> },
         { key: "actor", label: "سجلها", render: row => row.fee.actor_name },
+        { key: "note", label: "ملاحظة التسجيل", render: row => row.note ? <span>{row.note.important ? "★ " : ""}{row.note.body.slice(0, 80)}{row.note.body.length > 80 ? "…" : ""}</span> : "—" },
+        { key: "actions", label: "الملاحظة", actions: true, render: row => current.permissions.can_manage_center ||
+          current.permissions.branch_actions?.[String(row.event_branch_id)]?.includes("enrollment.manage")
+          ? <Button id={`${prefix}-note-${row.id}`} type="button" onClick={event => { noteOpener.current = event.currentTarget.id; openNote(row.id); }}>{row.note ? "عرض/تعديل الملاحظة" : "إضافة ملاحظة"}</Button>
+          : <span className="muted">غير متاح</span> },
       ]} />
+    {openNoteId && current.attempts.find(attempt => attempt.id === openNoteId) ? <section className="context-card" aria-label="محرر ملاحظة التسجيل">
+      <StudyAttemptNoteEditor key={openNoteId} studentId={studentId} attempt={current.attempts.find(attempt => attempt.id === openNoteId)!}
+        onClose={closeNote} onSaved={note => noteSaved(openNoteId, note)} onDirtyChange={setNoteDirty} />
+    </section> : null}
   </>;
 }
