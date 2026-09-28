@@ -288,6 +288,11 @@ test("corrects an allocation to another branch while retaining the original rece
     await staff.getByRole("button", { name: "عرض وتخصيص" }).click();
     await staff.getByRole("button", { name: "تصحيح التخصيص" }).click();
     await expect(staff.getByRole("combobox", { name: "التسجيل الصحيح" })).toBeFocused();
+    await staff.getByRole("button", { name: "عكس التخصيص" }).click();
+    await expect(staff.getByRole("region", { name: "تصحيح التخصيص" })).toHaveCount(0);
+    await expect(staff.getByRole("region", { name: "عكس التخصيص" })).toBeVisible();
+    await staff.getByRole("button", { name: "إلغاء التصحيح" }).click();
+    await staff.getByRole("button", { name: "تصحيح التخصيص" }).click();
     const staffOptions = await (await staff.request.get(`${origin}/api/v1/center/${paymentPath}/allocation-options`)).json();
     expect(staffOptions.fees.some((fee: { attempt_id: string }) => fee.attempt_id === attempts[1].id)).toBe(false);
     expect((await write(staff, `${correctionPath}/preview`, {

@@ -284,7 +284,7 @@ export function StudentPaymentAllocations({ studentId, payment, focusNote, onClo
         { key: "actor", label: "الموظف", render: (row) => row.actor_name },
         { key: "action", label: "إجراءات", actions: true, render: (row) => <span className="flex flex-wrap gap-2">
           <Button id={`${prefix}-allocation-note-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => setSelectedNote({ type: "allocation", id: row.id, label: "التخصيص" })}>ملاحظة التخصيص</Button>
-          {row.can_correct && !row.reversal_id ? <Button id={`${prefix}-reverse-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => { setReversing(row.id); setReason(""); requestId.current = null; focus(`${prefix}-reason`); }}>عكس التخصيص</Button> : null}
+          {row.can_correct && !row.reversal_id ? <Button id={`${prefix}-reverse-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => { setCorrecting(null); setCorrectionTarget(null); setCorrectionReason(""); setCorrectionPreview(null); setReversing(row.id); setReason(""); requestId.current = null; focus(`${prefix}-reason`); }}>عكس التخصيص</Button> : null}
           {row.can_correct && options?.can_allocate && !row.reversal_id ? <Button id={`${prefix}-correct-${row.id}`} disabled={busy || uncertain || dirty}
             onClick={() => { setCorrecting(row); setCorrectionTarget(null); setCorrectionReason(""); setCorrectionPreview(null); setReversing(null); requestId.current = null; focus(`${prefix}-correction-target`); }}>تصحيح التخصيص</Button> : null}
         </span> },
