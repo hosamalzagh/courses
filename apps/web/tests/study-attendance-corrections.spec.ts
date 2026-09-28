@@ -105,6 +105,11 @@ test("academic owner corrects and revokes a held lecture with visible impact whi
     await expect(owner.locator("html")).toHaveAttribute("data-theme", "dark");
     await owner.getByRole("row").filter({ hasText: student.body.student.name }).getByRole("button", { name: "تصحيح الحضور" }).click();
     await owner.getByLabel("الحالة الصحيحة").selectOption("counted");
+    await expect(owner.getByRole("row").filter({ hasText: otherStudent.body.student.name }).getByRole("button", { name: "تصحيح الحضور" })).toBeDisabled();
+    await owner.getByRole("link", { name: "العودة لجدول المحاضرات" }).click();
+    await expect(owner.getByRole("alertdialog", { name: "مغادرة دون حفظ" })).toBeVisible();
+    await owner.getByRole("alertdialog").getByRole("button", { name: "إلغاء" }).click();
+    await expect(owner.getByLabel("الحالة الصحيحة")).toHaveValue("counted");
     await owner.getByLabel("سبب التصحيح").fill("حضر مثبتًا في الكشف الورقي");
     await expect(owner.getByRole("row").filter({ hasText: otherStudent.body.student.name }).getByRole("button", { name: "تصحيح الحضور" })).toBeDisabled();
     await expect(owner.getByLabel("سبب التصحيح")).toHaveValue("حضر مثبتًا في الكشف الورقي");

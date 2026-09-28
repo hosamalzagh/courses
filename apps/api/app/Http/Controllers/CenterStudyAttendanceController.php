@@ -293,6 +293,7 @@ class CenterStudyAttendanceController extends Controller
                 || (int) $session->group_revision !== (int) $data['group_revision']) {
                 $this->conflict('session_changed');
             }
+            // CenterWrites holds the center row lock until commit, serializing attendance writes across groups.
             $impact = $this->revokeImpact($session);
             if (! hash_equals($impact['preview_token'], $data['preview_token'])) {
                 $this->conflict('revoke_preview_changed');

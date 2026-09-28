@@ -72,7 +72,7 @@ export function AttendanceControls({ context, search, linkedEntryId }: { context
   const selectedRow = current.students.find(row => row.attempt_id === selected?.attemptId);
   const noteRow = current.students.find(row => row.entry_id === selectedNote?.entryId && row.status !== null);
   const canEditNote = current.can_record || current.can_correct;
-  const correctionDraftOpen = selected?.mode === "correct" && correctReason.trim().length > 0;
+  const correctionDraftOpen = selected?.mode === "correct";
 
   async function reload() {
     const params = new URLSearchParams({ page: String(current.pagination.page), ...(search ? { q: search } : {}), ...(linkedEntryId ? { entry_id: linkedEntryId } : {}) });
@@ -189,8 +189,8 @@ export function AttendanceControls({ context, search, linkedEntryId }: { context
   }
 
   return <>
-    <UnsavedChangesGuard dirty={noteDirty || Boolean(correctReason) || Boolean(revokeReason)} guardHistory onDiscard={() => {
-      setSelectedNote(null); setNoteDirty(false); setDiscardNote(false); setCorrectReason(""); setRevokeReason("");
+    <UnsavedChangesGuard dirty={noteDirty || correctionDraftOpen || Boolean(revokeReason)} guardHistory onDiscard={() => {
+      setSelected(null); setSelectedNote(null); setNoteDirty(false); setDiscardNote(false); setCorrectReason(""); setRevokeReason("");
     }} />
     <CenterPageActions context={current} actions={<Link href={`/admin/groups/${group.id}/sessions`}>العودة لجدول المحاضرات</Link>} />
     {canClose && !confirmClose && !selected && !selectedNote ? <CenterHeaderActions><Button id={`${titleId}-close`} variant="primary" disabled={busy || conflict}
