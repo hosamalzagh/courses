@@ -581,6 +581,7 @@ class StudyEnrollmentTest extends TestCase
             ->assertJsonPath('account.student_status', 'suspended')
             ->assertJsonPath('account.due_total', '100.00')
             ->assertJsonPath('account.debt', '100.00');
+        $this->assertMatchesRegularExpression('/^[1-9]\d*$/', (string) $before->headers->get('X-Courses-Query-Count'));
         $this->assertLessThanOrEqual(6, (int) $before->headers->get('X-Courses-Query-Count'));
         $paymentRequest = [
             'branch_id' => $this->north, 'method' => 'cash', 'received_on' => '2026-09-28',
@@ -604,6 +605,7 @@ class StudyEnrollmentTest extends TestCase
             ->assertJsonPath('account.paid_total', '40.00')
             ->assertJsonPath('account.available_balance', '20.00')
             ->assertJsonPath('account.debt', '60.00');
+        $this->assertMatchesRegularExpression('/^[1-9]\d*$/', (string) $after->headers->get('X-Courses-Query-Count'));
         $this->assertLessThanOrEqual(6, (int) $after->headers->get('X-Courses-Query-Count'));
         $this->center->run(function () use ($student): void {
             $this->assertSame(1, DB::table('study_attempt_fees')->where('student_id', $student['id'])->count());
