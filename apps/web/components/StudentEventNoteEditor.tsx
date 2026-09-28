@@ -14,8 +14,10 @@ import type { StudyAttemptNote } from "@/lib/server-context";
 type NoteVersion = { revision: number; body: string; important: boolean; actor_name: string; created_at: string };
 type Detail = { entry_revision?: number; note: (StudyAttemptNote & { created_by_name: string; created_at: string; updated_at: string }) | null;
   versions: NoteVersion[]; pagination: { page: number; has_more: boolean; next_before_revision: number | null } };
-export function StudentEventNoteEditor({ path, title, description, onClose, onSaved, onDirtyChange, onOccurrenceChanged, canEdit = true, hideActions = false }: {
+export function StudentEventNoteEditor({ path, title, description, onClose, onSaved, onDirtyChange, onOccurrenceChanged,
+  expectedEntryRevision, canEdit = true, hideActions = false }: {
   path: string; title: string; description: string; onClose: () => void; canEdit?: boolean; hideActions?: boolean;
+  expectedEntryRevision?: number;
   onSaved: (note: StudyAttemptNote) => void; onDirtyChange: (dirty: boolean) => void;
   onOccurrenceChanged?: () => Promise<void>;
 }) {
@@ -45,11 +47,16 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
       if (!response.ok) { setError(await responseMessage(response)); return; }
       const fresh = await response.json() as Detail;
       if (!active) return;
+      if (expectedEntryRevision !== undefined && fresh.entry_revision !== expectedEntryRevision) {
+        setConflict(true); setStaleOccurrence(true);
+        setError("تغيرت واقعة الحضور منذ عرض الكشف. حمّل الكشف الحالي قبل كتابة ملاحظة لها.");
+        return;
+      }
       setDetail(fresh); setBody(fresh.note?.body ?? ""); setImportant(fresh.note?.important ?? false);
     }).catch(() => { if (active) setError("تعذر تحميل الملاحظة ونسخها."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; onDirtyChange(false); };
-  }, [path, onDirtyChange]);
+  }, [path, onDirtyChange, expectedEntryRevision]);
 
   async function reload() {
     setBusy(true); setError("");
@@ -150,7 +157,7 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
     {loading ? <><p role="status">جارٍ تحميل الملاحظة…</p>{!hideActions ? <CenterHeaderActions>
       <Button onClick={onClose}>إلغاء</Button>
     </CenterHeaderActions> : null}</> : !detail ? !hideActions ? <CenterHeaderActions>
-      <Button disabled={busy} onClick={reload}>إعادة المحاولة</Button>
+      <Button disabled={busy} onClick={reload}>{staleOccurrence ? "تحميل الواقعة الحالية" : "إعادة المحاولة"}</Button>
       <Button disabled={busy} onClick={onClose}>إلغاء</Button>
     </CenterHeaderActions> : null : <>
       {canEdit ? <form id={formId} onSubmit={save} noValidate className="form-stack">

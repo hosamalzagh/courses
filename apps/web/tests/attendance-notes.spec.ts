@@ -232,6 +232,21 @@ test("attendance and closed absence notes keep versions, importance and event pe
     expect((await refreshedRoster).status()).toBe(200);
     await expect(owner.getByRole("heading", { name: new RegExp(`ملاحظة غياب ${students[1].name}`) })).toHaveCount(0);
     await expect(owner.getByRole("row", { name: new RegExp(students[1].name) })).toContainText("غائب");
+    await owner.route(historyRoute, async route => {
+      const response = await route.fetch();
+      const detail = await response.json();
+      detail.entry_revision += 2;
+      await route.fulfill({ response, json: detail });
+    });
+    await owner.getByRole("row", { name: new RegExp(students[1].name) }).getByRole("button", { name: "عرض الملاحظة" }).click();
+    await expect(owner.getByText("تغيرت واقعة الحضور منذ عرض الكشف. حمّل الكشف الحالي قبل كتابة ملاحظة لها.")).toBeVisible();
+    await expect(owner.getByRole("textbox", { name: "نص الملاحظة" })).toHaveCount(0);
+    await owner.unroute(historyRoute);
+    const preOpenRefresh = owner.waitForResponse(response => response.request().method() === "GET"
+      && response.url().includes(`/api/v1/center/${path}`) && !response.url().includes("/note"));
+    await owner.getByRole("button", { name: "تحميل الواقعة الحالية" }).click();
+    expect((await preOpenRefresh).status()).toBe(200);
+    await expect(owner.getByRole("heading", { name: new RegExp(`ملاحظة غياب ${students[1].name}`) })).toHaveCount(0);
   } finally {
     await owner.close(); await staff.close();
   }

@@ -15,6 +15,7 @@ import { formatSessionTime } from "@/lib/session-time";
 
 type Action = { kind: "record" | "undo" | "close"; key: string; requestId: string };
 type Selection = { attemptId: string; mode: "record" | "undo" };
+type NoteSelection = { entryId: string; entryRevision: number };
 
 export function AttendanceControls({ context, search }: { context: AttendanceContext; search: string }) {
   const router = useRouter();
@@ -27,7 +28,7 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
   const [conflict, setConflict] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const [selected, setSelected] = useState<Selection | null>(null);
-  const [selectedNote, setSelectedNote] = useState<string | null>(null);
+  const [selectedNote, setSelectedNote] = useState<NoteSelection | null>(null);
   const [noteDirty, setNoteDirty] = useState(false);
   const [discardNote, setDiscardNote] = useState(false);
   const [error, setError] = useState("");
@@ -39,7 +40,7 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
       setCurrent(context);
       setConflict(false);
       if (!sameRevision || (selected && !context.students.some(row => row.attempt_id === selected.attemptId))) setSelected(null);
-      if (selectedNote && !context.students.some(row => row.entry_id === selectedNote)) {
+      if (selectedNote && !context.students.some(row => row.entry_id === selectedNote.entryId)) {
         setSelectedNote(null); setNoteDirty(false); setDiscardNote(false);
       }
     }
@@ -56,7 +57,7 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
   const canRecord = open && started && current.can_record;
   const canClose = open && started && current.can_close;
   const selectedRow = current.students.find(row => row.attempt_id === selected?.attemptId);
-  const noteRow = current.students.find(row => row.entry_id === selectedNote && row.status !== null);
+  const noteRow = current.students.find(row => row.entry_id === selectedNote?.entryId && row.status !== null);
   const canEditNote = current.can_record || current.can_correct;
 
   async function reload() {
@@ -123,7 +124,7 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
   }
 
   function discardSelectedNote() {
-    const target = selectedNote ? `${titleId}-${selectedNote}-note` : "";
+    const target = selectedNote ? `${titleId}-${selectedNote.entryId}-note` : "";
     setSelectedNote(null); setNoteDirty(false); setDiscardNote(false);
     requestAnimationFrame(() => document.getElementById(target)?.focus());
   }
@@ -161,7 +162,8 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
           : `راجع آخر إدخال للطالب ${selectedRow.name}، ثم أكد التراجع من إجراءات أعلى الصفحة.`}
       </div> : null}
     </section>
-    {noteRow ? <StudentEventNoteEditor key={noteRow.entry_id} path={`${path}/attendance/${noteRow.entry_id}/note`}
+    {noteRow && selectedNote ? <StudentEventNoteEditor key={`${selectedNote.entryId}-${selectedNote.entryRevision}`}
+      path={`${path}/attendance/${selectedNote.entryId}/note`} expectedEntryRevision={selectedNote.entryRevision}
       title={`ملاحظة ${noteRow.status === "absent" ? "غياب" : "حضور"} ${noteRow.name}`}
       description="الملاحظة اختيارية وترتبط بواقعة الحضور أو الغياب. لا تغير الحالة أو الاحتساب أو إغلاق المحاضرة، ولا تحل محل سبب تصحيح إلزامي."
       canEdit={canEditNote} hideActions={discardNote} onClose={closeNote} onDirtyChange={setNoteDirty}
@@ -193,8 +195,9 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
           {open && current.can_undo_own && row.entry_id && row.recorded_by === current.user.id && current.last_own_attempt_id === row.attempt_id && row.status !== "absent"
             ? <Button id={`${titleId}-${row.attempt_id}-undo`} disabled={busy || conflict || Boolean(selectedNote)}
                 onClick={() => select(row, "undo")}>عرض التراجع</Button> : null}
-          {row.status && row.entry_id && (row.note_body || canEditNote) ? <Button id={`${titleId}-${row.entry_id}-note`} size="sm" disabled={busy || conflict || Boolean(selectedNote)}
-            onClick={() => { setSelected(null); setConfirmClose(false); setSelectedNote(row.entry_id); setDiscardNote(false); }}>
+          {row.status && row.entry_id && row.entry_revision !== null && (row.note_body || canEditNote) ? <Button id={`${titleId}-${row.entry_id}-note`} size="sm" disabled={busy || conflict || Boolean(selectedNote)}
+            onClick={() => { setSelected(null); setConfirmClose(false);
+              setSelectedNote({ entryId: row.entry_id!, entryRevision: row.entry_revision! }); setDiscardNote(false); }}>
               {row.note_body ? "عرض الملاحظة" : "إضافة ملاحظة"}</Button> : null}
         </div> },
       ]}
