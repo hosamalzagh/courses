@@ -24,7 +24,8 @@ class WorkerIsolationTest extends TestCase
 
     public function test_one_redis_worker_reverts_tenant_database_and_cache_even_after_a_failed_job(): void
     {
-        abort_unless(config('database.connections.central.database') === 'courses_test_central', 500);
+        $testDatabase = config('database.connections.central.database');
+        abort_unless($testDatabase === 'courses_test_central' || preg_match('/^courses_issue[0-9]+_test_central$/', $testDatabase) === 1, 500);
         $this->assertSame(['default'], config('horizon.defaults.supervisor-1.queue'));
         $this->assertSame('redis', config('horizon.defaults.supervisor-1.connection'));
         $this->assertSame(['platform'], config('horizon.defaults.supervisor-platform.queue'));
@@ -61,7 +62,7 @@ class WorkerIsolationTest extends TestCase
             PHP_BINARY, 'artisan',
             'queue:work', 'redis', '--queue='.$queue, '--max-jobs=4', '--stop-when-empty',
             '--sleep=1', '--tries=1', '--no-interaction', '--env=testing',
-        ], base_path(), ['APP_ENV' => 'testing', 'DB_DATABASE' => 'courses_test_central']);
+        ], base_path(), ['APP_ENV' => 'testing', 'DB_DATABASE' => $testDatabase]);
         $worker->setTimeout(40);
         try {
             $worker->mustRun();
@@ -109,7 +110,8 @@ class WorkerIsolationTest extends TestCase
 
     public function test_one_platform_redis_worker_delivers_distinct_owner_invitations_after_a_failed_job(): void
     {
-        abort_unless(config('database.connections.central.database') === 'courses_test_central', 500);
+        $testDatabase = config('database.connections.central.database');
+        abort_unless($testDatabase === 'courses_test_central' || preg_match('/^courses_issue[0-9]+_test_central$/', $testDatabase) === 1, 500);
         Artisan::call('migrate:fresh', ['--database' => 'central', '--force' => true]);
         $centers = [];
         foreach (['alpha', 'beta'] as $slug) {
@@ -141,7 +143,7 @@ class WorkerIsolationTest extends TestCase
                 PHP_BINARY, 'artisan', 'queue:work', 'platform', '--queue='.$queue, '--max-jobs=3',
                 '--stop-when-empty', '--sleep=1', '--tries=1', '--no-interaction', '--env=testing',
             ], base_path(), [
-                'APP_ENV' => 'testing', 'DB_DATABASE' => 'courses_test_central',
+                'APP_ENV' => 'testing', 'DB_DATABASE' => $testDatabase,
                 'MAIL_MAILER' => 'array', 'PLATFORM_QUEUE_DRIVER' => 'redis',
             ]);
             $worker->setTimeout(60);

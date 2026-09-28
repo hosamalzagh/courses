@@ -36,7 +36,8 @@ class CenterAuditController extends Controller
             $enrollmentBranches = array_keys(array_filter($permissions->branchRoles,
                 fn ($roles) => in_array('enrollment.manage', CenterPermissions::actions($roles), true)));
             $financialEvents = self::FINANCIAL_EVENTS;
-            $enrollmentEvents = ['student.enrolled', 'student.study_attempt_note_created', 'student.study_attempt_note_updated'];
+            $enrollmentEvents = ['student.enrolled', 'student.study_repeated', 'student.study_withdrawn',
+                'student.study_attempt_note_created', 'student.study_attempt_note_updated'];
             $attendanceEvents = ['student.attendance_note_created', 'student.attendance_note_updated'];
             $attendanceBranches = array_keys(array_filter($permissions->branchRoles,
                 fn ($roles) => in_array('attendance.record', CenterPermissions::actions($roles), true)
