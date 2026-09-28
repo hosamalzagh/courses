@@ -87,6 +87,13 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::post('students/{studentId}/photo', [CenterStudentPhotoController::class, 'store']);
         Route::get('students/{studentId}/photo/{photoId}', [CenterStudentPhotoController::class, 'show']);
         Route::post('students/{studentId}/attachments', [CenterStudentAttachmentController::class, 'store']);
+        Route::get('students/{studentId}/attachments/{attachmentId}/versions', [CenterStudentAttachmentController::class, 'versions']);
+        Route::get('students/{studentId}/attachments/{attachmentId}/versions/{versionId}/preview', [CenterStudentAttachmentController::class, 'previewVersion']);
+        Route::get('students/{studentId}/attachments/{attachmentId}/versions/{versionId}/download', [CenterStudentAttachmentController::class, 'downloadVersion']);
+        Route::post('students/{studentId}/attachments/{attachmentId}/replace', [CenterStudentAttachmentController::class, 'replace']);
+        Route::patch('students/{studentId}/attachments/{attachmentId}/classification', [CenterStudentAttachmentController::class, 'classify']);
+        Route::post('students/{studentId}/attachments/{attachmentId}/archive', [CenterStudentAttachmentController::class, 'archive']);
+        Route::post('students/{studentId}/attachments/{attachmentId}/restore', [CenterStudentAttachmentController::class, 'restore']);
         Route::get('students/{studentId}/attachments/{attachmentId}/preview', [CenterStudentAttachmentController::class, 'preview']);
         Route::get('students/{studentId}/attachments/{attachmentId}/download', [CenterStudentAttachmentController::class, 'download']);
         Route::get('students/{studentId}', [CenterStudentController::class, 'workspace']);
