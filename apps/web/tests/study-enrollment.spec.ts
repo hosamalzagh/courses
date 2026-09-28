@@ -144,6 +144,8 @@ test("suspension blocks a stale enrollment preview and lifting allows registrati
   const created = await write(page, "students", { name: `طالب منع التسجيل ${Date.now()}`, branch_ids: [branchId], request_id: crypto.randomUUID() });
   expect(created.status).toBe(201);
   const studentId = created.body.student.id;
+  const settings = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
+  if (!settings.account.currency) expect((await write(page, "financial-currency", { currency: "EGP", revision: settings.account.currency_revision }, "PATCH")).status).toBe(200);
   await page.goto(`${origin}/admin/students/${studentId}/enrollments`);
   await page.getByRole("searchbox", { name: "بحث في المجموعات المتاحة للتسجيل" }).fill(createdGroup.name);
   await page.getByRole("button", { name: "بحث في جميع المجموعات المتاحة للتسجيل" }).click();
@@ -187,6 +189,8 @@ test("parallel suspension and enrollment produce one serialized decision", async
   const created = await write(page, "students", { name: `تزامن الإيقاف ${Date.now()}`, branch_ids: [branchId], request_id: crypto.randomUUID() });
   expect(created.status).toBe(201);
   const studentId = created.body.student.id;
+  const settings = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
+  if (!settings.account.currency) expect((await write(page, "financial-currency", { currency: "EGP", revision: settings.account.currency_revision }, "PATCH")).status).toBe(200);
   const preview = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
   await page.evaluate(() => fetch("/sanctum/csrf-cookie", { credentials: "same-origin" }));
   const xsrf = (await page.context().cookies(origin)).find(cookie => cookie.name === "XSRF-TOKEN")?.value ?? "";
