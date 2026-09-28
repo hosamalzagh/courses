@@ -238,6 +238,8 @@ class StudySessionsTest extends TestCase
             $last = $this->student();
             $this->enroll($last['id'], $group, now('Africa/Cairo')->format('Y-m-d'));
         }
+        $this->center->run(fn () => DB::table('students')->where('id', $last['id'])->update(['student_number' => 1000]));
+        $last['student_number'] = 1000;
         $path = "{$this->base}/groups/{$group['id']}/sessions/{$session['id']}/attendance";
         $firstPage = $this->getJson($path)->assertOk()->assertJsonCount(20, 'students')
             ->assertJsonPath('pagination.has_more', true);
@@ -253,6 +255,8 @@ class StudySessionsTest extends TestCase
         $byNumber = $this->getJson("{$path}?q=".rawurlencode($arabicNumber))->assertOk()
             ->assertJsonCount(1, 'students')->assertJsonPath('students.0.student_id', $last['id']);
         $this->assertLessThanOrEqual(6, (int) $byNumber->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$path}?q=".rawurlencode('١٬٠٠٠'))->assertOk()
+            ->assertJsonCount(1, 'students')->assertJsonPath('students.0.student_id', $last['id']);
         $this->postJson("{$this->base}/groups/{$group['id']}/start", ['revision' => 2])->assertOk();
         $this->travelTo($scheduled->copy()->addHour());
         $recorded = $this->postJson($path, ['attempt_id' => $firstPage->json('students.0.attempt_id'),
