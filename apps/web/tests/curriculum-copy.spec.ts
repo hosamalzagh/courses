@@ -83,7 +83,8 @@ test("copy curriculum with preview, independent target, source history, isolatio
       .map(line => JSON.parse(line) as { path: string; count: number | null })
       .filter(entry => entry.path.includes(`/courses/${course.body.course.id}/copy-preview`));
     expect(previewReads.length).toBeGreaterThan(0);
-    expect(previewReads.every(entry => Number.isInteger(entry.count) && entry.count! <= 6)).toBe(true);
+    // Copy preparation uses a bounded PostgreSQL cursor inside a read transaction.
+    expect(previewReads.every(entry => Number.isInteger(entry.count) && entry.count! <= 7)).toBe(true);
     await expect(owner.getByText("مستوى: مستوى المصدر", { exact: false })).toBeVisible();
     const responsePromise = owner.waitForResponse(response => /\/api\/v1\/center\/courses\/[^/]+\/copies$/.test(response.url()) && response.request().method() === "POST");
     await owner.getByRole("button", { name: "تأكيد النسخ" }).click();

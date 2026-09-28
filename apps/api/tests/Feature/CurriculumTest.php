@@ -587,6 +587,32 @@ class CurriculumTest extends TestCase
         $this->getJson($path)->assertNotFound();
     }
 
+    public function test_course_copy_pages_a_large_outline_with_a_stable_snapshot(): void
+    {
+        $course = $this->postJson("{$this->base}/courses", [
+            'branch_id' => $this->north, 'name' => 'منهج متعدد المراحل', 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('course');
+        $this->center->run(function () use ($course): void {
+            DB::table('stages')->insert(array_map(fn (int $number): array => [
+                'id' => (string) Str::uuid(), 'course_id' => $course['id'], 'name' => "مرحلة {$number}",
+                'created_at' => now()->addSeconds($number), 'updated_at' => now(),
+            ], range(1, 61)));
+        });
+        $path = "{$this->base}/courses/{$course['id']}/copy-preview?target_branch_id={$this->south}";
+        $first = $this->getJson($path)->assertOk()->assertJsonCount(50, 'outline')
+            ->assertJsonPath('counts.stages', 61)->assertJsonPath('pagination.has_more', true);
+        $second = $this->getJson("{$path}&page=2")->assertOk()->assertJsonCount(11, 'outline')
+            ->assertJsonPath('counts.stages', 61)->assertJsonPath('pagination.has_more', false);
+        $this->assertSame($first->json('snapshot_hash'), $second->json('snapshot_hash'));
+        foreach ([$first, $second] as $response) {
+            $this->assertLessThanOrEqual(6, (int) $response->headers->get('X-Courses-Query-Count'));
+        }
+        $this->postJson("{$this->base}/courses/{$course['id']}/copies", [
+            'target_branch_id' => $this->south, 'snapshot_hash' => $second->json('snapshot_hash'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->assertJsonPath('counts.stages', 61);
+    }
+
     private function sequence(int $branchId, string $name = 'Course'): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => $name, 'request_id' => (string) Str::uuid()])->assertCreated()->json('course');

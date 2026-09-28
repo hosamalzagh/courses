@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,9 +23,9 @@ class CenterCurriculumCopyController extends Controller
         $permissions = $request->attributes->get('center_permissions');
         [$source, $target] = $this->sourceAndTarget($courseId, (int) $data['target_branch_id'], $permissions);
         abort_if((int) $source->branch_id === $target->id, 422, 'اختر فرعًا آخر لنسخ المنهج.');
-        $snapshot = $this->snapshot($source);
+        $payload = DB::connection('tenant')->transaction(fn (): array => $this->previewPayload($source, $target, (int) ($data['page'] ?? 1)));
 
-        return response()->json($this->previewPayload($source, $target, $snapshot, (int) ($data['page'] ?? 1)))
+        return response()->json($payload)
             ->header('Cache-Control', 'private, no-store');
     }
 
@@ -147,30 +148,7 @@ class CenterCurriculumCopyController extends Controller
 
     private function snapshot(object $source): array
     {
-        $rows = DB::connection('tenant')->table('stages')
-            ->leftJoin('levels', 'levels.stage_id', '=', 'stages.id')
-            ->leftJoin('study_plan_versions as plans', 'plans.level_id', '=', 'levels.id')
-            ->leftJoin('plan_lectures as lectures', 'lectures.plan_version_id', '=', 'plans.id')
-            ->where('stages.course_id', $source->id)
-            ->orderBy('stages.created_at')->orderBy('stages.id')
-            ->orderBy('levels.created_at')->orderBy('levels.id')
-            ->orderBy('plans.version')->orderBy('lectures.number')
-            ->get([
-                'stages.id as stage_id', 'stages.name as stage_name',
-                'stages.completion_threshold as stage_completion_threshold',
-                'stages.completion_revision as stage_completion_revision',
-                'stages.absence_mode as stage_absence_mode', 'stages.absence_limit as stage_absence_limit',
-                'stages.absence_revision as stage_absence_revision',
-                'levels.id as level_id', 'levels.name as level_name',
-                'levels.completion_threshold as level_completion_threshold',
-                'levels.completion_revision as level_completion_revision',
-                'levels.absence_mode as level_absence_mode', 'levels.absence_limit as level_absence_limit',
-                'levels.absence_revision as level_absence_revision',
-                'plans.id as plan_id', 'plans.version as plan_version', 'plans.revision as plan_revision',
-                'lectures.id as lecture_id', 'lectures.number as lecture_number',
-                'lectures.content as lecture_content', 'lectures.title as lecture_title',
-                'lectures.planned_hours as lecture_planned_hours',
-            ]);
+        $rows = $this->sourceRows($source)->get();
         $stages = [];
         foreach ($rows as $row) {
             $stageId = $row->stage_id;
@@ -217,41 +195,190 @@ class CenterCurriculumCopyController extends Controller
         }
         unset($stage);
 
-        return ['course' => [
+        return ['course' => $this->coursePayload($source), 'stages' => array_values($stages)];
+    }
+
+    private function sourceRows(object $source): Builder
+    {
+        return DB::connection('tenant')->table('stages')
+            ->leftJoin('levels', 'levels.stage_id', '=', 'stages.id')
+            ->leftJoin('study_plan_versions as plans', 'plans.level_id', '=', 'levels.id')
+            ->leftJoin('plan_lectures as lectures', 'lectures.plan_version_id', '=', 'plans.id')
+            ->where('stages.course_id', $source->id)
+            ->orderBy('stages.created_at')->orderBy('stages.id')
+            ->orderBy('levels.created_at')->orderBy('levels.id')
+            ->orderBy('plans.version')->orderBy('lectures.number')
+            ->select([
+                'stages.id as stage_id', 'stages.name as stage_name',
+                'stages.completion_threshold as stage_completion_threshold',
+                'stages.completion_revision as stage_completion_revision',
+                'stages.absence_mode as stage_absence_mode', 'stages.absence_limit as stage_absence_limit',
+                'stages.absence_revision as stage_absence_revision',
+                'levels.id as level_id', 'levels.name as level_name',
+                'levels.completion_threshold as level_completion_threshold',
+                'levels.completion_revision as level_completion_revision',
+                'levels.absence_mode as level_absence_mode', 'levels.absence_limit as level_absence_limit',
+                'levels.absence_revision as level_absence_revision',
+                'plans.id as plan_id', 'plans.version as plan_version', 'plans.revision as plan_revision',
+                'lectures.id as lecture_id', 'lectures.number as lecture_number',
+                'lectures.content as lecture_content', 'lectures.title as lecture_title',
+                'lectures.planned_hours as lecture_planned_hours',
+            ]);
+    }
+
+    private function coursePayload(object $source): array
+    {
+        return [
             'id' => $source->id, 'name' => $source->name,
             'completion_threshold' => $source->completion_threshold,
             'completion_revision' => $source->completion_revision,
             'absence_mode' => $source->absence_mode, 'absence_limit' => $source->absence_limit,
             'absence_revision' => $source->absence_revision,
-        ], 'stages' => array_values($stages)];
+        ];
     }
 
-    private function previewPayload(object $source, object $target, array $snapshot, int $page): array
+    private function previewPayload(object $source, object $target, int $page): array
     {
         $outline = [];
-        $counts = ['stages' => 0, 'levels' => 0, 'plans' => 0, 'lectures' => 0];
-        foreach ($snapshot['stages'] as $stage) {
-            $counts['stages']++;
-            $outline[] = ['kind' => 'stage', 'name' => $stage['name']];
-            foreach ($stage['levels'] as $level) {
-                $counts['levels']++;
-                $planCount = count($level['plans']);
-                $lectureCount = array_sum(array_map(fn (array $plan): int => count($plan['lectures']), $level['plans']));
-                $counts['plans'] += $planCount;
-                $counts['lectures'] += $lectureCount;
-                $outline[] = ['kind' => 'level', 'name' => $level['name'], 'stage_name' => $stage['name'],
-                    'plans' => $planCount, 'lectures' => $lectureCount];
-            }
-        }
+        $outlineCount = 0;
         $offset = ($page - 1) * 50;
+        $counts = ['stages' => 0, 'levels' => 0, 'plans' => 0, 'lectures' => 0];
+        $hash = hash_init('sha256');
+        $emit = static function (string $value) use ($hash): void {
+            hash_update($hash, $value);
+        };
+        $emit('{"course":'.json_encode($this->coursePayload($source), JSON_THROW_ON_ERROR).',"stages":[');
+        $addOutline = static function (array $item) use (&$outline, &$outlineCount, $offset): void {
+            if ($outlineCount >= $offset && $outlineCount < $offset + 50) {
+                $outline[] = $item;
+            }
+            $outlineCount++;
+        };
+        $stageId = $levelId = $planId = null;
+        $stageName = null;
+        $levelOutline = null;
+        $firstLevel = $firstPlan = $firstLecture = true;
+        $query = $this->sourceRows($source);
+        $tenant = DB::connection('tenant');
+        $tenant->statement('DECLARE curriculum_copy_preview NO SCROLL CURSOR FOR '.$query->toSql(), $query->getBindings());
+        try {
+            do {
+                $rows = $tenant->select('FETCH FORWARD 100 FROM curriculum_copy_preview');
+                foreach ($rows as $row) {
+                    if ($stageId !== $row->stage_id) {
+                        if ($planId !== null) {
+                            $emit(']}');
+                            $planId = null;
+                        }
+                        if ($levelId !== null) {
+                            $emit(']}');
+                            $addOutline($levelOutline);
+                            $levelId = null;
+                        }
+                        if ($stageId !== null) {
+                            $emit(']}');
+                            $emit(',');
+                        }
+                        $stageId = $row->stage_id;
+                        $stageName = $row->stage_name;
+                        $stage = [
+                            'id' => $stageId, 'name' => $stageName,
+                            'completion_threshold' => $row->stage_completion_threshold,
+                            'completion_revision' => $row->stage_completion_revision,
+                            'absence_mode' => $row->stage_absence_mode,
+                            'absence_limit' => $row->stage_absence_limit,
+                            'absence_revision' => $row->stage_absence_revision,
+                        ];
+                        $emit(substr(json_encode($stage, JSON_THROW_ON_ERROR), 0, -1).',"levels":[');
+                        $counts['stages']++;
+                        $addOutline(['kind' => 'stage', 'name' => $stageName]);
+                        $firstLevel = true;
+                    }
+                    if ($row->level_id === null) {
+                        continue;
+                    }
+                    if ($levelId !== $row->level_id) {
+                        if ($planId !== null) {
+                            $emit(']}');
+                            $planId = null;
+                        }
+                        if ($levelId !== null) {
+                            $emit(']}');
+                            $addOutline($levelOutline);
+                        }
+                        if (! $firstLevel) {
+                            $emit(',');
+                        }
+                        $firstLevel = false;
+                        $levelId = $row->level_id;
+                        $level = [
+                            'id' => $levelId, 'name' => $row->level_name,
+                            'completion_threshold' => $row->level_completion_threshold,
+                            'completion_revision' => $row->level_completion_revision,
+                            'absence_mode' => $row->level_absence_mode,
+                            'absence_limit' => $row->level_absence_limit,
+                            'absence_revision' => $row->level_absence_revision,
+                        ];
+                        $emit(substr(json_encode($level, JSON_THROW_ON_ERROR), 0, -1).',"plans":[');
+                        $counts['levels']++;
+                        $levelOutline = ['kind' => 'level', 'name' => $row->level_name,
+                            'stage_name' => $stageName, 'plans' => 0, 'lectures' => 0];
+                        $firstPlan = true;
+                    }
+                    if ($row->plan_id === null) {
+                        continue;
+                    }
+                    if ($planId !== $row->plan_id) {
+                        if ($planId !== null) {
+                            $emit(']}');
+                        }
+                        if (! $firstPlan) {
+                            $emit(',');
+                        }
+                        $firstPlan = false;
+                        $planId = $row->plan_id;
+                        $plan = ['id' => $planId, 'version' => $row->plan_version, 'revision' => $row->plan_revision];
+                        $emit(substr(json_encode($plan, JSON_THROW_ON_ERROR), 0, -1).',"lectures":[');
+                        $counts['plans']++;
+                        $levelOutline['plans']++;
+                        $firstLecture = true;
+                    }
+                    if ($row->lecture_id === null) {
+                        continue;
+                    }
+                    if (! $firstLecture) {
+                        $emit(',');
+                    }
+                    $firstLecture = false;
+                    $emit(json_encode(['id' => $row->lecture_id, 'number' => $row->lecture_number,
+                        'content' => $row->lecture_content, 'title' => $row->lecture_title,
+                        'planned_hours' => $row->lecture_planned_hours], JSON_THROW_ON_ERROR));
+                    $counts['lectures']++;
+                    $levelOutline['lectures']++;
+                }
+            } while (count($rows) === 100);
+        } finally {
+            // The read transaction closes the cursor on commit or rollback.
+        }
+        if ($planId !== null) {
+            $emit(']}');
+        }
+        if ($levelId !== null) {
+            $emit(']}');
+            $addOutline($levelOutline);
+        }
+        if ($stageId !== null) {
+            $emit(']}');
+        }
+        $emit(']}');
 
         return [
             'source' => ['id' => $source->id, 'name' => $source->name,
                 'branch_id' => $source->branch_id, 'branch_name' => $source->branch_name],
             'target' => ['id' => $target->id, 'name' => $target->name],
-            'snapshot_hash' => $this->hashSnapshot($snapshot), 'counts' => $counts,
-            'outline' => array_slice($outline, $offset, 50),
-            'pagination' => ['page' => $page, 'has_more' => count($outline) > $offset + 50],
+            'snapshot_hash' => hash_final($hash), 'counts' => $counts,
+            'outline' => $outline,
+            'pagination' => ['page' => $page, 'has_more' => $outlineCount > $offset + 50],
         ];
     }
 
