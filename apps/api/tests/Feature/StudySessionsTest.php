@@ -202,6 +202,10 @@ class StudySessionsTest extends TestCase
         $after = $this->getJson($attendance)->assertOk()->assertJsonCount(2, 'students')->json('students');
         $this->assertSame('counted', collect($after)->firstWhere('student_id', $first['id'])['status']);
         $this->assertSame('absent', collect($after)->firstWhere('student_id', $second['id'])['status']);
+        $backdated = $this->student();
+        $this->enroll($backdated['id'], $group, now('Africa/Cairo')->subDay()->format('Y-m-d'));
+        $closedRoster = $this->getJson($attendance)->assertOk()->assertJsonCount(2, 'students')->json('students');
+        $this->assertNull(collect($closedRoster)->firstWhere('student_id', $backdated['id']));
         $this->postJson("{$attendance}/{$recorded['id']}/undo", ['revision' => 5, 'request_id' => (string) Str::uuid()])
             ->assertConflict();
         $this->center->run(function (): void {

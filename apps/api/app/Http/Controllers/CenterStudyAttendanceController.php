@@ -212,11 +212,19 @@ class CenterStudyAttendanceController extends Controller
     {
         $date = (new DateTimeImmutable($session->scheduled_at))->setTimezone(new DateTimeZone('Africa/Cairo'))->format('Y-m-d');
 
-        return DB::connection('tenant')->table('study_attempts as attempts')
+        $roster = DB::connection('tenant')->table('study_attempts as attempts')
             ->join('students', 'students.id', '=', 'attempts.student_id')
             ->leftJoin('study_attendance_entries as entries', function ($join) use ($session): void {
                 $join->on('entries.attempt_id', '=', 'attempts.id')->where('entries.session_id', $session->id);
             })
+            ->select(['attempts.id as attempt_id', 'students.id as student_id', 'students.name', 'students.student_number',
+                'students.status as student_status', 'entries.id as entry_id', 'entries.status',
+                'entries.revision as entry_revision', 'entries.recorded_by']);
+        if ($session->closed_at) {
+            return $roster->whereNotNull('entries.id');
+        }
+
+        return $roster
             ->whereExists(function ($query) use ($session, $date): void {
                 $query->selectRaw('1')->from('study_attempt_group_periods as periods')
                     ->whereColumn('periods.attempt_id', 'attempts.id')->where('periods.group_id', $session->group_id)
@@ -228,10 +236,7 @@ class CenterStudyAttendanceController extends Controller
                     ->whereColumn('suspensions.student_id', 'students.id')
                     ->where('suspensions.suspended_at', '<=', $session->scheduled_at)
                     ->where(fn ($query) => $query->whereNull('suspensions.lifted_at')->orWhere('suspensions.lifted_at', '>', $session->scheduled_at));
-            })
-            ->select(['attempts.id as attempt_id', 'students.id as student_id', 'students.name', 'students.student_number',
-                'students.status as student_status', 'entries.id as entry_id', 'entries.status',
-                'entries.revision as entry_revision', 'entries.recorded_by']);
+            });
     }
 
     private function open(object $session, int $revision): void
