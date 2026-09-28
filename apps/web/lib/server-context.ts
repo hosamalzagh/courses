@@ -65,10 +65,17 @@ export type StudentSearchResult = { id: string; student_number: number; name: st
 export type StudentSearchContext = CenterContext & { policy: StudentSearchPolicy; students: StudentSearchResult[]; pagination: { page: number; has_more: boolean }; can_search: boolean };
 export type StudentPayment = { id: string; branch_id: number; branch_name?: string; amount: string; currency: string; method: string; received_on: string; actor_name: string; created_at: string };
 export type StudentAccountContext = CenterContext & {
-  account: { student_id: string; student_name: string; student_number: number; version: string; currency: string | null; currency_revision: number; currency_locked: boolean; available_balance: string };
+  account: { student_id: string; student_name: string; student_number: number; version: string; currency: string | null; currency_revision: number; currency_locked: boolean; available_balance: string; debt: string };
   recordable_branches: { id: number; name: string }[];
   payments: StudentPayment[];
   pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean };
+};
+export type StudyEnrollmentContext = CenterContext & {
+  student: { id: string; name: string; student_number: number; status: "active" | "suspended"; currency: string | null; currency_revision: number; version: string };
+  balance: { available_credit: string; debt: string };
+  groups: { id: string; name: string; status: string; approved_price: string; revision: number; level_id: string; plan_version_id: string; branch_id: number; branch_name: string; level_name: string }[];
+  attempts: { id: string; level_id: string; plan_version_id: string; current_group_id: string; branch_id: number; joined_on: string; status: string; created_at: string; group_name: string; level_name: string; requirements_count: number; fee: { id: string; original_price: string; discount: string; net_amount: string; currency: string; discount_reason: string | null; actor_name: string } }[];
+  pagination: { page: number; has_more: boolean; groups_page: number; groups_has_more: boolean };
 };
 
 export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable" | "student_unavailable";
@@ -135,6 +142,10 @@ export function loadStudentAccount(studentId: string, query = ""): Promise<Stude
   return fetchCenterPayload<StudentAccountContext>(`students/${encodeURIComponent(studentId)}/account${query ? `?${query}` : ""}`);
 }
 
+export function loadStudyEnrollments(studentId: string, query = ""): Promise<StudyEnrollmentContext | CenterAccessFailure> {
+  return fetchCenterPayload<StudyEnrollmentContext>(`students/${encodeURIComponent(studentId)}/enrollments${query ? `?${query}` : ""}`);
+}
+
 export function loadInstructorWorkspace(query = "", instructorId?: string): Promise<InstructorContext | CenterAccessFailure> {
   return fetchCenterPayload<InstructorContext>(`${instructorId ? `instructors/${encodeURIComponent(instructorId)}` : "instructor-workspace"}${query ? `?${query}` : ""}`);
 }
@@ -177,6 +188,8 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   if (studentEdit) return loadStudentWorkspace("", decodeURIComponent(studentEdit[1]));
   const studentAccount = path.match(/^\/admin\/students\/([^/]+)\/account$/);
   if (studentAccount) return loadStudentAccount(decodeURIComponent(studentAccount[1]), query(["page", "branches_page", "q"]));
+  const studentEnrollments = path.match(/^\/admin\/students\/([^/]+)\/enrollments$/);
+  if (studentEnrollments) return loadStudyEnrollments(decodeURIComponent(studentEnrollments[1]), query(["page", "groups_page", "q"]));
   if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q", "identifier"]));
   if (path === "/admin/curriculum") return loadCurriculumWorkspace(query(["courses_page", "stages_page", "levels_page", "branches_page"]));
   if (path === "/admin/groups") return loadGroupWorkspace(query(["page", "levels_page", "instructors_page"]));

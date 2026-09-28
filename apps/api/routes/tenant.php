@@ -18,6 +18,7 @@ use App\Http\Controllers\CenterStudentProfileChoiceController;
 use App\Http\Controllers\CenterStudentSearchController;
 use App\Http\Controllers\CenterStudentStatusController;
 use App\Http\Controllers\CenterStudyGroupController;
+use App\Http\Controllers\CenterStudyEnrollmentController;
 use App\Http\Middleware\MeasureCenterQueries;
 use App\Http\Middleware\RequireCenterMember;
 use App\Http\Middleware\ResolveCenter;
@@ -81,6 +82,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::patch('student-profile-choices/{choiceId}', [CenterStudentProfileChoiceController::class, 'update']);
         Route::get('student-workspace', [CenterStudentController::class, 'workspace']);
         Route::get('students/{studentId}/account', [CenterStudentFinanceController::class, 'account']);
+        Route::get('students/{studentId}/enrollments', [CenterStudyEnrollmentController::class, 'workspace']);
+        Route::post('students/{studentId}/enrollments', [CenterStudyEnrollmentController::class, 'store']);
         Route::post('students/{studentId}/payments', [CenterStudentFinanceController::class, 'recordPayment']);
         Route::patch('financial-currency', [CenterStudentFinanceController::class, 'updateCurrency']);
         Route::get('student-search-workspace', [CenterStudentSearchController::class, 'workspace']);

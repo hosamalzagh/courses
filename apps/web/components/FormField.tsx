@@ -9,9 +9,10 @@ type Props = {
   id: string; label: string; value: string; onChange: (value: string) => void;
   type?: string; autoComplete?: string; required?: boolean; hint?: string;
   error?: string; direction?: "ltr" | "rtl"; focusOnMount?: boolean;
+  disabled?: boolean;
 };
 
-export function FormField({ id, label, value, onChange, type = "text", autoComplete, required, hint, error, direction, focusOnMount = false }: Props) {
+export function FormField({ id, label, value, onChange, type = "text", autoComplete, required, hint, error, direction, focusOnMount = false, disabled = false }: Props) {
   const [visible, setVisible] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -27,7 +28,7 @@ export function FormField({ id, label, value, onChange, type = "text", autoCompl
   const props = {
     ref: inputRef, id, name: id, type: type === "password" && visible ? "text" : type,
     value, onChange: (event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value),
-    autoComplete, required, "aria-invalid": Boolean(error),
+    autoComplete, required, disabled, "aria-invalid": Boolean(error),
     "aria-describedby": error ? `${id}-error` : hint ? `${id}-hint` : undefined, dir: direction,
   };
   return <Field data-invalid={Boolean(error)}>

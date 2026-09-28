@@ -29,8 +29,11 @@ class CenterAuditController extends Controller
             $query->whereIn('branch_id', $auditableBranches);
             $financialBranches = array_keys(array_filter($permissions->branchRoles,
                 fn ($roles) => in_array('finance.read', CenterPermissions::actions($roles), true)));
-            $query->where(fn ($scope) => $scope->where('event', '!=', 'student.payment_recorded')
-                ->orWhereIn('branch_id', $financialBranches));
+            $enrollmentBranches = array_keys(array_filter($permissions->branchRoles,
+                fn ($roles) => in_array('enrollment.manage', CenterPermissions::actions($roles), true)));
+            $query->where(fn ($scope) => $scope->whereNotIn('event', ['student.payment_recorded', 'student.enrolled'])
+                ->orWhere(fn ($event) => $event->where('event', 'student.payment_recorded')->whereIn('branch_id', $financialBranches))
+                ->orWhere(fn ($event) => $event->where('event', 'student.enrolled')->whereIn('branch_id', $enrollmentBranches)));
         }
 
         return $query->orderByDesc('id')->limit(50)->get();

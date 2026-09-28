@@ -7,6 +7,8 @@ import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent } from "
 import { Checkbox } from "@/components/ui/checkbox";
 import { FieldLabel, FieldGroup, FieldSet, FieldLegend } from "@/components/ui/field";
 import { Button } from "@/components/Button";
+import { buttonVariants } from "@/components/ui/button";
+import { PrefetchLink } from "@/components/PrefetchLink";
 
 
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
@@ -22,14 +24,16 @@ type Props<T> = {
   emptyMessage: string; action?: ReactNode; filters?: { label: string; value: string; matches: (row: T) => boolean }[];
   expanded?: (row: T) => ReactNode; rowClassName?: string;
   pageSize?: number; serverSearch?: { value: string; onSearch: (value: string) => void };
+  serverPagination?: { page: number; hasMore: boolean; batchSize: number; previousHref: string; nextHref: string };
 };
 
 
-export function DataTable<T>({ id, title, description, rows, columns, rowKey, searchText, emptyMessage, action, filters = [], expanded, rowClassName, pageSize = 10, serverSearch }: Props<T>) {
+export function DataTable<T>({ id, title, description, rows, columns, rowKey, searchText, emptyMessage, action, filters = [], expanded, rowClassName, pageSize = 10, serverSearch, serverPagination }: Props<T>) {
   const serverSearchValue = serverSearch?.value;
   const hasServerSearch = Boolean(serverSearch);
   const [search, setSearch] = useState("");
   const [loadedServerSearch, setLoadedServerSearch] = useState(serverSearchValue);
+  const [loadedServerPage, setLoadedServerPage] = useState(serverPagination?.page);
   const [filter, setFilter] = useState("");
   const [page, setPage] = useState(1);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
@@ -48,6 +52,10 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
   if (loadedServerSearch !== serverSearchValue) {
     setLoadedServerSearch(serverSearchValue); setSearch(serverSearchValue ?? ""); setPage(1);
   }
+  if (loadedServerPage !== serverPagination?.page) {
+    const localPage = typeof window === "undefined" ? 1 : Number(new URLSearchParams(window.location.search).get(`${id}-page`)) || 1;
+    setLoadedServerPage(serverPagination?.page); setPage(Math.max(1, localPage));
+  }
 
   useEffect(() => {
     function restore() {
@@ -61,7 +69,7 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
     restore();
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
-  }, [id, filterKeys, serverSearchValue, hasServerSearch]);
+  }, [id, filterKeys, serverSearchValue, hasServerSearch, serverPagination?.page]);
 
   const activeFilter = filters.find((item) => item.value === filter);
   const query = search.trim().toLocaleLowerCase("ar-EG");
@@ -75,6 +83,12 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
   if (ready && page !== currentPage) setPage(currentPage);
   const start = (currentPage - 1) * pageSize;
   const pageRows = visible.slice(start, start + pageSize);
+  const batchOffset = serverPagination ? (serverPagination.page - 1) * serverPagination.batchSize : 0;
+  const previousBatchHref = serverPagination ? `${serverPagination.previousHref}${serverPagination.previousHref.includes("?") ? "&" : "?"}${id}-page=${Math.ceil(serverPagination.batchSize / pageSize)}` : "";
+  const hasPreviousPage = currentPage > 1 || Boolean(serverPagination && serverPagination.page > 1);
+  const hasNextPage = currentPage < pages || Boolean(serverPagination?.hasMore);
+  const previousPage = () => setPage(currentPage - 1);
+  const nextPage = () => setPage(currentPage + 1);
 
   useEffect(() => {
     if (!ready) return;
@@ -140,6 +154,14 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
         <TableBody>{pageRows.map((row) => <Fragment key={rowKey(row)}><TableRow className={rowClassName}>{shownColumns.map((column) => <TableCell key={column.key} className={column.actions ? "actions-column" : undefined}>{column.render(row)}</TableCell>)}</TableRow>{expanded?.(row) ? <TableRow className="table-detail-row"><TableCell colSpan={shownColumns.length}>{expanded(row)}</TableCell></TableRow> : null}</Fragment>)}</TableBody>
       </Table>
       {!visible.length ? <Empty><EmptyHeader><EmptyTitle><h3>{rows.length ? "لا توجد نتائج مطابقة" : emptyMessage}</h3></EmptyTitle>{rows.length ? <EmptyDescription>جرّب بحثًا آخر أو أعد ضبط التصفية.</EmptyDescription> : null}</EmptyHeader>{rows.length ? <EmptyContent><Button onClick={() => { setSearch(""); setFilter(""); setColumnFilters({}); setPage(1); input.current?.focus(); }}>مسح البحث والتصفية</Button></EmptyContent> : null}</Empty> : null}
-    <div className="table-footer"><span aria-live="polite">{visible.length ? `${(start + 1).toLocaleString("ar-EG")}–${Math.min(start + pageSize, visible.length).toLocaleString("ar-EG")} من ${visible.length.toLocaleString("ar-EG")}` : "٠ سجل"}</span><div className="pagination" aria-label={`صفحات ${title}`}><Button disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} aria-label={`الصفحة السابقة في ${title}`}>السابق</Button><span>صفحة {currentPage.toLocaleString("ar-EG")} من {pages.toLocaleString("ar-EG")}</span><Button disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)} aria-label={`الصفحة التالية في ${title}`}>التالي</Button></div></div>
+    <div className="table-footer"><span aria-live="polite">{visible.length ? `${(batchOffset + start + 1).toLocaleString("ar-EG")}–${(batchOffset + Math.min(start + pageSize, visible.length)).toLocaleString("ar-EG")}${serverPagination ? " من الدفعة المحمّلة" : ` من ${visible.length.toLocaleString("ar-EG")}`}` : "٠ سجل"}</span><div className="pagination" aria-label={`صفحات ${title}`}>
+      {currentPage > 1 || !serverPagination || serverPagination.page <= 1
+        ? <Button disabled={!hasPreviousPage} onClick={previousPage} aria-label={`الصفحة السابقة في ${title}`}>السابق</Button>
+        : <PrefetchLink href={previousBatchHref} className={buttonVariants({ variant: "outline" })} aria-label={`الصفحة السابقة في ${title}`}>السابق</PrefetchLink>}
+      <span>{serverPagination ? `دفعة ${serverPagination.page.toLocaleString("ar-EG")} · ` : ""}صفحة {currentPage.toLocaleString("ar-EG")} من {pages.toLocaleString("ar-EG")}</span>
+      {currentPage < pages || !serverPagination || !serverPagination.hasMore
+        ? <Button disabled={!hasNextPage} onClick={nextPage} aria-label={`الصفحة التالية في ${title}`}>التالي</Button>
+        : <PrefetchLink href={serverPagination.nextHref} className={buttonVariants({ variant: "outline" })} aria-label={`الصفحة التالية في ${title}`}>التالي</PrefetchLink>}
+    </div></div>
   </section>;
 }

@@ -35,7 +35,7 @@ export function NavigationHistoryTracker() {
   return null;
 }
 
-export function UnsavedChangesGuard({ dirty, guardHistory = false }: { dirty: boolean; guardHistory?: boolean }) {
+export function UnsavedChangesGuard({ dirty, guardHistory = false, onDiscard }: { dirty: boolean; guardHistory?: boolean; onDiscard?: () => void }) {
   const router = useRouter();
   const [destination, setDestination] = useState<string | null>(null);
   const leaving = useRef(false);
@@ -93,6 +93,7 @@ export function UnsavedChangesGuard({ dirty, guardHistory = false }: { dirty: bo
 
   return destination && dirty ? <ConfirmationDialog title="مغادرة دون حفظ" description="لديك بيانات لم تُحفظ. يمكنك إلغاء المغادرة ومتابعة تعديلها، أو مغادرة الصفحة دون حفظها." confirmLabel="مغادرة دون حفظ" onCancel={() => { historyDelta.current = null; setDestination(null); }} onConfirm={() => {
     leaving.current = true;
+    onDiscard?.();
     setDestination(null);
     if (historyDelta.current !== null) { window.history.go(historyDelta.current); return; }
     const url = new URL(destination);
