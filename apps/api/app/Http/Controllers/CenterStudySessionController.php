@@ -315,7 +315,7 @@ class CenterStudySessionController extends Controller
             $this->audit($actor->id, $group['branch_id'], 'study_session.replacement_scheduled', [
                 'group_id' => $groupId, 'cancelled_session_id' => $sessionId, 'replacement_session_id' => $id,
                 'plan_lecture_id' => $session->plan_lecture_id, 'number' => $prepared['number'],
-                'scheduled_at' => $prepared['scheduled_at'], 'decision' => $session->compensation_decision,
+                'scheduled_at' => $prepared['scheduled_at'], 'decision' => 'academic',
             ]);
 
             return response()->json(['session' => $this->sessions($groupId)->where('sessions.id', $id)->firstOrFail(),
@@ -353,8 +353,10 @@ class CenterStudySessionController extends Controller
 
     private function prepareReplacement(array $group, object $session, array $data): array
     {
-        if ($group['status'] === 'completed' || $session->status !== 'cancelled' || $session->cancelled_at === null
-            || $session->compensation_decision !== 'academic') {
+        $unheldCancellation = $session->cancelled_at !== null && $session->compensation_decision === 'academic';
+        $revokedReplacement = $session->revoked_at !== null && $session->replaces_session_id !== null;
+        if ($group['status'] === 'completed' || $session->status !== 'cancelled'
+            || (! $unheldCancellation && ! $revokedReplacement)) {
             $this->conflict('session_changed');
         }
         $db = DB::connection('tenant');
