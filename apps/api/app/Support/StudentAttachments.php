@@ -20,9 +20,12 @@ class StudentAttachments
             'classification' => $row->classification,
             'mime' => $row->mime,
             'size_bytes' => (int) $row->size_bytes,
+            'current_version' => (int) $row->current_version,
+            'archived_at' => $row->archived_at,
             'created_at' => $row->created_at,
             'preview_url' => '/api/v1/center/students/'.$row->student_id.'/attachments/'.$row->id.'/preview',
             'download_url' => '/api/v1/center/students/'.$row->student_id.'/attachments/'.$row->id.'/download',
+            'versions_url' => '/api/v1/center/students/'.$row->student_id.'/attachments/'.$row->id.'/versions',
         ];
     }
 }

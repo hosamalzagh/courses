@@ -143,6 +143,9 @@ class StudentAttachmentTest extends TestCase
     {
         $student = $this->student();
         $this->center->run(function (): void {
+            $versionPath = glob(database_path('migrations/tenant/*_version_student_attachments.php'))[0];
+            (require $versionPath)->down();
+            DB::table('migrations')->where('migration', pathinfo($versionPath, PATHINFO_FILENAME))->delete();
             $path = glob(database_path('migrations/tenant/*_create_student_attachments.php'))[0];
             (require $path)->down();
             DB::table('migrations')->where('migration', pathinfo($path, PATHINFO_FILENAME))->delete();
@@ -150,6 +153,89 @@ class StudentAttachmentTest extends TestCase
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
         $this->getJson("{$this->base}/students/{$student['id']}")->assertOk()->assertJsonPath('students.0.student_number', $student['student_number'])->assertJsonPath('students.0.attachment_revision', 1);
+    }
+
+    public function test_replacement_preserves_versions_and_retry_or_failure_cannot_duplicate_them(): void
+    {
+        $student = $this->student();
+        $attachment = $this->upload($student['id']);
+        $requestId = (string) Str::uuid();
+        $replace = ['request_id' => $requestId, 'attachment_revision' => 2, 'title' => 'نسخة محدثة', 'file' => $this->pdf()];
+        $url = "{$this->base}/students/{$student['id']}/attachments/{$attachment['id']}";
+        $this->post("{$url}/replace", $replace, ['Accept' => 'application/json'])->assertOk()->assertJsonPath('attachment.current_version', 2)->assertJsonPath('attachment_revision', 3);
+        $this->post("{$url}/replace", $replace, ['Accept' => 'application/json'])->assertOk()->assertJsonPath('attachment.current_version', 2);
+        $history = $this->getJson("{$url}/versions")->assertOk()->assertJsonCount(2, 'versions');
+        $this->assertNotNull($history->headers->get('X-Courses-Query-Count'));
+        $this->assertLessThanOrEqual(6, (int) $history->headers->get('X-Courses-Query-Count'));
+        $history->assertJsonPath('versions.0.actor_name', $this->owner->name);
+        $first = $history->json('versions.1');
+        $this->assertSame(1, $first['version']);
+        $this->get('http://alpha.courses.test'.$first['download_url'])->assertOk()->assertHeader('Content-Type', 'image/png');
+        $this->get('http://alpha.courses.test'.$history->json('versions.0.preview_url'))->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $this->post("{$url}/replace", ['request_id' => (string) Str::uuid(), 'attachment_revision' => 2, 'file' => $this->image()], ['Accept' => 'application/json'])->assertConflict();
+        $this->center->run(fn () => DB::statement("ALTER TABLE center_audit_logs ADD CONSTRAINT attachment_replace_failure CHECK (event <> 'student.attachment_replace') NOT VALID"));
+        try {
+            $this->post("{$url}/replace", ['request_id' => (string) Str::uuid(), 'attachment_revision' => 3, 'file' => $this->image()], ['Accept' => 'application/json'])->assertServerError();
+        } finally {
+            $this->center->run(fn () => DB::statement('ALTER TABLE center_audit_logs DROP CONSTRAINT attachment_replace_failure'));
+        }
+        $this->getJson("{$url}/versions")->assertOk()->assertJsonCount(2, 'versions');
+        $this->center->run(function () use ($attachment, $student): void {
+            $this->assertSame(2, DB::table('student_attachment_versions')->where('attachment_id', $attachment['id'])->count());
+            $audit = DB::table('center_audit_logs')->where('event', 'student.attachment_replace')->first();
+            $this->assertSame(['student_id' => $student['id'], 'attachment_id' => $attachment['id'], 'from_version' => 1, 'to_version' => 2], json_decode($audit->details, true));
+        });
+        $this->assertCount(2, Storage::disk('local')->allFiles('student-attachments/'.$this->center->id));
+    }
+
+    public function test_archiving_restoring_and_reclassification_recheck_each_historical_link(): void
+    {
+        $student = $this->student();
+        $attachment = $this->upload($student['id']);
+        $url = "{$this->base}/students/{$student['id']}/attachments/{$attachment['id']}";
+        $generalVersion = $this->getJson("{$url}/versions")->assertOk()->json('versions.0');
+        $this->patchJson("{$url}/classification", ['request_id' => (string) Str::uuid(), 'attachment_revision' => 2, 'classification' => 'identity'])->assertOk()->assertJsonPath('attachment_revision', 3);
+        $identityVersion = $this->getJson("{$url}/versions")->assertOk()->json('versions.0');
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $this->get('http://alpha.courses.test'.$attachment['download_url'])->assertNotFound();
+        $this->get('http://alpha.courses.test'.$generalVersion['download_url'])->assertNotFound();
+        $this->getJson("{$url}/versions")->assertNotFound();
+        $this->asUser($this->owner);
+        $this->postJson("{$url}/archive", ['request_id' => (string) Str::uuid(), 'attachment_revision' => 3])->assertOk()->assertJsonPath('attachment_revision', 4);
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=attachments")->assertOk()->assertJsonCount(0, 'attachments.entries');
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=attachments&attachments_status=archived")->assertOk()->assertJsonCount(1, 'attachments.entries');
+        $this->asUser($this->staff);
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=attachments&attachments_status=archived")->assertOk()->assertJsonCount(0, 'attachments.entries');
+        $this->get('http://alpha.courses.test'.$generalVersion['preview_url'])->assertNotFound();
+        $this->postJson("{$url}/restore", ['request_id' => (string) Str::uuid(), 'attachment_revision' => 4])->assertForbidden();
+        $this->asUser($this->owner);
+        $this->postJson("{$url}/restore", ['request_id' => (string) Str::uuid(), 'attachment_revision' => 4])->assertOk()->assertJsonPath('attachment_revision', 5);
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=attachments")->assertOk()->assertJsonCount(1, 'attachments.entries');
+        $this->get('http://alpha.courses.test'.$generalVersion['preview_url'])->assertOk();
+        $this->patchJson("{$url}/classification", ['request_id' => (string) Str::uuid(), 'attachment_revision' => 5, 'classification' => 'general'])->assertOk()->assertJsonPath('attachment.current_version', 3);
+        $this->asUser($this->staff);
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=attachments")->assertOk()->assertJsonCount(1, 'attachments.entries');
+        $this->get('http://alpha.courses.test'.$attachment['download_url'])->assertOk();
+        $this->get('http://alpha.courses.test'.$identityVersion['download_url'])->assertNotFound();
+        $this->getJson("{$url}/versions")->assertOk()->assertJsonCount(2, 'versions');
+        $this->center->run(function () use ($student, $attachment): void {
+            $audit = DB::table('center_audit_logs')->where('event', 'student.attachment_classify')->orderByDesc('id')->first();
+            $this->assertSame(['student_id' => $student['id'], 'attachment_id' => $attachment['id'], 'from_classification' => 'identity', 'to_classification' => 'general', 'from_version' => 2, 'to_version' => 3], json_decode($audit->details, true));
+        });
+    }
+
+    public function test_existing_attachment_is_backfilled_into_version_history(): void
+    {
+        $student = $this->student();
+        $attachment = $this->upload($student['id']);
+        $this->center->run(function (): void {
+            $path = glob(database_path('migrations/tenant/*_version_student_attachments.php'))[0];
+            (require $path)->down();
+            DB::table('migrations')->where('migration', pathinfo($path, PATHINFO_FILENAME))->delete();
+        });
+        $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->getJson("{$this->base}/students/{$student['id']}/attachments/{$attachment['id']}/versions")->assertOk()->assertJsonCount(1, 'versions')->assertJsonPath('versions.0.version', 1);
     }
 
     public function test_attachment_pages_stay_bounded_with_a_longer_list(): void
@@ -173,6 +259,13 @@ class StudentAttachmentTest extends TestCase
     private function student(): array
     {
         return $this->postJson("{$this->base}/students", ['name' => 'طالب مرفقات', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid()])->assertCreated()->json('student');
+    }
+
+    private function upload(string $studentId): array
+    {
+        return $this->post("{$this->base}/students/{$studentId}/attachments", $this->payload((string) Str::uuid(), 1, [
+            ['title' => 'وثيقة أولى', 'classification' => 'general', 'file' => $this->image()],
+        ]), ['Accept' => 'application/json'])->assertCreated()->json('attachments.0');
     }
 
     private function payload(string $requestId, int $revision, array $items): array

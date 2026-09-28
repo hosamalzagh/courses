@@ -244,6 +244,9 @@ class StudentProfilesTest extends TestCase
     {
         $this->createStudent('Alpha only', [$this->north]);
         $this->center->run(function (): void {
+            $versionsMigration = glob(database_path('migrations/tenant/*_version_student_attachments.php'))[0];
+            (require $versionsMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($versionsMigration, PATHINFO_FILENAME))->delete();
             $attachmentsMigration = glob(database_path('migrations/tenant/*_create_student_attachments.php'))[0];
             (require $attachmentsMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($attachmentsMigration, PATHINFO_FILENAME))->delete();

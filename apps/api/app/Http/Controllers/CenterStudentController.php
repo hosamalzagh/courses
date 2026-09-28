@@ -37,6 +37,7 @@ class CenterStudentController extends Controller
             'tab' => ['sometimes', 'in:custom-history,attachments'],
             'custom_history_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'attachments_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'attachments_status' => ['sometimes', 'in:active,archived'],
             'q' => ['nullable', 'string', 'max:255'],
             'identifier' => ['nullable', 'string', 'max:50'],
         ]);
@@ -97,18 +98,20 @@ class CenterStudentController extends Controller
         }
         if ($studentId !== null && ($data['tab'] ?? '') === 'attachments') {
             $attachmentPage = (int) ($data['attachments_page'] ?? 1);
+            $attachmentStatus = $permissions->isCenterManager() ? ($data['attachments_status'] ?? 'active') : 'active';
             $attachments = DB::connection('tenant')->table('student_attachments')
                 ->whereColumn('student_attachments.student_id', 'students.id')
+                ->when($attachmentStatus === 'archived', fn (Builder $rows) => $rows->whereNotNull('archived_at'), fn (Builder $rows) => $rows->whereNull('archived_at'))
                 ->when(! $permissions->isCenterManager(), function (Builder $rows) use ($permissions): void {
                     $rows->where(function (Builder $visible) use ($permissions): void {
-                        $visible->where('classification', 'general')->orWhereExists(DB::connection('tenant')->table('student_branches')
+                        $visible->where(fn (Builder $general) => $general->where('classification', 'general')->where('content_classification', 'general'))->orWhereExists(DB::connection('tenant')->table('student_branches')
                             ->whereColumn('student_branches.student_id', 'students.id')
                             ->whereIn('student_branches.branch_id', StudentIdentity::readableBranches($permissions))->selectRaw('1'));
                     });
                 })
                 ->orderByDesc('created_at')->orderByDesc('id')
                 ->offset(($attachmentPage - 1) * 20)->limit(21)
-                ->select(['id', 'student_id', 'title', 'classification', 'mime', 'size_bytes', 'created_at']);
+                ->select(['id', 'student_id', 'title', 'classification', 'mime', 'size_bytes', 'current_version', 'archived_at', 'created_at']);
             $query->selectSub(DB::connection('tenant')->query()->fromSub($attachments, 'attachment_rows')->selectRaw('json_agg(attachment_rows ORDER BY created_at DESC, id DESC)'), 'attachments');
         }
         $students = $query->orderBy('student_number')->offset(($page - 1) * 50)->limit(51)->get();
@@ -128,7 +131,7 @@ class CenterStudentController extends Controller
             'students' => $students->take(50)->map(fn (stdClass $student): array => $this->payload($student, $permissions))->values(),
             ...($studentId !== null ? ['suspensions' => array_slice(json_decode($students->first()->suspensions ?? '[]', true) ?? [], 0, 20), 'status_pagination' => ['page' => $statusPage, 'has_more' => count(json_decode($students->first()->suspensions ?? '[]', true) ?? []) > 20]] : []),
             ...(isset($historyPage) ? ['custom_history' => ['entries' => array_slice(json_decode($students->first()->custom_history ?? '[]', true) ?? [], 0, 50), 'pagination' => ['page' => $historyPage, 'has_more' => count(json_decode($students->first()->custom_history ?? '[]', true) ?? []) > 50]]] : []),
-            ...(isset($attachmentPage) ? ['attachments' => ['entries' => collect(json_decode($students->first()->attachments ?? '[]') ?? [])->take(20)->map(fn (stdClass $row): array => StudentAttachments::payload($row))->values(), 'pagination' => ['page' => $attachmentPage, 'has_more' => count(json_decode($students->first()->attachments ?? '[]', true) ?? []) > 20]]] : []),
+            ...(isset($attachmentPage) ? ['attachments' => ['entries' => collect(json_decode($students->first()->attachments ?? '[]') ?? [])->take(20)->map(fn (stdClass $row): array => StudentAttachments::payload($row))->values(), 'status' => $attachmentStatus, 'pagination' => ['page' => $attachmentPage, 'has_more' => count(json_decode($students->first()->attachments ?? '[]', true) ?? []) > 20]]] : []),
             'pagination' => ['page' => $page, 'has_more' => $students->count() > 50, 'branches_page' => $branchPage, 'branches_has_more' => $branches->count() > 50],
         ])->header('Cache-Control', 'private, no-store');
     }
