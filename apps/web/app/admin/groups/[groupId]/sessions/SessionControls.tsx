@@ -197,8 +197,11 @@ export function SessionControls({ context }: { context: SessionContext }) {
         { key: "title", label: "العنوان", render: item => item.title || "—" },
         { key: "time", label: "الموعد بتوقيت القاهرة", render: item => formatSessionTime(item.scheduled_at) },
         { key: "status", label: "الحالة", render: item => item.status === "planned" ? "مخطط" : item.status === "held" ? "أُقيمت" : "ملغاة" },
-        { key: "actions", label: "الإجراءات", actions: true, render: item => group.can_manage && group.status !== "completed" && item.status === "planned" && parseSessionTime(item.scheduled_at).getTime() > Date.now()
-          ? <Button id={`postpone-${item.id}`} disabled={busy} onClick={() => { setSelected(item); setPostponeAt(""); setReason(""); setPostponeId(newSubmissionId()); setError(""); }}>تأجيل</Button> : "—" },
+        { key: "actions", label: "الإجراءات", actions: true, render: item => <span className="flex flex-wrap items-center gap-2">
+          <Link href={`/admin/groups/${group.id}/sessions/${item.id}/attendance`}>كشف الحضور</Link>
+          {group.can_manage && group.status !== "completed" && item.status === "planned" && parseSessionTime(item.scheduled_at).getTime() > Date.now()
+            ? <Button id={`postpone-${item.id}`} disabled={busy} onClick={() => { setSelected(item); setPostponeAt(""); setReason(""); setPostponeId(newSubmissionId()); setError(""); }}>تأجيل</Button> : null}
+        </span> },
       ]}
       serverPagination={{ page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 20,
         previousHref: `/admin/groups/${group.id}/sessions${context.pagination.page > 2 ? `?page=${context.pagination.page - 1}` : ""}`,
