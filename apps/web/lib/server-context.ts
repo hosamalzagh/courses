@@ -82,7 +82,7 @@ export type StudyEnrollmentContext = CenterContext & {
 export type StudyAttemptNote = { id: string; body: string; important: boolean; revision: number; updated_by_name: string };
 
 export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable" | "student_unavailable";
-export type AbsenceOption = { kind: "courses" | "stages" | "levels" | "study_groups"; id: string; name: string; branch_id: number; branch_name: string; course_id: string | null; stage_id: string | null; level_id: string | null; absence_mode: "consecutive" | "total" | "disabled" | null; absence_limit: number | null; absence_revision: number };
+export type AbsenceOption = { kind: "courses" | "stages" | "levels" | "study_groups"; id: string; name: string; branch_id: number; branch_name: string; course_id: string | null; stage_id: string | null; level_id: string | null; course_name: string | null; stage_name: string | null; level_name: string | null; absence_mode: "consecutive" | "total" | "disabled" | null; absence_limit: number | null; absence_revision: number };
 export type AbsenceStudent = { id: string; student_id: string; student_name: string; student_number: number; branch_id: number; branch_name: string; course_name: string; stage_name: string; level_name: string; group_name: string; effective_mode: "consecutive" | "total" | "disabled"; effective_limit: number | null; total_absences: number; consecutive_absences: number; historical_absences: number; needs_review: boolean };
 export type AbsenceContext = CenterContext & { options: AbsenceOption[]; students: AbsenceStudent[]; pagination: { page: number; has_more: boolean } };
 

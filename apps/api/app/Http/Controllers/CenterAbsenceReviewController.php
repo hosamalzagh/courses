@@ -136,20 +136,25 @@ WITH nodes AS (
  SELECT 'branches' AS kind, branches.id::text AS id, branches.name, branches.id AS branch_id, branches.name AS branch_name,
    branches.slug, branches.address,
    NULL::uuid AS course_id, NULL::uuid AS stage_id, NULL::uuid AS level_id,
+   NULL::text AS course_name, NULL::text AS stage_name, NULL::text AS level_name,
    NULL::varchar(20) AS absence_mode, NULL::smallint AS absence_limit, NULL::integer AS absence_revision FROM branches WHERE {$branchScope['sql']}
  UNION ALL
  SELECT 'courses' AS kind, courses.id::text, courses.name, courses.branch_id, branches.name AS branch_name,
    NULL::text, NULL::text,
    NULL::uuid AS course_id, NULL::uuid AS stage_id, NULL::uuid AS level_id,
+   courses.name, NULL::text, NULL::text,
    courses.absence_mode, courses.absence_limit, courses.absence_revision FROM courses JOIN branches ON branches.id = courses.branch_id WHERE {$scope['sql']}
  UNION ALL
  SELECT 'stages', stages.id::text, stages.name, courses.branch_id, branches.name, NULL::text, NULL::text, courses.id, NULL::uuid, NULL::uuid,
+   courses.name, stages.name, NULL::text,
    stages.absence_mode, stages.absence_limit, stages.absence_revision FROM stages JOIN courses ON courses.id = stages.course_id JOIN branches ON branches.id = courses.branch_id WHERE {$scope['sql']}
  UNION ALL
  SELECT 'levels', levels.id::text, levels.name, courses.branch_id, branches.name, NULL::text, NULL::text, courses.id, stages.id, NULL::uuid,
+   courses.name, stages.name, levels.name,
    levels.absence_mode, levels.absence_limit, levels.absence_revision FROM levels JOIN stages ON stages.id = levels.stage_id JOIN courses ON courses.id = stages.course_id JOIN branches ON branches.id = courses.branch_id WHERE {$scope['sql']}
  UNION ALL
  SELECT 'study_groups', study_groups.id::text, study_groups.name, courses.branch_id, branches.name, NULL::text, NULL::text, courses.id, stages.id, levels.id,
+   courses.name, stages.name, levels.name,
    study_groups.absence_mode, study_groups.absence_limit, study_groups.absence_revision FROM study_groups JOIN levels ON levels.id = study_groups.level_id JOIN stages ON stages.id = levels.stage_id JOIN courses ON courses.id = stages.course_id JOIN branches ON branches.id = courses.branch_id WHERE {$scope['sql']}
 ), bounded AS (
  SELECT nodes.*, row_number() OVER (PARTITION BY kind ORDER BY name, id) AS ordinal FROM nodes
@@ -172,7 +177,8 @@ SQL;
                 array_filter($rows, fn ($row) => $row['kind'] === 'branches'))),
             'options' => array_values(array_map(
                 fn ($row) => array_intersect_key($row, array_flip(['kind', 'id', 'name', 'branch_id', 'branch_name',
-                    'course_id', 'stage_id', 'level_id', 'absence_mode', 'absence_limit', 'absence_revision'])),
+                    'course_id', 'stage_id', 'level_id', 'course_name', 'stage_name', 'level_name',
+                    'absence_mode', 'absence_limit', 'absence_revision'])),
                 array_filter($rows, fn ($row) => $row['kind'] !== 'branches')
             )),
         ];

@@ -26,6 +26,13 @@ function ruleText(mode: string | null, limit: number | null): string {
   return `${limit.toLocaleString("ar-EG")} غياب ${mode === "total" ? "إجمالي" : "متتالٍ"}`;
 }
 
+function scopePath(option: AbsenceOption): string {
+  const parents = option.kind === "courses" ? [] : option.kind === "stages" ? [option.course_name]
+    : option.kind === "levels" ? [option.course_name, option.stage_name]
+    : [option.course_name, option.stage_name, option.level_name];
+  return [option.branch_name, ...parents, option.name].filter(Boolean).join(" / ");
+}
+
 export function AbsenceReviewControls({ context, filters }: { context: AbsenceContext; filters: Record<string, string> }) {
   const router = useRouter();
   const formId = useId();
@@ -51,6 +58,15 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   const [pendingNavigation, setPendingNavigation] = useState<Record<FilterKey, string> | null>(null);
   const [pendingRule, setPendingRule] = useState<string | null>(null);
   const options = [...context.options, ...extraOptions.filter(option => !context.options.some(initial => initial.kind === option.kind && initial.id === option.id))];
+  const pathCounts = new Map<string, number>();
+  for (const option of options) {
+    const path = scopePath(option);
+    pathCounts.set(path, (pathCounts.get(path) ?? 0) + 1);
+  }
+  const scopeLabel = (option: AbsenceOption) => {
+    const path = scopePath(option);
+    return (pathCounts.get(path) ?? 0) > 1 ? `${path} · ${option.id}` : path;
+  };
   const [savedRules, setSavedRules] = useState<Record<string, Pick<AbsenceOption, "absence_mode" | "absence_limit" | "absence_revision">>>({});
   const selectedOption = options.find(option => `${option.kind}:${option.id}` === ruleKey);
   const localRule = savedRules[ruleKey];
@@ -169,7 +185,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
           {kinds.map((kind, index) => {
             const field = (["course_id", "stage_id", "level_id", "group_id"] as const)[index];
             const later = (["stage_id", "level_id", "group_id"] as const).slice(index);
-            return <Field key={kind}><FieldLabel htmlFor={`absence-${kind}`}>{labels[kind]}</FieldLabel><NativeSelect id={`absence-${kind}`} value={draft[field]} onChange={event => setDraft(current => ({ ...current, [field]: event.target.value, ...Object.fromEntries(later.map(key => [key, ""])) }))}><NativeSelectOption value="">كل {labels[kind]}</NativeSelectOption>{optionsFor(kind).map(option => <NativeSelectOption key={option.id} value={option.id}>{option.name} · {option.branch_name}</NativeSelectOption>)}</NativeSelect></Field>;
+            return <Field key={kind}><FieldLabel htmlFor={`absence-${kind}`}>{labels[kind]}</FieldLabel><NativeSelect id={`absence-${kind}`} value={draft[field]} onChange={event => setDraft(current => ({ ...current, [field]: event.target.value, ...Object.fromEntries(later.map(key => [key, ""])) }))}><NativeSelectOption value="">كل {labels[kind]}</NativeSelectOption>{optionsFor(kind).map(option => <NativeSelectOption key={option.id} value={option.id}>{scopeLabel(option)}</NativeSelectOption>)}</NativeSelect></Field>;
           })}
           <Field><FieldLabel htmlFor="absence-view">عرض</FieldLabel><NativeSelect id="absence-view" value={draft.view} onChange={event => setDraft(current => ({ ...current, view: event.target.value }))}><NativeSelectOption value="review">المستوجبون للمراجعة</NativeSelectOption><NativeSelectOption value="all">جميع الطلاب الحاليين</NativeSelectOption></NativeSelect></Field>
         </FieldGroup>
@@ -182,7 +198,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
       <p className="muted">تُطبق قاعدة المجموعة أولًا، ثم المستوى، فالمرحلة، فالكورس. التعطيل الصريح يوقف التنبيه لهذا النطاق.</p>
       <form id={formId} className="form-stack" onSubmit={saveRule}>
         <FieldGroup className="grid gap-3 md:grid-cols-3">
-          <Field><FieldLabel htmlFor="absence-rule-scope">النطاق المراد تعديله</FieldLabel><NativeSelect ref={ruleSelect} id="absence-rule-scope" value={ruleKey} onChange={event => selectRule(event.target.value)}><NativeSelectOption value="">اختر النطاق</NativeSelectOption>{editable.map(option => <NativeSelectOption key={`${option.kind}:${option.id}`} value={`${option.kind}:${option.id}`}>{labels[option.kind]}: {option.name} · {option.branch_name}</NativeSelectOption>)}</NativeSelect></Field>
+          <Field><FieldLabel htmlFor="absence-rule-scope">النطاق المراد تعديله</FieldLabel><NativeSelect ref={ruleSelect} id="absence-rule-scope" value={ruleKey} onChange={event => selectRule(event.target.value)}><NativeSelectOption value="">اختر النطاق</NativeSelectOption>{editable.map(option => <NativeSelectOption key={`${option.kind}:${option.id}`} value={`${option.kind}:${option.id}`}>{labels[option.kind]}: {scopeLabel(option)}</NativeSelectOption>)}</NativeSelect></Field>
           <Field><FieldLabel htmlFor="absence-rule-mode">نوع القاعدة</FieldLabel><NativeSelect id="absence-rule-mode" value={mode} disabled={!selected} onChange={event => { setMode(event.target.value); setError(""); }}><NativeSelectOption value="inherit" disabled={selected?.kind === "courses"}>موروثة</NativeSelectOption><NativeSelectOption value="consecutive">غياب متتالٍ</NativeSelectOption><NativeSelectOption value="total">غياب إجمالي</NativeSelectOption><NativeSelectOption value="disabled">تعطيل التنبيه</NativeSelectOption></NativeSelect></Field>
           <Field><FieldLabel htmlFor="absence-rule-limit">الحد</FieldLabel><Input ref={limitInput} id="absence-rule-limit" type="number" min={1} max={999} value={limit} disabled={!selected || mode === "inherit" || mode === "disabled"} onChange={event => setLimit(event.target.value)} aria-invalid={Boolean(error)} /><FieldDescription>من ١ إلى ٩٩٩ غيابًا عند اختيار المتتالي أو الإجمالي.</FieldDescription></Field>
         </FieldGroup>
