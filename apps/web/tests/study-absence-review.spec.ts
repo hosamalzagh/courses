@@ -97,6 +97,13 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
 
     await owner.goto(`${origin}/admin/absence-review?view=all&${groupFilter}`);
     await expect(owner.getByText(student.body.student.name)).toBeVisible();
+    await owner.getByLabel("الفرع", { exact: true }).selectOption(String(north));
+    await owner.getByRole("button", { name: "تطبيق النطاق" }).click();
+    await expect(owner).toHaveURL(/branch_id=/);
+    await owner.goBack();
+    await expect(owner.getByLabel("الفرع", { exact: true })).toHaveValue("");
+    await owner.getByLabel("النطاق المراد تعديله").selectOption(`stages:${stage.body.stage.id}`);
+    await expect(owner.getByText("القيمة الحالية: موروثة")).toBeVisible();
     await owner.getByLabel("النطاق المراد تعديله").selectOption(`courses:${course.body.course.id}`);
     await owner.getByLabel("نوع القاعدة").selectOption("total");
     await owner.getByLabel("الحد").fill("1");

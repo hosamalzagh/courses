@@ -20,6 +20,7 @@ const labels = { courses: "الكورس", stages: "المرحلة الدراسي
 type FilterKey = "branch_id" | "course_id" | "stage_id" | "level_id" | "group_id" | "view" | "q";
 
 function ruleText(mode: string | null, limit: number | null): string {
+  if (mode === null) return "موروثة";
   if (mode === "disabled") return "التنبيه معطل";
   if (limit === null) return "لم يُحدد حد الغياب";
   return `${limit.toLocaleString("ar-EG")} غياب ${mode === "total" ? "إجمالي" : "متتالٍ"}`;
