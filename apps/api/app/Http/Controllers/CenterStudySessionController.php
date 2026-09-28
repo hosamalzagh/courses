@@ -258,7 +258,8 @@ class CenterStudySessionController extends Controller
             ->join('plan_lectures as lectures', 'lectures.id', '=', 'sessions.plan_lecture_id')
             ->where('sessions.group_id', $groupId)
             ->select(['sessions.id', 'sessions.number', 'sessions.title', 'sessions.scheduled_at',
-                'sessions.status', 'sessions.revision', 'lectures.number as plan_lecture_number', 'lectures.content']);
+                'sessions.status', 'sessions.revision', 'sessions.revoked_at',
+                'lectures.number as plan_lecture_number', 'lectures.content']);
     }
 
     private function time(string $input): DateTimeImmutable

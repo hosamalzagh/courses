@@ -24,7 +24,7 @@ export type GroupContext = CenterContext & {
 };
 export type StudySession = {
   id: string; number: number; title: string | null; scheduled_at: string;
-  status: "planned" | "held" | "cancelled"; revision: number;
+  status: "planned" | "held" | "cancelled"; revision: number; revoked_at: string | null;
   plan_lecture_number: number; content: string;
 };
 export type SessionContext = CenterContext & {
@@ -48,10 +48,11 @@ export type AttendanceRow = {
 export type AttendanceContext = CenterContext & {
   group: { id: string; name: string; branch_id: number };
   session: { id: string; group_id: string; number: number; title: string | null; scheduled_at: string;
-    status: "planned" | "held" | "cancelled"; revision: number; closed_at: string | null; closed_by: number | null };
+    status: "planned" | "held" | "cancelled"; revision: number; closed_at: string | null; closed_by: number | null;
+    revoked_at: string | null; revoked_by: number | null; revoke_reason: string | null };
   students: AttendanceRow[];
   pagination: { page: number; has_more: boolean };
-  can_record: boolean; can_correct: boolean; can_close: boolean; can_undo_own: boolean;
+  can_record: boolean; can_correct: boolean; can_revoke: boolean; can_close: boolean; can_undo_own: boolean;
   has_started: boolean;
   last_own_attempt_id: string | null;
 };

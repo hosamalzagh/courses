@@ -172,6 +172,9 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::put('groups/{groupId}/sessions/{sessionId}/attendance/{entryId}/note', [CenterStudentEventNoteController::class, 'attendanceSave']);
         Route::post('groups/{groupId}/sessions/{sessionId}/attendance', [CenterStudyAttendanceController::class, 'record']);
         Route::post('groups/{groupId}/sessions/{sessionId}/attendance/{entryId}/undo', [CenterStudyAttendanceController::class, 'undo']);
+        Route::post('groups/{groupId}/sessions/{sessionId}/attendance/{entryId}/correct', [CenterStudyAttendanceController::class, 'correct']);
+        Route::get('groups/{groupId}/sessions/{sessionId}/revoke-preview', [CenterStudyAttendanceController::class, 'revokePreview']);
+        Route::post('groups/{groupId}/sessions/{sessionId}/revoke', [CenterStudyAttendanceController::class, 'revoke']);
         Route::post('groups/{groupId}/sessions/{sessionId}/close', [CenterStudyAttendanceController::class, 'close']);
         Route::post('branches', [CenterBranchController::class, 'store']);
         Route::get('branches/{branchId}', [CenterBranchController::class, 'show']);

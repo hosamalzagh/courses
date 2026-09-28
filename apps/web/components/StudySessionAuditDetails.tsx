@@ -4,7 +4,7 @@ import { PrefetchLink as Link } from "@/components/PrefetchLink";
 
 export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
   const attendance = entry.event.startsWith("study_attendance.");
-  if (!attendance && entry.event !== "study_sessions.scheduled" && entry.event !== "study_session.postponed") return null;
+  if (!attendance && entry.event !== "study_sessions.scheduled" && entry.event !== "study_session.postponed" && entry.event !== "study_session.revoked") return null;
   let details = entry.details;
   if (typeof details === "string") { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;
@@ -29,6 +29,7 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
       </> : <>
         <p>المحاولة: <bdi dir="ltr">{typeof data.attempt_id === "string" ? data.attempt_id : "غير مسجلة"}</bdi></p>
         <p>قبل: {status(data.before)} · بعد: {status(data.after)}</p>
+        {typeof data.reason === "string" ? <p>السبب: {data.reason}</p> : null}
       </>}
     </details>;
   }
@@ -43,6 +44,15 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
       <p>الموعد: <bdi>{typeof data.session_id === "string" ? data.session_id : "غير مسجل"}</bdi></p>
       <p>قبل: {date(data.before)} · بعد: {date(data.after)}</p>
       {typeof data.reason === "string" ? <p>السبب: {data.reason}</p> : null}
+    </> : null}
+    {entry.event === "study_session.revoked" ? <>
+      <p>المحاضرة: <bdi dir="ltr">{typeof data.session_id === "string" ? data.session_id : "غير مسجلة"}</bdi></p>
+      <p>قبل: منعقدة ومعتمدة · بعد: ملغى اعتمادها</p>
+      {typeof data.reason === "string" ? <p>السبب: {data.reason}</p> : null}
+      {data.impact && typeof data.impact === "object" && !Array.isArray(data.impact) ? <p>
+        سجلات الحضور المتأثرة: {typeof (data.impact as { attendance?: { total?: number } }).attendance?.total === "number"
+          ? (data.impact as { attendance: { total: number } }).attendance.total.toLocaleString("ar-EG") : "—"}
+      </p> : null}
     </> : null}
   </details>;
 }
