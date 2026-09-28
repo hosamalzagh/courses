@@ -45,6 +45,18 @@ async function pricedGroup(page: Page, branchId: number) {
   return group.body.group;
 }
 
+let suspensionTestField: { id: string; label: string; revision: number } | null = null;
+test.afterEach(async ({ page }) => {
+  const field = suspensionTestField;
+  suspensionTestField = null;
+  if (!field) return;
+  const disabled = await write(page, `student-custom-fields/${field.id}`, {
+    label: field.label, required: true, position: 1, revision: field.revision, active: false,
+  }, "PATCH");
+  expect(disabled.status).toBe(200);
+  expect(disabled.body.field.active).toBe(false);
+});
+
 test("allocates a payment, reverses it with a reason, and updates the visible balances", async ({ page }) => {
   await signIn(page);
   const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
@@ -121,9 +133,11 @@ test("suspended student with an incomplete old profile can settle existing fees 
     joined_on: "2026-09-28", discount: "0.00", discount_reason: null,
     version: enrollment.student.version, request_id: crypto.randomUUID(),
   })).status).toBe(201);
-  expect((await write(page, "student-custom-fields", {
+  const newField = await write(page, "student-custom-fields", {
     id: crypto.randomUUID(), label: "بيان مطلوب بعد التسجيل", type: "text", required: true, position: 1, options: [],
-  })).status).toBe(201);
+  });
+  expect(newField.status).toBe(201);
+  suspensionTestField = newField.body.field;
   expect((await write(page, `students/${studentId}/status`, {
     status: "suspended", reason: "توقف مؤقت", status_revision: 1, request_id: crypto.randomUUID(),
   })).status).toBe(200);

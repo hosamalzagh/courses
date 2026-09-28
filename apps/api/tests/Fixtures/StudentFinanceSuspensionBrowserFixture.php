@@ -11,8 +11,9 @@ use Illuminate\Support\Str;
 require __DIR__.'/../../vendor/autoload.php';
 $app = require __DIR__.'/../../bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
-if (! app()->isLocal() || getenv('COURSES_BROWSER_ISOLATED') !== '1' || config('database.connections.central.database') !== 'courses_issue74_browser') {
-    throw new RuntimeException('Use the isolated issue74 browser database.');
+if (! app()->isLocal() || getenv('COURSES_BROWSER_ISOLATED') !== '1' || config('database.connections.central.database') !== 'courses_issue74_browser' || (string) config('database.connections.central.port') === '5432') {
+    fwrite(STDERR, "Use the isolated issue74 browser database and a non-default PostgreSQL port.\n");
+    exit(1);
 }
 
 $credentials = [];
