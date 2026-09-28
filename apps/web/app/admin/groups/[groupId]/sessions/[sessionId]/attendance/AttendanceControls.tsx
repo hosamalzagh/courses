@@ -127,7 +127,7 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
     <section className="context-card form-stack" aria-labelledby={`${titleId}-title`}>
       <h2 id={`${titleId}-title`} tabIndex={-1}>{group.name} · المحاضرة {session.number.toLocaleString("ar-EG")}{session.title ? ` · ${session.title}` : ""}</h2>
       <p>الموعد: {formatSessionTime(session.scheduled_at)}. {session.status === "cancelled" ? "المحاضرة ملغاة ولا يُعتمد عنها غياب." : session.closed_at ? "كشف الحضور مغلق." : "غير المسجل لا يُحسب غائبًا قبل الإغلاق."}</p>
-      {!started && open ? <p>يمكن تسجيل الحضور بعد موعد المحاضرة.</p> : null}
+      {!started && open ? <p>يمكن تسجيل الحضور بعد بدء المجموعة وحلول موعد المحاضرة، بشرط أن تكون المجموعة قد بدأت قبل موعدها.</p> : null}
       {confirmClose ? <div id={`${titleId}-confirm`} tabIndex={-1} role="status">سيصبح الطلاب المستحقون غير المسجلين غائبين. راجع الكشف قبل التأكيد.</div> : null}
       {selectedRow ? <div id={`${titleId}-selection`} tabIndex={-1} role="status">
         {selected?.mode === "record" ? `اختر نوع الحضور للطالب ${selectedRow.name} من إجراءات أعلى الصفحة.`

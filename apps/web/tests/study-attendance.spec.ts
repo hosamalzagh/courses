@@ -82,8 +82,10 @@ test("records whole-session attendance, undoes the last entry, closes absences, 
     const tenantDb = `courses_center_${centerId}`;
     expect(centerId).toMatch(/^[a-f0-9-]{36}$/);
     expect(sessionId).toMatch(/^[a-f0-9-]{36}$/);
+    const startedGroup = await write(owner, `groups/${groupId}/start`, { revision: groupRevision });
+    expect(startedGroup.status).toBe(200);
     execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_ATTENDANCE_DB_PORT!, "-U", "postgres", "-d", tenantDb,
-      "-c", `UPDATE study_sessions SET scheduled_at = now() - interval '1 hour' WHERE id = '${sessionId}'`], { stdio: "ignore" });
+      "-c", `UPDATE study_groups SET started_at = now() - interval '1 day' WHERE id = '${groupId}'; UPDATE study_sessions SET scheduled_at = now() - interval '1 hour' WHERE id = '${sessionId}'`], { stdio: "ignore" });
 
     const path = `groups/${groupId}/sessions/${sessionId}/attendance`;
     const url = `${origin}/admin/${path}`;

@@ -61,6 +61,7 @@ SQL);
             $table->char('request_hash', 64);
             $table->unsignedBigInteger('actor_id');
             $table->foreignUuid('entry_id')->nullable()->constrained('study_attendance_entries')->restrictOnDelete();
+            $table->unsignedInteger('result_revision');
             $table->timestampTz('created_at');
         });
     }
@@ -69,7 +70,7 @@ SQL);
     {
         Schema::dropIfExists('study_attendance_submissions');
         Schema::dropIfExists('study_attendance_events');
-        DB::statement('DROP FUNCTION preserve_study_attendance_event()');
+        DB::statement('DROP FUNCTION IF EXISTS preserve_study_attendance_event()');
         Schema::dropIfExists('study_attendance_entries');
         Schema::table('study_sessions', fn (Blueprint $table) => $table->dropColumn(['closed_at', 'closed_by']));
         Schema::table('study_attempt_group_periods', fn (Blueprint $table) => $table->dropIndex('study_periods_group_date_attempt_idx'));

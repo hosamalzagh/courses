@@ -176,6 +176,8 @@ class StudySessionsTest extends TestCase
         $firstAttempt = collect($before->json('students'))->firstWhere('student_id', $first['id'])['attempt_id'];
         $this->postJson($attendance, ['attempt_id' => $firstAttempt, 'status' => 'counted',
             'revision' => 1, 'request_id' => (string) Str::uuid()])->assertConflict();
+        $this->postJson("{$this->base}/groups/{$group['id']}/start", ['revision' => 2])->assertOk();
+        $group['revision'] = 3;
 
         $this->travelTo($scheduled->copy()->addHour());
         $this->postJson("{$this->base}/students/{$first['id']}/status", [
@@ -193,10 +195,14 @@ class StudySessionsTest extends TestCase
         $this->asUser($this->owner);
         $this->postJson($attendance, [...$payload, 'request_id' => (string) Str::uuid()])
             ->assertConflict()->assertJsonPath('code', 'session_changed');
-        $this->postJson("{$attendance}/{$recorded['id']}/undo", ['revision' => 2, 'request_id' => (string) Str::uuid()])
+        $undoRequestId = (string) Str::uuid();
+        $this->postJson("{$attendance}/{$recorded['id']}/undo", ['revision' => 2, 'request_id' => $undoRequestId])
             ->assertOk()->assertJsonPath('entry.status', null)->assertJsonPath('revision', 3);
+        $this->postJson($attendance, $payload)->assertOk()->assertJsonPath('revision', 2);
         $this->postJson($attendance, [...$payload, 'revision' => 3, 'request_id' => (string) Str::uuid()])
             ->assertCreated()->assertJsonPath('revision', 4);
+        $this->postJson("{$attendance}/{$recorded['id']}/undo", ['revision' => 2, 'request_id' => $undoRequestId])
+            ->assertOk()->assertJsonPath('revision', 3);
         $this->postJson("{$path}/{$session['id']}/close", ['revision' => 4, 'request_id' => (string) Str::uuid()])
             ->assertOk()->assertJsonPath('absent_count', 1)->assertJsonPath('session.status', 'held');
         $after = $this->getJson($attendance)->assertOk()->assertJsonCount(2, 'students')->json('students');
@@ -245,6 +251,7 @@ class StudySessionsTest extends TestCase
         $byNumber = $this->getJson("{$path}?q=".rawurlencode($arabicNumber))->assertOk()
             ->assertJsonCount(1, 'students')->assertJsonPath('students.0.student_id', $last['id']);
         $this->assertLessThanOrEqual(6, (int) $byNumber->headers->get('X-Courses-Query-Count'));
+        $this->postJson("{$this->base}/groups/{$group['id']}/start", ['revision' => 2])->assertOk();
         $this->travelTo($scheduled->copy()->addHour());
         $recorded = $this->postJson($path, ['attempt_id' => $firstPage->json('students.0.attempt_id'),
             'status' => 'counted', 'revision' => 1, 'request_id' => (string) Str::uuid()])->assertCreated()->json('entry');
@@ -275,6 +282,28 @@ class StudySessionsTest extends TestCase
         $this->postJson("{$path}/attendance", ['attempt_id' => (string) Str::uuid(), 'status' => 'counted',
             'revision' => 1, 'request_id' => (string) Str::uuid()])->assertConflict();
         $this->postJson("{$path}/close", ['revision' => 1, 'request_id' => (string) Str::uuid()])->assertConflict();
+        $this->center->run(fn () => $this->assertSame(0, DB::table('study_attendance_entries')->count()));
+    }
+
+    public function test_waiting_group_and_group_started_after_session_cannot_accept_attendance(): void
+    {
+        $group = $this->group($this->north, 'Waiting attendance');
+        $scheduled = now('Africa/Cairo')->addDays(14)->setTime(16, 0);
+        $session = $this->postJson("{$this->base}/groups/{$group['id']}/sessions", [
+            'kind' => 'single', 'revision' => 1, 'start_at' => $scheduled->format('Y-m-d\TH:i'),
+            'plan_lecture_number' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
+        $path = "{$this->base}/groups/{$group['id']}/sessions/{$session['id']}";
+        $this->travelTo($scheduled->copy()->addHour());
+        $this->getJson("{$path}/attendance")->assertOk()->assertJsonPath('has_started', false);
+        $this->postJson("{$path}/attendance", ['attempt_id' => (string) Str::uuid(), 'status' => 'counted',
+            'revision' => 1, 'request_id' => (string) Str::uuid()])->assertConflict()->assertJsonPath('code', 'session_changed');
+        $this->postJson("{$path}/close", ['revision' => 1, 'request_id' => (string) Str::uuid()])
+            ->assertConflict()->assertJsonPath('code', 'session_changed');
+        $this->postJson("{$this->base}/groups/{$group['id']}/start", ['revision' => 2])->assertOk();
+        $this->getJson("{$path}/attendance")->assertOk()->assertJsonPath('has_started', false);
+        $this->postJson("{$path}/close", ['revision' => 1, 'request_id' => (string) Str::uuid()])
+            ->assertConflict()->assertJsonPath('code', 'session_changed');
         $this->center->run(fn () => $this->assertSame(0, DB::table('study_attendance_entries')->count()));
     }
 

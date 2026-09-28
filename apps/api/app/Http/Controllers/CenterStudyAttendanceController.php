@@ -49,7 +49,10 @@ class CenterStudyAttendanceController extends Controller
             'can_close' => $permissions->can('attendance.close', (int) $session->branch_id),
             'can_undo_own' => $permissions->can('attendance.undo_own', (int) $session->branch_id),
             'last_own_attempt_id' => $session->last_own_attempt_id,
-            'has_started' => now()->toImmutable() >= new DateTimeImmutable($session->scheduled_at),
+            'has_started' => $session->group_status === 'started'
+                && $session->group_started_at !== null
+                && new DateTimeImmutable($session->group_started_at) <= new DateTimeImmutable($session->scheduled_at)
+                && now()->toImmutable() >= new DateTimeImmutable($session->scheduled_at),
         ])->header('Cache-Control', 'private, no-store');
     }
 
@@ -65,7 +68,7 @@ class CenterStudyAttendanceController extends Controller
             abort_unless($permissions->can('attendance.record', (int) $session->branch_id), 403);
             $hash = hash('sha256', json_encode([$sessionId, 'record', $data['attempt_id'], $data['status']]));
             if ($previous = $this->submission($request, $sessionId, $data['request_id'], $hash)) {
-                return response()->json(['entry' => DB::connection('tenant')->table('study_attendance_entries')->where('id', $previous->entry_id)->first(), 'revision' => $session->revision]);
+                return response()->json(['entry' => DB::connection('tenant')->table('study_attendance_entries')->where('id', $previous->entry_id)->first(), 'revision' => $previous->result_revision]);
             }
             $this->open($session, (int) $data['revision']);
             $eligible = $this->roster($session)->where('attempts.id', $data['attempt_id'])->first();
@@ -87,7 +90,7 @@ class CenterStudyAttendanceController extends Controller
             }
             $this->event($sessionId, $data['attempt_id'], 'record', null, $data['status'], $request->user()->id, $session->revision + 1);
             $this->advance($sessionId, $session->revision + 1);
-            $this->saveSubmission($data['request_id'], $sessionId, 'record', $hash, $request->user()->id, $entryId);
+            $this->saveSubmission($data['request_id'], $sessionId, 'record', $hash, $request->user()->id, $entryId, $session->revision + 1);
             $this->audit($request->user()->id, (int) $session->branch_id, 'study_attendance.recorded', [
                 'group_id' => $groupId, 'session_id' => $sessionId, 'attempt_id' => $data['attempt_id'],
                 'before' => null, 'after' => $data['status'],
@@ -108,7 +111,7 @@ class CenterStudyAttendanceController extends Controller
             abort_unless($permissions->can('attendance.undo_own', (int) $session->branch_id), 403);
             $hash = hash('sha256', json_encode([$sessionId, 'undo', $entryId]));
             if ($previous = $this->submission($request, $sessionId, $data['request_id'], $hash)) {
-                return response()->json(['entry' => DB::connection('tenant')->table('study_attendance_entries')->where('id', $previous->entry_id)->first(), 'revision' => $session->revision]);
+                return response()->json(['entry' => DB::connection('tenant')->table('study_attendance_entries')->where('id', $previous->entry_id)->first(), 'revision' => $previous->result_revision]);
             }
             $this->open($session, (int) $data['revision']);
             $entry = DB::connection('tenant')->table('study_attendance_entries')->where('id', $entryId)->where('session_id', $sessionId)->lockForUpdate()->first();
@@ -124,7 +127,7 @@ class CenterStudyAttendanceController extends Controller
             ]);
             $this->event($sessionId, $entry->attempt_id, 'undo', $entry->status, null, $request->user()->id, $session->revision + 1);
             $this->advance($sessionId, $session->revision + 1);
-            $this->saveSubmission($data['request_id'], $sessionId, 'undo', $hash, $request->user()->id, $entryId);
+            $this->saveSubmission($data['request_id'], $sessionId, 'undo', $hash, $request->user()->id, $entryId, $session->revision + 1);
             $this->audit($request->user()->id, (int) $session->branch_id, 'study_attendance.undone', [
                 'group_id' => $groupId, 'session_id' => $sessionId, 'attempt_id' => $entry->attempt_id,
                 'before' => $entry->status, 'after' => null,
@@ -169,7 +172,7 @@ class CenterStudyAttendanceController extends Controller
                 'revision' => $session->revision + 1, 'updated_at' => $now,
             ]);
             $this->event($sessionId, null, 'close', null, null, $request->user()->id, $session->revision + 1);
-            $this->saveSubmission($data['request_id'], $sessionId, 'close', $hash, $request->user()->id, null);
+            $this->saveSubmission($data['request_id'], $sessionId, 'close', $hash, $request->user()->id, null, $session->revision + 1);
             $this->audit($request->user()->id, (int) $session->branch_id, 'study_attendance.closed', [
                 'group_id' => $groupId, 'session_id' => $sessionId,
                 'absent_count' => $unrecorded->count(),
@@ -192,7 +195,8 @@ class CenterStudyAttendanceController extends Controller
             ->where('sessions.id', $sessionId)->where('groups.id', $groupId)
             ->select(['sessions.id', 'sessions.group_id', 'sessions.number', 'sessions.title', 'sessions.scheduled_at',
                 'sessions.status', 'sessions.revision', 'sessions.closed_at', 'sessions.closed_by',
-                'groups.name as group_name', 'courses.branch_id']);
+                'groups.name as group_name', 'groups.status as group_status',
+                'groups.started_at as group_started_at', 'courses.branch_id']);
         if ($actorId !== null) {
             $query->selectSub(DB::connection('tenant')->table('study_attendance_events as own_events')
                 ->whereColumn('own_events.session_id', 'sessions.id')->where('own_events.actor_id', $actorId)
@@ -241,7 +245,9 @@ class CenterStudyAttendanceController extends Controller
 
     private function open(object $session, int $revision): void
     {
-        if ($session->status === 'cancelled' || $session->closed_at || (int) $session->revision !== $revision
+        if ($session->group_status !== 'started' || $session->group_started_at === null
+            || new DateTimeImmutable($session->group_started_at) > new DateTimeImmutable($session->scheduled_at)
+            || $session->status === 'cancelled' || $session->closed_at || (int) $session->revision !== $revision
             || new DateTimeImmutable($session->scheduled_at) > now()->toImmutable()) {
             $this->conflict('session_changed');
         }
@@ -260,11 +266,11 @@ class CenterStudyAttendanceController extends Controller
         return $previous;
     }
 
-    private function saveSubmission(string $requestId, string $sessionId, string $kind, string $hash, int $actorId, ?string $entryId): void
+    private function saveSubmission(string $requestId, string $sessionId, string $kind, string $hash, int $actorId, ?string $entryId, int $resultRevision): void
     {
         DB::connection('tenant')->table('study_attendance_submissions')->insert([
             'request_id' => $requestId, 'session_id' => $sessionId, 'kind' => $kind, 'request_hash' => $hash,
-            'actor_id' => $actorId, 'entry_id' => $entryId, 'created_at' => now(),
+            'actor_id' => $actorId, 'entry_id' => $entryId, 'result_revision' => $resultRevision, 'created_at' => now(),
         ]);
     }
 
