@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions } from "@/components/CenterShell";
 import { InlineNotice } from "@/components/InlineNotice";
@@ -17,6 +18,7 @@ export function FinancialEventNoteEditor({ studentId, type, eventId, label, onCl
   studentId: string; type: "payment" | "allocation"; eventId: string; label: string;
   onClose: () => void; onDirtyChange: (dirty: boolean) => void;
 }) {
+  const router = useRouter();
   const prefix = useId();
   const formId = `${prefix}-note-form`;
   const path = `students/${studentId}/${type === "payment" ? "payments" : "allocations"}/${eventId}/note`;
@@ -56,7 +58,7 @@ export function FinancialEventNoteEditor({ studentId, type, eventId, label, onCl
       const response = await centerRequest(`${path}?page=${detail.pagination.page + 1}`, "GET");
       if (!response.ok) { setError(await responseMessage(response)); return; }
       const next = await response.json() as Detail;
-      setDetail(previous => previous ? { ...next, versions: [...previous.versions, ...next.versions] } : next);
+      setDetail(previous => previous ? { ...previous, versions: [...previous.versions, ...next.versions], pagination: next.pagination } : next);
     } catch { setError("تعذر تحميل نسخ التعديل الأقدم."); }
     finally { setBusy(false); }
   }
@@ -84,6 +86,7 @@ export function FinancialEventNoteEditor({ studentId, type, eventId, label, onCl
       setBody(saved.note.body); setImportant(saved.note.important);
       setNotice("حُفظت الملاحظة وتاريخ تعديلها دون تغيير المبلغ أو الرصيد.");
       requestId.current = null; setUncertain(false); setConflict(false);
+      router.refresh();
       await load();
     } catch { setUncertain(true); setError("تعذر تأكيد الحفظ. أعد المحاولة بالطلب نفسه دون تغيير النص."); }
     finally { submitting.current = false; setBusy(false); }

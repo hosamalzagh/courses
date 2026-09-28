@@ -235,7 +235,30 @@ test("edits payment and allocation notes while financial permissions hide other 
   await page.getByRole("checkbox", { name: "ملاحظة مهمة" }).check();
   await page.getByRole("button", { name: "إضافة الملاحظة" }).click();
   await expect(page.getByText("تحقق من إيصال الدفعة")).toBeVisible();
-  await expect(page.getByText("نسخة ١")).toBeVisible();
+  await expect(page.getByText("نسخة ١", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "إغلاق الملاحظة" }).click();
+  const paymentNotePath = `students/${studentId}/payments/${northPaymentId}/note`;
+  let revision = 1;
+  for (let index = 0; index < 20; index++) {
+    const updated = await write(page, paymentNotePath, {
+      body: `تعديل محفوظ ${index + 1}`, important: false, revision, request_id: crypto.randomUUID(),
+    }, "PUT");
+    expect(updated.status).toBe(200);
+    revision = updated.body.note.revision;
+  }
+  await page.getByRole("button", { name: "ملاحظة الدفعة وتاريخها" }).click();
+  await page.getByRole("textbox", { name: "نص الملاحظة" }).fill("مسودة قبل التعديل المتزامن");
+  const concurrent = await write(page, paymentNotePath, {
+    body: "تعديل موظف آخر", important: false, revision, request_id: crypto.randomUUID(),
+  }, "PUT");
+  expect(concurrent.status).toBe(200);
+  await page.getByRole("button", { name: "عرض نسخ أقدم" }).click();
+  await expect(page.getByText("نسخة ١", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "حفظ تعديل الملاحظة" }).click();
+  await expect(page.getByText("تغيرت الملاحظة. حمّل أحدث نسخة وقارنها قبل الحفظ.")).toBeVisible();
+  const preserved = await (await page.request.get(`${origin}/api/v1/center/${paymentNotePath}`)).json();
+  expect(preserved.note.body).toBe("تعديل موظف آخر");
+  await page.getByRole("button", { name: "إلغاء التعديل" }).click();
   await page.getByRole("button", { name: "إغلاق الملاحظة" }).click();
   await page.getByLabel(/المستحق 100.00.*المتبقي 100.00/).fill("30.00");
   await page.getByRole("button", { name: "تخصيص المبالغ المحددة" }).click();
@@ -250,7 +273,7 @@ test("edits payment and allocation notes while financial permissions hide other 
   const noteResponse = await page.request.get(`${origin}/api/v1/center/students/${studentId}/payments/${northPaymentId}/note`);
   expect(Number(noteResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
   await page.goto(`${origin}/admin/audit`);
-  await expect(page.getByText("إضافة ملاحظة على دفعة الطالب").first()).toBeVisible();
+  await expect(page.getByText("تعديل ملاحظة دفعة الطالب").first()).toBeVisible();
   await expect(page.getByText("إضافة ملاحظة على تخصيص الدفعة").first()).toBeVisible();
   await page.getByText("تفاصيل ملاحظة الحركة المالية").first().click();
   await expect(page.getByText("نص الملاحظة متاح من الحركة المالية ضمن صلاحياتها.").first()).toBeVisible();
