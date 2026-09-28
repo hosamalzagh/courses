@@ -64,6 +64,8 @@ class StudyTeachingTest extends TestCase
         $workspace = $this->getJson($path)->assertOk()->assertJsonPath('can_record', true)
             ->assertJsonPath('session.suggested_instructors.0.id', $assigned['id']);
         $this->assertLessThanOrEqual(6, (int) $workspace->headers->get('X-Courses-Query-Count'));
+        $cancelPath = "{$this->base}/groups/{$group['id']}/sessions/{$session['id']}";
+        $cancelPreview = $this->getJson("{$cancelPath}/cancel-preview")->assertOk()->json();
         $this->putJson($path, ['revision' => 1, 'request_id' => (string) Str::uuid(), 'segments' => [
             ['instructor_id' => $otherBranch['id'], 'start_minute' => 0, 'duration_minutes' => 60],
         ]])->assertUnprocessable();
@@ -76,6 +78,14 @@ class StudyTeachingTest extends TestCase
         $requestId = (string) Str::uuid();
         $this->putJson($path, ['revision' => 1, 'request_id' => $requestId, 'segments' => $segments])
             ->assertCreated()->assertJsonPath('revision', 2)->assertJsonCount(3, 'segments');
+        $this->getJson("{$cancelPath}/cancel-preview")->assertConflict()->assertJsonPath('code', 'session_has_teaching');
+        $this->postJson("{$cancelPath}/cancel", [
+            'reason' => 'إلغاء بعد التدريس', 'decision' => 'academic',
+            'group_revision' => $cancelPreview['group_revision'],
+            'session_revision' => $cancelPreview['session_revision'],
+            'preview_token' => $cancelPreview['preview_token'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertConflict()->assertJsonPath('code', 'session_has_teaching');
         $this->putJson($path, ['revision' => 1, 'request_id' => $requestId, 'segments' => $segments])
             ->assertOk()->assertJsonPath('replayed', true);
         $this->putJson($path, ['revision' => 1, 'request_id' => $requestId, 'segments' => array_slice($segments, 0, 1)])
