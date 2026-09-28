@@ -47,6 +47,7 @@ class CenterStudyAttendanceController extends Controller
             'students' => $rows->take(20)->values(),
             'pagination' => ['page' => $page, 'has_more' => $rows->count() > 20],
             'can_record' => $permissions->can('attendance.record', (int) $session->branch_id),
+            'can_correct' => $permissions->can('attendance.correct', (int) $session->branch_id),
             'can_close' => $permissions->can('attendance.close', (int) $session->branch_id),
             'can_undo_own' => $permissions->can('attendance.undo_own', (int) $session->branch_id),
             'last_own_attempt_id' => $session->last_own_attempt_id,
@@ -241,10 +242,17 @@ class CenterStudyAttendanceController extends Controller
                     ->where(fn ($period) => $period->whereNull('session_suspensions.lifted_at')
                         ->orWhere('session_suspensions.lifted_at', '>', $session->scheduled_at));
             })
+            ->leftJoin('student_event_notes as attendance_notes', function ($join) use ($session): void {
+                $join->on('attendance_notes.event_id', '=', 'entries.id')
+                    ->on('attendance_notes.student_id', '=', 'students.id')
+                    ->where('attendance_notes.branch_id', $session->branch_id)
+                    ->whereNotNull('entries.status')->where('attendance_notes.event_type', 'attendance');
+            })
             ->select(['attempts.id as attempt_id', 'students.id as student_id', 'students.name', 'students.student_number',
                 'students.status as student_status', 'entries.id as entry_id', 'entries.status',
                 'entries.revision as entry_revision', 'entries.recorded_by',
-                'session_suspensions.suspended_at', 'session_suspensions.lifted_at']);
+                'session_suspensions.suspended_at', 'session_suspensions.lifted_at',
+                'attendance_notes.body as note_body', 'attendance_notes.important as note_important']);
         if ($session->closed_at) {
             return $roster->whereNotNull('entries.id');
         }

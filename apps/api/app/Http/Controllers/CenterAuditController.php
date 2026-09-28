@@ -33,9 +33,14 @@ class CenterAuditController extends Controller
                 fn ($roles) => in_array('enrollment.manage', CenterPermissions::actions($roles), true)));
             $financialEvents = ['student.payment_recorded', 'student.payment_allocated', 'student.payment_allocation_reversed'];
             $enrollmentEvents = ['student.enrolled', 'student.study_attempt_note_created', 'student.study_attempt_note_updated'];
-            $query->where(fn ($scope) => $scope->whereNotIn('event', [...$financialEvents, ...$enrollmentEvents])
+            $attendanceEvents = ['student.attendance_note_created', 'student.attendance_note_updated'];
+            $attendanceBranches = array_keys(array_filter($permissions->branchRoles,
+                fn ($roles) => in_array('attendance.record', CenterPermissions::actions($roles), true)
+                    || in_array('attendance.correct', CenterPermissions::actions($roles), true)));
+            $query->where(fn ($scope) => $scope->whereNotIn('event', [...$financialEvents, ...$enrollmentEvents, ...$attendanceEvents])
                 ->orWhere(fn ($event) => $event->whereIn('event', $financialEvents)->whereIn('branch_id', $financialBranches))
-                ->orWhere(fn ($event) => $event->whereIn('event', $enrollmentEvents)->whereIn('branch_id', $enrollmentBranches)));
+                ->orWhere(fn ($event) => $event->whereIn('event', $enrollmentEvents)->whereIn('branch_id', $enrollmentBranches))
+                ->orWhere(fn ($event) => $event->whereIn('event', $attendanceEvents)->whereIn('branch_id', $attendanceBranches)));
         }
 
         return $query->orderByDesc('id')->limit(50)->get();
