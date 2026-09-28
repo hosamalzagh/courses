@@ -148,21 +148,20 @@ class CenterStudyAttendanceController extends Controller
             }
             $this->open($session, (int) $data['revision']);
             $unrecorded = $this->roster($session)->whereNull('entries.status')
-                ->get(['attempts.id as attempt_id', 'entries.id as entry_id', 'entries.revision as entry_revision']);
+                ->get(['attempts.id as attempt_id', 'entries.id as entry_id']);
             $now = now();
-            foreach ($unrecorded as $student) {
-                if ($student->entry_id) {
-                    DB::connection('tenant')->table('study_attendance_entries')->where('id', $student->entry_id)->update([
-                        'status' => 'absent', 'revision' => $student->entry_revision + 1,
-                        'recorded_by' => $request->user()->id, 'recorded_at' => $now, 'updated_at' => $now,
-                    ]);
-                } else {
-                    DB::connection('tenant')->table('study_attendance_entries')->insert([
-                        'id' => (string) Str::uuid(), 'session_id' => $sessionId, 'attempt_id' => $student->attempt_id,
-                        'status' => 'absent', 'revision' => 1, 'recorded_by' => $request->user()->id,
-                        'recorded_at' => $now, 'created_at' => $now, 'updated_at' => $now,
-                    ]);
-                }
+            foreach ($unrecorded->pluck('entry_id')->filter()->chunk(500) as $ids) {
+                DB::connection('tenant')->table('study_attendance_entries')->whereIn('id', $ids->all())
+                    ->whereNull('status')->update(['status' => 'absent', 'revision' => DB::raw('revision + 1'),
+                        'recorded_by' => $request->user()->id, 'recorded_at' => $now, 'updated_at' => $now]);
+            }
+            $newEntries = $unrecorded->filter(fn ($student) => $student->entry_id === null)->map(fn ($student): array => [
+                'id' => (string) Str::uuid(), 'session_id' => $sessionId, 'attempt_id' => $student->attempt_id,
+                'status' => 'absent', 'revision' => 1, 'recorded_by' => $request->user()->id,
+                'recorded_at' => $now, 'created_at' => $now, 'updated_at' => $now,
+            ]);
+            foreach ($newEntries->values()->chunk(500) as $entries) {
+                DB::connection('tenant')->table('study_attendance_entries')->insert($entries->all());
             }
             DB::connection('tenant')->table('study_sessions')->where('id', $sessionId)->update([
                 'status' => 'held', 'closed_at' => $now, 'closed_by' => $request->user()->id,

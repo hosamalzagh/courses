@@ -178,5 +178,10 @@ test("records whole-session attendance, undoes the last entry, closes absences, 
     await owner.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
     await expect(owner.locator("html")).toHaveAttribute("data-theme", "dark");
     expect(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await owner.goto(`${origin}/admin/audit`);
+    const auditRow = owner.getByRole("row").filter({ hasText: "إغلاق كشف حضور محاضرة" });
+    await expect(auditRow).toBeVisible();
+    await auditRow.getByText("تفاصيل حضور المحاضرة").click();
+    await expect(auditRow).toContainText("اعتمد الغياب لـ ١ طالب");
   } finally { await owner.close(); await staff.close(); }
 });

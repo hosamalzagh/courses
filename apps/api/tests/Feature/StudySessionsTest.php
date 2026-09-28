@@ -237,6 +237,17 @@ class StudySessionsTest extends TestCase
         $matching = $this->getJson("{$path}?q=".rawurlencode($last['name']))->assertOk()
             ->assertJsonCount(1, 'students')->assertJsonPath('students.0.student_id', $last['id']);
         $this->assertLessThanOrEqual(6, (int) $matching->headers->get('X-Courses-Query-Count'));
+        $this->travelTo($scheduled->copy()->addHour());
+        $recorded = $this->postJson($path, ['attempt_id' => $firstPage->json('students.0.attempt_id'),
+            'status' => 'counted', 'revision' => 1, 'request_id' => (string) Str::uuid()])->assertCreated()->json('entry');
+        $this->postJson("{$path}/{$recorded['id']}/undo", ['revision' => 2, 'request_id' => (string) Str::uuid()])->assertOk();
+        $this->postJson("{$this->base}/groups/{$group['id']}/sessions/{$session['id']}/close", [
+            'revision' => 3, 'request_id' => (string) Str::uuid(),
+        ])->assertOk()->assertJsonPath('absent_count', 21);
+        $this->center->run(function () use ($recorded): void {
+            $this->assertSame(21, DB::table('study_attendance_entries')->where('status', 'absent')->count());
+            $this->assertSame(3, DB::table('study_attendance_entries')->where('id', $recorded['id'])->value('revision'));
+        });
     }
 
     public function test_cancelled_session_cannot_record_or_close_attendance(): void
