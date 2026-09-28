@@ -73,7 +73,8 @@ test("withdrawal fee settlement and correction preserve money, permissions, audi
     expect(Number(accountResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
     const html = await owner.request.get(`${origin}/admin/students/${studentId}/account`);
     expect(await html.text()).toContain("1000.00");
-    await owner.route(`**/api/v1/center/students/${studentId}/fees/${attempt.fee.id}/adjustments?*`, async route => {
+    const adjustmentQueryRoute = `**/api/v1/center/students/${studentId}/fees/${attempt.fee.id}/adjustments?*`;
+    await owner.route(adjustmentQueryRoute, async route => {
       const response = await route.fetch();
       const detail = await response.json();
       await route.fulfill({ response, json: { ...detail, pagination: { ...detail.pagination, history_has_more: true } } });
@@ -101,6 +102,7 @@ test("withdrawal fee settlement and correction preserve money, permissions, audi
     await owner.getByRole("button", { name: "التحقق من الاعتماد" }).click();
     await owner.getByRole("button", { name: "تأكيد التسوية" }).click();
     await expect(owner.getByRole("button", { name: "تسوية أو تصحيح" })).toBeFocused();
+    await owner.unroute(adjustmentQueryRoute);
     const settled = await (await owner.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
     expect(settled.account).toMatchObject({ due_total: "800.00", paid_total: "800.00", available_balance: "100.00" });
     const settlementHistory = await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/fees/${attempt.fee.id}/adjustments`)).json();
@@ -118,6 +120,20 @@ test("withdrawal fee settlement and correction preserve money, permissions, audi
     await expect(owner.getByRole("button", { name: "تسوية أو تصحيح" })).toBeFocused();
     const corrected = await (await owner.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
     expect(corrected.account).toMatchObject({ due_total: "1000.00", paid_total: "800.00", available_balance: "100.00", debt: "200.00" });
+    await owner.route(adjustmentQueryRoute, async route => {
+      const response = await route.fetch();
+      const detail = await response.json();
+      const page = new URL(route.request().url()).searchParams.get("history_page");
+      await route.fulfill({ response, json: page === "2"
+        ? { ...detail, history: [{ ...settlementHistory.history[0], reversal_id: null }] }
+        : { ...detail, pagination: { ...detail.pagination, history_has_more: true } } });
+    });
+    await owner.getByRole("button", { name: "تسوية أو تصحيح" }).click();
+    await expect(owner.getByRole("button", { name: "تصحيح هذه التسوية" })).toBeVisible();
+    await owner.getByRole("button", { name: "قرارات أقدم" }).click();
+    await expect(owner.getByRole("button", { name: "تصحيح هذه التسوية" })).toHaveCount(0);
+    await owner.getByRole("button", { name: "إغلاق محرر الرسوم" }).click();
+    await owner.unroute(adjustmentQueryRoute);
     await owner.goto(`${origin}/admin/audit`);
     await expect(owner.getByText("تصحيح تسوية رسوم محاولة دراسة").first()).toBeVisible();
     await owner.getByText("تفاصيل قرار الرسوم").first().click();
@@ -127,6 +143,12 @@ test("withdrawal fee settlement and correction preserve money, permissions, audi
     await signIn(staff, "staff");
     await staff.goto(`${origin}/admin/students/${studentId}/account`);
     await expect(staff.getByRole("button", { name: "تسوية أو تصحيح" })).toHaveCount(0);
+    await staff.getByRole("button", { name: "عرض سجل الرسوم" }).click();
+    await expect(staff.getByText("تصحيح قرار خاطئ").first()).toBeVisible();
+    await expect(staff.getByRole("button", { name: "معاينة الأثر" })).toHaveCount(0);
+    await expect(staff.getByRole("button", { name: "تصحيح هذه التسوية" })).toHaveCount(0);
+    await staff.getByRole("button", { name: "إغلاق محرر الرسوم" }).click();
+    await expect(staff.getByRole("button", { name: "عرض سجل الرسوم" })).toBeFocused();
     const denied = await staff.request.get(`${origin}/api/v1/center/students/${studentId}/fees/${attempt.fee.id}/adjustments?new_due=500.00`);
     expect(denied.status()).toBe(403);
     await owner.goto(`${origin}/admin/students/${studentId}/account`);

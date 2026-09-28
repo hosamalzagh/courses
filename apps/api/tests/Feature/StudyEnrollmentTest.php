@@ -1050,6 +1050,7 @@ class StudyEnrollmentTest extends TestCase
             'replaces_adjustment_id' => null, 'version' => $preview->json('version'),
             'request_id' => (string) Str::uuid()];
         $settlement = $this->postJson($url, $payload)->assertCreated()->json('adjustments.0');
+        $this->getJson($url)->assertOk()->assertJsonPath('latest_active_adjustment_id', $settlement['id']);
         $this->postJson($url, $payload)->assertOk()->assertJsonPath('adjustments.0.id', $settlement['id']);
         $this->postJson($url, [...$payload, 'new_due' => '700.00'])->assertConflict();
         $this->getJson($accountUrl)->assertOk()->assertJsonPath('account.due_total', '800.00')
@@ -1068,9 +1069,12 @@ class StudyEnrollmentTest extends TestCase
         $correction = ['new_due' => '1000.00', 'reason' => 'تصحيح تسوية أُدخلت خطأ',
             'replaces_adjustment_id' => $settlement['id'], 'version' => $fresh['version'],
             'request_id' => (string) Str::uuid()];
-        $this->postJson($url, $correction)->assertCreated()->assertJsonCount(2, 'adjustments')
+        $replacement = $this->postJson($url, $correction)->assertCreated()->assertJsonCount(2, 'adjustments')
             ->assertJsonPath('preview.account_after.due_total', '1000.00')
-            ->assertJsonPath('preview.account_after.debt', '200.00');
+            ->assertJsonPath('preview.account_after.debt', '200.00')->json('adjustments.1');
+        $olderPage = $this->getJson("{$url}?history_page=2")->assertOk()->assertJsonCount(0, 'history')
+            ->assertJsonPath('latest_active_adjustment_id', $replacement['id']);
+        $this->assertLessThanOrEqual(6, (int) $olderPage->headers->get('X-Courses-Query-Count'));
         $this->postJson($url, [...$correction, 'request_id' => (string) Str::uuid()])->assertConflict();
         $this->center->run(function () use ($settlement): void {
             $this->assertSame(3, DB::table('study_fee_adjustments')->count());

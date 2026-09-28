@@ -19,7 +19,8 @@ type Preview = { fee_before: string; fee_after: string; fee_paid_before: string;
   account_before: Balance; account_after: Balance; released_allocations: { allocation_id: string; payment_id: string; released_amount: string; replacement_amount: string }[] };
 type Detail = { fee: { id: string; attempt_id: string; branch_id: number; status: string; withdrawn_on: string | null;
   net_amount: string; current_due: string; paid_amount: string; currency: string }; version: string; can_approve: boolean;
-  account: Balance; history: Adjustment[]; pagination: { history_page: number; history_has_more: boolean }; preview: Preview | null };
+  account: Balance; latest_active_adjustment_id: string | null; history: Adjustment[];
+  pagination: { history_page: number; history_has_more: boolean }; preview: Preview | null };
 
 export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged, onDirtyChange }: {
   studentId: string; fee: StudentFee; onClose: () => void; onChanged: () => Promise<void>; onDirtyChange: (dirty: boolean) => void;
@@ -105,7 +106,7 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
     } finally { submitting.current = false; setBusy(false); }
   }
 
-  const latestActive = detail?.history.find(item => item.kind === "settlement" && !item.reversal_id);
+  const latestActiveId = detail?.latest_active_adjustment_id;
   const currency = detail?.fee.currency ?? fee.currency;
   const preview = detail?.preview;
   return <section className="context-card form-stack" aria-labelledby={`${prefix}-title`}>
@@ -118,14 +119,14 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
       <p>الرسوم المسجلة: <bdi dir="ltr">{detail.fee.net_amount} {currency}</bdi> — المستحق الحالي: <strong><bdi dir="ltr">{detail.fee.current_due} {currency}</bdi></strong> — المسدد: <bdi dir="ltr">{detail.fee.paid_amount} {currency}</bdi></p>
       {detail.fee.withdrawn_on ? <p>انتهى الارتباط الدراسي في <bdi dir="ltr">{detail.fee.withdrawn_on}</bdi>. الانسحاب وحده لم يغير الرسوم.</p> : <p>هذه معالجة مالية صريحة لمحاولة دراسة قائمة.</p>}
       {replacesId ? <InlineNotice>تصحيح أحدث تسوية معتمدة. سيسجل عكسها وقرار بديل مع حفظ أصلها.</InlineNotice> : null}
-      <form id={formId} onSubmit={prepare} noValidate><FieldGroup>
+      {detail.can_approve ? <form id={formId} onSubmit={prepare} noValidate><FieldGroup>
         <FormField id={`${prefix}-new-due`} label={`المستحق الجديد (${currency})`} type="text" direction="ltr" value={newDue} onChange={changeDue} disabled={busy || conflict || uncertain} />
         <Field data-invalid={Boolean(error && !reason.trim())}>
           <FieldLabel htmlFor={`${prefix}-reason`}>سبب التسوية أو التصحيح</FieldLabel>
           <Textarea id={`${prefix}-reason`} value={reason} onChange={event => changeReason(event.target.value)} maxLength={2000} disabled={busy || conflict || uncertain} />
           {error && !reason.trim() ? <FieldError>السبب مطلوب.</FieldError> : null}
         </Field>
-      </FieldGroup></form>
+      </FieldGroup></form> : null}
       {preview ? <section className="context-card form-stack" aria-label="معاينة أثر التسوية">
         <h3>الأثر قبل الاعتماد</h3>
         <p>مستحق المحاولة: <bdi dir="ltr">{preview.fee_before}</bdi> ← <strong><bdi dir="ltr">{preview.fee_after} {currency}</bdi></strong></p>
@@ -136,9 +137,9 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
         {preview.released_allocations.length ? <p>سيُعكس أثر {preview.released_allocations.length.toLocaleString("ar-EG")} تخصيص، مع حفظ الأصل وإعادة الجزء الذي لا يتجاوز المستحق الجديد.</p> : null}
       </section> : null}
       <CenterHeaderActions>
-        <Button form={formId} type="submit" disabled={busy || conflict || uncertain} busy={busy}>معاينة الأثر</Button>
-        {preview ? <Button variant="primary" disabled={busy || conflict} onClick={() => setConfirm(true)}>{uncertain ? "التحقق من الاعتماد" : replacesId ? "اعتماد التصحيح" : "اعتماد التسوية"}</Button> : null}
-        {replacesId ? <Button disabled={busy || uncertain} onClick={() => { setReplacesId(null); setDetail(current => current ? { ...current, preview: null } : current); }}>إلغاء وضع التصحيح</Button> : null}
+        {detail.can_approve ? <Button form={formId} type="submit" disabled={busy || conflict || uncertain} busy={busy}>معاينة الأثر</Button> : null}
+        {detail.can_approve && preview ? <Button variant="primary" disabled={busy || conflict} onClick={() => setConfirm(true)}>{uncertain ? "التحقق من الاعتماد" : replacesId ? "اعتماد التصحيح" : "اعتماد التسوية"}</Button> : null}
+        {detail.can_approve && replacesId ? <Button disabled={busy || uncertain} onClick={() => { setReplacesId(null); setDetail(current => current ? { ...current, preview: null } : current); }}>إلغاء وضع التصحيح</Button> : null}
         <Button disabled={busy || uncertain} onClick={() => dirty ? setCancel(true) : onClose()}>إغلاق محرر الرسوم</Button>
         {conflict ? <Button disabled={busy} onClick={() => void load()}>تحميل أحدث الرسوم</Button> : null}
       </CenterHeaderActions>
@@ -151,7 +152,7 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
           { key: "due", label: "المستحق بعدها", render: row => <bdi dir="ltr">{row.after_due} {currency}</bdi> },
           { key: "reason", label: "السبب", render: row => row.reason },
           { key: "actor", label: "اعتمدها", render: row => row.actor_name },
-          { key: "actions", label: "الإجراءات", actions: true, render: row => row.id === latestActive?.id && !row.reversal_id ?
+          { key: "actions", label: "الإجراءات", actions: true, render: row => detail.can_approve && row.id === latestActiveId && !row.reversal_id ?
             <Button disabled={busy || conflict || uncertain} onClick={() => { setReplacesId(row.id); setNewDue(row.before_due); setDetail(current => current ? { ...current, preview: null } : current); document.getElementById(`${prefix}-new-due`)?.focus(); }}>تصحيح هذه التسوية</Button> : <span className="muted">محفوظة</span> },
         ]} />
       <CenterHeaderActions>

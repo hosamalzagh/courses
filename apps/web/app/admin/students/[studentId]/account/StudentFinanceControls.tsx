@@ -228,8 +228,10 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
         { key: "original", label: "رسوم التسجيل", render: row => <bdi dir="ltr">{row.net_amount} {row.currency}</bdi> },
         { key: "due", label: "المستحق الحالي", render: row => <bdi dir="ltr">{row.current_due} {row.currency}</bdi> },
         { key: "paid", label: "المسدد", render: row => <bdi dir="ltr">{row.paid_amount} {row.currency}</bdi> },
-        { key: "actions", label: "الإجراءات", actions: true, render: row => row.can_approve ?
-          <Button id={`${formPrefix}-fee-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedFeeId(row.id); setSelectedPaymentId(null); }}>تسوية أو تصحيح</Button> : <span className="muted">للقراءة فقط</span> },
+        { key: "actions", label: "الإجراءات", actions: true, render: row =>
+          <Button id={`${formPrefix}-fee-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedFeeId(row.id); setSelectedPaymentId(null); }}>
+            {row.can_approve ? "تسوية أو تصحيح" : "عرض سجل الرسوم"}
+          </Button> },
       ]} />
     {selectedFee ? <StudentFeeAdjustmentEditor key={selectedFee.id} studentId={studentId} fee={selectedFee}
       onClose={() => { setSelectedFeeId(null); focus(`fee-${selectedFee.id}`); }} onChanged={refreshAfterAllocation} onDirtyChange={setFeeDirty} /> : null}

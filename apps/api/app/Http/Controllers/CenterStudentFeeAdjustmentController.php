@@ -48,6 +48,7 @@ class CenterStudentFeeAdjustmentController extends Controller
             'version' => StudentAccountVersion::forActor($studentId, $fee->financial_account_revision, $request->user()->id),
             'can_approve' => $permissions->can('finance.approve', (int) $fee->branch_id),
             'account' => $this->presentAccount($account),
+            'latest_active_adjustment_id' => $fee->latest_active_adjustment_id,
             'history' => $history->take(20)->values(),
             'pagination' => ['history_page' => $historyPage, 'history_has_more' => $history->count() > 20],
             'preview' => $preview,
@@ -155,6 +156,12 @@ class CenterStudentFeeAdjustmentController extends Controller
         if ($historyPage !== null) {
             $query->selectSub(DB::connection('tenant')->query()->fromSub($this->historyQuery($historyPage), 'history_rows')
                 ->selectRaw("COALESCE(json_agg(history_rows), '[]'::json)"), 'history_rows');
+            $query->selectSub(DB::connection('tenant')->table('study_fee_adjustments as latest_adjustment')
+                ->whereColumn('latest_adjustment.fee_id', 'fees.id')->where('latest_adjustment.kind', 'settlement')
+                ->whereNotExists(DB::connection('tenant')->table('study_fee_adjustments as latest_reversal')
+                    ->whereColumn('latest_reversal.reverses_id', 'latest_adjustment.id')->selectRaw('1'))
+                ->orderByDesc('latest_adjustment.created_at')->orderByDesc('latest_adjustment.sequence')
+                ->select('latest_adjustment.id')->limit(1), 'latest_active_adjustment_id');
         }
         $fee = $query->first();
         abort_unless($fee && $permissions->can('finance.read', (int) $fee->branch_id), 404);
