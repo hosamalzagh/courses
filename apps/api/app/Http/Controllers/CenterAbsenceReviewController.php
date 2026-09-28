@@ -29,7 +29,7 @@ class CenterAbsenceReviewController extends Controller
             abort_unless($permissions->can('read', (int) $data['branch_id']), 404);
         }
 
-        $options = $this->options($permissions, $data);
+        $choices = $this->options($permissions, $data);
         $rows = $this->report($permissions, $data);
         $page = (int) ($data['page'] ?? 1);
 
@@ -38,7 +38,7 @@ class CenterAbsenceReviewController extends Controller
             'membership' => $request->attributes->get('center_membership')->only(['status', 'grants_version']),
             'center' => $request->attributes->get('center')->only(['id', 'name', 'slug']),
             'permissions' => $permissions->toArray(),
-            'options' => $options,
+            ...$choices,
             'students' => array_slice($rows, 0, 50),
             'pagination' => ['page' => $page, 'has_more' => count($rows) > 50],
         ])->header('Cache-Control', 'private, no-store');
@@ -57,10 +57,10 @@ class CenterAbsenceReviewController extends Controller
             abort_unless($permissions->can('read', (int) $data['branch_id']), 404);
         }
 
-        return response()->json(['options' => $this->options($permissions, [
+        return response()->json($this->options($permissions, [
             'branch_id' => $data['branch_id'] ?? null,
             'option_q' => trim($data['q']), 'options_page' => (int) ($data['page'] ?? 1),
-        ])])->header('Cache-Control', 'private, no-store');
+        ]))->header('Cache-Control', 'private, no-store');
     }
 
     public function updateRule(Request $request, string $kind, string $id): JsonResponse
@@ -130,35 +130,52 @@ class CenterAbsenceReviewController extends Controller
     private function options(CenterPermissions $permissions, array $data): array
     {
         $scope = $this->scopeSql($permissions, 'courses.branch_id');
+        $branchScope = $this->scopeSql($permissions, 'branches.id');
         $sql = <<<SQL
 WITH nodes AS (
- SELECT 'courses' AS kind, courses.id, courses.name, courses.branch_id, branches.name AS branch_name,
+ SELECT 'branches' AS kind, branches.id::text AS id, branches.name, branches.id AS branch_id, branches.name AS branch_name,
+   branches.slug, branches.address,
+   NULL::uuid AS course_id, NULL::uuid AS stage_id, NULL::uuid AS level_id,
+   NULL::varchar(20) AS absence_mode, NULL::smallint AS absence_limit, NULL::integer AS absence_revision FROM branches WHERE {$branchScope['sql']}
+ UNION ALL
+ SELECT 'courses' AS kind, courses.id::text, courses.name, courses.branch_id, branches.name AS branch_name,
+   NULL::text, NULL::text,
    NULL::uuid AS course_id, NULL::uuid AS stage_id, NULL::uuid AS level_id,
    courses.absence_mode, courses.absence_limit, courses.absence_revision FROM courses JOIN branches ON branches.id = courses.branch_id WHERE {$scope['sql']}
  UNION ALL
- SELECT 'stages', stages.id, stages.name, courses.branch_id, branches.name, courses.id, NULL::uuid, NULL::uuid,
+ SELECT 'stages', stages.id::text, stages.name, courses.branch_id, branches.name, NULL::text, NULL::text, courses.id, NULL::uuid, NULL::uuid,
    stages.absence_mode, stages.absence_limit, stages.absence_revision FROM stages JOIN courses ON courses.id = stages.course_id JOIN branches ON branches.id = courses.branch_id WHERE {$scope['sql']}
  UNION ALL
- SELECT 'levels', levels.id, levels.name, courses.branch_id, branches.name, courses.id, stages.id, NULL::uuid,
+ SELECT 'levels', levels.id::text, levels.name, courses.branch_id, branches.name, NULL::text, NULL::text, courses.id, stages.id, NULL::uuid,
    levels.absence_mode, levels.absence_limit, levels.absence_revision FROM levels JOIN stages ON stages.id = levels.stage_id JOIN courses ON courses.id = stages.course_id JOIN branches ON branches.id = courses.branch_id WHERE {$scope['sql']}
  UNION ALL
- SELECT 'study_groups', study_groups.id, study_groups.name, courses.branch_id, branches.name, courses.id, stages.id, levels.id,
+ SELECT 'study_groups', study_groups.id::text, study_groups.name, courses.branch_id, branches.name, NULL::text, NULL::text, courses.id, stages.id, levels.id,
    study_groups.absence_mode, study_groups.absence_limit, study_groups.absence_revision FROM study_groups JOIN levels ON levels.id = study_groups.level_id JOIN stages ON stages.id = levels.stage_id JOIN courses ON courses.id = stages.course_id JOIN branches ON branches.id = courses.branch_id WHERE {$scope['sql']}
 ), bounded AS (
  SELECT nodes.*, row_number() OVER (PARTITION BY kind ORDER BY name, id) AS ordinal FROM nodes
  WHERE (?::bigint IS NULL OR branch_id = ?::bigint)
    AND (?::text IS NULL OR name ILIKE '%' || ?::text || '%')
 )
-SELECT * FROM bounded WHERE (ordinal > ? AND ordinal <= ?) OR id IN (?::uuid, ?::uuid, ?::uuid, ?::uuid) ORDER BY kind, name, id
+SELECT * FROM bounded WHERE (ordinal > ? AND ordinal <= ?) OR id IN (?::text, ?::text, ?::text, ?::text) ORDER BY kind, name, id
 SQL;
-        $bindings = array_merge(...array_fill(0, 4, $scope['bindings']));
+        $bindings = [...$branchScope['bindings'], ...array_merge(...array_fill(0, 4, $scope['bindings']))];
         $branch = $data['branch_id'] ?? null;
         $search = $data['option_q'] ?? null;
         $offset = ((int) ($data['options_page'] ?? 1) - 1) * 50;
         $bindings = [...$bindings, $branch, $branch, $search, $search, $offset, $offset + 50,
             $data['course_id'] ?? null, $data['stage_id'] ?? null, $data['level_id'] ?? null, $data['group_id'] ?? null];
 
-        return array_map(fn ($row) => (array) $row, DB::connection('tenant')->select($sql, $bindings));
+        $rows = array_map(fn ($row) => (array) $row, DB::connection('tenant')->select($sql, $bindings));
+
+        return [
+            'branches' => array_values(array_map(fn ($row) => ['id' => (int) $row['branch_id'], 'name' => $row['name'], 'slug' => $row['slug'], 'address' => $row['address']],
+                array_filter($rows, fn ($row) => $row['kind'] === 'branches'))),
+            'options' => array_values(array_map(
+                fn ($row) => array_intersect_key($row, array_flip(['kind', 'id', 'name', 'branch_id', 'branch_name',
+                    'course_id', 'stage_id', 'level_id', 'absence_mode', 'absence_limit', 'absence_revision'])),
+                array_filter($rows, fn ($row) => $row['kind'] !== 'branches')
+            )),
+        ];
     }
 
     private function report(CenterPermissions $permissions, array $data): array
@@ -187,7 +204,8 @@ WITH candidates AS (
    AND (?::uuid IS NULL OR stages.id = ?::uuid)
    AND (?::uuid IS NULL OR levels.id = ?::uuid)
    AND (?::uuid IS NULL OR study_groups.id = ?::uuid)
-   AND (?::text IS NULL OR students.name ILIKE '%' || ?::text || '%')
+   AND (?::text IS NULL OR students.name ILIKE '%' || ?::text || '%'
+        OR (?::bigint IS NOT NULL AND students.student_number = ?::bigint))
 ), eligible AS (
  SELECT c.id AS attempt_id, periods.id AS period_id, periods.left_on IS NULL AS current_period,
    entries.status, sessions.scheduled_at, sessions.id AS session_id
@@ -229,11 +247,16 @@ FROM calculated WHERE (?::text = 'all' OR needs_review)
 ORDER BY student_name, student_number, id OFFSET ? LIMIT 51
 SQL;
         $bindings = $scope['bindings'];
-        foreach (['branch_id', 'course_id', 'stage_id', 'level_id', 'group_id', 'q'] as $key) {
+        foreach (['branch_id', 'course_id', 'stage_id', 'level_id', 'group_id'] as $key) {
             $value = $data[$key] ?? null;
             $bindings[] = $value;
             $bindings[] = $value;
         }
+        $search = trim($data['q'] ?? '') ?: null;
+        $digits = $search === null ? null : strtr($search,
+            array_combine(mb_str_split('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹'), str_split('01234567890123456789')));
+        $number = $digits !== null && ctype_digit($digits) && strlen($digits) <= 18 ? $digits : null;
+        $bindings = [...$bindings, $search, $search, $number, $number];
         $bindings = [...$bindings, ...$periodScope['bindings']];
         $bindings[] = $data['view'] ?? 'review';
         $bindings[] = ((int) ($data['page'] ?? 1) - 1) * 50;

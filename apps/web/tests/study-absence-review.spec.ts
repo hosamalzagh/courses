@@ -75,7 +75,7 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
     });
     expect(session.status).toBe(201);
     expect((await write(owner, `groups/${group.body.group.id}/start`, { revision: session.body.group_revision })).status).toBe(200);
-    execFileSync("/Users/Shared/DBngin/postgresql/18.4_arm/bin/psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_ABSENCE_DB_PORT!, "-U", "postgres",
+    execFileSync(process.env.COURSES_ABSENCE_PSQL ?? "psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_ABSENCE_DB_PORT!, "-U", "postgres",
       "-d", `courses_center_${centerId}`, "-c",
       `UPDATE study_groups SET started_at = now() - interval '2 days' WHERE id = '${group.body.group.id}'; UPDATE study_sessions SET scheduled_at = now() - interval '1 hour' WHERE id = '${session.body.sessions[0].id}'`], { stdio: "ignore" });
     const closed = await write(owner, `groups/${group.body.group.id}/sessions/${session.body.sessions[0].id}/close`, {
@@ -117,6 +117,12 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
     await owner.goto(`${origin}/admin/absence-review`);
     await expect(owner.getByText(student.body.student.name)).toBeVisible();
     await expect(owner.getByRole("row").filter({ hasText: student.body.student.name }).getByRole("cell", { name: "يحتاج مراجعة" })).toBeVisible();
+    await expect(owner.locator(`#absence-branch option[value="${south}"]`)).toHaveCount(1);
+    const arabicNumber = Number(student.body.student.student_number).toLocaleString("ar-EG", { useGrouping: false });
+    await owner.getByRole("searchbox", { name: "بحث في طلاب الغياب" }).fill(arabicNumber);
+    await owner.getByRole("button", { name: "بحث في جميع طلاب الغياب" }).click();
+    await expect(owner).toHaveURL(/q=/);
+    await expect(owner.getByText(student.body.student.name)).toBeVisible();
     await expect(owner.locator("html")).toHaveAttribute("data-theme", "light");
     await owner.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
     await expect(owner.locator("html")).toHaveAttribute("data-theme", "dark");

@@ -13,7 +13,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { centerRequest, responseMessage } from "@/lib/client-api";
-import type { AbsenceContext, AbsenceOption } from "@/lib/server-context";
+import type { AbsenceContext, AbsenceOption, Branch } from "@/lib/server-context";
 
 const kinds = ["courses", "stages", "levels", "study_groups"] as const;
 const labels = { courses: "الكورس", stages: "المرحلة الدراسية", levels: "المستوى", study_groups: "المجموعة" };
@@ -43,6 +43,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   const [conflict, setConflict] = useState(false);
   const [optionSearch, setOptionSearch] = useState("");
   const [extraOptions, setExtraOptions] = useState<AbsenceOption[]>([]);
+  const [extraBranches, setExtraBranches] = useState<Branch[]>([]);
   const [optionPage, setOptionPage] = useState(0);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [optionError, setOptionError] = useState("");
@@ -58,7 +59,11 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   const dirty = Boolean(selected && (mode !== (selected.absence_mode ?? "inherit") || proposedLimit !== selected.absence_limit));
   const canManage = (branchId: number) => context.permissions.can_manage_center || context.permissions.branch_actions?.[String(branchId)]?.includes("curriculum.manage");
   const editable = options.filter(option => canManage(option.branch_id));
-  const branches = Array.from(new Map(options.map(option => [option.branch_id, option.branch_name])).entries());
+  const branches = Array.from(new Map<number, string>([
+    ...context.branches.map(branch => [branch.id, branch.name] as const),
+    ...extraBranches.map(branch => [branch.id, branch.name] as const),
+    ...options.map(option => [option.branch_id, option.branch_name] as const),
+  ]).entries());
 
   function navigate(next: Record<FilterKey, string>) {
     if (dirty) { setPendingNavigation(next); return; }
@@ -132,9 +137,10 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
       if (draft.branch_id) query.set("branch_id", draft.branch_id);
       const response = await centerRequest(`absence-options?${query}`, "GET");
       if (!response.ok) { setOptionError(await responseMessage(response)); return; }
-      const result = (await response.json()) as { options: AbsenceOption[] };
+      const result = (await response.json()) as { options: AbsenceOption[]; branches: Branch[] };
       setExtraOptions(current => page === 1 ? result.options : [...current, ...result.options]);
-      setOptionPage(result.options.length ? page : 0);
+      setExtraBranches(current => page === 1 ? result.branches : [...current, ...result.branches]);
+      setOptionPage(result.options.length || result.branches.length ? page : 0);
     } catch { setOptionError("تعذر البحث في النطاقات."); }
     finally { setLoadingOptions(false); }
   }
@@ -149,7 +155,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
     <section className="data-panel form-stack" aria-labelledby="absence-filters-title">
       <h2 id="absence-filters-title">نطاق التقرير</h2>
       <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); void findOptions(1); }}>
-        <Field><FieldLabel htmlFor="absence-option-search">البحث في الكورسات والمراحل والمستويات والمجموعات</FieldLabel><Input id="absence-option-search" type="search" value={optionSearch} onChange={event => setOptionSearch(event.target.value)} /></Field>
+        <Field><FieldLabel htmlFor="absence-option-search">البحث في الفروع والكورسات والمراحل والمستويات والمجموعات</FieldLabel><Input id="absence-option-search" type="search" value={optionSearch} onChange={event => setOptionSearch(event.target.value)} /></Field>
         <Button type="submit" busy={loadingOptions} disabled={!optionSearch.trim()}>بحث في النطاقات</Button>
         {optionPage > 0 ? <Button onClick={() => void findOptions(optionPage + 1)} busy={loadingOptions}>تحميل نطاقات أخرى</Button> : null}
       </form>

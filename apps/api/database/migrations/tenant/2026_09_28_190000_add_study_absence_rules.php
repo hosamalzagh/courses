@@ -22,6 +22,7 @@ return new class extends Migration
     public function down(): void
     {
         foreach (['study_groups', 'levels', 'stages', 'courses'] as $name) {
+            DB::statement("ALTER TABLE {$name} DROP CONSTRAINT IF EXISTS {$name}_absence_rule_valid");
             Schema::table($name, fn (Blueprint $table) => $table->dropColumn(['absence_mode', 'absence_limit', 'absence_revision']));
         }
     }

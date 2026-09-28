@@ -67,6 +67,9 @@ class StudyAbsenceReviewTest extends TestCase
         $all->assertJsonPath('students.0.consecutive_absences', 1)
             ->assertJsonPath('students.0.total_absences', 3)
             ->assertJsonPath('students.0.needs_review', false);
+        $arabicNumber = strtr((string) $student['student_number'], array_combine(str_split('0123456789'), mb_str_split('٠١٢٣٤٥٦٧٨٩')));
+        $this->getJson("{$this->base}/absence-review?view=all&q=".urlencode($arabicNumber))->assertOk()
+            ->assertJsonCount(1, 'students')->assertJsonPath('students.0.student_id', $student['id']);
         $this->assertLessThanOrEqual(6, (int) $all->headers->get('X-Courses-Query-Count'));
         $this->getJson("{$this->base}/absence-review?branch_id={$this->north}")->assertOk()->assertJsonCount(0, 'students');
 
@@ -99,6 +102,12 @@ class StudyAbsenceReviewTest extends TestCase
     {
         $north = $this->group($this->north, 'Visible');
         $south = $this->group($this->south, 'Hidden');
+        $this->center->run(fn () => DB::table('courses')->insert(array_map(fn ($index) => [
+            'id' => (string) Str::uuid(), 'branch_id' => $this->north, 'name' => sprintf('A %03d', $index),
+            'created_at' => now(), 'updated_at' => now(),
+        ], range(1, 51))));
+        $this->getJson("{$this->base}/absence-review?view=all")->assertOk()
+            ->assertJsonFragment(['id' => $this->south, 'name' => 'South']);
         $path = "{$this->base}/absence-rules/courses/{$north['course']['id']}";
         $hiddenPath = "{$this->base}/absence-rules/courses/{$south['course']['id']}";
         $this->patchJson($path, ['mode' => 'total', 'limit' => 2, 'revision' => 1])->assertOk()->assertJsonPath('rule.revision', 2);
@@ -108,14 +117,28 @@ class StudyAbsenceReviewTest extends TestCase
         $this->patchJson($path, ['mode' => 'inherit', 'limit' => null, 'revision' => 2])->assertUnprocessable();
         $this->grant([$this->north => ['branch_viewer']]);
         $this->asUser($this->staff);
-        $this->getJson("{$this->base}/absence-review?view=all")->assertOk()
+        $this->getJson("{$this->base}/absence-review?view=all")->assertOk()->assertJsonCount(1, 'branches')
             ->assertJsonMissing(['id' => $south['course']['id']]);
         $this->getJson("{$this->base}/absence-options?q=Hidden")->assertOk()->assertJsonCount(0, 'options');
         $this->getJson("{$this->base}/absence-options?q=Visible")->assertOk()->assertJsonFragment(['id' => $north['course']['id']]);
+        $this->getJson("{$this->base}/absence-options?q=North")->assertOk()->assertJsonCount(1, 'branches');
         $this->getJson("{$this->base}/absence-review?branch_id={$this->south}")->assertNotFound();
         $this->getJson("{$this->base}/absence-options?branch_id={$this->south}&q=Hidden")->assertNotFound();
         $this->patchJson($path, ['mode' => 'total', 'limit' => 4, 'revision' => 2])->assertForbidden();
         $this->patchJson($hiddenPath, ['mode' => 'total', 'limit' => 4, 'revision' => 1])->assertNotFound();
+    }
+
+    public function test_rule_migration_can_rollback_and_restore_an_existing_center(): void
+    {
+        $this->center->run(function (): void {
+            $migration = require database_path('migrations/tenant/2026_09_28_190000_add_study_absence_rules.php');
+            DB::connection('tenant')->transaction(function () use ($migration): void {
+                $migration->down();
+                $this->assertFalse(DB::connection('tenant')->getSchemaBuilder()->hasColumn('courses', 'absence_mode'));
+                $migration->up();
+                $this->assertTrue(DB::connection('tenant')->getSchemaBuilder()->hasColumn('courses', 'absence_mode'));
+            });
+        });
     }
 
     private function group(int $branchId, string $name): array
