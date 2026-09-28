@@ -83,18 +83,19 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
     });
     expect(closed.status).toBe(200);
     expect(closed.body.absent_count).toBe(1);
+    const groupFilter = `group_id=${encodeURIComponent(group.body.group.id)}`;
 
-    const direct = await owner.request.get(`${origin}/api/v1/center/absence-review?view=all`);
+    const direct = await owner.request.get(`${origin}/api/v1/center/absence-review?view=all&${groupFilter}`);
     expect(direct.status(), await direct.text()).toBe(200);
     const before = readFileSync(process.env.COURSES_ABSENCE_QUERY_LOG!, "utf8").trim().split("\n").length;
-    const html = await (await owner.request.get(`${origin}/admin/absence-review?view=all`)).text();
+    const html = await (await owner.request.get(`${origin}/admin/absence-review?view=all&${groupFilter}`)).text();
     expect(html).toContain(student.body.student.name);
     const reads = readFileSync(process.env.COURSES_ABSENCE_QUERY_LOG!, "utf8").trim().split("\n").slice(before)
       .map(line => JSON.parse(line) as { path: string; count: number | null }).filter(row => row.path === "/api/v1/center/absence-review");
     expect(reads.length).toBeGreaterThan(0);
     expect(reads.every(row => Number.isInteger(row.count) && row.count! <= 6)).toBe(true);
 
-    await owner.goto(`${origin}/admin/absence-review?view=all`);
+    await owner.goto(`${origin}/admin/absence-review?view=all&${groupFilter}`);
     await expect(owner.getByText(student.body.student.name)).toBeVisible();
     await owner.getByLabel("النطاق المراد تعديله").selectOption(`courses:${course.body.course.id}`);
     await owner.getByLabel("نوع القاعدة").selectOption("total");
@@ -114,7 +115,7 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
     await expect(owner.getByText("تعديل قاعدة تنبيه الغياب").first()).toBeVisible();
     await owner.getByText("عرض تغيير قاعدة الغياب").first().click();
     await expect(owner.getByText("بعد: ١ غياب متتالٍ").first()).toBeVisible();
-    await owner.goto(`${origin}/admin/absence-review`);
+    await owner.goto(`${origin}/admin/absence-review?${groupFilter}`);
     await expect(owner.getByText(student.body.student.name)).toBeVisible();
     await expect(owner.getByRole("row").filter({ hasText: student.body.student.name }).getByRole("cell", { name: "يحتاج مراجعة" })).toBeVisible();
     await expect(owner.locator(`#absence-branch option[value="${south}"]`)).toHaveCount(1);
@@ -131,7 +132,7 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
     expect(await owner.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
 
     await signIn(staff, "staff");
-    await staff.goto(`${origin}/admin/absence-review?view=all`);
+    await staff.goto(`${origin}/admin/absence-review?view=all&${groupFilter}`);
     await expect(staff.getByText(student.body.student.name)).toBeVisible();
     await expect(staff.getByRole("button", { name: "حفظ قاعدة الغياب" })).toHaveCount(0);
     expect((await write(staff, `absence-rules/courses/${course.body.course.id}`, { mode: "disabled", limit: null, revision: 2 }, "PATCH")).status).toBe(403);
