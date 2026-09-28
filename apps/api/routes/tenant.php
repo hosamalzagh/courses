@@ -147,6 +147,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::post('groups/{groupId}/sessions', [CenterStudySessionController::class, 'store']);
         Route::patch('groups/{groupId}/sessions/{sessionId}/postpone', [CenterStudySessionController::class, 'postpone']);
         Route::get('groups/{groupId}/sessions/{sessionId}/attendance', [CenterStudyAttendanceController::class, 'workspace']);
+        Route::get('groups/{groupId}/sessions/{sessionId}/attendance/{entryId}/note', [CenterStudentEventNoteController::class, 'attendanceShow']);
+        Route::put('groups/{groupId}/sessions/{sessionId}/attendance/{entryId}/note', [CenterStudentEventNoteController::class, 'attendanceSave']);
         Route::post('groups/{groupId}/sessions/{sessionId}/attendance', [CenterStudyAttendanceController::class, 'record']);
         Route::post('groups/{groupId}/sessions/{sessionId}/attendance/{entryId}/undo', [CenterStudyAttendanceController::class, 'undo']);
         Route::post('groups/{groupId}/sessions/{sessionId}/close', [CenterStudyAttendanceController::class, 'close']);

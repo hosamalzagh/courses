@@ -7,12 +7,15 @@ import { CenterHeaderActions, CenterPageActions } from "@/components/CenterShell
 import { DataTable } from "@/components/DataTable";
 import { InlineNotice } from "@/components/InlineNotice";
 import { PrefetchLink as Link } from "@/components/PrefetchLink";
+import { StudentEventNoteEditor } from "@/components/StudentEventNoteEditor";
+import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { centerRequest, newSubmissionId, responseMessage } from "@/lib/client-api";
 import type { AttendanceContext, AttendanceRow } from "@/lib/groups";
 import { formatSessionTime } from "@/lib/session-time";
 
 type Action = { kind: "record" | "undo" | "close"; key: string; requestId: string };
 type Selection = { attemptId: string; mode: "record" | "undo" };
+type NoteSelection = { entryId: string; entryRevision: number };
 
 export function AttendanceControls({ context, search }: { context: AttendanceContext; search: string }) {
   const router = useRouter();
@@ -25,6 +28,9 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
   const [conflict, setConflict] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const [selected, setSelected] = useState<Selection | null>(null);
+  const [selectedNote, setSelectedNote] = useState<NoteSelection | null>(null);
+  const [noteDirty, setNoteDirty] = useState(false);
+  const [discardNote, setDiscardNote] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   if (loadedContext !== context) {
@@ -34,6 +40,9 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
       setCurrent(context);
       setConflict(false);
       if (!sameRevision || (selected && !context.students.some(row => row.attempt_id === selected.attemptId))) setSelected(null);
+      if (selectedNote && !context.students.some(row => row.entry_id === selectedNote.entryId)) {
+        setSelectedNote(null); setNoteDirty(false); setDiscardNote(false);
+      }
     }
   }
 
@@ -48,6 +57,8 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
   const canRecord = open && started && current.can_record;
   const canClose = open && started && current.can_close;
   const selectedRow = current.students.find(row => row.attempt_id === selected?.attemptId);
+  const noteRow = current.students.find(row => row.entry_id === selectedNote?.entryId && row.status !== null);
+  const canEditNote = current.can_record || current.can_correct;
 
   async function reload() {
     const params = new URLSearchParams({ page: String(current.pagination.page), ...(search ? { q: search } : {}) });
@@ -95,6 +106,7 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
   }
 
   function select(row: AttendanceRow, mode: Selection["mode"]) {
+    setSelectedNote(null);
     setConfirmClose(false);
     setSelected({ attemptId: row.attempt_id, mode });
     requestAnimationFrame(() => document.getElementById(`${titleId}-selection`)?.focus());
@@ -106,9 +118,23 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
     requestAnimationFrame(() => document.getElementById(target)?.focus());
   }
 
+  function closeNote() {
+    if (noteDirty) { setDiscardNote(true); return; }
+    discardSelectedNote();
+  }
+
+  function discardSelectedNote() {
+    const target = selectedNote ? `${titleId}-${selectedNote.entryId}-note` : "";
+    setSelectedNote(null); setNoteDirty(false); setDiscardNote(false);
+    requestAnimationFrame(() => document.getElementById(target)?.focus());
+  }
+
   return <>
+    <UnsavedChangesGuard dirty={noteDirty} guardHistory onDiscard={() => {
+      setSelectedNote(null); setNoteDirty(false); setDiscardNote(false);
+    }} />
     <CenterPageActions context={current} actions={<Link href={`/admin/groups/${group.id}/sessions`}>العودة لجدول المحاضرات</Link>} />
-    {canClose && !confirmClose && !selected ? <CenterHeaderActions><Button id={`${titleId}-close`} variant="primary" disabled={busy || conflict}
+    {canClose && !confirmClose && !selected && !selectedNote ? <CenterHeaderActions><Button id={`${titleId}-close`} variant="primary" disabled={busy || conflict}
       onClick={() => { setConfirmClose(true); requestAnimationFrame(() => document.getElementById(`${titleId}-confirm`)?.focus()); }}>إغلاق كشف المحاضرة</Button></CenterHeaderActions> : null}
     {selected && selectedRow && !conflict ? <CenterHeaderActions>
       {selected.mode === "record" ? <>
@@ -122,6 +148,8 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
       onClick={() => void action("close", session.id, `${path}/close`, {})}>تأكيد الإغلاق</Button>
       <Button disabled={busy} onClick={() => { setConfirmClose(false); requestAnimationFrame(() => document.getElementById(`${titleId}-close`)?.focus()); }}>إلغاء</Button></CenterHeaderActions> : null}
     {conflict ? <CenterHeaderActions><Button disabled={busy} onClick={() => void reload().then(() => setNotice("حُمّل أحدث كشف؛ راجع الحالة قبل إعادة الإجراء.")).catch(failure => setError(failure instanceof Error ? failure.message : "تعذر التحديث."))}>تحميل أحدث البيانات</Button></CenterHeaderActions> : null}
+    {discardNote ? <CenterHeaderActions><Button variant="danger" onClick={discardSelectedNote}>تجاهل التعديلات</Button>
+      <Button onClick={() => setDiscardNote(false)}>متابعة التعديل</Button></CenterHeaderActions> : null}
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     <section className="context-card form-stack" aria-labelledby={`${titleId}-title`}>
@@ -134,9 +162,24 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
           : `راجع آخر إدخال للطالب ${selectedRow.name}، ثم أكد التراجع من إجراءات أعلى الصفحة.`}
       </div> : null}
     </section>
+    {noteRow && selectedNote ? <StudentEventNoteEditor key={`${selectedNote.entryId}-${selectedNote.entryRevision}`}
+      path={`${path}/attendance/${selectedNote.entryId}/note`} expectedEntryRevision={selectedNote.entryRevision}
+      title={`ملاحظة ${noteRow.status === "absent" ? "غياب" : "حضور"} ${noteRow.name}`}
+      description="الملاحظة اختيارية وترتبط بواقعة الحضور أو الغياب. لا تغير الحالة أو الاحتساب أو إغلاق المحاضرة، ولا تحل محل سبب تصحيح إلزامي."
+      canEdit={canEditNote} hideActions={discardNote} onClose={closeNote} onDirtyChange={setNoteDirty}
+      onOccurrenceChanged={async () => {
+        await reload();
+        discardSelectedNote();
+        setNotice("تغيرت واقعة الحضور. حُمّل الكشف الحالي؛ افتح ملاحظتها الجديدة بعد مراجعة الحالة.");
+      }}
+      onSaved={note => setCurrent(previous => ({ ...previous, students: previous.students.map(row => row.entry_id === noteRow.entry_id
+        ? { ...row, note_body: note.body, note_important: note.important } : row) }))} /> : null}
     <DataTable id={`attendance-${session.id}`} title="كشف الطلاب المستحقين" description="يعرض الطلاب المرتبطين بالمجموعة وقت المحاضرة، مع فترات الإيقاف المستبعدة من الحضور والغياب." rows={current.students}
       rowKey={row => row.attempt_id} searchText={row => `${row.name} ${row.student_number}`} emptyMessage="لا يوجد طلاب مستحقون لهذه المحاضرة."
-      serverSearch={{ value: search, onSearch: value => router.push(attendanceUrl(1, value)) }}
+      serverSearch={{ value: search, onSearch: value => {
+        if (noteDirty) { setNotice("احفظ الملاحظة أو ألغِ تعديلها قبل البحث."); return; }
+        router.push(attendanceUrl(1, value));
+      } }}
       columns={[
         { key: "student", label: "الطالب", render: row => <Link href={`/admin/students/${row.student_id}`}>{row.name}</Link> },
         { key: "number", label: "رقم الطالب", render: row => row.student_number.toLocaleString("ar-EG") },
@@ -144,12 +187,19 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
           ? <span>مستبعد بسبب الإيقاف<br /><small>من {formatSessionTime(row.suspended_at)}{row.lifted_at ? ` إلى ${formatSessionTime(row.lifted_at)}` : " إلى الآن"}</small></span>
           : row.status === "counted" ? "حاضر محتسب" : row.status === "not_counted" ? "حاضر غير محتسب" : row.status === "absent" ? "غائب"
           : row.student_status === "suspended" ? "ملف الطالب موقوف حاليًا" : "غير مسجل" },
-        { key: "actions", label: "الإجراءات", actions: true, render: row => canRecord && !row.status && !row.suspended_at && row.student_status === "active"
-          ? <Button id={`${titleId}-${row.attempt_id}-record`} disabled={busy || conflict} onClick={() => select(row, "record")}>تسجيل الحضور</Button>
-          : open && current.can_undo_own && row.entry_id && row.recorded_by === current.user.id && current.last_own_attempt_id === row.attempt_id && row.status !== "absent"
-            ? <Button id={`${titleId}-${row.attempt_id}-undo`} disabled={busy || conflict}
-                onClick={() => select(row, "undo")}>عرض التراجع</Button>
-            : "—" },
+        { key: "note", label: "ملاحظة", render: row => row.status && row.note_body
+          ? <span>{row.note_important ? "★ " : ""}{row.note_body.slice(0, 80)}{row.note_body.length > 80 ? "…" : ""}</span> : "—" },
+        { key: "actions", label: "الإجراءات", actions: true, render: row => <div className="flex flex-wrap gap-2">
+          {canRecord && !row.status && !row.suspended_at && row.student_status === "active"
+            ? <Button id={`${titleId}-${row.attempt_id}-record`} disabled={busy || conflict || Boolean(selectedNote)} onClick={() => select(row, "record")}>تسجيل الحضور</Button> : null}
+          {open && current.can_undo_own && row.entry_id && row.recorded_by === current.user.id && current.last_own_attempt_id === row.attempt_id && row.status !== "absent"
+            ? <Button id={`${titleId}-${row.attempt_id}-undo`} disabled={busy || conflict || Boolean(selectedNote)}
+                onClick={() => select(row, "undo")}>عرض التراجع</Button> : null}
+          {row.status && row.entry_id && row.entry_revision !== null && (row.note_body || canEditNote) ? <Button id={`${titleId}-${row.entry_id}-note`} size="sm" disabled={busy || conflict || Boolean(selectedNote)}
+            onClick={() => { setSelected(null); setConfirmClose(false);
+              setSelectedNote({ entryId: row.entry_id!, entryRevision: row.entry_revision! }); setDiscardNote(false); }}>
+              {row.note_body ? "عرض الملاحظة" : "إضافة ملاحظة"}</Button> : null}
+        </div> },
       ]}
       serverPagination={{ page: current.pagination.page, hasMore: current.pagination.has_more, batchSize: 20,
         previousHref: attendanceUrl(current.pagination.page - 1),

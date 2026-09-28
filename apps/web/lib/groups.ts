@@ -42,6 +42,7 @@ export type AttendanceRow = {
   status: "counted" | "not_counted" | "absent" | null;
   entry_revision: number | null; recorded_by: number | null;
   suspended_at: string | null; lifted_at: string | null;
+  note_body: string | null; note_important: boolean | null;
 };
 
 export type AttendanceContext = CenterContext & {
@@ -50,7 +51,7 @@ export type AttendanceContext = CenterContext & {
     status: "planned" | "held" | "cancelled"; revision: number; closed_at: string | null; closed_by: number | null };
   students: AttendanceRow[];
   pagination: { page: number; has_more: boolean };
-  can_record: boolean; can_close: boolean; can_undo_own: boolean;
+  can_record: boolean; can_correct: boolean; can_close: boolean; can_undo_own: boolean;
   has_started: boolean;
   last_own_attempt_id: string | null;
 };
