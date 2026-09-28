@@ -746,7 +746,7 @@ class StudyEnrollmentTest extends TestCase
         $this->assertMatchesRegularExpression('/^[1-9]\d*$/', (string) $beforeRepeat->headers->get('X-Courses-Query-Count'));
         $this->assertLessThanOrEqual(6, (int) $beforeRepeat->headers->get('X-Courses-Query-Count'));
         $this->patchJson("{$this->base}/groups/{$group['id']}/settings", [
-            'revision' => $group['revision'], 'approved_price' => '180.00', 'completion_threshold' => null,
+            'revision' => $group['revision'], 'approved_price' => '180.00', 'completion_threshold' => 65,
             'instructor_ids' => array_column($group['instructors'], 'id'),
         ])->assertOk();
         $fresh = $this->getJson($url)->json();
@@ -771,7 +771,14 @@ class StudyEnrollmentTest extends TestCase
         $this->assertMatchesRegularExpression('/^[1-9]\d*$/', (string) $after->headers->get('X-Courses-Query-Count'));
         $this->assertLessThanOrEqual(6, (int) $after->headers->get('X-Courses-Query-Count'));
         $this->postJson($url, [...$repeatPayload, 'version' => $after->json('student.version'), 'request_id' => (string) Str::uuid()])->assertConflict();
-        $this->center->run(function () use ($repeat): void {
+        $this->patchJson("{$this->base}/groups/{$group['id']}/settings", [
+            'revision' => $group['revision'] + 1, 'approved_price' => '180.00', 'completion_threshold' => 95,
+            'instructor_ids' => array_column($group['instructors'], 'id'),
+        ])->assertOk();
+        $this->center->run(function () use ($first, $repeat, $group): void {
+            $this->assertSame(80, DB::table('study_attempts')->where('id', $first['id'])->value('completion_threshold'));
+            $this->assertSame(65, DB::table('study_attempts')->where('id', $repeat['id'])->value('completion_threshold'));
+            $this->assertSame(95, DB::table('study_groups')->where('id', $group['id'])->value('completion_threshold'));
             $this->assertSame(2, DB::table('study_attempt_fees')->count());
             $this->assertSame(1, DB::table('student_payments')->count());
             $this->assertSame(1, DB::table('student_payment_allocations')->count());
