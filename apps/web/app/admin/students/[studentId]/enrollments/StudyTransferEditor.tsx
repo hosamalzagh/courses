@@ -104,6 +104,7 @@ export function StudyTransferEditor({ studentId, attempt, groups, initialGroupsP
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [discard, setDiscard] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState("");
@@ -130,6 +131,7 @@ export function StudyTransferEditor({ studentId, attempt, groups, initialGroupsP
   function changeGroup(value: string) { previewGeneration.current++; setGroupId(value); setSelectedGroup(choices.find(group => group.id === value) ?? null); setPreview(null); setHistory([]); setHistoryPage(1); setLoading(false); setError(""); requestId.current = null; }
   function changeDate(value: string) { previewGeneration.current++; setDate(value); setPreview(null); setHistory([]); setHistoryPage(1); setLoading(false); setError(""); requestId.current = null; }
   function changeReason(value: string) { setReason(value); setError(""); requestId.current = null; }
+  function close() { if (dirty) setDiscard(true); else onClose(); }
 
   async function loadPreview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -242,12 +244,14 @@ export function StudyTransferEditor({ studentId, attempt, groups, initialGroupsP
         {uncertain ? "التحقق من النقل" : "تأكيد النقل"}
       </Button> : <Button form={`${prefix}-transfer-form`} type="submit" variant="primary" busy={loading}
         disabled={busy || uncertain || conflict || !selected}>معاينة النقل</Button>}
-      <Button onClick={onClose} disabled={busy || uncertain}>إلغاء</Button>
+      <Button onClick={close} disabled={busy || uncertain}>إلغاء</Button>
       {conflict ? <Button onClick={onReload}>تحميل أحدث البيانات</Button> : null}
     </CenterHeaderActions>
     {preview && (history.length > 0 || historyPage > 1) ? <TransferHistoryView history={history} page={historyPage} hasMore={historyHasMore}
       loading={loading || busy} onPage={page => void fetchPreview(page)} /> : null}
     {confirm ? <ConfirmationDialog title="تأكيد نقل المحاولة" description="ستتغير المجموعة والخطة الحالية مع حفظ تاريخ الفرع والحضور والرسوم السابقة. لن تُنشأ حركة مالية."
       confirmLabel="نقل المحاولة" onCancel={() => setConfirm(false)} onConfirm={save} /> : null}
+    {discard ? <ConfirmationDialog title="تجاهل بيانات النقل" description="ستُفقد المجموعة والتاريخ والسبب اللذين أدخلتهما."
+      confirmLabel="تجاهل التعديلات" cancelLabel="متابعة التعديل" onCancel={() => setDiscard(false)} onConfirm={onClose} /> : null}
   </section>;
 }

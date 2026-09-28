@@ -98,6 +98,10 @@ test('moves an active attempt across branches with a reviewed preview and denies
     await owner.getByRole('button', { name: 'إغلاق القائمة' }).click();
     expect(await owner.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
     await editor.getByLabel('مجموعة الوجهة').selectOption(target.group.id);
+    await owner.getByRole('button', { name: 'إلغاء', exact: true }).click();
+    await expect(owner.getByRole('alertdialog', { name: 'تجاهل بيانات النقل' })).toBeVisible();
+    await owner.getByRole('button', { name: 'متابعة التعديل' }).click();
+    await expect(editor.getByLabel('مجموعة الوجهة')).toHaveValue(target.group.id);
     await editor.getByLabel('تاريخ النقل الفعلي').fill('2026-09-29');
     const previewResponse = owner.waitForResponse(response => response.request().method() === 'GET'
       && response.url().includes(`/enrollments/${attemptId}/transfer/preview?`));
