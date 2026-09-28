@@ -288,7 +288,8 @@ SQL, [$data['transferred_on']]);
             $group->id, $group->revision, $group->plan_version_id, $group->branch_id,
             $group->completion_threshold,
             $data['transferred_on'], $sourceIds, $approvalIds, $targetLectures->pluck('id')->all(),
-            $creditedLectures->pluck('id')->all(), $missingLectures->pluck('id')->all(),
+            $creditedLectures->map(fn (object $lecture): array => [$lecture->id, $credited[$lecture->id]])->values()->all(),
+            $missingLectures->pluck('id')->all(),
             $row->financial_account_revision, $balance]));
 
         return [
@@ -298,9 +299,11 @@ SQL, [$data['transferred_on']]);
                 'level_name' => $group->level_name, 'plan_version_id' => $group->plan_version_id,
                 'plan_version' => (int) $group->plan_version, 'completion_threshold' => (int) $group->completion_threshold],
             'required_count' => $targetLectures->count(), 'credited_count' => $creditedLectures->count(),
-            'credited_lectures' => $creditedLectures->map(fn (object $lecture): array => ['id' => $lecture->id, 'number' => $lecture->number])->values()->all(),
+            'credited_lectures' => $creditedLectures->map(fn (object $lecture): array => ['id' => $lecture->id,
+                'number' => $lecture->number, 'final' => $credited[$lecture->id]])->values()->all(),
             'missing_lectures' => $missingLectures->map(fn (object $lecture): array => ['id' => $lecture->id, 'number' => $lecture->number])->values()->all(),
             'credited_numbers' => $creditedLectures->pluck('number')->all(),
+            'open_credited_numbers' => $creditedLectures->filter(fn (object $lecture): bool => ! $credited[$lecture->id])->pluck('number')->values()->all(),
             'missing_numbers' => $missingLectures->pluck('number')->all(),
             'approval_ids' => $approvalIds, 'equivalence_ready' => $directApproval,
             'balance' => $balance,

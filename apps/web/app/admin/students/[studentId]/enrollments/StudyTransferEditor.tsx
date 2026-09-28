@@ -20,6 +20,7 @@ type Preview = {
   to: { group_id: string; group_name: string; branch_id: number; level_id: string; level_name: string;
     plan_version_id: string; plan_version: number; completion_threshold: number };
   required_count: number; credited_count: number; credited_numbers: number[]; missing_numbers: number[];
+  open_credited_numbers: number[];
   approval_count: number; equivalence_ready: boolean; balance: { debt: string; available_credit: string };
 };
 type HistoryContext = { branch_id: number; branch_name: string; level_id: string; level_name: string;
@@ -27,7 +28,7 @@ type HistoryContext = { branch_id: number; branch_name: string; level_id: string
 type History = { id: string; transferred_on: string; from: HistoryContext | null;
   to: HistoryContext | null;
   reason: string | null; actor_name: string | null; credited_count: number; required_count: number;
-  credited_lectures: { id: string; number: number }[] | null; missing_lectures: { id: string; number: number }[] | null };
+  credited_lectures: { id: string; number: number; final: boolean }[] | null; missing_lectures: { id: string; number: number }[] | null };
 
 function TransferHistoryView({ history, page, hasMore, loading, onPage }: {
   history: History[]; page: number; hasMore: boolean; loading: boolean; onPage: (page: number) => void;
@@ -44,7 +45,7 @@ function TransferHistoryView({ history, page, hasMore, loading, onPage }: {
           ? `${row.to.branch_name} — ${row.to.level_name} — خطة ${row.to.plan_version} — ${row.to.group_name ?? "انتظار"}` : "سياق محجوب" },
         { key: "coverage", label: "التغطية عند النقل", render: row => `${row.credited_count}/${row.required_count}` },
         { key: "lectures", label: "تفصيل المتطلبات وقت النقل", render: row => row.credited_lectures && row.missing_lectures
-          ? `المحتسب: ${row.credited_lectures.map(lecture => lecture.number).join("، ") || "لا يوجد"}؛ الناقص: ${row.missing_lectures.map(lecture => lecture.number).join("، ") || "لا يوجد"}`
+          ? `المحتسب: ${row.credited_lectures.map(lecture => lecture.number).join("، ") || "لا يوجد"}؛ الناقص: ${row.missing_lectures.map(lecture => lecture.number).join("، ") || "لا يوجد"}${row.credited_lectures.some(lecture => !lecture.final) ? `؛ المبدئي: ${row.credited_lectures.filter(lecture => !lecture.final).map(lecture => lecture.number).join("، ")}` : ""}`
           : "تفصيل غير محفوظ" },
         { key: "reason", label: "السبب", render: row => row.reason ?? "محجوب" },
       ]} />
@@ -237,6 +238,7 @@ export function StudyTransferEditor({ studentId, attempt, groups, initialGroupsP
       <h3>{preview.to.level_name} — {preview.to.group_name}، إصدار الخطة {preview.to.plan_version.toLocaleString("ar-EG")}</h3>
       <p>متطلبات الوجهة: {preview.required_count.toLocaleString("ar-EG")}، المحتسب: {preview.credited_count.toLocaleString("ar-EG")}، الناقص: {preview.missing_numbers.length.toLocaleString("ar-EG")}</p>
       <p>المحاضرات المحتسبة: {preview.credited_numbers.join("، ") || "لا توجد"} — الناقصة: {preview.missing_numbers.join("، ") || "لا توجد"}</p>
+      {preview.open_credited_numbers.length ? <InlineNotice tone="warning">يتضمن المحتسب حضورًا مبدئيًا في محاضرات مفتوحة: {preview.open_credited_numbers.join("، ")}. قد يتغير قبل إغلاق الكشف؛ راجع التغطية عند اعتماد إتمام الدراسة.</InlineNotice> : null}
       <p>اعتمادات المعادلة المستخدمة: {preview.approval_count.toLocaleString("ar-EG")}</p>
       {!preview.equivalence_ready ? <InlineNotice tone="warning">لا توجد معادلة معتمدة من إصدار الخطة الحالي إلى إصدار الوجهة. اعتمدها قبل التأكيد.</InlineNotice> : null}
       <p>مديونية الفروع المصرح بها: <bdi dir="ltr">{preview.balance.debt} {currency ?? ""}</bdi> — الرصيد المقدم المتاح: <bdi dir="ltr">{preview.balance.available_credit} {currency ?? ""}</bdi></p>

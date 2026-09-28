@@ -1576,7 +1576,7 @@ class StudyEnrollmentTest extends TestCase
         $this->center->run(function () use ($source, $attempt, $sourceLecture, $sessionId): void {
             DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $source['id'],
                 'plan_lecture_id' => $sourceLecture, 'number' => 1, 'scheduled_at' => '2026-09-27 08:00:00+00',
-                'status' => 'held', 'closed_at' => now(), 'closed_by' => $this->owner->id,
+                'status' => 'planned',
                 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
                 'created_at' => now(), 'updated_at' => now()]);
             DB::table('study_attendance_entries')->insert(['id' => (string) Str::uuid(), 'session_id' => $sessionId,
@@ -1606,7 +1606,8 @@ class StudyEnrollmentTest extends TestCase
             ->assertJsonPath('preview.balance.debt', '80.00');
         $this->assertLessThanOrEqual(6, (int) $previewResponse->headers->get('X-Courses-Query-Count'));
         $preview = $previewResponse->json('preview');
-        $this->assertSame([['id' => $targetLecture, 'number' => 1]], $preview['credited_lectures']);
+        $this->assertSame([['id' => $targetLecture, 'number' => 1, 'final' => false]], $preview['credited_lectures']);
+        $this->assertSame([1], $preview['open_credited_numbers']);
         $this->assertSame([], $preview['missing_lectures']);
         $payload = ['group_id' => $target['id'], 'group_revision' => $target['revision'],
             'transferred_on' => '2026-09-28', 'revision' => $attempt['revision'],
@@ -1623,7 +1624,14 @@ class StudyEnrollmentTest extends TestCase
             ->increment('financial_account_revision'));
         $this->postJson($transferUrl, [...$payload, 'preview_hash' => $thresholdPreview['hash'],
             'request_id' => (string) Str::uuid()])->assertConflict()->assertJsonPath('code', 'transfer_preview_changed');
-        $payload['preview_hash'] = $this->getJson($previewUrl)->assertOk()->json('preview.hash');
+        $openPreview = $this->getJson($previewUrl)->assertOk()->assertJsonPath('preview.open_credited_numbers', [1])->json('preview');
+        $this->center->run(fn () => DB::table('study_sessions')->where('id', $sessionId)->update([
+            'status' => 'held', 'closed_at' => now(), 'closed_by' => $this->owner->id,
+        ]));
+        $this->postJson($transferUrl, [...$payload, 'preview_hash' => $openPreview['hash'],
+            'request_id' => (string) Str::uuid()])->assertConflict()->assertJsonPath('code', 'transfer_preview_changed');
+        $payload['preview_hash'] = $this->getJson($previewUrl)->assertOk()
+            ->assertJsonPath('preview.open_credited_numbers', [])->json('preview.hash');
         $payload['request_id'] = (string) Str::uuid();
         $this->postJson($transferUrl, $payload)->assertCreated()->assertJsonPath('transfer.attempt_id', $attempt['id'])
             ->assertJsonPath('transfer.credited_lectures.0.id', $targetLecture)
@@ -1648,6 +1656,12 @@ class StudyEnrollmentTest extends TestCase
             $this->assertSame(1, DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])->whereNull('left_on')->count());
             $this->assertSame($target['plan_version_id'], DB::table('study_attempts')->where('id', $attempt['id'])->value('plan_version_id'));
             $this->assertSame(2, DB::table('center_audit_logs')->where('event', 'student.study_transferred')->count());
+            try {
+                (require database_path('migrations/tenant/2026_09_29_000100_add_study_transfer_coverage_snapshot.php'))->down();
+                $this->fail('Rollback must preserve transfer coverage snapshots.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString('Cannot roll back', $exception->getMessage());
+            }
         });
         $this->grant([$this->north => ['branch_auditor', 'registration'], $this->south => ['branch_auditor', 'registration']]);
         $this->asUser($this->staff);
