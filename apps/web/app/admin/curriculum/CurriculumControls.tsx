@@ -10,6 +10,7 @@ import { FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/f
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { CurriculumCopyControls } from './CurriculumCopyControls';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
 import { WorkspaceSections } from '@/components/WorkspaceSections';
@@ -72,6 +73,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
     params.set('tab', next); router.push(`/admin/curriculum?${params}`);
   }
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [copyCourse, setCopyCourse] = useState<Course | null>(null);
   const [loadedSection, setLoadedSection] = useState(section);
   const [name, setName] = useState('');
   const [branchId, setBranchId] = useState(0);
@@ -95,12 +97,13 @@ export function CurriculumControls({ context, detail = false, section = 'courses
     }
   }, [section]);
   const [baseline, setBaseline] = useState('');
-  if (loadedSection !== section) { setLoadedSection(section); setEditor(null); setError(''); setConflict(false); setFieldErrors({}); }
+  if (loadedSection !== section) { setLoadedSection(section); setEditor(null); setCopyCourse(null); setError(''); setConflict(false); setFieldErrors({}); }
   const dirty = editor !== null && baseline !== JSON.stringify([name, branchId, lectures, threshold]);
   const trigger = useRef<HTMLElement | null>(null);
   const manageable = context.branches.filter((branch) => context.permissions.can_manage_center || context.permissions.branch_actions?.[String(branch.id)]?.includes('curriculum.manage'));
   const branchName = (id: number) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`;
   function open(next: Editor, preserveTrigger = false) {
+    setCopyCourse(null);
     if (!preserveTrigger) trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const nextName = next.kind === 'plan' || next.kind === 'new-version' ? next.level.name : next.kind === 'threshold' ? next.record.name : '';
     const nextBranch = manageable[0]?.id ?? 0;
@@ -111,6 +114,15 @@ export function CurriculumControls({ context, detail = false, section = 'courses
     setEditor(next); setName(nextName); setBranchId(nextBranch); setLectures(nextLectures); setThreshold(nextThreshold);
     setRequestId(newSubmissionId()); setError(''); setNotice(''); setFieldErrors({}); setConflict(false);
     if (next.kind === 'threshold') requestAnimationFrame(() => document.getElementById('curriculum-completion-threshold')?.focus());
+  }
+  function openCopy(course: Course) {
+    trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setEditor(null); setCopyCourse(course); setError(''); setNotice('');
+    requestAnimationFrame(() => document.getElementById('curriculum-copy-title')?.focus());
+  }
+  function closeCopy() {
+    setCopyCourse(null);
+    requestAnimationFrame(() => trigger.current?.isConnected && trigger.current.focus());
   }
   async function editPlan(level: Level, kind: 'plan' | 'new-version' = 'plan') {
     if (saving.current) return;
@@ -300,10 +312,14 @@ export function CurriculumControls({ context, detail = false, section = 'courses
       </FieldGroup>
 </form> : null;
   const courses = <>        <DataTable id='curriculum-courses' title='الكورسات' description='المناهج المتاحة في الفروع المصرح بها. البحث والتصفية ضمن الدفعة المعروضة.' rows={context.courses} rowKey={(row) => row.id} searchText={(row) => `${row.name} ${branchName(row.branch_id)}`} emptyMessage='لا توجد كورسات متاحة. أنشئ كورسًا إذا كانت لديك صلاحية الإدارة الأكاديمية.' columns={[
-          { key: 'name', label: 'الكورس', filterText: (row) => row.name, render: (row) => <h3>{row.name}</h3> },
+          { key: 'name', label: 'الكورس', filterText: (row) => row.name, render: (row) => <><h3>{row.name}</h3>{row.source_course_name && row.source_branch_name ? <p className='muted'>نسخة من {row.source_course_name} · {row.source_branch_name}</p> : null}</> },
           { key: 'branch', label: 'الفرع', filterText: (row) => branchName(row.branch_id), render: (row) => branchName(row.branch_id) },
           { key: 'threshold', label: 'نسبة الإتمام', render: (row) => `${row.completion_threshold.toLocaleString('ar-EG')}٪` },
-          { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => row.can_manage ? <span className='flex flex-wrap gap-2'><Button data-curriculum-edit={row.id} disabled={busy || editor !== null} onClick={() => open({ kind: 'stage', course: row })}>إضافة مرحلة دراسية</Button><Button disabled={busy || editor !== null} onClick={() => open({ kind: 'threshold', scope: 'course', record: row })}>تحديد نسبة الإتمام</Button></span> : 'عرض فقط' },
+          { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => row.can_manage || manageable.some(branch => branch.id !== row.branch_id)
+            ? <span className='flex flex-wrap gap-2'>
+              {row.can_manage ? <><Button data-curriculum-edit={row.id} disabled={busy || editor !== null || copyCourse !== null} onClick={() => open({ kind: 'stage', course: row })}>إضافة مرحلة دراسية</Button><Button disabled={busy || editor !== null || copyCourse !== null} onClick={() => open({ kind: 'threshold', scope: 'course', record: row })}>تحديد نسبة الإتمام</Button></> : null}
+              {manageable.some(branch => branch.id !== row.branch_id) ? <Button disabled={busy || editor !== null || copyCourse !== null} onClick={() => openCopy(row)}>نسخ المنهج إلى فرع</Button> : null}
+            </span> : 'عرض فقط' },
         ]} />{batch('courses')}
 </>;
   const stages = <>        <DataTable id='curriculum-stages' title='المراحل الدراسية' rows={context.stages} rowKey={(row) => row.id} searchText={(row) => `${row.name} ${row.course_name}`} emptyMessage='لا توجد مراحل دراسية متاحة. أضف مرحلة من الكورس.' columns={[
@@ -325,14 +341,14 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   const branchChoices = <>      {!detail && (context.pagination.branches.has_more || context.pagination.branches.page > 1) ? <section className='context-card'><p>فروع إنشاء الكورس في هذه الدفعة.</p>{batch('branches')}</section> : null}
 </>;
   return <>
-    <CenterPageActions context={context} actions={!detail && manageable.length ? <Button hidden={editor !== null} variant='primary' disabled={busy || editor !== null} onClick={() => open({ kind: 'course' })}>إنشاء كورس</Button> : undefined} />
+    <CenterPageActions context={context} actions={!detail && manageable.length ? <Button hidden={editor !== null || copyCourse !== null} variant='primary' disabled={busy || editor !== null || copyCourse !== null} onClick={() => open({ kind: 'course' })}>إنشاء كورس</Button> : undefined} />
       <UnsavedChangesGuard dirty={dirty} guardHistory />
       {busy && !editor ? <InlineNotice>جارٍ تحميل خطة المستوى الحالية…</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}{error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
       {detail ? <Link href={`/admin/curriculum?${levelListParams()}`}>العودة إلى المستويات وخططها</Link> : null}
       {detail ? editorForm : null}
       {detail ? levels : <WorkspaceSections value={section} label='أقسام منهج الفرع' path='/admin/curriculum' sections={[
-        { value: 'courses', label: 'الكورسات', content: <>{editorForm}<div hidden={Boolean(editor)} className='workspace-register'>{courses}{branchChoices}</div></> },
+        { value: 'courses', label: 'الكورسات', content: <>{editorForm}{copyCourse ? <CurriculumCopyControls key={copyCourse.id} course={copyCourse} context={context} onClose={closeCopy} /> : null}<div hidden={Boolean(editor || copyCourse)} className='workspace-register'>{courses}{branchChoices}</div></> },
         { value: 'stages', label: 'المراحل الدراسية', content: <>{editorForm}<div hidden={Boolean(editor)} className='workspace-register'>{stages}</div></> },
         { value: 'levels', label: 'المستويات وخططها', content: <>{editorForm}<div hidden={Boolean(editor)} className='workspace-register'>{levels}</div></> },
       ]} />}

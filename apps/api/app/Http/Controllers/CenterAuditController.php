@@ -52,6 +52,24 @@ class CenterAuditController extends Controller
                 ->orWhere(fn ($event) => $event->whereIn('event', $attendanceEvents)->whereIn('branch_id', $attendanceBranches)));
         }
 
-        return $query->orderByDesc('id')->limit(50)->get();
+        return self::redactCopySources($query->orderByDesc('id')->limit(50)->get(), $permissions);
+    }
+
+    public static function redactCopySources(Collection $entries, CenterPermissions $permissions): Collection
+    {
+        return $entries->map(function (object $entry) use ($permissions): object {
+            if ($entry->event === 'curriculum.course_copied') {
+                $details = json_decode($entry->details, true);
+                if (is_array($details) && isset($details['source_branch_id'])
+                    && ! $permissions->can('read', (int) $details['source_branch_id'])) {
+                    unset($details['source_course_id'], $details['source_course_name'],
+                        $details['source_branch_id'], $details['source_branch_name']);
+                    $details['source_hidden'] = true;
+                    $entry->details = json_encode($details);
+                }
+            }
+
+            return $entry;
+        });
     }
 }
