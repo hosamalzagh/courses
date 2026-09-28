@@ -139,7 +139,6 @@ export function GroupControls({ context }: { context: GroupContext }) {
   function update(change: Partial<Fields>) {
     setFields(current => ({ ...current, ...change }));
     setFieldErrors({});
-    if (editor === "create") setRequestId(newSubmissionId());
   }
 
   async function save(event: FormEvent<HTMLFormElement>) {
