@@ -154,8 +154,10 @@ class CenterAbsenceReviewController extends Controller
             try {
                 while ($visible = array_map(fn ($row) => (array) $row,
                     $tenant->select('FETCH FORWARD 50 FROM bulk_waitlist_report'))) {
-                    foreach ($visible as $row) {
-                        $seen[$row['id']] = true;
+                    if ($selected !== []) {
+                        foreach ($visible as $row) {
+                            $seen[$row['id']] = true;
+                        }
                     }
                     $manageable = array_values(array_filter($visible, fn (array $row) => $row['student_status'] === 'active' && $permissions->can('enrollment.manage', (int) $row['branch_id'])));
                     $eligible = $this->previewEligibleIds($manageable, $data['entered_on']);
