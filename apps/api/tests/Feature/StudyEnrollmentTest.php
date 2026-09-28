@@ -980,7 +980,7 @@ class StudyEnrollmentTest extends TestCase
             $this->assertSame($allocation['id'], $saved['reversal']['allocation_id']);
             $this->assertSame('خُصص للتسجيل الخطأ', $saved['reversal']['reason']);
             try {
-                (require database_path('migrations/tenant/2026_09_29_020000_allow_student_allocation_corrections.php'))->down();
+                (require database_path('migrations/tenant/2026_09_29_030000_allow_student_allocation_corrections.php'))->down();
                 $this->fail('Approved corrections must prevent rollback of their submission kind.');
             } catch (\RuntimeException $exception) {
                 $this->assertStringContainsString('Cannot roll back', $exception->getMessage());
