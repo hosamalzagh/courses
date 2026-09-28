@@ -107,6 +107,7 @@ class CenterStudyWaitlistController extends Controller
                 ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
                 ->where('entries.attempt_id', $attemptId)->where('sessions.group_id', $period->group_id)
                 ->whereNotNull('entries.status')
+                ->where('sessions.status', '<>', 'cancelled')
                 ->whereRaw("(sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= ?::date", [$data['entered_on']])
                 ->exists();
             abort_if($recordedAttendance, 422, 'تاريخ الانتظار يسبق حضورًا مسجلًا أو يوافق يومه.');

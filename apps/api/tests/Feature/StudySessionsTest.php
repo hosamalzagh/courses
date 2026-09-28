@@ -775,6 +775,13 @@ class StudySessionsTest extends TestCase
         });
         $attempts = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")->assertOk()->json('attempts');
         $attempt = collect($attempts)->firstWhere('id', $row['attempt_id']);
+        $this->postJson("{$this->base}/students/{$student['id']}/enrollments/{$row['attempt_id']}/waitlist", [
+            'entered_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'انتظار بعد إلغاء اعتماد المحاضرة',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->assertJsonPath('waitlist.from_group_id', $group['id']);
+        $attempts = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")->assertOk()->json('attempts');
+        $attempt = collect($attempts)->firstWhere('id', $row['attempt_id']);
+        $this->assertNull($attempt['current_group_id']);
         $this->postJson("{$this->base}/students/{$student['id']}/enrollments/{$row['attempt_id']}/withdraw", [
             'withdrawn_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'انسحاب بعد إلغاء اعتماد المحاضرة',
             'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
