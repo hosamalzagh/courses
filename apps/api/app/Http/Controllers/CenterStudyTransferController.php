@@ -28,19 +28,28 @@ class CenterStudyTransferController extends Controller
         $historyPage = (int) ($data['history_page'] ?? 1);
         $permissions = $request->attributes->get('center_permissions');
         $preview = $this->buildPreview($studentId, $attemptId, $data, $permissions);
-        $visibleBranches = array_keys(array_filter($permissions->branchRoles,
-            fn (array $roles): bool => in_array('read', CenterPermissions::actions($roles), true)));
-        $history = $this->historyQuery()->where('transfers.attempt_id', $attemptId)
-            ->when(! $permissions->isCenterManager(), fn ($query) => $query
-                ->whereIn('transfers.from_branch_id', $visibleBranches)->whereIn('transfers.to_branch_id', $visibleBranches))
-            ->orderByDesc('transfers.created_at')->orderByDesc('transfers.id')
-            ->offset(($historyPage - 1) * 20)->limit(21)->get();
         $preview['approval_count'] = count($preview['approval_ids']);
         unset($preview['approval_ids']);
 
-        return response()->json(['preview' => $preview, 'history' => $history->take(20)->map(
-            fn (object $row): array => $this->historyRow($row, $permissions)
-        )->values(), 'history_page' => $historyPage, 'history_has_more' => $history->count() > 20])
+        return response()->json(['preview' => $preview, ...$this->historyPage($attemptId, $permissions, $historyPage)])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function history(Request $request, string $studentId, string $attemptId): JsonResponse
+    {
+        abort_unless(Str::isUuid($studentId) && Str::isUuid($attemptId), 404);
+        $data = $request->validate(['history_page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
+        $permissions = $request->attributes->get('center_permissions');
+        $attempt = StudentPhotos::visibleStudent($studentId, $permissions, 'enrollment.manage')
+            ->join('study_attempts as attempts', 'attempts.student_id', '=', 'students.id')
+            ->where('attempts.id', $attemptId)
+            ->whereExists(DB::connection('tenant')->table('student_branches')
+                ->whereColumn('student_branches.student_id', 'students.id')
+                ->whereColumn('student_branches.branch_id', 'attempts.branch_id')->selectRaw('1'))
+            ->first(['attempts.branch_id']);
+        abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
+
+        return response()->json($this->historyPage($attemptId, $permissions, (int) ($data['history_page'] ?? 1)))
             ->header('Cache-Control', 'private, no-store');
     }
 
@@ -274,6 +283,7 @@ SQL, [$data['transferred_on']]);
         $hash = hash('sha256', json_encode([$attempt->id, $attempt->revision, $attempt->branch_id,
             $attempt->level_id, $attempt->plan_version_id, $attempt->current_group_id,
             $group->id, $group->revision, $group->plan_version_id, $group->branch_id,
+            $group->completion_threshold,
             $data['transferred_on'], $sourceIds, $approvalIds, $targetLectures->pluck('id')->all(),
             $row->financial_account_revision, $balance]));
 
@@ -311,6 +321,20 @@ SQL, [$data['transferred_on']]);
             'reason' => $sourceVisible && $permissions->can('read', (int) $row->to_branch_id) ? $row->reason : null,
             'actor_name' => $sourceVisible && $permissions->can('read', (int) $row->to_branch_id) ? $row->actor_name : null,
             'credited_count' => (int) $row->credited_count, 'required_count' => (int) $row->required_count];
+    }
+
+    private function historyPage(string $attemptId, CenterPermissions $permissions, int $page): array
+    {
+        $visibleBranches = array_keys(array_filter($permissions->branchRoles,
+            fn (array $roles): bool => in_array('read', CenterPermissions::actions($roles), true)));
+        $history = $this->historyQuery()->where('transfers.attempt_id', $attemptId)
+            ->when(! $permissions->isCenterManager(), fn ($query) => $query
+                ->whereIn('transfers.from_branch_id', $visibleBranches)->whereIn('transfers.to_branch_id', $visibleBranches))
+            ->orderByDesc('transfers.created_at')->orderByDesc('transfers.id')
+            ->offset(($page - 1) * 20)->limit(21)->get();
+
+        return ['history' => $history->take(20)->map(fn (object $row): array => $this->historyRow($row, $permissions))->values(),
+            'history_page' => $page, 'history_has_more' => $history->count() > 20];
     }
 
     private function historyQuery(): Builder

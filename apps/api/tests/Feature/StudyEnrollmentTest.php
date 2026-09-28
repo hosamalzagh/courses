@@ -1595,9 +1595,16 @@ class StudyEnrollmentTest extends TestCase
             'transferred_on' => '2026-09-28', 'revision' => $attempt['revision'],
             'preview_hash' => $beforeApproval['hash'], 'reason' => 'نقل للفرع الجنوبي', 'request_id' => (string) Str::uuid()];
         $this->postJson($transferUrl, $payload)->assertConflict()->assertJsonPath('code', 'transfer_preview_changed');
+        $this->patchJson("{$this->base}/levels/{$target['level_id']}/completion-threshold", [
+            'revision' => 1, 'completion_threshold' => 75,
+        ])->assertOk();
+        $this->postJson($transferUrl, [...$payload, 'preview_hash' => $preview['hash'],
+            'request_id' => (string) Str::uuid()])->assertConflict()->assertJsonPath('code', 'transfer_preview_changed');
+        $thresholdPreview = $this->getJson($previewUrl)->assertOk()
+            ->assertJsonPath('preview.to.completion_threshold', 75)->json('preview');
         $this->center->run(fn () => DB::table('students')->where('id', $student['id'])
             ->increment('financial_account_revision'));
-        $this->postJson($transferUrl, [...$payload, 'preview_hash' => $preview['hash'],
+        $this->postJson($transferUrl, [...$payload, 'preview_hash' => $thresholdPreview['hash'],
             'request_id' => (string) Str::uuid()])->assertConflict()->assertJsonPath('code', 'transfer_preview_changed');
         $payload['preview_hash'] = $this->getJson($previewUrl)->assertOk()->json('preview.hash');
         $payload['request_id'] = (string) Str::uuid();
@@ -1656,6 +1663,19 @@ class StudyEnrollmentTest extends TestCase
             'group_id' => $secondTarget['id'], 'transferred_on' => '2026-09-29',
         ]))->assertOk()->assertJsonCount(0, 'history');
         $this->assertLessThanOrEqual(6, (int) $hiddenHistory->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$transferUrl}/history")->assertOk()->assertJsonCount(0, 'history');
+        $this->asUser($this->owner);
+        $current = $this->getJson($url)->assertOk()->json('attempts.0');
+        $this->postJson("{$url}/{$attempt['id']}/withdraw", [
+            'withdrawn_on' => '2026-09-29', 'reason' => 'انسحاب بعد النقل',
+            'revision' => $current['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk()->assertJsonPath('attempt.status', 'withdrawn');
+        $this->getJson("{$transferUrl}/preview?".http_build_query([
+            'group_id' => $secondTarget['id'], 'transferred_on' => '2026-09-29',
+        ]))->assertStatus(409);
+        $closedHistory = $this->getJson("{$transferUrl}/history?history_page=2")->assertOk()
+            ->assertJsonPath('history_page', 2)->assertJsonCount(2, 'history');
+        $this->assertLessThanOrEqual(6, (int) $closedHistory->headers->get('X-Courses-Query-Count'));
     }
 
     public function test_waitlisted_attempt_moves_to_a_different_plan_only_with_current_permissions(): void

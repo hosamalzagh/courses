@@ -104,6 +104,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::post('students/{studentId}/enrollments/{attemptId}/waitlist', [CenterStudyWaitlistController::class, 'enter']);
         Route::post('students/{studentId}/enrollments/{attemptId}/reattach', [CenterStudyWaitlistController::class, 'leave']);
         Route::get('students/{studentId}/enrollments/{attemptId}/transfer/preview', [CenterStudyTransferController::class, 'preview']);
+        Route::get('students/{studentId}/enrollments/{attemptId}/transfer/history', [CenterStudyTransferController::class, 'history']);
         Route::post('students/{studentId}/enrollments/{attemptId}/transfer', [CenterStudyTransferController::class, 'store']);
         Route::get('students/{studentId}/enrollment-notes', [CenterStudentEventNoteController::class, 'index']);
         Route::get('students/{studentId}/notes', [CenterStudentNotesController::class, 'index']);

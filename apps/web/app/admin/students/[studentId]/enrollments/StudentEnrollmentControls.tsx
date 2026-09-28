@@ -17,7 +17,7 @@ import type { StudyEnrollmentContext, StudyAttemptNote } from "@/lib/server-cont
 import { StudyAttemptNoteEditor } from "./StudyAttemptNoteEditor";
 import { StudyWithdrawalEditor } from "./StudyWithdrawalEditor";
 import { StudyWaitlistEditor } from "./StudyWaitlistEditor";
-import { StudyTransferEditor } from "./StudyTransferEditor";
+import { StudyTransferEditor, StudyTransferHistory } from "./StudyTransferEditor";
 
 export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: { initial: StudyEnrollmentContext; search: string; linkedAttemptId?: string }) {
   const router = useRouter();
@@ -46,8 +46,10 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
   const [openWaitlistId, setOpenWaitlistId] = useState<string | null>(null);
   const [waitlistDirty, setWaitlistDirty] = useState(false);
   const [openTransferId, setOpenTransferId] = useState<string | null>(null);
+  const [openTransferHistoryId, setOpenTransferHistoryId] = useState<string | null>(null);
   const [transferDirty, setTransferDirty] = useState(false);
   const transferOpener = useRef<string | null>(null);
+  const transferHistoryOpener = useRef<string | null>(null);
   const transferFocusPending = useRef<string | null>(null);
   const waitlistOpener = useRef<string | null>(null);
   const repeatOpener = useRef<string | null>(null);
@@ -58,7 +60,7 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
   if (loadedInitial !== initial) {
     setLoadedInitial(initial); setCurrent(initial);
     if (current.student.id !== initial.student.id) {
-      setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason(""); setRepeatId(null); setOpenWithdrawalId(null); setOpenWaitlistId(null); setOpenTransferId(null);
+      setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason(""); setRepeatId(null); setOpenWithdrawalId(null); setOpenWaitlistId(null); setOpenTransferId(null); setOpenTransferHistoryId(null);
     }
   }
   useEffect(() => {
@@ -107,7 +109,12 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
     requestAnimationFrame(() => { if (transferOpener.current) document.getElementById(transferOpener.current)?.focus(); });
   }
 
-  function discard() { reset(); closeNote(); closeWithdrawal(); closeWaitlist(); closeTransfer(); }
+  function closeTransferHistory() {
+    setOpenTransferHistoryId(null);
+    requestAnimationFrame(() => { if (transferHistoryOpener.current) document.getElementById(transferHistoryOpener.current)?.focus(); });
+  }
+
+  function discard() { reset(); closeNote(); closeWithdrawal(); closeWaitlist(); closeTransfer(); closeTransferHistory(); }
 
   function openNote(attemptId: string) {
     if (openNoteId === attemptId) return;
@@ -274,13 +281,16 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
             current.permissions.branch_actions?.[String(row.branch_id)]?.includes("enrollment.manage");
           const canManageNote = row.event_branch_id !== null && (current.permissions.can_manage_center ||
             current.permissions.branch_actions?.[String(row.event_branch_id)]?.includes("enrollment.manage"));
-          if ((!canManageAttempt || (row.status !== "active" && row.has_repeat)) && !canManageNote) return <span className="muted">غير متاح</span>;
+          if (!canManageAttempt && !canManageNote) return <span className="muted">غير متاح</span>;
           return <div className="form-actions">
+            {canManageAttempt ? <Button id={`${prefix}-transfer-history-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
+              transferHistoryOpener.current = event.currentTarget.id; setOpenTransferId(null); setOpenTransferHistoryId(row.id);
+            }}>سجل النقل</Button> : null}
             {canManageAttempt && row.status === "active" ? <Button id={`${prefix}-waitlist-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
               waitlistOpener.current = event.currentTarget.id; setOpenWaitlistId(row.id);
             }}>{row.current_group_id ? "نقل إلى الانتظار" : "إعادة الإلحاق"}</Button> : null}
             {canManageAttempt && row.status === "active" ? <Button id={`${prefix}-transfer-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
-              transferOpener.current = event.currentTarget.id; setOpenTransferId(row.id);
+              transferOpener.current = event.currentTarget.id; setOpenTransferHistoryId(null); setOpenTransferId(row.id);
             }}>نقل إلى مجموعة أخرى</Button> : null}
             {canManageAttempt && row.status === "active" ? <Button id={`${prefix}-withdraw-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
               withdrawalOpener.current = event.currentTarget.id; setOpenWithdrawalId(row.id);
@@ -315,5 +325,8 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
         groupsHasMore={current.pagination.groups_has_more} currency={current.student.currency} onClose={closeTransfer} onDirtyChange={setTransferDirty}
         onReload={() => { closeTransfer(); void reload(); }}
         onSaved={() => { transferFocusPending.current = transferOpener.current; void reload("حُفظ النقل في المحاولة نفسها دون رسوم أو تخصيص جديد."); }} /> : null}
+    {openTransferHistoryId && current.attempts.some(attempt => attempt.id === openTransferHistoryId) ?
+      <StudyTransferHistory key={openTransferHistoryId} studentId={studentId} attemptId={openTransferHistoryId}
+        onClose={closeTransferHistory} /> : null}
   </>;
 }

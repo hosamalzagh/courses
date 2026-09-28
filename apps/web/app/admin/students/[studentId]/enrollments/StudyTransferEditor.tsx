@@ -28,6 +28,58 @@ type History = { id: string; transferred_on: string; from: HistoryContext | null
   to: HistoryContext | null;
   reason: string | null; actor_name: string | null; credited_count: number; required_count: number };
 
+function TransferHistoryView({ history, page, hasMore, loading, onPage }: {
+  history: History[]; page: number; hasMore: boolean; loading: boolean; onPage: (page: number) => void;
+}) {
+  const prefix = useId();
+  return <>
+    <DataTable id={`${prefix}-history`} title={`سجل النقل · صفحة ${page.toLocaleString("ar-EG")}`} rows={history} rowKey={row => row.id}
+      searchText={row => `${row.transferred_on} ${row.reason ?? ""}`} emptyMessage="لا يوجد نقل في هذه الصفحة."
+      columns={[
+        { key: "date", label: "التاريخ", render: row => <bdi dir="ltr">{row.transferred_on}</bdi> },
+        { key: "source", label: "السياق السابق", render: row => row.from
+          ? `${row.from.branch_name} — ${row.from.level_name} — خطة ${row.from.plan_version} — ${row.from.group_name ?? "انتظار"}` : "سياق محجوب" },
+        { key: "destination", label: "الوجهة", render: row => row.to
+          ? `${row.to.branch_name} — ${row.to.level_name} — خطة ${row.to.plan_version} — ${row.to.group_name ?? "انتظار"}` : "سياق محجوب" },
+        { key: "coverage", label: "التغطية عند النقل", render: row => `${row.credited_count}/${row.required_count}` },
+        { key: "reason", label: "السبب", render: row => row.reason ?? "محجوب" },
+      ]} />
+    {page > 1 || hasMore ? <div className="form-actions">
+      <Button type="button" disabled={page <= 1 || loading} onClick={() => onPage(page - 1)}>السجل السابق</Button>
+      <Button type="button" disabled={!hasMore || loading} onClick={() => onPage(page + 1)}>السجل التالي</Button>
+    </div> : null}
+  </>;
+}
+
+export function StudyTransferHistory({ studentId, attemptId, onClose }: {
+  studentId: string; attemptId: string; onClose: () => void;
+}) {
+  const [history, setHistory] = useState<History[]>([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    centerRequest(`students/${studentId}/enrollments/${attemptId}/transfer/history?history_page=${page}`, "GET")
+      .then(async response => {
+        if (!response.ok) throw new Error(await responseMessage(response));
+        return response.json() as Promise<{ history: History[]; history_page: number; history_has_more: boolean }>;
+      }).then(result => {
+        if (cancelled) return;
+        setHistory(result.history); setHasMore(result.history_has_more); setLoading(false);
+      }).catch(cause => { if (!cancelled) { setHistory([]); setHasMore(false); setError(cause instanceof Error ? cause.message : "تعذر تحميل سجل النقل."); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [studentId, attemptId, page]);
+  return <section className="context-card form-stack" aria-label="سجل نقل المحاولة">
+    <h2>سجل نقل المحاولة</h2>
+    {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+    {loading ? <p role="status">جارٍ تحميل سجل النقل…</p> : <TransferHistoryView history={history} page={page} hasMore={hasMore} loading={loading}
+      onPage={next => { setLoading(true); setError(""); setPage(next); }} />}
+    <CenterHeaderActions><Button onClick={onClose}>إغلاق السجل</Button></CenterHeaderActions>
+  </section>;
+}
+
 export function StudyTransferEditor({ studentId, attempt, groups, initialGroupsPage, initialSearch, groupsHasMore, currency, onClose, onSaved, onReload, onDirtyChange }: {
   studentId: string; attempt: Attempt; groups: Group[]; initialGroupsPage: number; initialSearch: string; groupsHasMore: boolean; currency: string | null;
   onClose: () => void; onSaved: () => void; onReload: () => void; onDirtyChange: (dirty: boolean) => void;
@@ -193,21 +245,8 @@ export function StudyTransferEditor({ studentId, attempt, groups, initialGroupsP
       <Button onClick={onClose} disabled={busy || uncertain}>إلغاء</Button>
       {conflict ? <Button onClick={onReload}>تحميل أحدث البيانات</Button> : null}
     </CenterHeaderActions>
-    {history.length ? <DataTable id={`${prefix}-history`} title="سجل النقل" rows={history} rowKey={row => row.id}
-      searchText={row => `${row.transferred_on} ${row.reason ?? ""}`} emptyMessage="لا يوجد نقل سابق."
-      columns={[
-        { key: "date", label: "التاريخ", render: row => <bdi dir="ltr">{row.transferred_on}</bdi> },
-        { key: "source", label: "السياق السابق", render: row => row.from
-          ? `${row.from.branch_name} — ${row.from.level_name} — خطة ${row.from.plan_version} — ${row.from.group_name ?? "انتظار"}` : "سياق محجوب" },
-        { key: "destination", label: "الوجهة", render: row => row.to
-          ? `${row.to.branch_name} — ${row.to.level_name} — خطة ${row.to.plan_version} — ${row.to.group_name ?? "انتظار"}` : "سياق محجوب" },
-        { key: "coverage", label: "التغطية عند النقل", render: row => `${row.credited_count}/${row.required_count}` },
-        { key: "reason", label: "السبب", render: row => row.reason ?? "محجوب" },
-      ]} /> : null}
-    {preview && (historyPage > 1 || historyHasMore) ? <div className="form-actions">
-      <Button type="button" disabled={historyPage <= 1 || loading || busy} onClick={() => void fetchPreview(historyPage - 1)}>السجل السابق</Button>
-      <Button type="button" disabled={!historyHasMore || loading || busy} onClick={() => void fetchPreview(historyPage + 1)}>السجل التالي</Button>
-    </div> : null}
+    {preview && (history.length > 0 || historyPage > 1) ? <TransferHistoryView history={history} page={historyPage} hasMore={historyHasMore}
+      loading={loading || busy} onPage={page => void fetchPreview(page)} /> : null}
     {confirm ? <ConfirmationDialog title="تأكيد نقل المحاولة" description="ستتغير المجموعة والخطة الحالية مع حفظ تاريخ الفرع والحضور والرسوم السابقة. لن تُنشأ حركة مالية."
       confirmLabel="نقل المحاولة" onCancel={() => setConfirm(false)} onConfirm={save} /> : null}
   </section>;

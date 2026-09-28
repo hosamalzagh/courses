@@ -113,7 +113,8 @@ test('moves an active attempt across branches with a reviewed preview and denies
     await expect(owner.locator(`[id$="-transfer-${attemptId}"]`)).toBeFocused();
     const current = await owner.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`);
     expect(Number(current.headers()['x-courses-query-count'])).toBeLessThanOrEqual(6);
-    expect((await current.json()).attempts[0]).toMatchObject({ id: attemptId, branch_id: south.body.branch.id,
+    const currentAttempt = (await current.json()).attempts[0];
+    expect(currentAttempt).toMatchObject({ id: attemptId, branch_id: south.body.branch.id,
       current_group_id: target.group.id, fee: { net_amount: '100.00' } });
     await owner.goto(`${origin}/admin/audit`);
     await expect(owner.getByText('نقل محاولة الدراسة بين المجموعات أو الفروع').first()).toBeVisible();
@@ -130,8 +131,18 @@ test('moves an active attempt across branches with a reviewed preview and denies
     await laterPageEditor.getByRole('button', { name: 'المجموعات السابقة' }).click();
     expect((await firstGroupPage).status()).toBe(200);
     await expect(laterPageEditor.getByRole('button', { name: 'المجموعات السابقة' })).toBeDisabled();
+    const withdrawal = await write(owner, `students/${studentId}/enrollments/${attemptId}/withdraw`, {
+      withdrawn_on: '2026-09-29', reason: 'انسحاب بعد النقل', revision: currentAttempt.revision, request_id: crypto.randomUUID(),
+    });
+    expect(withdrawal.status).toBe(200);
+    await owner.goto(`${origin}/admin/students/${studentId}/enrollments`);
+    await owner.locator(`[id$="-transfer-history-${attemptId}"]`).click();
+    const history = owner.getByRole('region', { name: 'سجل نقل المحاولة' });
+    await expect(history.getByRole('table', { name: /سجل النقل/ })).toBeVisible();
+    await expect(history.getByText('انتقل إلى الفرع الجنوبي')).toBeVisible();
     await signIn(staff, 'staff');
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).status()).toBe(404);
+    expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/transfer/history`)).status()).toBe(404);
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/transfer/preview?group_id=${source.group.id}&transferred_on=2026-09-29`)).status()).toBe(404);
   } finally { await owner.close(); await staff.close(); }
 });
