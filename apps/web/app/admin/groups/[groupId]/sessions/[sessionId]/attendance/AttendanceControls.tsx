@@ -71,8 +71,8 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
         if (response.status !== 503) pending.current = null;
         return;
       }
-      pending.current = null;
       await reload();
+      pending.current = null;
       if (kind === "close") {
         setConfirmClose(false);
         setNotice("أُغلق كشف المحاضرة واعتمد غياب الطلاب المستحقين غير المسجلين.");

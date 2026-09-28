@@ -116,6 +116,15 @@ test("records whole-session attendance, undoes the last entry, closes absences, 
     await owner.getByRole("button", { name: "إلغاء" }).click();
     await expect(row.getByRole("button", { name: "تسجيل الحضور" })).toBeFocused();
     await row.getByRole("button", { name: "تسجيل الحضور" }).click();
+    let failRefresh = true;
+    await owner.route(new RegExp(`/api/v1/center/${path}\\?page=1$`), async route => {
+      if (failRefresh && route.request().method() === "GET") {
+        failRefresh = false;
+        await route.abort();
+      } else await route.continue();
+    });
+    await owner.getByRole("button", { name: "حاضر محتسب" }).click();
+    await expect(owner.getByText("تعذر التأكد من النتيجة. أعد الإجراء نفسه للتحقق دون تكراره.")).toBeVisible();
     await owner.getByRole("button", { name: "حاضر محتسب" }).click();
     await expect(row).toContainText("حاضر محتسب");
     await row.getByRole("button", { name: "عرض التراجع" }).click();

@@ -25,10 +25,11 @@ class CenterStudyAttendanceController extends Controller
         $roster = $this->roster($session);
         if (isset($data['q']) && trim($data['q']) !== '') {
             $search = mb_strtolower(preg_replace('/\s+/u', ' ', trim($data['q'])));
-            $roster->where(function (Builder $query) use ($search, $data): void {
+            $number = strtr(trim($data['q']), array_combine(mb_str_split('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹'), str_split('01234567890123456789')));
+            $roster->where(function (Builder $query) use ($search, $number): void {
                 $query->whereRaw('strpos(students.name_search, ?) > 0', [$search]);
-                if (ctype_digit(trim($data['q'])) && strlen(trim($data['q'])) <= 18) {
-                    $query->orWhere('students.student_number', (int) trim($data['q']));
+                if (ctype_digit($number) && strlen($number) <= 18) {
+                    $query->orWhere('students.student_number', (int) $number);
                 }
             });
         }

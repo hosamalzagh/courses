@@ -9,6 +9,9 @@ return new class extends Migration
 {
     public function up(): void
     {
+        Schema::table('study_attempt_group_periods', function (Blueprint $table): void {
+            $table->index(['group_id', 'joined_on', 'left_on', 'attempt_id'], 'study_periods_group_date_attempt_idx');
+        });
         Schema::table('study_sessions', function (Blueprint $table): void {
             $table->timestampTz('closed_at')->nullable();
             $table->unsignedBigInteger('closed_by')->nullable();
@@ -69,5 +72,6 @@ SQL);
         DB::statement('DROP FUNCTION preserve_study_attendance_event()');
         Schema::dropIfExists('study_attendance_entries');
         Schema::table('study_sessions', fn (Blueprint $table) => $table->dropColumn(['closed_at', 'closed_by']));
+        Schema::table('study_attempt_group_periods', fn (Blueprint $table) => $table->dropIndex('study_periods_group_date_attempt_idx'));
     }
 };

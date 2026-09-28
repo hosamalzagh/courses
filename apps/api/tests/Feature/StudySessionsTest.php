@@ -237,6 +237,10 @@ class StudySessionsTest extends TestCase
         $matching = $this->getJson("{$path}?q=".rawurlencode($last['name']))->assertOk()
             ->assertJsonCount(1, 'students')->assertJsonPath('students.0.student_id', $last['id']);
         $this->assertLessThanOrEqual(6, (int) $matching->headers->get('X-Courses-Query-Count'));
+        $arabicNumber = strtr((string) $last['student_number'], array_combine(str_split('0123456789'), mb_str_split('٠١٢٣٤٥٦٧٨٩')));
+        $byNumber = $this->getJson("{$path}?q=".rawurlencode($arabicNumber))->assertOk()
+            ->assertJsonCount(1, 'students')->assertJsonPath('students.0.student_id', $last['id']);
+        $this->assertLessThanOrEqual(6, (int) $byNumber->headers->get('X-Courses-Query-Count'));
         $this->travelTo($scheduled->copy()->addHour());
         $recorded = $this->postJson($path, ['attempt_id' => $firstPage->json('students.0.attempt_id'),
             'status' => 'counted', 'revision' => 1, 'request_id' => (string) Str::uuid()])->assertCreated()->json('entry');
