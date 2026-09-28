@@ -157,7 +157,13 @@ class StudyCoverageTest extends TestCase
         ])->assertOk();
         $this->asUser($this->viewer);
         $this->getJson($path)->assertOk()->assertJsonPath('students.0.student_id', $student['id']);
+        $this->postJson("{$this->base}/groups/{$visible['id']}/completion-preview", [
+            'complete_group' => true, 'decisions' => [],
+        ])->assertForbidden();
         $this->getJson("{$this->base}/groups/{$hidden['id']}/coverage")->assertNotFound();
+        $this->postJson("{$this->base}/groups/{$hidden['id']}/completion-preview", [
+            'complete_group' => true, 'decisions' => [],
+        ])->assertNotFound();
         $this->getJson("{$this->base}/groups/not-a-uuid/coverage")->assertNotFound();
     }
 
@@ -213,6 +219,103 @@ class StudyCoverageTest extends TestCase
         $this->assertLessThanOrEqual(6, (int) $second->headers->get('X-Courses-Query-Count'));
         $this->getJson("{$path}?q=".rawurlencode($last['name']))->assertOk()->assertJsonCount(1, 'students')
             ->assertJsonPath('students.0.student_id', $last['id']);
+    }
+
+    public function test_group_completion_keeps_student_decisions_explicit_and_allows_later_approval(): void
+    {
+        $group = $this->group($this->north, 2);
+        $first = $this->student();
+        $second = $this->student();
+        $firstAttempt = $this->enroll($first['id'], $group, now('Africa/Cairo')->format('Y-m-d'));
+        $secondAttempt = $this->enroll($second['id'], $group, now('Africa/Cairo')->format('Y-m-d'));
+        $start = now('Africa/Cairo')->addDays(2)->setTime(16, 0);
+        $sessions = $this->postJson("{$this->base}/groups/{$group['id']}/sessions", [
+            'kind' => 'weekly', 'revision' => 1, 'start_at' => $start->format('Y-m-d\\TH:i'),
+            'count' => 2, 'interval_weeks' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions');
+        $this->postJson("{$this->base}/groups/{$group['id']}/start", ['revision' => 2])->assertOk();
+        $this->travelTo($start->copy()->addWeeks(2));
+        $previewPath = "{$this->base}/groups/{$group['id']}/completion-preview";
+        $savePath = "{$this->base}/groups/{$group['id']}/completion";
+        $selection = ['complete_group' => true, 'decisions' => [['attempt_id' => $firstAttempt['id']]]];
+        $openSelection = ['complete_group' => true, 'decisions' => []];
+        $openPreview = $this->postJson($previewPath, $openSelection)->assertOk()
+            ->assertJsonPath('open_sessions', [1, 2])->json();
+        $this->postJson($savePath, [...$openSelection, 'group_revision' => $openPreview['group']['revision'],
+            'preview_token' => $openPreview['preview_token'], 'request_id' => (string) Str::uuid()])
+            ->assertConflict()->assertJsonPath('code', 'group_has_open_sessions');
+
+        foreach ($sessions as $session) {
+            $path = "{$this->base}/groups/{$group['id']}/sessions/{$session['id']}/attendance";
+            $this->postJson($path, ['attempt_id' => $firstAttempt['id'], 'status' => 'counted',
+                'revision' => 1, 'request_id' => (string) Str::uuid()])->assertCreated();
+            $this->postJson("{$this->base}/groups/{$group['id']}/sessions/{$session['id']}/close", [
+                'revision' => 2, 'request_id' => (string) Str::uuid(),
+            ])->assertOk();
+        }
+        $this->postJson($previewPath, ['complete_group' => true, 'decisions' => []])
+            ->assertOk()->assertJsonCount(0, 'students');
+        $preview = $this->postJson($previewPath, $selection)->assertOk()
+            ->assertJsonPath('students.0.covered_count', 2)
+            ->assertJsonPath('students.0.exceptional', false)->json();
+        $requestId = (string) Str::uuid();
+        $save = [...$selection, 'group_revision' => $preview['group']['revision'],
+            'preview_token' => $preview['preview_token'], 'request_id' => $requestId];
+        $this->postJson($savePath, $save)->assertOk()->assertJsonPath('group_status', 'completed')
+            ->assertJsonPath('completed_attempt_ids.0', $firstAttempt['id']);
+        $this->postJson($savePath, $save)->assertOk()->assertJsonPath('completed_attempt_ids.0', $firstAttempt['id']);
+        $this->postJson($savePath, [...$save, 'request_id' => (string) Str::uuid()])
+            ->assertConflict()->assertJsonPath('code', 'group_changed');
+        $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk()
+            ->assertJsonPath('group.status', 'completed')->assertJsonPath('students.0.attempt_status', 'completed');
+
+        $lateSelection = ['complete_group' => false, 'decisions' => [['attempt_id' => $secondAttempt['id']]]];
+        $this->postJson($previewPath, $lateSelection)->assertConflict()
+            ->assertJsonPath('code', 'completion_exception_reason_required');
+        $lateSelection['decisions'][0]['exception_reason'] = 'إتمام استثنائي بعد مراجعة النواقص';
+        $latePreview = $this->postJson($previewPath, $lateSelection)->assertOk()
+            ->assertJsonPath('students.0.exceptional', true)
+            ->assertJsonPath('students.0.missing_numbers', [1, 2])->json();
+        $this->postJson($savePath, [...$lateSelection, 'group_revision' => $latePreview['group']['revision'],
+            'preview_token' => $latePreview['preview_token'], 'request_id' => (string) Str::uuid()])
+            ->assertOk()->assertJsonPath('completed_attempt_ids.0', $secondAttempt['id']);
+        $this->center->run(function () use ($group, $firstAttempt, $secondAttempt): void {
+            $decisions = DB::table('study_attempt_completion_decisions')->where('group_id', $group['id'])->get()->keyBy('attempt_id');
+            $this->assertCount(2, $decisions);
+            $this->assertFalse($decisions[$firstAttempt['id']]->exceptional);
+            $this->assertTrue($decisions[$secondAttempt['id']]->exceptional);
+            $this->assertSame(0, (int) $decisions[$secondAttempt['id']]->covered_count);
+            $this->assertSame(1, DB::table('center_audit_logs')->where('event', 'study_group.completed')->count());
+            $this->assertSame(2, DB::table('center_audit_logs')->where('event', 'study_attempt.completed')->count());
+        });
+    }
+
+    public function test_group_can_complete_without_approving_any_student(): void
+    {
+        $group = $this->group($this->north, 1);
+        $student = $this->student();
+        $attempt = $this->enroll($student['id'], $group, now('Africa/Cairo')->format('Y-m-d'));
+        $start = now('Africa/Cairo')->addDays(2)->setTime(16, 0);
+        $session = $this->postJson("{$this->base}/groups/{$group['id']}/sessions", [
+            'kind' => 'single', 'revision' => 1, 'start_at' => $start->format('Y-m-d\\TH:i'),
+            'plan_lecture_number' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
+        $this->postJson("{$this->base}/groups/{$group['id']}/start", ['revision' => 2])->assertOk();
+        $this->travelTo($start->copy()->addDay());
+        $this->postJson("{$this->base}/groups/{$group['id']}/sessions/{$session['id']}/close", [
+            'revision' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $selection = ['complete_group' => true, 'decisions' => []];
+        $preview = $this->postJson("{$this->base}/groups/{$group['id']}/completion-preview", $selection)
+            ->assertOk()->assertJsonCount(0, 'students')->json();
+        $this->postJson("{$this->base}/groups/{$group['id']}/completion", [
+            ...$selection, 'group_revision' => $preview['group']['revision'],
+            'preview_token' => $preview['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk()->assertJsonPath('group_status', 'completed')->assertJsonCount(0, 'completed_attempt_ids');
+        $this->center->run(function () use ($attempt): void {
+            $this->assertSame('active', DB::table('study_attempts')->where('id', $attempt['id'])->value('status'));
+            $this->assertSame(0, DB::table('study_attempt_completion_decisions')->count());
+        });
     }
 
     private function group(int $branchId, int $lectureCount): array

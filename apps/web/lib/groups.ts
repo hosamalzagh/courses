@@ -75,10 +75,11 @@ export type CoverageRow = {
   joined_on: string; attempt_status: string; student_status: "active" | "suspended";
   covered_numbers: number[]; missing_numbers: number[]; open_numbers: number[];
   covered_count: number; required_count: number; completion_threshold: number; percentage: number; eligible: boolean;
+  approved_at: string | null; exceptional: boolean | null; completion_reason: string | null;
 };
 
 export type CoverageContext = CenterContext & {
-  group: { id: string; name: string; status: StudyGroup["status"]; branch_id: number;
+  group: { id: string; name: string; status: StudyGroup["status"]; branch_id: number; revision: number; can_complete: boolean;
     completion_threshold: number; required_count: number;
     requirements: { number: number; title: string | null; content: string }[] };
   students: CoverageRow[];
