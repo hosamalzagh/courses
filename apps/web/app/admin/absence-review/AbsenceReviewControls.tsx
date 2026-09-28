@@ -36,6 +36,8 @@ function scopePath(option: AbsenceOption): string {
 export function AbsenceReviewControls({ context, filters }: { context: AbsenceContext; filters: Record<string, string> }) {
   const router = useRouter();
   const formId = useId();
+  const optionSearchFormId = useId();
+  const filtersFormId = useId();
   const ruleSelect = useRef<HTMLSelectElement>(null);
   const limitInput = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState<Record<FilterKey, string>>({
@@ -76,11 +78,13 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   const dirty = Boolean(selected && (mode !== (selected.absence_mode ?? "inherit") || proposedLimit !== selected.absence_limit));
   const canManage = (branchId: number) => context.permissions.can_manage_center || context.permissions.branch_actions?.[String(branchId)]?.includes("curriculum.manage");
   const editable = options.filter(option => canManage(option.branch_id));
-  const branches = Array.from(new Map<number, string>([
-    ...context.branches.map(branch => [branch.id, branch.name] as const),
-    ...extraBranches.map(branch => [branch.id, branch.name] as const),
-    ...options.map(option => [option.branch_id, option.branch_name] as const),
-  ]).entries());
+  const branches = Array.from(new Map<number, Branch>([
+    ...options.map(option => [option.branch_id, { id: option.branch_id, name: option.branch_name, slug: "", address: null }] as const),
+    ...context.branches.map(branch => [branch.id, branch] as const),
+    ...extraBranches.map(branch => [branch.id, branch] as const),
+  ]).values());
+  const branchNameCounts = new Map<string, number>();
+  for (const branch of branches) branchNameCounts.set(branch.name, (branchNameCounts.get(branch.name) ?? 0) + 1);
 
   function navigate(next: Record<FilterKey, string>) {
     if (dirty) { setPendingNavigation(next); return; }
@@ -173,15 +177,13 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
     {pendingRule !== null ? <ConfirmationDialog title="تغيير النطاق دون حفظ" description="غيّرت قاعدة الغياب ولم تحفظها. هل تريد فتح قاعدة أخرى دون حفظ التغيير؟" confirmLabel="فتح قاعدة أخرى" onCancel={() => { setPendingRule(null); ruleSelect.current?.focus(); }} onConfirm={() => { const next = pendingRule; setPendingRule(null); selectRuleNow(next); ruleSelect.current?.focus(); }} /> : null}
     <section className="data-panel form-stack" aria-labelledby="absence-filters-title">
       <h2 id="absence-filters-title">نطاق التقرير</h2>
-      <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); void findOptions(1); }}>
+      <form id={optionSearchFormId} className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); void findOptions(1); }}>
         <Field><FieldLabel htmlFor="absence-option-search">البحث في الفروع والكورسات والمراحل والمستويات والمجموعات</FieldLabel><Input id="absence-option-search" type="search" value={optionSearch} onChange={event => setOptionSearch(event.target.value)} /></Field>
-        <Button type="submit" busy={loadingOptions} disabled={!optionSearch.trim()}>بحث في النطاقات</Button>
-        {optionPage > 0 ? <Button onClick={() => void findOptions(optionPage + 1)} busy={loadingOptions}>تحميل نطاقات أخرى</Button> : null}
       </form>
       {optionError ? <InlineNotice tone="error">{optionError}</InlineNotice> : null}
-      <form className="form-stack" onSubmit={event => { event.preventDefault(); navigate(draft); }}>
+      <form id={filtersFormId} className="form-stack" onSubmit={event => { event.preventDefault(); navigate(draft); }}>
         <FieldGroup className="grid gap-3 md:grid-cols-3">
-          <Field><FieldLabel htmlFor="absence-branch">الفرع</FieldLabel><NativeSelect id="absence-branch" value={draft.branch_id} onChange={event => setDraft({ branch_id: event.target.value, course_id: "", stage_id: "", level_id: "", group_id: "", view: draft.view, q: draft.q })}><NativeSelectOption value="">كل الفروع المصرح بها</NativeSelectOption>{branches.map(([id, name]) => <NativeSelectOption key={id} value={id}>{name}</NativeSelectOption>)}</NativeSelect></Field>
+          <Field><FieldLabel htmlFor="absence-branch">الفرع</FieldLabel><NativeSelect id="absence-branch" value={draft.branch_id} onChange={event => setDraft({ branch_id: event.target.value, course_id: "", stage_id: "", level_id: "", group_id: "", view: draft.view, q: draft.q })}><NativeSelectOption value="">كل الفروع المصرح بها</NativeSelectOption>{branches.map(branch => <NativeSelectOption key={branch.id} value={branch.id}>{branch.name}{(branchNameCounts.get(branch.name) ?? 0) > 1 ? ` · ${branch.slug || `#${branch.id}`}` : ""}</NativeSelectOption>)}</NativeSelect></Field>
           {kinds.map((kind, index) => {
             const field = (["course_id", "stage_id", "level_id", "group_id"] as const)[index];
             const later = (["stage_id", "level_id", "group_id"] as const).slice(index);
@@ -189,8 +191,12 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
           })}
           <Field><FieldLabel htmlFor="absence-view">عرض</FieldLabel><NativeSelect id="absence-view" value={draft.view} onChange={event => setDraft(current => ({ ...current, view: event.target.value }))}><NativeSelectOption value="review">المستوجبون للمراجعة</NativeSelectOption><NativeSelectOption value="all">جميع الطلاب الحاليين</NativeSelectOption></NativeSelect></Field>
         </FieldGroup>
-        <Button type="submit" variant="primary">تطبيق النطاق</Button>
       </form>
+      <CenterHeaderActions>
+        <Button form={filtersFormId} type="submit" variant="primary">تطبيق النطاق</Button>
+        <Button form={optionSearchFormId} type="submit" busy={loadingOptions} disabled={!optionSearch.trim()}>بحث في النطاقات</Button>
+        {optionPage > 0 ? <Button onClick={() => void findOptions(optionPage + 1)} busy={loadingOptions}>تحميل نطاقات أخرى</Button> : null}
+      </CenterHeaderActions>
     </section>
 
     {editable.length ? <section className="data-panel form-stack" aria-labelledby="absence-rule-title">
@@ -215,7 +221,10 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
 
     <DataTable id="absence-review" title="طلاب الغياب" description="العداد التشغيلي يخص فترة الارتباط الحالية؛ الغياب السابق محفوظ للتاريخ." rows={context.students}
       rowKey={row => row.id} searchText={row => `${row.student_name} ${row.student_number}`} emptyMessage="لا توجد حالات ضمن هذا النطاق."
-      serverSearch={{ value: filters.q ?? "", onSearch: q => navigate({ ...draft, q }) }}
+      serverSearch={{ value: filters.q ?? "", onSearch: q => navigate({
+        branch_id: filters.branch_id ?? "", course_id: filters.course_id ?? "", stage_id: filters.stage_id ?? "",
+        level_id: filters.level_id ?? "", group_id: filters.group_id ?? "", view: filters.view ?? "review", q,
+      }) }}
       serverPagination={{ page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 50, previousHref: pageHref(Math.max(1, context.pagination.page - 1)), nextHref: pageHref(context.pagination.page + 1) }}
       columns={[
         { key: "student", label: "الطالب", render: row => <Link href={`/admin/students/${row.student_id}`}>{row.student_name} · {row.student_number.toLocaleString("ar-EG")}</Link> },
