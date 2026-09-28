@@ -146,7 +146,7 @@ class StudentFinanceTest extends TestCase
             $this->center->run(fn () => DB::statement('ALTER TABLE center_audit_logs DROP CONSTRAINT payment_failure'));
         }
         $this->getJson("{$this->base}/students/{$student['id']}/account")->assertOk()
-            ->assertJsonPath('account.available_balance', '0')
+            ->assertJsonPath('account.available_balance', '0.00')
             ->assertJsonPath('account.currency_locked', false);
         $this->center->run(fn () => $this->assertSame(1, DB::table('students')->where('id', $student['id'])->value('financial_account_revision')));
         $this->postJson("{$this->base}/students/{$student['id']}/payments", $request)->assertCreated();
@@ -161,6 +161,9 @@ class StudentFinanceTest extends TestCase
             'audit_count' => DB::table('center_audit_logs')->count(),
         ]);
         $this->center->run(function (): void {
+            $allocationsMigration = glob(database_path('migrations/tenant/*_create_student_payment_allocations.php'))[0];
+            (require $allocationsMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($allocationsMigration, PATHINFO_FILENAME))->delete();
             $path = glob(database_path('migrations/tenant/*_create_student_financial_accounts.php'))[0];
             (require $path)->down();
             DB::table('migrations')->where('migration', pathinfo($path, PATHINFO_FILENAME))->delete();
@@ -181,6 +184,8 @@ class StudentFinanceTest extends TestCase
         $beta = Center::where('slug', 'beta')->firstOrFail();
         $beta->run(function (): void {
             $this->assertNull(DB::table('center_settings')->where('id', 1)->value('financial_currency'));
+            $this->assertSame(0, DB::table('student_payment_allocations')->count());
+            $this->assertSame(0, DB::table('student_payment_allocation_reversals')->count());
         });
     }
 

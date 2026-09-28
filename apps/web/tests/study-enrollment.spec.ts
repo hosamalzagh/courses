@@ -95,7 +95,7 @@ test("enrolls through the employee page and preserves SSR, credit, RTL, and the 
   const html = await page.request.get(`${origin}/admin/students/${studentId}/enrollments`);
   expect(await html.text()).toContain("1300.00");
   await page.goto(`${origin}/admin/students/${studentId}/account`);
-  await expect(page.getByText("مديونية محاولات الدراسة ضمن فروع صلاحيتك", { exact: false })).toBeVisible();
+  await expect(page.getByText("المديونية المتبقية", { exact: false })).toBeVisible();
   await expect(page.getByText("1300.00 EGP").first()).toBeVisible();
   await page.goto(`${origin}/admin/students/${studentId}/enrollments`);
   await page.setViewportSize({ width: 390, height: 844 });

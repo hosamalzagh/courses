@@ -135,6 +135,9 @@ class InstructorProfilesTest extends TestCase
     {
         $this->createInstructor('Alpha only', [$this->north]);
         $this->center->run(function (): void {
+            $allocationsMigration = glob(database_path('migrations/tenant/*_create_student_payment_allocations.php'))[0];
+            (require $allocationsMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($allocationsMigration, PATHINFO_FILENAME))->delete();
             $sessionsMigration = glob(database_path('migrations/tenant/*_create_study_sessions.php'))[0];
             (require $sessionsMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($sessionsMigration, PATHINFO_FILENAME))->delete();

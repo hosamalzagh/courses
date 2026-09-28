@@ -23,6 +23,8 @@ const eventNames: Record<string, string> = {
   "center.settings_updated": "تعديل إعدادات المركز",
   "center.financial_currency_changed": "تغيير عملة المركز",
   "student.payment_recorded": "استلام دفعة مقدمة للطالب",
+  "student.payment_allocated": "تخصيص دفعة مقدمة لرسوم محاولة الدراسة",
+  "student.payment_allocation_reversed": "عكس تخصيص دفعة مقدمة",
   "student.enrolled": "تسجيل طالب ورسوم محاولة الدراسة",
   "student.study_attempt_note_created": "إضافة ملاحظة على تسجيل الطالب",
   "student.study_attempt_note_updated": "تعديل ملاحظة تسجيل الطالب",

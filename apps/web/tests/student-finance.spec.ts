@@ -8,6 +8,7 @@ const credentials = process.env.COURSES_FINANCE_CREDENTIALS
 
 async function signIn(page: Page, who: "alpha" | "staff" = "alpha") {
   await page.goto(`${origin}/login`);
+  await page.waitForLoadState("networkidle");
   await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(credentials[who].email);
   await page.getByRole("textbox", { name: "كلمة المرور", exact: true }).fill(credentials[who].password);
   await page.getByRole("button", { name: "دخول المركز", exact: true }).click();
@@ -27,6 +28,107 @@ async function write(page: Page, route: string, payload: object, method = "POST"
   }, { route, payload, method });
 }
 
+async function pricedGroup(page: Page, branchId: number) {
+  const course = await write(page, "courses", { branch_id: branchId, name: `Course ${crypto.randomUUID().slice(0, 6)}`, request_id: crypto.randomUUID() });
+  expect(course.status).toBe(201);
+  const stage = await write(page, `courses/${course.body.course.id}/stages`, { name: "Stage", request_id: crypto.randomUUID() });
+  expect(stage.status).toBe(201);
+  const level = await write(page, `stages/${stage.body.stage.id}/levels`, { name: "Level", request_id: crypto.randomUUID(), lectures: [{ number: 1, content: "Required lecture", planned_hours: 2 }] });
+  expect(level.status).toBe(201);
+  const instructor = await write(page, "instructors", { name: `Teacher ${Date.now()}`, branch_ids: [branchId], request_id: crypto.randomUUID() });
+  expect(instructor.status).toBe(201);
+  const group = await write(page, "groups", { level_id: level.body.level.id, plan_version_id: level.body.level.plan.id,
+    name: `Group ${crypto.randomUUID().slice(0, 6)}`, approved_price: "100.00", instructor_ids: [instructor.body.instructor.id], request_id: crypto.randomUUID() });
+  expect(group.status).toBe(201);
+  return group.body.group;
+}
+
+test("allocates a payment, reverses it with a reason, and updates the visible balances", async ({ page }) => {
+  await signIn(page);
+  const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+  const branchId = workspace.branches[0].id;
+  const group = await pricedGroup(page, branchId);
+  const student = await write(page, "students", { name: `تخصيص ${Date.now()}`, branch_ids: [branchId], request_id: crypto.randomUUID() });
+  expect(student.status).toBe(201);
+  const studentId = student.body.student.id;
+  const accountPath = `students/${studentId}/account`;
+  const settings = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  if (!settings.account.currency) expect((await write(page, "financial-currency", { currency: "EGP", revision: settings.account.currency_revision }, "PATCH")).status).toBe(200);
+  const enrollment = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+  expect((await write(page, `students/${studentId}/enrollments`, { group_id: group.id, group_revision: group.revision,
+    currency_revision: enrollment.student.currency_revision, joined_on: "2026-09-28", discount: "0.00", discount_reason: null,
+    version: enrollment.student.version, request_id: crypto.randomUUID() })).status).toBe(201);
+  const before = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  expect((await write(page, `students/${studentId}/payments`, { branch_id: branchId, method: "cash", received_on: "2026-09-28",
+    amount: "80.00", version: before.account.version, request_id: crypto.randomUUID() })).status).toBe(201);
+  await page.goto(`${origin}/admin/students/${studentId}/account`);
+  await expect(page.getByText("80.00 EGP").first()).toBeVisible();
+  await page.getByRole("button", { name: "عرض وتخصيص" }).click();
+  await expect(page.getByRole("heading", { name: /تخصيص الدفعة المستلمة/ })).toBeVisible();
+  const optionsResponse = await page.request.get(`${origin}/api/v1/center/students/${studentId}/payments/${(await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json()).payments[0].id}/allocation-options`);
+  expect(Number(optionsResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+  await page.getByLabel(new RegExp(`المستحق 100.00.*المتبقي 100.00`)).fill("60.00");
+  await page.getByRole("button", { name: "تخصيص المبالغ المحددة" }).click();
+  await expect(page.getByText("حُفظ التخصيص", { exact: false })).toBeVisible();
+  await expect(page.getByText("20.00 EGP").first()).toBeVisible();
+  const allocated = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  expect(allocated.account).toMatchObject({ available_balance: "20.00", paid_total: "60.00", debt: "40.00" });
+  await page.getByRole("button", { name: "عكس التخصيص" }).click();
+  await page.getByLabel("سبب العكس").fill("سجل على المجموعة خطأ");
+  await page.getByRole("button", { name: "اعتماد العكس" }).click();
+  await expect(page.getByText("سُجل عكس التخصيص", { exact: false })).toBeVisible();
+  const reversed = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  expect(reversed.account).toMatchObject({ available_balance: "80.00", paid_total: "0.00", debt: "100.00" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+  await page.getByRole("button", { name: "القائمة" }).click();
+  await page.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("button", { name: "إغلاق القائمة" }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("simultaneous allocations cannot spend one payment twice", async ({ page }) => {
+  await signIn(page);
+  const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+  const branchId = workspace.branches[0].id;
+  const groups = [await pricedGroup(page, branchId), await pricedGroup(page, branchId)];
+  const student = await write(page, "students", { name: `تزامن تخصيص ${Date.now()}`, branch_ids: [branchId], request_id: crypto.randomUUID() });
+  expect(student.status).toBe(201);
+  const studentId = student.body.student.id;
+  const accountPath = `students/${studentId}/account`;
+  const settings = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  if (!settings.account.currency) expect((await write(page, "financial-currency", { currency: "EGP", revision: settings.account.currency_revision }, "PATCH")).status).toBe(200);
+  const attempts: string[] = [];
+  for (const group of groups) {
+    const current = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+    const created = await write(page, `students/${studentId}/enrollments`, { group_id: group.id, group_revision: group.revision,
+      currency_revision: current.student.currency_revision, joined_on: "2026-09-28", discount: "0.00", discount_reason: null,
+      version: current.student.version, request_id: crypto.randomUUID() });
+    expect(created.status).toBe(201);
+    attempts.push(created.body.attempt.id);
+  }
+  const before = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  const payment = await write(page, `students/${studentId}/payments`, { branch_id: branchId, method: "cash", received_on: "2026-09-28",
+    amount: "100.00", version: before.account.version, request_id: crypto.randomUUID() });
+  expect(payment.status).toBe(201);
+  const version = (await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json()).account.version;
+  await page.evaluate(() => fetch("/sanctum/csrf-cookie", { credentials: "same-origin" }));
+  const xsrf = (await page.context().cookies(origin)).find((cookie) => cookie.name === "XSRF-TOKEN")?.value ?? "";
+  const outcomes = await Promise.all([8157, 8158].map(async (port, index) => {
+    const response = await page.request.post(`http://alpha.courses.test:${port}/api/v1/center/students/${studentId}/payments/${payment.body.payment.id}/allocations`, {
+      data: { targets: [{ attempt_id: attempts[index], amount: "80.00" }], version, request_id: crypto.randomUUID() },
+      headers: { Accept: "application/json", "X-XSRF-TOKEN": decodeURIComponent(xsrf) },
+    });
+    return { status: response.status(), body: await response.json() };
+  }));
+  expect(outcomes.map((item) => item.status).sort()).toEqual([201, 409]);
+  expect(outcomes.find((item) => item.status === 409)?.body.code).toBe("student_account_changed");
+  const after = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  expect(after.account).toMatchObject({ available_balance: "20.00", paid_total: "80.00", debt: "120.00" });
+  expect(after.payments[0].allocated_amount).toBe("80.00");
+});
+
 test("currency, payment and visible account work through the employee UI and SSR", async ({ page }) => {
   await signIn(page);
   const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
@@ -38,7 +140,7 @@ test("currency, payment and visible account work through the employee UI and SSR
   await page.goto(`${origin}/admin/students/${studentId}`);
   await page.getByRole("link", { name: "الحساب المالي" }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/students/${studentId}/account$`));
-  await expect(page.getByText("الرصيد المتاح من الدفعات المقدمة", { exact: false })).toBeVisible();
+  await expect(page.getByText("الرصيد غير المخصص", { exact: false })).toBeVisible();
   if (await page.getByRole("combobox", { name: "عملة المركز" }).count()) {
     await page.getByRole("combobox", { name: "عملة المركز" }).selectOption("EGP");
     if (await page.getByRole("button", { name: "حفظ عملة المركز" }).isEnabled()) {
@@ -90,15 +192,22 @@ test("restricted staff see only their branch and a hidden account is denied in t
     const studentId = shared.body.student.id;
     const settings = await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
     if (!settings.account.currency) expect((await write(owner, "financial-currency", { currency: "EGP", revision: settings.account.currency_revision }, "PATCH")).status).toBe(200);
+    let southPaymentId = "";
     for (const [branchId, amount] of [[north.id, "25.00"], [south.id, "80.00"]] as const) {
       const account = await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
-      expect((await write(owner, `students/${studentId}/payments`, { branch_id: branchId, method: "cash", received_on: "2026-09-28", amount, version: account.account.version, request_id: crypto.randomUUID() })).status).toBe(201);
+      const saved = await write(owner, `students/${studentId}/payments`, { branch_id: branchId, method: "cash", received_on: "2026-09-28", amount, version: account.account.version, request_id: crypto.randomUUID() });
+      expect(saved.status).toBe(201);
+      if (branchId === south.id) southPaymentId = saved.body.payment.id;
     }
-    expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, { center_roles: [], branch_roles: { [north.id]: ["accounting"] } }, "PUT")).status).toBe(200);
+    const members = await (await owner.request.get(`${origin}/api/v1/center/member-workspace`)).json();
+    const staffMembershipId = members.members.find((item: { user: { email: string } }) => item.user.email === credentials.staff.email)?.id;
+    expect(staffMembershipId).toBeTruthy();
+    expect((await write(owner, `members/${staffMembershipId}/grants`, { center_roles: [], branch_roles: { [north.id]: ["accounting"] } }, "PUT")).status).toBe(200);
     await signIn(staff, "staff");
     await staff.goto(`${origin}/admin/students/${studentId}/account`);
     await expect(staff.getByText("25.00 EGP").first()).toBeVisible();
     expect(await staff.locator("body").innerText()).not.toContain("80.00");
+    expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/payments/${southPaymentId}/allocation-options`)).status()).toBe(404);
     const visible = await staff.request.get(`${origin}/api/v1/center/students/${studentId}/account`);
     expect((await visible.json()).account).not.toHaveProperty("revision");
     await staff.goto(`${origin}/admin/students/${hidden.body.student.id}/account`);

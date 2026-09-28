@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use App\Support\ActiveStudentAllocations;
 use App\Support\StudentAccountVersion;
+use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -43,13 +45,19 @@ class CenterStudentFinanceController extends Controller
             ->whereColumn('study_attempt_fees.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('study_attempt_fees.branch_id', $readable))
             ->selectRaw('COALESCE(SUM(study_attempt_fees.net_amount), 0)');
+        $used = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'students.id')
+            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.source_branch_id', $readable))
+            ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
+        $paid = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'students.id')
+            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.target_branch_id', $readable))
+            ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
         $student = StudentPhotos::visibleStudent($studentId, $permissions, 'finance.read')
             ->select(['students.id', 'students.name', 'students.student_number', 'students.financial_account_revision'])
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency'), 'currency')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency_revision'), 'currency_revision')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency_locked_at'), 'currency_locked_at')
-            ->selectSub($balance, 'available_balance')
-            ->selectSub($debt, 'debt')
+            ->selectSub($balance, 'received_total')->selectSub($debt, 'due_total')
+            ->selectSub($used, 'used_total')->selectSub($paid, 'paid_total')
             ->selectSub(DB::connection('tenant')->query()->fromSub($choices, 'branch_choices')->selectRaw('json_agg(branch_choices)'), 'recordable_branches')
             ->first();
         abort_unless($student, 404);
@@ -75,9 +83,14 @@ class CenterStudentFinanceController extends Controller
             })
             ->orderByDesc('student_payments.created_at')->orderByDesc('student_payments.id')
             ->offset(($page - 1) * 20)->limit(21)
-            ->get(['student_payments.id', 'student_payments.branch_id', 'branches.name as branch_name',
+            ->select(['student_payments.id', 'student_payments.branch_id', 'branches.name as branch_name',
                 'student_payments.amount', 'student_payments.currency', 'student_payments.method',
-                'student_payments.received_on', 'student_payments.actor_name', 'student_payments.created_at']);
+                'student_payments.received_on', 'student_payments.actor_name', 'student_payments.created_at'])
+            ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'student_payments.id')
+                ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'allocated_amount')->get();
+
+        $unallocated = StudentMoney::cents($student->received_total) - StudentMoney::cents($student->used_total);
+        $outstanding = StudentMoney::cents($student->due_total) - StudentMoney::cents($student->paid_total);
 
         return response()->json([
             'user' => $request->user()->only(['id', 'name', 'email']),
@@ -89,11 +102,18 @@ class CenterStudentFinanceController extends Controller
                 'version' => StudentAccountVersion::forActor($student->id, $student->financial_account_revision, $request->user()->id),
                 'currency' => $student->currency, 'currency_revision' => (int) $student->currency_revision,
                 'currency_locked' => $student->currency_locked_at !== null,
-                'available_balance' => $student->available_balance,
-                'debt' => $student->debt,
+                'received_total' => StudentMoney::format(StudentMoney::cents($student->received_total)),
+                'due_total' => StudentMoney::format(StudentMoney::cents($student->due_total)),
+                'paid_total' => StudentMoney::format(StudentMoney::cents($student->paid_total)),
+                'available_balance' => StudentMoney::format($unallocated),
+                'debt' => StudentMoney::format($outstanding),
             ],
             'recordable_branches' => $branches->take(50)->values(),
-            'payments' => $payments->take(20)->values(),
+            'payments' => $payments->take(20)->map(fn (object $row) => [
+                ...(array) $row,
+                'allocated_amount' => StudentMoney::format(StudentMoney::cents($row->allocated_amount)),
+                'available_amount' => StudentMoney::format(StudentMoney::cents($row->amount) - StudentMoney::cents($row->allocated_amount)),
+            ])->values(),
             'pagination' => [
                 'page' => $page, 'has_more' => $payments->count() > 20,
                 'branches_page' => $branchPage, 'branches_has_more' => $branches->count() > 50,
