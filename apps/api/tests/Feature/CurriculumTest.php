@@ -576,6 +576,10 @@ class CurriculumTest extends TestCase
         $audit = $this->getJson("{$this->base}/audit")->assertOk();
         $this->assertStringNotContainsString('خاص بالشمال', $audit->getContent());
         $this->assertStringContainsString('source_hidden', $audit->getContent());
+        $branchAudit = $this->getJson("{$this->base}/branches/{$this->south}/audit")->assertOk();
+        $this->assertStringNotContainsString('خاص بالشمال', $branchAudit->getContent());
+        $this->assertStringNotContainsString($course['id'], $branchAudit->getContent());
+        $this->assertStringContainsString('source_hidden', $branchAudit->getContent());
         $this->grant([$this->north => ['branch_viewer'], $this->south => ['branch_viewer']]);
         $this->asUser($this->staff);
         $this->getJson($path)->assertNotFound();

@@ -86,7 +86,7 @@ class CenterBranchController extends Controller
             ->limit(50)
             ->get();
 
-        return response()->json(['entries' => $entries]);
+        return response()->json(['entries' => CenterAuditController::redactCopySources($entries, $this->permissions($request))]);
     }
 
     private function permissions(Request $request): CenterPermissions
