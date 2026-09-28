@@ -125,7 +125,9 @@ class CenterStudyEnrollmentController extends Controller
 
                 return response()->json(['attempt' => $this->present($this->attempts($studentId, $permissions)->where('study_attempts.id', $existing->id)->firstOrFail())]);
             }
-            abort_if($student->status !== 'active', 409, 'الطالب موقوف؛ راجع حالته قبل التسجيل.');
+            if ($student->status !== 'active') {
+                $this->conflict('student_suspended');
+            }
             if ((int) $group->revision !== (int) $data['group_revision']) {
                 $this->conflict('group_changed');
             }

@@ -93,8 +93,11 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
       });
       if (!response.ok) {
         if (response.status === 409) {
+          const conflictCode = (await response.json().catch(() => ({})) as { code?: string }).code;
           setConflict(true); setUncertain(false);
-          setError("تغير حساب الطالب أو تسجيله أو سعر المجموعة أو عملة المركز. حمّل أحدث البيانات وراجع الطلب.");
+          setError(conflictCode === "student_suspended"
+            ? "أُوقف ملف الطالب بعد فتح الصفحة؛ لا يمكن تسجيله الآن. حمّل أحدث البيانات لمراجعة حالته."
+            : "تغير حساب الطالب أو تسجيله أو سعر المجموعة أو عملة المركز. حمّل أحدث البيانات وراجع الطلب.");
         } else {
           const errors = await responseFieldErrors(response); setFieldErrors(errors);
           setError(await responseMessage(response)); if (Object.keys(errors).length) focus(Object.keys(errors)[0]);

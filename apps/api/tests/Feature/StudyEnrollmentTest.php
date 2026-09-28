@@ -225,6 +225,46 @@ class StudyEnrollmentTest extends TestCase
             'request_id' => (string) Str::uuid()])->assertCreated()->assertJsonPath('attempt.fee.currency', 'USD');
     }
 
+    public function test_suspension_blocks_stale_enrollment_without_fee_and_lifting_restores_registration(): void
+    {
+        $priorGroup = $this->group($this->north, '80.00');
+        $group = $this->group($this->north, '150.00');
+        $student = $this->student([$this->north]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $initial = $this->getJson($url)->assertOk()->json();
+        $prior = $this->postJson($url, ['group_id' => $priorGroup['id'], 'group_revision' => $priorGroup['revision'],
+            'currency_revision' => $initial['student']['currency_revision'], 'joined_on' => '2026-09-27',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $initial['student']['version'],
+            'request_id' => (string) Str::uuid()])->assertCreated()->json('attempt');
+        $preview = $this->getJson($url)->assertOk()->assertJsonPath('student.status', 'active')->json();
+        $payload = ['group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $preview['student']['currency_revision'], 'joined_on' => '2026-09-28',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $preview['student']['version'],
+            'request_id' => (string) Str::uuid()];
+        $statusUrl = "{$this->base}/students/{$student['id']}/status";
+        $this->postJson($statusUrl, ['status' => 'suspended', 'reason' => 'وقف مؤقت',
+            'status_revision' => 1, 'request_id' => (string) Str::uuid()])->assertOk();
+        $this->postJson($url, $payload)->assertConflict()->assertJsonPath('code', 'student_suspended');
+        $this->getJson($url)->assertOk()->assertJsonPath('student.status', 'suspended')->assertJsonCount(1, 'attempts')
+            ->assertJsonPath('attempts.0.fee.net_amount', '80.00');
+        $this->center->run(function () use ($student, $prior): void {
+            $this->assertSame(1, DB::table('study_attempts')->where('student_id', $student['id'])->count());
+            $this->assertSame(1, DB::table('study_attempt_fees')->where('student_id', $student['id'])->count());
+            $this->assertSame('80.00', DB::table('study_attempt_fees')->where('id', $prior['fee']['id'])->value('net_amount'));
+            $this->assertSame(1, DB::table('center_audit_logs')->where('event', 'student.enrolled')->count());
+        });
+        $this->postJson($statusUrl, ['status' => 'active', 'reason' => 'انتهى الإيقاف',
+            'status_revision' => 2, 'request_id' => (string) Str::uuid()])->assertOk();
+        $fresh = $this->getJson($url)->assertOk()->assertJsonPath('student.status', 'active')->json();
+        $this->postJson($url, [...$payload, 'version' => $fresh['student']['version'],
+            'request_id' => (string) Str::uuid()])->assertCreated()->assertJsonPath('attempt.fee.net_amount', '150.00');
+        $attempts = $this->getJson($url)->assertOk()->assertJsonCount(2, 'attempts')->json('attempts');
+        $this->assertSame('80.00', collect($attempts)->firstWhere('id', $prior['id'])['fee']['net_amount']);
+        $this->getJson("{$this->base}/students/{$student['id']}")->assertOk()->assertJsonCount(1, 'suspensions')
+            ->assertJsonPath('suspensions.0.suspended_reason', 'وقف مؤقت')->assertJsonPath('suspensions.0.lifted_reason', 'انتهى الإيقاف');
+    }
+
     private function group(int $branchId, string $price): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => 'Course '.Str::random(5), 'request_id' => (string) Str::uuid()])->assertCreated()->json('course');

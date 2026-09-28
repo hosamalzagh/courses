@@ -136,6 +136,79 @@ test("restricted registration staff cannot see another branch or enroll its stud
   } finally { await owner.close(); await staff.close(); }
 });
 
+test("suspension blocks a stale enrollment preview and lifting allows registration", async ({ page }) => {
+  await signIn(page);
+  const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+  const branchId = workspace.branches[0].id;
+  const createdGroup = await group(page, branchId, "150.00");
+  const created = await write(page, "students", { name: `طالب منع التسجيل ${Date.now()}`, branch_ids: [branchId], request_id: crypto.randomUUID() });
+  expect(created.status).toBe(201);
+  const studentId = created.body.student.id;
+  await page.goto(`${origin}/admin/students/${studentId}/enrollments`);
+  await page.getByRole("searchbox", { name: "بحث في المجموعات المتاحة للتسجيل" }).fill(createdGroup.name);
+  await page.getByRole("button", { name: "بحث في جميع المجموعات المتاحة للتسجيل" }).click();
+  await expect(page).toHaveURL(/q=Group/);
+  await page.getByRole("combobox", { name: "المجموعة الأساسية" }).selectOption(createdGroup.id);
+  await page.getByLabel("تاريخ الانضمام الفعلي").fill("2026-09-28");
+  const suspended = await write(page, `students/${studentId}/status`, {
+    status: "suspended", reason: "إيقاف قبل التأكيد", status_revision: 1, request_id: crypto.randomUUID(),
+  });
+  expect(suspended.status).toBe(200);
+  await page.getByRole("button", { name: "تسجيل الطالب والرسوم" }).click();
+  await expect(page.getByText("أُوقف ملف الطالب بعد فتح الصفحة", { exact: false })).toBeVisible();
+  const deniedResponse = await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`);
+  expect(Number(deniedResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+  const denied = await deniedResponse.json();
+  expect(denied.attempts).toHaveLength(0);
+  expect(denied.balance.debt).toBe("0");
+  await page.getByRole("button", { name: "تحميل أحدث البيانات" }).click();
+  await expect(page.getByText("الطالب موقوف؛ لا يمكن تسجيل محاولة جديدة.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "تسجيل الطالب والرسوم" })).toBeDisabled();
+  const lifted = await write(page, `students/${studentId}/status`, {
+    status: "active", reason: "انتهاء الإيقاف", status_revision: suspended.body.status_revision, request_id: crypto.randomUUID(),
+  });
+  expect(lifted.status).toBe(200);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "تسجيل الطالب والرسوم" })).toBeEnabled();
+  await page.getByRole("combobox", { name: "المجموعة الأساسية" }).selectOption(createdGroup.id);
+  await page.getByLabel("تاريخ الانضمام الفعلي").fill("2026-09-28");
+  await page.getByRole("button", { name: "تسجيل الطالب والرسوم" }).click();
+  await expect(page.getByText("سُجلت المحاولة ورسومها معًا", { exact: false })).toBeVisible();
+  const after = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+  expect(after.attempts).toHaveLength(1);
+  expect(after.balance.debt).toBe("150.00");
+});
+
+test("parallel suspension and enrollment produce one serialized decision", async ({ page }) => {
+  await signIn(page);
+  const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+  const branchId = workspace.branches[0].id;
+  const createdGroup = await group(page, branchId, "80.00");
+  const created = await write(page, "students", { name: `تزامن الإيقاف ${Date.now()}`, branch_ids: [branchId], request_id: crypto.randomUUID() });
+  expect(created.status).toBe(201);
+  const studentId = created.body.student.id;
+  const preview = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+  await page.evaluate(() => fetch("/sanctum/csrf-cookie", { credentials: "same-origin" }));
+  const xsrf = (await page.context().cookies(origin)).find(cookie => cookie.name === "XSRF-TOKEN")?.value ?? "";
+  const headers = { Accept: "application/json", "X-XSRF-TOKEN": decodeURIComponent(xsrf) };
+  const statusUrl = `http://alpha.courses.test:8157/api/v1/center/students/${studentId}/status`;
+  const enrollmentUrl = `http://alpha.courses.test:8158/api/v1/center/students/${studentId}/enrollments`;
+  const [suspension, enrollment] = await Promise.all([
+    page.request.post(statusUrl, { headers, data: { status: "suspended", reason: "قرار متزامن", status_revision: 1, request_id: crypto.randomUUID() } }),
+    page.request.post(enrollmentUrl, { headers, data: { group_id: createdGroup.id, group_revision: createdGroup.revision,
+      currency_revision: preview.student.currency_revision, joined_on: "2026-09-28", discount: "0.00", discount_reason: null,
+      version: preview.student.version, request_id: crypto.randomUUID() } }),
+  ]);
+  expect(suspension.status()).toBe(200);
+  expect([201, 409]).toContain(enrollment.status());
+  if (enrollment.status() === 409) expect((await enrollment.json()).code).toBe("student_suspended");
+  const after = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+  expect(after.student.status).toBe("suspended");
+  expect(after.attempts).toHaveLength(enrollment.status() === 201 ? 1 : 0);
+  expect(after.balance.debt).toBe(enrollment.status() === 201 ? "80.00" : "0");
+  if (enrollment.status() === 201) expect(after.attempts[0].fee.net_amount).toBe("80.00");
+});
+
 test("simultaneous submissions keep one fee per request and reject stale distinct requests", async ({ page }) => {
   await signIn(page);
   const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
@@ -184,6 +257,9 @@ test("a lost enrollment response retries the original request without another fe
   const settings = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
   if (!settings.account.currency) expect((await write(page, "financial-currency", { currency: "EGP", revision: settings.account.currency_revision }, "PATCH")).status).toBe(200);
   await page.goto(`${origin}/admin/students/${studentId}/enrollments`);
+  await page.getByRole("searchbox", { name: "بحث في المجموعات المتاحة للتسجيل" }).fill(createdGroup.name);
+  await page.getByRole("button", { name: "بحث في جميع المجموعات المتاحة للتسجيل" }).click();
+  await expect(page).toHaveURL(/q=Group/);
   await page.getByRole("combobox", { name: "المجموعة الأساسية" }).selectOption(createdGroup.id);
   await page.getByLabel("تاريخ الانضمام الفعلي").fill("2026-09-28");
   await page.route(`**/api/v1/center/students/${studentId}/enrollments`, async route => {
