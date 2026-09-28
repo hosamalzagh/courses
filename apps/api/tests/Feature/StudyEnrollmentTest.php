@@ -927,6 +927,13 @@ class StudyEnrollmentTest extends TestCase
         });
         $url = "{$this->base}/students/{$student['id']}/allocations/{$allocation['id']}/corrections";
         $version = $this->getJson($accountUrl)->json('account.version');
+        $this->postJson("{$url}/preview", [
+            'target_attempt_id' => strtoupper($attempts[0]['id']), 'version' => $version,
+        ])->assertUnprocessable();
+        $this->postJson($url, [
+            'target_attempt_id' => strtoupper($attempts[0]['id']), 'reason' => 'لن تنقل إلى التسجيل نفسه',
+            'version' => $version, 'request_id' => (string) Str::uuid(),
+        ])->assertUnprocessable();
         $previewRequest = ['target_attempt_id' => $attempts[1]['id'], 'version' => $version];
         $this->postJson("{$url}/preview", $previewRequest)->assertOk()
             ->assertJsonPath('original.attempt_id', $attempts[0]['id'])

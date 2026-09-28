@@ -413,7 +413,8 @@ class CenterStudentAllocationController extends Controller
             ->where('allocation_id', $allocation->id)->exists()) {
             $this->conflict('allocation_already_reversed');
         }
-        abort_if($targetAttemptId === $allocation->attempt_id, 422, 'اختر تسجيلًا مختلفًا أو أعد المبلغ إلى الرصيد.');
+        abort_if($targetAttemptId !== null && strcasecmp($targetAttemptId, $allocation->attempt_id) === 0,
+            422, 'اختر تسجيلًا مختلفًا أو أعد المبلغ إلى الرصيد.');
         $amount = StudentMoney::cents($allocation->amount);
         $oldPaid = StudentMoney::cents($allocation->paid_amount);
         $oldRemaining = StudentMoney::cents($allocation->current_due) - $oldPaid;
