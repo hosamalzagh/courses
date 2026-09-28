@@ -267,8 +267,8 @@ SQL, [$data['transferred_on']]);
         $approvals = json_decode($row->approvals, true);
         $credits = StudyCoverageCredits::resolve($sourceRows, $approvals);
         $credited = $credits['lectures'];
-        $approvalIds = collect($approvals)->filter(fn (array $approval): bool => $approval['target_plan_version_id'] === $group->plan_version_id
-            && in_array($approval['id'], $credits['approval_ids'], true))->pluck('id')->all();
+        $approvalIds = $targetLectures->flatMap(fn (object $lecture): array => $credits['dependencies'][$lecture->id] ?? [])
+            ->unique()->sort()->values()->all();
         $directApproval = $attempt->plan_version_id === $group->plan_version_id;
         foreach ($approvals as $approval) {
             if ($approval['target_plan_version_id'] === $group->plan_version_id

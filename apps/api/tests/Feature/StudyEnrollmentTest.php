@@ -1782,6 +1782,9 @@ class StudyEnrollmentTest extends TestCase
                 'group_id' => $destination['id'], 'transferred_on' => $date,
             ]))->assertOk()->assertJsonPath('preview.credited_count', $credited)
                 ->assertJsonPath('preview.equivalence_ready', true)->json('preview');
+            if ($destination['id'] === $target['id']) {
+                $this->assertSame(2, $preview['approval_count']);
+            }
             $this->postJson($transferUrl, [
                 'group_id' => $destination['id'], 'group_revision' => $destination['revision'],
                 'transferred_on' => $date, 'revision' => $preview['revision'],
@@ -1805,6 +1808,8 @@ class StudyEnrollmentTest extends TestCase
         $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
         $this->center->run(fn () => $this->assertSame(2,
             DB::table('study_attempt_transfers')->where('attempt_id', $attempt['id'])->count()));
+        $this->center->run(fn () => $this->assertCount(2, json_decode(DB::table('study_attempt_transfers')
+            ->where('attempt_id', $attempt['id'])->where('to_group_id', $target['id'])->value('approval_ids'), true)));
     }
 
     public function test_transfer_migration_reaches_existing_and_new_centers(): void
