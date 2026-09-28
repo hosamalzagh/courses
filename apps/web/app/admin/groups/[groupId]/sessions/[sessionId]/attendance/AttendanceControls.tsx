@@ -165,6 +165,11 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
       title={`ملاحظة ${noteRow.status === "absent" ? "غياب" : "حضور"} ${noteRow.name}`}
       description="الملاحظة اختيارية وترتبط بواقعة الحضور أو الغياب. لا تغير الحالة أو الاحتساب أو إغلاق المحاضرة، ولا تحل محل سبب تصحيح إلزامي."
       canEdit={canEditNote} hideActions={discardNote} onClose={closeNote} onDirtyChange={setNoteDirty}
+      onOccurrenceChanged={async () => {
+        await reload();
+        discardSelectedNote();
+        setNotice("تغيرت واقعة الحضور. حُمّل الكشف الحالي؛ افتح ملاحظتها الجديدة بعد مراجعة الحالة.");
+      }}
       onSaved={note => setCurrent(previous => ({ ...previous, students: previous.students.map(row => row.entry_id === noteRow.entry_id
         ? { ...row, note_body: note.body, note_important: note.important } : row) }))} /> : null}
     <DataTable id={`attendance-${session.id}`} title="كشف الطلاب المستحقين" description="يعرض الطلاب المرتبطين بالمجموعة وقت المحاضرة، مع فترات الإيقاف المستبعدة من الحضور والغياب." rows={current.students}

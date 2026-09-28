@@ -226,7 +226,12 @@ test("attendance and closed absence notes keep versions, importance and event pe
     await expect(owner.getByText("تغيرت واقعة الحضور أثناء تحميل النسخ. حمّل الواقعة الحالية قبل المتابعة.")).toBeVisible();
     await expect(owner.getByText("نسخة من واقعة أخرى")).toHaveCount(0);
     await owner.unroute(historyRoute);
+    const refreshedRoster = owner.waitForResponse(response => response.request().method() === "GET"
+      && response.url().includes(`/api/v1/center/${path}`) && !response.url().includes("/note"));
     await owner.getByRole("button", { name: "تحميل الواقعة الحالية" }).click();
+    expect((await refreshedRoster).status()).toBe(200);
+    await expect(owner.getByRole("heading", { name: new RegExp(`ملاحظة غياب ${students[1].name}`) })).toHaveCount(0);
+    await expect(owner.getByRole("row", { name: new RegExp(students[1].name) })).toContainText("غائب");
   } finally {
     await owner.close(); await staff.close();
   }

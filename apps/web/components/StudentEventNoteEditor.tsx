@@ -14,9 +14,10 @@ import type { StudyAttemptNote } from "@/lib/server-context";
 type NoteVersion = { revision: number; body: string; important: boolean; actor_name: string; created_at: string };
 type Detail = { entry_revision?: number; note: (StudyAttemptNote & { created_by_name: string; created_at: string; updated_at: string }) | null;
   versions: NoteVersion[]; pagination: { page: number; has_more: boolean; next_before_revision: number | null } };
-export function StudentEventNoteEditor({ path, title, description, onClose, onSaved, onDirtyChange, canEdit = true, hideActions = false }: {
+export function StudentEventNoteEditor({ path, title, description, onClose, onSaved, onDirtyChange, onOccurrenceChanged, canEdit = true, hideActions = false }: {
   path: string; title: string; description: string; onClose: () => void; canEdit?: boolean; hideActions?: boolean;
   onSaved: (note: StudyAttemptNote) => void; onDirtyChange: (dirty: boolean) => void;
+  onOccurrenceChanged?: () => Promise<void>;
 }) {
   const router = useRouter();
   const prefix = useId();
@@ -53,6 +54,10 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
   async function reload() {
     setBusy(true); setError("");
     try {
+      if (staleOccurrence && onOccurrenceChanged) {
+        await onOccurrenceChanged();
+        return;
+      }
       const response = await centerRequest(path, "GET");
       if (!response.ok) { setError(await responseMessage(response)); return; }
       const fresh = await response.json() as Detail;
@@ -62,7 +67,8 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
       setConflict(false); setStaleOccurrence(false); setUncertain(false); requestId.current = null;
       setNotice(staleOccurrence ? "حُمّلت واقعة الحضور الحالية وتُركت المسودة القديمة. اكتب ملاحظة جديدة إذا كانت مناسبة لها."
         : preserveDraft ? "حُمّلت أحدث نسخة وبقيت مسودتك. قارنها بتاريخ التعديل قبل إعادة الحفظ." : "حُمّلت أحدث نسخة. راجعها قبل التعديل.");
-    } catch { setError("تعذر تحميل أحدث نسخة. تحقق من الاتصال وأعد المحاولة."); }
+    } catch { setError(staleOccurrence ? "تعذر تحديث كشف الحضور. تحقق من الاتصال وأعد المحاولة."
+      : "تعذر تحميل أحدث نسخة. تحقق من الاتصال وأعد المحاولة."); }
     finally { setBusy(false); }
   }
 
