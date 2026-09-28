@@ -93,6 +93,15 @@ test("bulk preview, individual outcome, forbidden branch, and SSR budget", async
 
     await owner.goto(url);
     await owner.getByRole("checkbox", { name: `اختيار ${people[0].name} للنقل إلى الانتظار` }).check();
+    await expect(owner.getByLabel("طريقة الاختيار").locator('option[value="selected"]')).toHaveText("طلاب محددون (١)");
+    await owner.getByLabel("عرض").selectOption("review");
+    await owner.getByRole("button", { name: "تطبيق النطاق" }).click();
+    await expect(owner).toHaveURL(/view=review/);
+    await expect(owner.getByLabel("طريقة الاختيار").locator('option[value="selected"]')).toHaveText("طلاب محددون (٠)");
+    await owner.getByLabel("عرض").selectOption("all");
+    await owner.getByRole("button", { name: "تطبيق النطاق" }).click();
+    await expect(owner).toHaveURL(/view=all/);
+    await owner.getByRole("checkbox", { name: `اختيار ${people[0].name} للنقل إلى الانتظار` }).check();
     await owner.getByLabel("سبب النقل").fill("مراجعة جماعية بعد الغياب");
     await owner.getByRole("button", { name: "معاينة النقل" }).click();
     await expect(owner.getByRole("heading", { name: "معاينة الدفعة ونتيجتها" })).toBeFocused();

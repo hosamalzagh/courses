@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
 import { AbsenceBulkWaitlist, AbsenceSelectionCell } from "./AbsenceBulkWaitlist";
 import { Button } from "@/components/Button";
@@ -60,7 +60,17 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   const [optionError, setOptionError] = useState("");
   const [pendingNavigation, setPendingNavigation] = useState<Record<FilterKey, string> | null>(null);
   const [pendingRule, setPendingRule] = useState<string | null>(null);
-  const [selectedAttemptIds, setSelectedAttemptIds] = useState<string[]>([]);
+  const selectionScope = JSON.stringify(([
+    "branch_id", "course_id", "stage_id", "level_id", "group_id", "view", "q",
+  ] as const).map(key => filters[key] ?? ""));
+  const [selection, setSelection] = useState({ scope: selectionScope, ids: [] as string[] });
+  const selectedAttemptIds = selection.scope === selectionScope ? selection.ids : [];
+  function setSelectedAttemptIds(next: SetStateAction<string[]>) {
+    setSelection(current => {
+      const ids = current.scope === selectionScope ? current.ids : [];
+      return { scope: selectionScope, ids: typeof next === "function" ? next(ids) : next };
+    });
+  }
   const enrollmentScopeId = (["group_id", "level_id", "stage_id", "course_id"] as const)
     .map(key => filters[key]).find(Boolean);
   const enrollmentScope = context.options.find(option => option.id === enrollmentScopeId);
