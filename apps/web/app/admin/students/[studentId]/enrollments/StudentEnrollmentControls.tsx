@@ -240,19 +240,24 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
         { key: "fee", label: "الرسوم بعد الخصم", render: row => <bdi dir="ltr">{row.fee.net_amount} {row.fee.currency}</bdi> },
         { key: "actor", label: "سجلها", render: row => row.fee.actor_name },
         { key: "note", label: "ملاحظة التسجيل", render: row => row.note ? <span>{row.note.important ? "★ " : ""}{row.note.body.slice(0, 80)}{row.note.body.length > 80 ? "…" : ""}</span> : "—" },
-        { key: "actions", label: "الإجراءات", actions: true, render: row => current.permissions.can_manage_center ||
-          current.permissions.branch_actions?.[String(row.event_branch_id)]?.includes("enrollment.manage")
-          ? <div className="form-actions">
-            {row.status === "active" ? <Button id={`${prefix}-withdraw-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
+        { key: "actions", label: "الإجراءات", actions: true, render: row => {
+          const canManageAttempt = current.permissions.can_manage_center ||
+            current.permissions.branch_actions?.[String(row.branch_id)]?.includes("enrollment.manage");
+          const canManageNote = current.permissions.can_manage_center ||
+            current.permissions.branch_actions?.[String(row.event_branch_id)]?.includes("enrollment.manage");
+          if ((!canManageAttempt || (row.status !== "active" && row.has_repeat)) && !canManageNote) return <span className="muted">غير متاح</span>;
+          return <div className="form-actions">
+            {canManageAttempt && row.status === "active" ? <Button id={`${prefix}-withdraw-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
               withdrawalOpener.current = event.currentTarget.id; setOpenWithdrawalId(row.id);
-            }}>انسحاب</Button> : <Button id={`${prefix}-repeat-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
+            }}>انسحاب</Button> : null}
+            {canManageAttempt && row.status !== "active" && !row.has_repeat ? <Button id={`${prefix}-repeat-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
               repeatOpener.current = event.currentTarget.id;
               setRepeatId(row.id); setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason("");
               focus("group_id");
-            }}>إعادة الدراسة</Button>}
-            <Button id={`${prefix}-note-${row.id}`} type="button" onClick={event => { noteOpener.current = event.currentTarget.id; openNote(row.id); }}>{row.note ? "عرض/تعديل الملاحظة" : "إضافة ملاحظة"}</Button>
-          </div>
-          : <span className="muted">غير متاح</span> },
+            }}>إعادة الدراسة</Button> : null}
+            {canManageNote ? <Button id={`${prefix}-note-${row.id}`} type="button" onClick={event => { noteOpener.current = event.currentTarget.id; openNote(row.id); }}>{row.note ? "عرض/تعديل الملاحظة" : "إضافة ملاحظة"}</Button> : null}
+          </div>;
+        } },
       ]} />
     {openNoteId && current.attempts.find(attempt => attempt.id === openNoteId) ? <section className="context-card" aria-label="محرر ملاحظة التسجيل">
       <StudyAttemptNoteEditor key={openNoteId} studentId={studentId} attempt={current.attempts.find(attempt => attempt.id === openNoteId)!}

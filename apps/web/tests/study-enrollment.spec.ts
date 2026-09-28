@@ -446,6 +446,9 @@ test("withdraws and repeats study with preserved fees, SSR, SQL budget, and mobi
   expect(Number(repeatedResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
   const repeated = await repeatedResponse.json();
   expect(repeated.attempts).toHaveLength(2);
+  expect(repeated.attempts.find((item: { id: string }) => item.id === firstId).has_repeat).toBe(true);
+  await expect(page.locator(`[id$="-repeat-${firstId}"]`)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "انسحاب", exact: true })).toHaveCount(1);
   expect(repeated.attempts.find((item: { repeated_from_attempt_id: string | null }) => item.repeated_from_attempt_id === firstId)).toMatchObject({ status: "active", fee: { net_amount: "100.00" } });
   expect(repeated.balance.debt).toBe("200.00");
   const html = await page.request.get(`${origin}/admin/students/${studentId}/enrollments`);

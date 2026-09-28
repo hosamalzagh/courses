@@ -316,6 +316,7 @@ class CenterStudyEnrollmentController extends Controller
                 'study_attempts.created_at', 'study_groups.name as group_name', 'levels.name as level_name',
                 'withdrawal.withdrawn_on', 'withdrawal.reason as withdrawal_reason', 'withdrawal.actor_name as withdrawal_actor_name'])
             ->selectRaw('(SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id) AS requirements_count')
+            ->selectRaw('CASE WHEN EXISTS (SELECT 1 FROM study_attempts AS repeated WHERE repeated.repeated_from_attempt_id = study_attempts.id) THEN 1 ELSE 0 END AS has_repeat')
             ->addSelect(['fees.id as fee_id', 'fees.original_price', 'fees.discount', 'fees.net_amount',
                 'fees.currency', 'fees.discount_reason', 'fees.actor_name', 'fees.branch_id as event_branch_id',
                 'note.id as note_id', 'note.body as note_body', 'note.important as note_important',
@@ -329,6 +330,7 @@ class CenterStudyEnrollmentController extends Controller
             'event_branch_id' => (int) $row->event_branch_id,
             'joined_on' => $row->joined_on, 'status' => $row->status, 'revision' => (int) $row->revision,
             'repeated_from_attempt_id' => $row->repeated_from_attempt_id,
+            'has_repeat' => (bool) (int) $row->has_repeat,
             'withdrawal' => $row->withdrawn_on === null ? null : ['withdrawn_on' => $row->withdrawn_on,
                 'reason' => $row->withdrawal_reason, 'actor_name' => $row->withdrawal_actor_name],
             'created_at' => $row->created_at,

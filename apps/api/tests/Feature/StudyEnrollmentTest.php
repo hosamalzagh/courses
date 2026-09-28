@@ -766,6 +766,9 @@ class StudyEnrollmentTest extends TestCase
             ->assertJsonPath('balance.debt', '250.00')
             ->assertJsonPath('balance.available_credit', '10.00');
         $older = collect($after->json('attempts'))->firstWhere('id', $first['id']);
+        $newer = collect($after->json('attempts'))->firstWhere('id', $repeat['id']);
+        $this->assertTrue($older['has_repeat']);
+        $this->assertFalse($newer['has_repeat']);
         $this->assertSame('100.00', $older['fee']['net_amount']);
         $this->assertSame($closed['withdrawal']['withdrawn_on'], $older['withdrawal']['withdrawn_on']);
         $this->assertMatchesRegularExpression('/^[1-9]\d*$/', (string) $after->headers->get('X-Courses-Query-Count'));
@@ -931,6 +934,30 @@ class StudyEnrollmentTest extends TestCase
         $this->grant([$this->south => ['registration']]);
         $this->asUser($this->staff);
         $this->postJson($withdrawUrl, $payload)->assertNotFound();
+    }
+
+    public function test_transferred_attempt_uses_current_branch_for_withdrawal_and_original_branch_for_fee_event(): void
+    {
+        $group = $this->group($this->north, '100.00');
+        $student = $this->student([$this->north, $this->south]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($url)->json();
+        $attempt = $this->postJson($url, ['group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $workspace['student']['currency_revision'], 'joined_on' => '2026-09-28',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $workspace['student']['version'],
+            'request_id' => (string) Str::uuid()])->assertCreated()->json('attempt');
+        // Model a branch transfer while keeping the original fee event in its recorded branch.
+        $this->center->run(fn () => DB::table('study_attempts')->where('id', $attempt['id'])->update(['branch_id' => $this->south]));
+        $this->grant([$this->south => ['registration']]);
+        $this->asUser($this->staff);
+        $this->getJson($url)->assertOk()->assertJsonCount(1, 'attempts')
+            ->assertJsonPath('attempts.0.branch_id', $this->south)
+            ->assertJsonPath('attempts.0.event_branch_id', $this->north);
+        $this->postJson("{$url}/{$attempt['id']}/withdraw", [
+            'withdrawn_on' => '2026-09-28', 'reason' => 'انسحاب بعد النقل', 'revision' => 1,
+            'request_id' => (string) Str::uuid(),
+        ])->assertOk()->assertJsonPath('attempt.status', 'withdrawn');
     }
 
     private function group(int $branchId, string $price): array
