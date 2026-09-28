@@ -627,6 +627,79 @@ class StudyEnrollmentTest extends TestCase
         $this->getJson($accountUrl)->assertNotFound();
     }
 
+    public function test_financial_notes_follow_payment_and_allocation_permissions_without_changing_balances(): void
+    {
+        $group = $this->group($this->north, '100.00');
+        $student = $this->student([$this->north]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $enrollment = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")->assertOk()->json();
+        $this->postJson("{$this->base}/students/{$student['id']}/enrollments", [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $enrollment['student']['currency_revision'], 'joined_on' => '2026-09-28',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $enrollment['student']['version'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $accountUrl = "{$this->base}/students/{$student['id']}/account";
+        $payment = $this->postJson("{$this->base}/students/{$student['id']}/payments", [
+            'branch_id' => $this->north, 'method' => 'cash', 'received_on' => '2026-09-28', 'amount' => '80.00',
+            'version' => $this->getJson($accountUrl)->json('account.version'), 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('payment');
+        $paymentUrl = "{$this->base}/students/{$student['id']}/payments/{$payment['id']}";
+        $options = $this->getJson("{$paymentUrl}/allocation-options")->assertOk()->json();
+        $allocation = $this->postJson("{$paymentUrl}/allocations", [
+            'targets' => [['attempt_id' => $options['fees'][0]['attempt_id'], 'amount' => '30.00']],
+            'version' => $options['version'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('allocations.0');
+        $allocationUrl = "{$this->base}/students/{$student['id']}/allocations/{$allocation['id']}/note";
+        $before = $this->getJson($accountUrl)->assertOk()->json('account');
+
+        foreach (["{$paymentUrl}/note" => 'payment', $allocationUrl => 'allocation'] as $url => $type) {
+            $this->getJson($url)->assertOk()->assertJsonPath('note', null)->assertJsonPath('can_edit', true);
+            $request = ['body' => "ملاحظة {$type} مالية", 'important' => false, 'revision' => 0,
+                'request_id' => (string) Str::uuid()];
+            $created = $this->putJson($url, $request)->assertCreated()->assertJsonPath('note.revision', 1)->json('note');
+            $this->putJson($url, $request)->assertOk()->assertJsonPath('note.id', $created['id']);
+            $this->putJson($url, [...$request, 'body' => 'تغيير الطلب'])->assertConflict()->assertJsonPath('code', 'note_request_changed');
+            $this->putJson($url, [...$request, 'request_id' => (string) Str::uuid()])->assertConflict()->assertJsonPath('code', 'note_changed');
+            $this->putJson($url, ['body' => "تعديل {$type}", 'important' => true, 'revision' => 1,
+                'request_id' => (string) Str::uuid()])->assertOk()->assertJsonPath('note.revision', 2);
+            $this->getJson($url)->assertOk()->assertJsonCount(2, 'versions')->assertJsonPath('note.important', true);
+        }
+        $after = $this->getJson($accountUrl)->assertOk()->json('account');
+        $this->assertSame($before['version'], $after['version']);
+        $this->assertSame($before['available_balance'], $after['available_balance']);
+        $this->assertSame($before['paid_total'], $after['paid_total']);
+        $this->assertStringNotContainsString('ملاحظة payment مالية', $this->getJson($accountUrl)->getContent());
+        $this->center->run(function () use ($payment, $allocation): void {
+            $this->assertSame('80.00', DB::table('student_payments')->where('id', $payment['id'])->value('amount'));
+            $this->assertSame('30.00', DB::table('student_payment_allocations')->where('id', $allocation['id'])->value('amount'));
+            $this->assertSame(4, DB::table('student_event_note_revisions')->count());
+            $this->assertStringNotContainsString('ملاحظة', DB::table('center_audit_logs')->where('event', 'student.payment_note_created')->value('details'));
+        });
+
+        $this->grant([$this->north => ['branch_auditor']]);
+        $this->asUser($this->staff);
+        $this->getJson("{$paymentUrl}/note")->assertNotFound();
+        $this->getJson($allocationUrl)->assertNotFound();
+        $this->putJson("{$paymentUrl}/note", ['body' => 'محجوب', 'important' => false, 'revision' => 2,
+            'request_id' => (string) Str::uuid()])->assertNotFound();
+        $this->assertStringNotContainsString('student.payment_note_created', $this->getJson("{$this->base}/audit")->getContent());
+        $branchAudit = $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent();
+        $this->assertStringNotContainsString('student.payment_note_created', $branchAudit);
+        $this->assertStringNotContainsString('student.allocation_note_created', $branchAudit);
+        $this->grant([$this->north => ['branch_auditor', 'accounting']]);
+        $this->asUser($this->staff);
+        $visibleAudit = $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent();
+        $this->assertStringContainsString('student.payment_note_created', $visibleAudit);
+        $this->assertStringContainsString('student.allocation_note_created', $visibleAudit);
+        $this->assertStringNotContainsString('ملاحظة payment مالية', $visibleAudit);
+        $this->grant([$this->south => ['branch_auditor', 'accounting']]);
+        $this->asUser($this->staff);
+        $this->getJson("{$paymentUrl}/note")->assertNotFound();
+        $this->getJson($allocationUrl)->assertNotFound();
+        $this->getJson($accountUrl)->assertNotFound();
+    }
+
     private function group(int $branchId, string $price): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => 'Course '.Str::random(5), 'request_id' => (string) Str::uuid()])->assertCreated()->json('course');

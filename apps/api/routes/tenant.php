@@ -14,6 +14,7 @@ use App\Http\Controllers\CenterStudentController;
 use App\Http\Controllers\CenterStudentCustomFieldController;
 use App\Http\Controllers\CenterStudentEventNoteController;
 use App\Http\Controllers\CenterStudentFinanceController;
+use App\Http\Controllers\CenterStudentFinancialNoteController;
 use App\Http\Controllers\CenterStudentNumberingController;
 use App\Http\Controllers\CenterStudentPhotoController;
 use App\Http\Controllers\CenterStudentProfileChoiceController;
@@ -93,6 +94,10 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('students/{studentId}/enrollments/{attemptId}/note', [CenterStudentEventNoteController::class, 'show']);
         Route::put('students/{studentId}/enrollments/{attemptId}/note', [CenterStudentEventNoteController::class, 'save']);
         Route::post('students/{studentId}/payments', [CenterStudentFinanceController::class, 'recordPayment']);
+        Route::get('students/{studentId}/payments/{eventId}/note', [CenterStudentFinancialNoteController::class, 'payment']);
+        Route::put('students/{studentId}/payments/{eventId}/note', [CenterStudentFinancialNoteController::class, 'savePayment']);
+        Route::get('students/{studentId}/allocations/{eventId}/note', [CenterStudentFinancialNoteController::class, 'allocation']);
+        Route::put('students/{studentId}/allocations/{eventId}/note', [CenterStudentFinancialNoteController::class, 'saveAllocation']);
         Route::get('students/{studentId}/payments/{paymentId}/allocation-options', [CenterStudentAllocationController::class, 'options']);
         Route::post('students/{studentId}/payments/{paymentId}/allocations', [CenterStudentAllocationController::class, 'allocate']);
         Route::post('students/{studentId}/allocations/{allocationId}/reverse', [CenterStudentAllocationController::class, 'reverse']);

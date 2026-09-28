@@ -2,11 +2,21 @@ import type { AuditEntry } from "@/lib/server-context";
 import { paymentMethodLabels } from "@/lib/student-finance";
 
 export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
-  if (!['student.payment_recorded', 'student.payment_allocated', 'student.payment_allocation_reversed', 'center.financial_currency_changed', 'student.enrolled'].includes(entry.event)) return null;
+  if (!['student.payment_recorded', 'student.payment_allocated', 'student.payment_allocation_reversed',
+    'student.payment_note_created', 'student.payment_note_updated',
+    'student.allocation_note_created', 'student.allocation_note_updated',
+    'center.financial_currency_changed', 'student.enrolled'].includes(entry.event)) return null;
   let details = entry.details;
   if (typeof details === "string") { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;
   const data = details as Record<string, unknown>;
+  if (entry.event.startsWith('student.payment_note_') || entry.event.startsWith('student.allocation_note_')) {
+    return <details><summary>تفاصيل ملاحظة الحركة المالية</summary>
+      <p>الطالب: <bdi dir="ltr">{String(data.student_id ?? "")}</bdi></p>
+      <p>{entry.event.startsWith('student.payment_note_') ? 'الدفعة' : 'التخصيص'}: <bdi dir="ltr">{String(data.event_id ?? "")}</bdi></p>
+      <p>نسخة <bdi dir="ltr">{String(data.revision ?? "")}</bdi> — {data.important ? 'مهمة' : 'عادية'}. نص الملاحظة متاح من الحركة المالية ضمن صلاحياتها.</p>
+    </details>;
+  }
   if (entry.event === "center.financial_currency_changed") {
     return <p>عملة المركز: <bdi dir="ltr">{String(data.before ?? "غير محددة")} ← {String(data.after ?? "غير محددة")}</bdi></p>;
   }
