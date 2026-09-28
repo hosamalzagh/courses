@@ -47,7 +47,7 @@ test("schedule preview, confirmation, postponement and branch permissions throug
     expect(stage.status).toBe(201);
     const level = await write(owner, `stages/${stage.body.stage.id}/levels`, "POST", {
       name: "مستوى الجدولة", request_id: crypto.randomUUID(),
-      lectures: [1, 2, 3].map(number => ({ number, content: `محتوى ${number}`, planned_hours: 2 })),
+      lectures: Array.from({ length: 22 }, (_, index) => ({ number: index + 1, content: `محتوى ${index + 1}`, planned_hours: 2 })),
     });
     expect(level.status).toBe(201);
     const instructor = await write(owner, "instructors", "POST", { name: `محاضر ${stamp}`, branch_ids: [north.id], request_id: crypto.randomUUID() });
@@ -93,6 +93,20 @@ test("schedule preview, confirmation, postponement and branch permissions throug
     await expect(owner.getByText("تأجيل محاضرة مجموعة").first()).toBeVisible();
     await owner.getByText("عرض تغيير جدول المحاضرات").first().click();
     await expect(owner.getByText("تغيير القاعة").first()).toBeVisible();
+
+    const next = new Date(first.getTime() + 60 * 86400000);
+    const nextLocal = new Intl.DateTimeFormat("sv-SE", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(next).replace(" ", "T");
+    expect((await write(owner, `groups/${group.body.group.id}/sessions`, "POST", {
+      kind: "weekly", revision: 3, start_at: nextLocal, count: 20, interval_weeks: 1, request_id: crypto.randomUUID(),
+    })).status).toBe(201);
+    await owner.goto(`${origin}${path}`);
+    await expect(owner.getByText("غير المجدولة: ٠")).toBeVisible();
+    const pages = owner.getByLabel("صفحات مواعيد المحاضرات");
+    await pages.getByRole("button", { name: "الصفحة التالية في مواعيد المحاضرات" }).click();
+    await pages.getByRole("link", { name: "الصفحة التالية في مواعيد المحاضرات" }).click();
+    await expect(owner).toHaveURL(/\/sessions\?page=2/);
+    await expect(owner.getByRole("table")).toContainText("محتوى 22");
+    await expect(owner.getByRole("table").getByRole("row")).toHaveCount(3);
 
     const members = await (await owner.request.get(`${origin}/api/v1/center/member-workspace`)).json();
     const membership = members.members.find((member: { user: { email: string } }) => member.user.email === credentials.staff.email);

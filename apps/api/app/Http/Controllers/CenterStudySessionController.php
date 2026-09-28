@@ -66,7 +66,9 @@ class CenterStudySessionController extends Controller
             $existing = DB::connection('tenant')->table('study_session_submissions')->where('request_id', $requestId)->first();
             if ($existing) {
                 abort_unless($existing->group_id === $groupId && $existing->actor_id === $request->user()->id, 403);
-                if ($existing->request_hash !== $hash) $this->conflict('session_request_changed');
+                if ($existing->request_hash !== $hash) {
+                    $this->conflict('session_request_changed');
+                }
 
                 return response()->json(['sessions' => $this->sessions($groupId)->whereIn('sessions.id', json_decode($existing->session_ids, true))->get(),
                     'group_revision' => $group['revision']])
@@ -123,7 +125,9 @@ class CenterStudySessionController extends Controller
             $existing = DB::connection('tenant')->table('study_session_submissions')->where('request_id', $data['request_id'])->first();
             if ($existing) {
                 abort_unless($existing->group_id === $groupId && $existing->actor_id === $request->user()->id, 403);
-                if ($existing->request_hash !== $hash) $this->conflict('session_request_changed');
+                if ($existing->request_hash !== $hash) {
+                    $this->conflict('session_request_changed');
+                }
 
                 return response()->json(['session' => $this->sessions($groupId)->where('sessions.id', $sessionId)->firstOrFail(),
                     'group_revision' => $group['revision']])
@@ -133,9 +137,13 @@ class CenterStudySessionController extends Controller
                 ->lockForUpdate()->first();
             abort_unless($session, 404);
             if ($group['status'] === 'completed' || $session->status !== 'planned'
-                || (int) $session->revision !== (int) $data['revision']) $this->conflict('session_changed');
+                || (int) $session->revision !== (int) $data['revision']) {
+                $this->conflict('session_changed');
+            }
             $oldTime = new DateTimeImmutable($session->scheduled_at);
-            if ($oldTime <= new DateTimeImmutable('now') || $newTime <= $oldTime) $this->conflict('session_not_future');
+            if ($oldTime <= new DateTimeImmutable('now') || $newTime <= $oldTime) {
+                $this->conflict('session_not_future');
+            }
             if (DB::connection('tenant')->table('study_sessions')->where('group_id', $groupId)
                 ->where('id', '!=', $sessionId)->where('status', '!=', 'cancelled')->where('scheduled_at', $newTime->format('Y-m-d H:i:sP'))->exists()) {
                 $this->conflict('session_time_taken');
@@ -232,7 +240,9 @@ class CenterStudySessionController extends Controller
                 'courses.branch_id', 'levels.name as level_name'])
             ->selectRaw("COALESCE((SELECT json_agg(json_build_object('number', number, 'title', title, 'content', content) ORDER BY number) FROM (SELECT number, title, content FROM plan_lectures WHERE plan_version_id = groups.plan_version_id ORDER BY number LIMIT 200) AS plan), '[]'::json) AS requirements");
         $query->selectRaw("COALESCE((SELECT json_agg(lecture_number ORDER BY lecture_number) FROM (SELECT DISTINCT lectures.number AS lecture_number FROM study_sessions AS sessions JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id WHERE sessions.group_id = groups.id AND sessions.status <> 'cancelled' ORDER BY lecture_number LIMIT 200) AS scheduled), '[]'::json) AS scheduled_requirements");
-        if ($lock) $query->lockForUpdate();
+        if ($lock) {
+            $query->lockForUpdate();
+        }
         $row = $query->first();
         abort_unless($row && $permissions->can('read', (int) $row->branch_id), 404);
 

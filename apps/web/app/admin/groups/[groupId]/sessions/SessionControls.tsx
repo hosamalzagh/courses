@@ -25,6 +25,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
   const busyRef = useRef(false);
   const [group, setGroup] = useState(context.group);
   const [sessions, setSessions] = useState(context.sessions);
+  const [loadedContext, setLoadedContext] = useState(context);
   const [draft, setDraft] = useState<Draft>(initialDraft);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [requestId, setRequestId] = useState(newSubmissionId);
@@ -37,6 +38,14 @@ export function SessionControls({ context }: { context: SessionContext }) {
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
+  if (loadedContext !== context) {
+    setLoadedContext(context);
+    setGroup(context.group);
+    setSessions(context.sessions);
+    setSelected(previous => previous ? context.sessions.find(item => item.id === previous.id) ?? null : null);
+    setPreview(null);
+    setConflict(false);
+  }
   const dirty = Boolean(preview || draft.start_at || draft.title || selected || postponeAt || reason);
   const prefix = `groups/${group.id}/sessions`;
   const available = group.requirements.filter(requirement => !group.scheduled_requirements.includes(requirement.number));
