@@ -1651,6 +1651,17 @@ class StudyEnrollmentTest extends TestCase
         $coverage = $this->getJson("{$this->base}/groups/{$target['id']}/coverage")
             ->assertOk()->assertJsonPath('students.0.covered_count', 1)->assertJsonPath('students.0.missing_numbers', []);
         $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
+        $sourceSessionPath = "{$this->base}/groups/{$source['id']}/sessions/{$sessionId}";
+        $revokePreview = $this->getJson("{$sourceSessionPath}/revoke-preview")->assertOk()
+            ->assertJsonPath('attendance.potential_coverage_records', 1)->json();
+        $this->postJson("{$sourceSessionPath}/revoke", [
+            'reason' => 'إلغاء اعتماد مصدر التغطية المنقولة',
+            'session_revision' => $revokePreview['session_revision'],
+            'group_revision' => $revokePreview['group_revision'],
+            'preview_token' => $revokePreview['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->getJson("{$this->base}/groups/{$target['id']}/coverage")
+            ->assertOk()->assertJsonPath('students.0.covered_count', 0);
         $this->center->run(function () use ($attempt, $target): void {
             $this->assertSame(1, DB::table('study_attempt_transfers')->where('attempt_id', $attempt['id'])->count());
             $this->assertSame(1, DB::table('study_attempt_fees')->where('attempt_id', $attempt['id'])->count());

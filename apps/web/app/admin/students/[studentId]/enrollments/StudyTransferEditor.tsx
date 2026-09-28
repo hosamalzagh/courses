@@ -35,7 +35,7 @@ function TransferHistoryView({ history, page, hasMore, loading, onPage }: {
 }) {
   const prefix = useId();
   return <>
-    <DataTable id={`${prefix}-history`} title={`سجل النقل · صفحة ${page.toLocaleString("ar-EG")}`} rows={history} rowKey={row => row.id}
+    <DataTable id={`${prefix}-history`} title={`سجل النقل · صفحة ${page.toLocaleString("ar-EG")}`} rows={history} rowKey={row => row.id} pageSize={20}
       searchText={row => `${row.transferred_on} ${row.reason ?? ""}`} emptyMessage="لا يوجد نقل في هذه الصفحة."
       columns={[
         { key: "date", label: "التاريخ", render: row => <bdi dir="ltr">{row.transferred_on}</bdi> },

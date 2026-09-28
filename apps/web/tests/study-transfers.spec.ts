@@ -147,6 +147,22 @@ test('moves an active attempt across branches with a reviewed preview and denies
     await expect(history.getByText('المحتسب: لا يوجد؛ الناقص: 1')).toBeVisible();
     const savedHistory = await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/transfer/history`)).json();
     expect(savedHistory.history[0].missing_lectures).toEqual([{ id: target.plan.lectures[0].id, number: 1 }]);
+    await owner.getByRole('button', { name: 'إغلاق السجل' }).click();
+    await owner.route(`**/students/${studentId}/enrollments/${attemptId}/transfer/history?history_page=*`, async route => {
+      const page = Number(new URL(route.request().url()).searchParams.get('history_page'));
+      const records = page === 1
+        ? Array.from({ length: 20 }, (_, index) => ({ ...savedHistory.history[0], id: `history-${index + 1}`, reason: `سجل ${index + 1}` }))
+        : [{ ...savedHistory.history[0], id: 'history-21', reason: 'سجل 21' }];
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        history: records, history_page: page, history_has_more: page === 1,
+      }) });
+    });
+    await owner.locator(`[id$="-transfer-history-${attemptId}"]`).click();
+    const pagedHistory = owner.getByRole('region', { name: 'سجل نقل المحاولة' });
+    await expect(pagedHistory.getByRole('table', { name: /سجل النقل/ }).locator('tbody tr')).toHaveCount(20);
+    await pagedHistory.getByRole('button', { name: 'السجل التالي' }).click();
+    await expect(pagedHistory.getByText('سجل 21')).toBeVisible();
+    await expect(pagedHistory.getByRole('table', { name: /سجل النقل/ }).locator('tbody tr')).toHaveCount(1);
     await signIn(staff, 'staff');
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).status()).toBe(404);
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/transfer/history`)).status()).toBe(404);

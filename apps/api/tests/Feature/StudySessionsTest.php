@@ -923,7 +923,7 @@ class StudySessionsTest extends TestCase
         $this->assertSame(1, collect($coverage)->firstWhere('student_id', $student['id'])['covered_count']);
         $preview = $this->getJson("{$path}/revoke-preview")->assertOk()
             ->assertJsonPath('attendance.total', 1)->assertJsonPath('attendance.counted', 1)
-            ->assertJsonPath('attendance.current_coverage_records', 1)->json();
+            ->assertJsonPath('attendance.potential_coverage_records', 1)->json();
         $staleSchedule = ['kind' => 'weekly', 'revision' => $preview['group_revision'],
             'start_at' => now('Africa/Cairo')->addDays(2)->setTime(17, 0)->format('Y-m-d\TH:i'),
             'count' => 1, 'interval_weeks' => 1];
