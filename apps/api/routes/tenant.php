@@ -20,6 +20,7 @@ use App\Http\Controllers\CenterStudentProfileChoiceController;
 use App\Http\Controllers\CenterStudentSearchController;
 use App\Http\Controllers\CenterStudentStatusController;
 use App\Http\Controllers\CenterStudyAttendanceController;
+use App\Http\Controllers\CenterStudyCoverageController;
 use App\Http\Controllers\CenterStudyEnrollmentController;
 use App\Http\Controllers\CenterStudyGroupController;
 use App\Http\Controllers\CenterStudySessionController;
@@ -141,6 +142,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::post('groups/{groupId}/start', [CenterStudyGroupController::class, 'start']);
         Route::patch('groups/{groupId}/settings', [CenterStudyGroupController::class, 'updateSettings']);
         Route::get('groups/{groupId}/sessions', [CenterStudySessionController::class, 'workspace']);
+        Route::get('groups/{groupId}/coverage', [CenterStudyCoverageController::class, 'workspace']);
         Route::post('groups/{groupId}/sessions/preview', [CenterStudySessionController::class, 'preview']);
         Route::post('groups/{groupId}/sessions', [CenterStudySessionController::class, 'store']);
         Route::patch('groups/{groupId}/sessions/{sessionId}/postpone', [CenterStudySessionController::class, 'postpone']);

@@ -300,7 +300,7 @@ export function GroupControls({ context }: { context: GroupContext }) {
           { key: "price", label: "السعر", render: row => row.approved_price },
           { key: "threshold", label: "الإتمام", render: row => `${row.completion_threshold.toLocaleString("ar-EG")}٪${row.completion_threshold_override === null ? " · موروثة" : " · مخصصة"}` },
           { key: "instructors", label: "المحاضرون", render: row => row.instructors.map(item => item.name).join("، ") },
-          { key: "actions", label: "الإجراءات", actions: true, render: row => <div className="form-actions"><Link href={`/admin/groups/${row.id}/sessions`}>جدول المحاضرات</Link>{row.can_manage ? <Button data-group-edit={row.id} disabled={busy} onClick={() => open(row)}>إدارة {row.name}</Button> : null}</div> },
+          { key: "actions", label: "الإجراءات", actions: true, render: row => <div className="form-actions"><Link href={`/admin/groups/${row.id}/sessions`}>جدول المحاضرات</Link><Link href={`/admin/groups/${row.id}/coverage`}>تقرير التغطية</Link>{row.can_manage ? <Button data-group-edit={row.id} disabled={busy} onClick={() => open(row)}>إدارة {row.name}</Button> : null}</div> },
         ]} />
       {pages("groups", "المجموعات")}
       {pages("levels", "المستويات والخطط")}

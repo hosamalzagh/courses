@@ -19,6 +19,7 @@ export function getAdminHeader(path: string, context: CenterContext): { title: s
   };
   if (path.startsWith("/admin/curriculum/")) return { ...headers["/admin/curriculum"], title: "خطة المستوى" };
   if (/^\/admin\/groups\/[^/]+\/sessions$/.test(path)) return { title: "جدول محاضرات المجموعة", description: "مواعيد المجموعة مرقمة ومرتبطة بمحاضرات إصدار الخطة المعتمد. التوقيت بتوقيت القاهرة." };
+  if (/^\/admin\/groups\/[^/]+\/coverage$/.test(path)) return { title: "تغطية المحتوى وأهلية الإتمام", description: "المحاضرات المطلوبة المستوفاة منفصلة عن انتظام الطالب منذ انضمامه. بلوغ الحد يؤهل للمراجعة ولا يعتمد الإتمام تلقائيًا." };
   if (/^\/admin\/groups\/[^/]+\/sessions\/[^/]+\/attendance$/.test(path)) return { title: "كشف حضور المحاضرة", description: "الحضور غير المسجل يبقى معلقًا حتى إغلاق المحاضرة، ثم يعتمد غياب المستحقين فقط." };
   if (path === "/admin/students/new") return { title: 'إنشاء ملف طالب', description: 'ابدأ بالاسم وفرع مصرح به، ثم استكمل البيانات الاختيارية.' };
   if (path.endsWith('/account') && path.startsWith('/admin/students/')) return { title: 'حساب الطالب', description: 'الدفعات المقدمة غير مخصصة لمجموعة بعد. المبالغ المعروضة ضمن فروع صلاحيتك فقط.' };

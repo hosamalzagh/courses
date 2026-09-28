@@ -2,7 +2,7 @@ import { cache } from "react";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import type { CurriculumContext } from "./curriculum";
-import type { AttendanceContext, GroupContext, SessionContext } from "./groups";
+import type { AttendanceContext, CoverageContext, GroupContext, SessionContext } from "./groups";
 
 export type Branch = { id: number; name: string; slug: string; address: string | null };
 export type CenterSettings = { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number; student_code_enabled?: boolean; student_code_label?: string; student_code_revision?: number };
@@ -169,6 +169,10 @@ export function loadGroupSessions(groupId: string, query = ""): Promise<SessionC
   return fetchCenterPayload<SessionContext>(`groups/${encodeURIComponent(groupId)}/sessions${query ? `?${query}` : ""}`);
 }
 
+export function loadGroupCoverage(groupId: string, query = ""): Promise<CoverageContext | CenterAccessFailure> {
+  return fetchCenterPayload<CoverageContext>(`groups/${encodeURIComponent(groupId)}/coverage${query ? `?${query}` : ""}`);
+}
+
 export function loadGroupAttendance(groupId: string, sessionId: string, query = ""): Promise<AttendanceContext | CenterAccessFailure> {
   return fetchCenterPayload<AttendanceContext>(`groups/${encodeURIComponent(groupId)}/sessions/${encodeURIComponent(sessionId)}/attendance${query ? `?${query}` : ""}`);
 }
@@ -204,6 +208,8 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q", "identifier"]));
   if (path === "/admin/curriculum") return loadCurriculumWorkspace(query(["courses_page", "stages_page", "levels_page", "branches_page"]));
   if (path === "/admin/groups") return loadGroupWorkspace(query(["page", "levels_page", "instructors_page"]));
+  const groupCoverage = path.match(/^\/admin\/groups\/([^/]+)\/coverage$/);
+  if (groupCoverage) return loadGroupCoverage(decodeURIComponent(groupCoverage[1]), query(["page", "q"]));
   const groupAttendance = path.match(/^\/admin\/groups\/([^/]+)\/sessions\/([^/]+)\/attendance$/);
   if (groupAttendance) return loadGroupAttendance(decodeURIComponent(groupAttendance[1]), decodeURIComponent(groupAttendance[2]), query(["page", "q"]));
   const groupSessions = path.match(/^\/admin\/groups\/([^/]+)\/sessions$/);
