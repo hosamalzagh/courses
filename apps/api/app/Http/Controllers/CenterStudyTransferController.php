@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Support\ActiveStudentAllocations;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use App\Support\EffectiveStudyFees;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
 use App\Support\StudyCoverageCredits;
@@ -235,7 +236,7 @@ EXISTS (SELECT 1 FROM study_attendance_entries AS entries
       AND (sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= ?::date) AS recorded_after
 SQL, [$data['transferred_on']]);
         $query->selectSub($sum('student_payments', 'amount', 'branch_id'), 'received_total')
-            ->selectSub($sum('study_attempt_fees', 'net_amount', 'branch_id'), 'due_total')
+            ->selectSub($sum('study_attempt_fees', EffectiveStudyFees::amount('study_attempt_fees'), 'branch_id'), 'due_total')
             ->selectSub($used, 'used_total')->selectSub($paid, 'paid_total');
         $row = ($lock ? $query->lock('FOR UPDATE OF attempts, groups') : $query)->first();
         abort_unless($row && $permissions->can('enrollment.manage', (int) $row->branch_id), 404);
@@ -337,7 +338,7 @@ SQL, [$data['transferred_on']]);
         $history = $this->historyQuery()->where('transfers.attempt_id', $attemptId)
             ->when(! $permissions->isCenterManager(), fn ($query) => $query
                 ->whereIn('transfers.from_branch_id', $visibleBranches)->whereIn('transfers.to_branch_id', $visibleBranches))
-            ->orderByDesc('transfers.created_at')->orderByDesc('transfers.id')
+            ->orderByDesc('transfers.transferred_on')->orderByDesc('transfers.created_at')->orderByDesc('transfers.id')
             ->offset(($page - 1) * 20)->limit(21)->get();
 
         return ['history' => $history->take(20)->map(fn (object $row): array => $this->historyRow($row, $permissions))->values(),

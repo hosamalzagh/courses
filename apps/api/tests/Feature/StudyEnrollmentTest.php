@@ -1555,6 +1555,21 @@ class StudyEnrollmentTest extends TestCase
             'discount' => '0.00', 'discount_reason' => null, 'version' => $workspace['student']['version'],
             'request_id' => (string) Str::uuid(),
         ])->assertCreated()->json('attempt');
+        $this->center->run(function () use ($attempt, $student): void {
+            $submissionId = (string) Str::uuid();
+            DB::table('study_fee_adjustment_submissions')->insert([
+                'request_id' => $submissionId, 'student_id' => $student['id'], 'fee_id' => $attempt['fee']['id'],
+                'kind' => 'settle', 'request_hash' => hash('sha256', $submissionId), 'actor_id' => $this->owner->id,
+                'created_at' => now(),
+            ]);
+            DB::table('study_fee_adjustments')->insert([
+                'id' => (string) Str::uuid(), 'submission_id' => $submissionId, 'sequence' => 1,
+                'student_id' => $student['id'], 'fee_id' => $attempt['fee']['id'], 'branch_id' => $this->north,
+                'kind' => 'settlement', 'amount_delta' => '-20.00', 'before_due' => '100.00',
+                'after_due' => '80.00', 'reason' => 'تسوية قبل النقل', 'actor_id' => $this->owner->id,
+                'actor_name' => $this->owner->name, 'created_at' => now(),
+            ]);
+        });
         $sourceLecture = $this->center->run(fn () => DB::table('plan_lectures')->where('plan_version_id', $source['plan_version_id'])->value('id'));
         $targetLecture = $this->center->run(fn () => DB::table('plan_lectures')->where('plan_version_id', $target['plan_version_id'])->value('id'));
         $sessionId = (string) Str::uuid();
@@ -1588,7 +1603,7 @@ class StudyEnrollmentTest extends TestCase
         ])->assertCreated();
         $previewResponse = $this->getJson($previewUrl)->assertOk()->assertJsonPath('preview.equivalence_ready', true)
             ->assertJsonPath('preview.credited_count', 1)->assertJsonPath('preview.required_count', 1)
-            ->assertJsonPath('preview.balance.debt', '100.00');
+            ->assertJsonPath('preview.balance.debt', '80.00');
         $this->assertLessThanOrEqual(6, (int) $previewResponse->headers->get('X-Courses-Query-Count'));
         $preview = $previewResponse->json('preview');
         $this->assertSame([['id' => $targetLecture, 'number' => 1]], $preview['credited_lectures']);
@@ -1626,6 +1641,7 @@ class StudyEnrollmentTest extends TestCase
         $this->center->run(function () use ($attempt, $target): void {
             $this->assertSame(1, DB::table('study_attempt_transfers')->where('attempt_id', $attempt['id'])->count());
             $this->assertSame(1, DB::table('study_attempt_fees')->where('attempt_id', $attempt['id'])->count());
+            $this->assertSame(1, DB::table('study_fee_adjustments')->where('fee_id', $attempt['fee']['id'])->count());
             $this->assertSame($this->north, (int) DB::table('study_attempt_fees')->where('attempt_id', $attempt['id'])->value('branch_id'));
             $this->assertSame(2, DB::table('study_attendance_entries')->where('attempt_id', $attempt['id'])->count());
             $this->assertSame(2, DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])->count());
