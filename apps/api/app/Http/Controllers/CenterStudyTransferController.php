@@ -7,6 +7,7 @@ use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
+use App\Support\StudyCoverageCredits;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
@@ -22,7 +23,9 @@ class CenterStudyTransferController extends Controller
         $data = $request->validate([
             'group_id' => ['required', 'uuid'],
             'transferred_on' => ['required', 'date_format:Y-m-d', 'before_or_equal:'.now('Africa/Cairo')->toDateString()],
+            'history_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
         ]);
+        $historyPage = (int) ($data['history_page'] ?? 1);
         $permissions = $request->attributes->get('center_permissions');
         $preview = $this->buildPreview($studentId, $attemptId, $data, $permissions);
         $visibleBranches = array_keys(array_filter($permissions->branchRoles,
@@ -30,13 +33,15 @@ class CenterStudyTransferController extends Controller
         $history = $this->historyQuery()->where('transfers.attempt_id', $attemptId)
             ->when(! $permissions->isCenterManager(), fn ($query) => $query
                 ->whereIn('transfers.from_branch_id', $visibleBranches)->whereIn('transfers.to_branch_id', $visibleBranches))
-            ->orderByDesc('transfers.created_at')->orderByDesc('transfers.id')->limit(21)->get();
+            ->orderByDesc('transfers.created_at')->orderByDesc('transfers.id')
+            ->offset(($historyPage - 1) * 20)->limit(21)->get();
         $preview['approval_count'] = count($preview['approval_ids']);
         unset($preview['approval_ids']);
 
         return response()->json(['preview' => $preview, 'history' => $history->take(20)->map(
             fn (object $row): array => $this->historyRow($row, $permissions)
-        )->values(), 'history_has_more' => $history->count() > 20])->header('Cache-Control', 'private, no-store');
+        )->values(), 'history_page' => $historyPage, 'history_has_more' => $history->count() > 20])
+            ->header('Cache-Control', 'private, no-store');
     }
 
     public function store(Request $request, string $studentId, string $attemptId): JsonResponse
@@ -97,7 +102,7 @@ class CenterStudyTransferController extends Controller
                 $recordedAttendance = DB::connection('tenant')->table('study_attendance_entries as entries')
                     ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
                     ->where('entries.attempt_id', $attemptId)->where('sessions.group_id', $period->group_id)
-                    ->whereNotNull('entries.status')
+                    ->whereNotNull('entries.status')->where('sessions.status', '<>', 'cancelled')
                     ->whereRaw("(sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= ?::date", [$data['transferred_on']])
                     ->exists();
                 abort_if($recordedAttendance, 422, 'تاريخ النقل يسبق حضورًا مسجلًا أو يوافق يومه.');
@@ -195,21 +200,27 @@ EXISTS (SELECT 1 FROM student_branches WHERE student_id = attempts.student_id AN
 EXISTS (SELECT 1 FROM study_attempts AS other WHERE other.student_id = attempts.student_id AND other.level_id = groups.level_id AND other.status = 'active' AND other.id <> attempts.id) AS level_occupied,
 COALESCE((SELECT joined_on::text FROM study_attempt_group_periods WHERE attempt_id = attempts.id AND left_on IS NULL),
     (SELECT entered_on::text FROM study_attempt_waitlists WHERE attempt_id = attempts.id AND left_on IS NULL)) AS current_start,
-COALESCE((SELECT json_agg(json_build_object('id', lectures.id, 'plan_version_id', lectures.plan_version_id) ORDER BY lectures.id)
+COALESCE((SELECT json_agg(json_build_object('id', lectures.id, 'final', sessions.closed_at IS NOT NULL) ORDER BY lectures.id)
     FROM study_attendance_entries AS entries JOIN study_sessions AS sessions ON sessions.id = entries.session_id
     JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id
     WHERE entries.attempt_id = attempts.id AND entries.status = 'counted' AND sessions.status <> 'cancelled'), '[]'::json) AS source_rows,
 COALESCE((SELECT json_agg(json_build_object('id', id, 'number', number) ORDER BY number)
     FROM plan_lectures WHERE plan_version_id = groups.plan_version_id), '[]'::json) AS target_lectures,
-COALESCE((SELECT json_agg(json_build_object('id', id, 'source_plan_version_id', source_plan_version_id,
-    'source_lecture_ids', source_lecture_ids, 'target_lecture_ids', target_lecture_ids) ORDER BY id)
-    FROM content_equivalences WHERE target_plan_version_id = groups.plan_version_id), '[]'::json) AS approvals
+COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
+    'source_plan_version_id', approvals.source_plan_version_id,
+    'target_plan_version_id', approvals.target_plan_version_id,
+    'source_lecture_ids', approvals.source_lecture_ids, 'target_lecture_ids', approvals.target_lecture_ids) ORDER BY approvals.id)
+    FROM content_equivalences AS approvals
+    WHERE approvals.target_plan_version_id = groups.plan_version_id
+      OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
+          WHERE transfers.attempt_id = attempts.id AND jsonb_exists(transfers.approval_ids, approvals.id::text))), '[]'::json) AS approvals
 SQL)
             ->selectRaw(<<<'SQL'
 EXISTS (SELECT 1 FROM study_attendance_entries AS entries
     JOIN study_sessions AS sessions ON sessions.id = entries.session_id
     WHERE entries.attempt_id = attempts.id AND sessions.group_id = attempts.current_group_id
-      AND entries.status IS NOT NULL AND (sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= ?::date) AS recorded_after
+      AND entries.status IS NOT NULL AND sessions.status <> 'cancelled'
+      AND (sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= ?::date) AS recorded_after
 SQL, [$data['transferred_on']]);
         $query->selectSub($sum('student_payments', 'amount', 'branch_id'), 'received_total')
             ->selectSub($sum('study_attempt_fees', 'net_amount', 'branch_id'), 'due_total')
@@ -240,28 +251,20 @@ SQL, [$data['transferred_on']]);
             abort(422, 'تاريخ النقل يسبق حضورًا مسجلًا أو يوافق يومه.');
         }
 
-        $sourceRows = collect(json_decode($row->source_rows, true))->map(fn (array $entry) => (object) $entry);
-        $sourceIds = $sourceRows->pluck('id')->unique()->values()->all();
-        $sourceByPlan = $sourceRows->groupBy('plan_version_id')->map(fn ($rows) => $rows->pluck('id')->unique()->all());
+        $sourceRows = json_decode($row->source_rows, true);
+        $sourceIds = collect($sourceRows)->pluck('id')->unique()->values()->all();
         $targetLectures = collect(json_decode($row->target_lectures, true))->map(fn (array $entry) => (object) $entry);
-        $credited = array_fill_keys($sourceByPlan->get($group->plan_version_id, []), true);
-        $approvals = collect(json_decode($row->approvals, true))->map(fn (array $entry) => (object) $entry);
-        $approvalIds = [];
+        $approvals = json_decode($row->approvals, true);
+        $credits = StudyCoverageCredits::resolve($sourceRows, $approvals);
+        $credited = $credits['lectures'];
+        $approvalIds = collect($approvals)->filter(fn (array $approval): bool => $approval['target_plan_version_id'] === $group->plan_version_id
+            && in_array($approval['id'], $credits['approval_ids'], true))->pluck('id')->all();
         $directApproval = $attempt->plan_version_id === $group->plan_version_id;
         foreach ($approvals as $approval) {
-            if ($approval->source_plan_version_id === $attempt->plan_version_id) {
+            if ($approval['target_plan_version_id'] === $group->plan_version_id
+                && $approval['source_plan_version_id'] === $attempt->plan_version_id) {
                 $directApproval = true;
             }
-            $required = $approval->source_lecture_ids;
-            $coveredSource = $sourceByPlan->get($approval->source_plan_version_id, []);
-            if (count(array_diff($required, $coveredSource)) !== 0) {
-                continue;
-            }
-            $targets = $approval->target_lecture_ids;
-            foreach ($targets as $id) {
-                $credited[$id] = true;
-            }
-            $approvalIds[] = $approval->id;
         }
         $creditedLectures = $targetLectures->filter(fn ($lecture) => isset($credited[$lecture->id]));
         $missingLectures = $targetLectures->reject(fn ($lecture) => isset($credited[$lecture->id]));

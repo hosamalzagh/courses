@@ -47,6 +47,8 @@ export function StudyTransferEditor({ studentId, attempt, groups, groupsHasMore,
   const [reason, setReason] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [history, setHistory] = useState<History[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -54,6 +56,7 @@ export function StudyTransferEditor({ studentId, attempt, groups, groupsHasMore,
   const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState("");
   const requestId = useRef<string | null>(null);
+  const previewGeneration = useRef(0);
   const submitting = useRef(false);
   const dirty = Boolean(groupId || date || reason);
   useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
@@ -72,8 +75,8 @@ export function StudyTransferEditor({ studentId, attempt, groups, groupsHasMore,
     return () => { cancelled = true; };
   }, [studentId, query, groupsPage]);
 
-  function changeGroup(value: string) { setGroupId(value); setSelectedGroup(choices.find(group => group.id === value) ?? null); setPreview(null); setError(""); requestId.current = null; }
-  function changeDate(value: string) { setDate(value); setPreview(null); setError(""); requestId.current = null; }
+  function changeGroup(value: string) { previewGeneration.current++; setGroupId(value); setSelectedGroup(choices.find(group => group.id === value) ?? null); setPreview(null); setHistory([]); setHistoryPage(1); setLoading(false); setError(""); requestId.current = null; }
+  function changeDate(value: string) { previewGeneration.current++; setDate(value); setPreview(null); setHistory([]); setHistoryPage(1); setLoading(false); setError(""); requestId.current = null; }
   function changeReason(value: string) { setReason(value); setError(""); requestId.current = null; }
 
   async function loadPreview(event: FormEvent<HTMLFormElement>) {
@@ -83,15 +86,23 @@ export function StudyTransferEditor({ studentId, attempt, groups, groupsHasMore,
       setError("اختر المجموعة وتاريخ النقل أولًا.");
       document.getElementById(!groupId ? `${prefix}-group` : `${prefix}-date`)?.focus(); return;
     }
-    setLoading(true); setError(""); setPreview(null);
+    await fetchPreview(1);
+  }
+
+  async function fetchPreview(page: number) {
+    const generation = ++previewGeneration.current;
+    setLoading(true); setError("");
+    if (page === 1) setPreview(null);
     try {
-      const params = new URLSearchParams({ group_id: groupId, transferred_on: date });
+      const params = new URLSearchParams({ group_id: groupId, transferred_on: date, history_page: String(page) });
       const response = await centerRequest(`${base}/preview?${params}`, "GET");
       if (!response.ok) throw new Error(await responseMessage(response));
-      const result = await response.json() as { preview: Preview; history: History[] };
-      setPreview(result.preview); setHistory(result.history);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "تعذرت معاينة النقل."); }
-    finally { setLoading(false); }
+      const result = await response.json() as { preview: Preview; history: History[]; history_page: number; history_has_more: boolean };
+      if (generation !== previewGeneration.current) return;
+      setPreview(result.preview); setHistory(result.history); setHistoryPage(result.history_page);
+      setHistoryHasMore(result.history_has_more);
+    } catch (cause) { if (generation === previewGeneration.current) setError(cause instanceof Error ? cause.message : "تعذرت معاينة النقل."); }
+    finally { if (generation === previewGeneration.current) setLoading(false); }
   }
 
   function prepare() {
@@ -193,6 +204,10 @@ export function StudyTransferEditor({ studentId, attempt, groups, groupsHasMore,
         { key: "coverage", label: "التغطية عند النقل", render: row => `${row.credited_count}/${row.required_count}` },
         { key: "reason", label: "السبب", render: row => row.reason ?? "محجوب" },
       ]} /> : null}
+    {preview && (historyPage > 1 || historyHasMore) ? <div className="form-actions">
+      <Button type="button" disabled={historyPage <= 1 || loading || busy} onClick={() => void fetchPreview(historyPage - 1)}>السجل السابق</Button>
+      <Button type="button" disabled={!historyHasMore || loading || busy} onClick={() => void fetchPreview(historyPage + 1)}>السجل التالي</Button>
+    </div> : null}
     {confirm ? <ConfirmationDialog title="تأكيد نقل المحاولة" description="ستتغير المجموعة والخطة الحالية مع حفظ تاريخ الفرع والحضور والرسوم السابقة. لن تُنشأ حركة مالية."
       confirmLabel="نقل المحاولة" onCancel={() => setConfirm(false)} onConfirm={save} /> : null}
   </section>;

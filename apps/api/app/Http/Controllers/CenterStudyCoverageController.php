@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\StudyCoverageCredits;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -25,7 +26,7 @@ class CenterStudyCoverageController extends Controller
             ->where('groups.id', $groupId)
             ->select(['groups.id', 'groups.name', 'groups.status', 'groups.plan_version_id', 'courses.branch_id'])
             ->selectRaw('COALESCE(groups.completion_threshold, levels.completion_threshold, stages.completion_threshold, courses.completion_threshold) AS completion_threshold')
-            ->selectRaw("COALESCE((SELECT json_agg(json_build_object('number', number, 'title', title, 'content', content) ORDER BY number) FROM plan_lectures WHERE plan_version_id = groups.plan_version_id), '[]'::json) AS requirements")
+            ->selectRaw("COALESCE((SELECT json_agg(json_build_object('id', id, 'number', number, 'title', title, 'content', content) ORDER BY number) FROM plan_lectures WHERE plan_version_id = groups.plan_version_id), '[]'::json) AS requirements")
             ->first();
         abort_unless($group && $permissions->can('read', (int) $group->branch_id), 404);
 
@@ -42,31 +43,17 @@ class CenterStudyCoverageController extends Controller
                 'attempts.completion_threshold',
                 'students.id as student_id', 'students.name', 'students.student_number', 'students.status as student_status'])
             ->selectRaw(<<<'SQL'
-COALESCE((SELECT json_agg(json_build_object('number', covered.number, 'final', covered.final) ORDER BY covered.number)
-FROM (WITH counted AS (
-    SELECT lectures.id, bool_or(sessions.closed_at IS NOT NULL) AS final
+COALESCE((SELECT json_agg(json_build_object('id', lectures.id, 'final', sessions.closed_at IS NOT NULL))
     FROM study_attendance_entries AS entries
     JOIN study_sessions AS sessions ON sessions.id = entries.session_id
     JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id
-    WHERE entries.attempt_id = attempts.id AND entries.status = 'counted' AND sessions.status <> 'cancelled'
-    GROUP BY lectures.id
-), credited AS (
-    SELECT targets.number,
-        EXISTS (SELECT 1 FROM counted WHERE counted.id = targets.id AND counted.final) OR
-        EXISTS (SELECT 1 FROM content_equivalences AS approvals
-            WHERE approvals.target_plan_version_id = attempts.plan_version_id
-              AND jsonb_exists(approvals.target_lecture_ids, targets.id::text)
-              AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(approvals.source_lecture_ids) AS source(id)
-                  WHERE NOT EXISTS (SELECT 1 FROM counted WHERE counted.id::text = source.id AND counted.final))) AS final
-    FROM plan_lectures AS targets
-    WHERE targets.plan_version_id = attempts.plan_version_id
-      AND (EXISTS (SELECT 1 FROM counted WHERE counted.id = targets.id)
-        OR EXISTS (SELECT 1 FROM content_equivalences AS approvals
-            WHERE approvals.target_plan_version_id = attempts.plan_version_id
-              AND jsonb_exists(approvals.target_lecture_ids, targets.id::text)
-              AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(approvals.source_lecture_ids) AS source(id)
-                  WHERE NOT EXISTS (SELECT 1 FROM counted WHERE counted.id::text = source.id))))
-) SELECT number, final FROM credited) AS covered), '[]'::json) AS coverage
+    WHERE entries.attempt_id = attempts.id AND entries.status = 'counted' AND sessions.status <> 'cancelled'), '[]'::json) AS attendance_rows,
+COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
+    'source_lecture_ids', approvals.source_lecture_ids, 'target_lecture_ids', approvals.target_lecture_ids))
+    FROM content_equivalences AS approvals
+    WHERE approvals.target_plan_version_id = attempts.plan_version_id
+      OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
+          WHERE transfers.attempt_id = attempts.id AND jsonb_exists(transfers.approval_ids, approvals.id::text))), '[]'::json) AS approvals
 SQL);
         if (isset($data['q']) && trim($data['q']) !== '') {
             $search = mb_strtolower(preg_replace('/\s+/u', ' ', trim($data['q'])));
@@ -81,10 +68,12 @@ SQL);
         }
         $rows = $students->orderBy('students.student_number')->orderBy('attempts.id')
             ->offset(($page - 1) * 20)->limit(21)->get();
-        $report = $rows->take(20)->map(function (object $row) use ($requiredNumbers, $requiredCount): array {
-            $coverage = json_decode($row->coverage, true);
+        $report = $rows->take(20)->map(function (object $row) use ($requirements, $requiredNumbers, $requiredCount): array {
+            $credits = StudyCoverageCredits::resolve(json_decode($row->attendance_rows, true), json_decode($row->approvals, true));
+            $coverage = array_values(array_filter($requirements, fn (array $entry): bool => array_key_exists($entry['id'], $credits['lectures'])));
             $coveredNumbers = array_column($coverage, 'number');
-            $openNumbers = array_values(array_column(array_filter($coverage, fn (array $entry): bool => ! $entry['final']), 'number'));
+            $openNumbers = array_values(array_column(array_filter($coverage,
+                fn (array $entry): bool => ! $credits['lectures'][$entry['id']]), 'number'));
             $coveredCount = count($coveredNumbers);
 
             return [
