@@ -54,3 +54,18 @@ export type AttendanceContext = CenterContext & {
   has_started: boolean;
   last_own_attempt_id: string | null;
 };
+
+export type CoverageRow = {
+  attempt_id: string; student_id: string; name: string; student_number: number;
+  joined_on: string; attempt_status: string; student_status: "active" | "suspended";
+  covered_numbers: number[]; missing_numbers: number[]; open_numbers: number[];
+  covered_count: number; required_count: number; completion_threshold: number; percentage: number; eligible: boolean;
+};
+
+export type CoverageContext = CenterContext & {
+  group: { id: string; name: string; status: StudyGroup["status"]; branch_id: number;
+    completion_threshold: number; required_count: number;
+    requirements: { number: number; title: string | null; content: string }[] };
+  students: CoverageRow[];
+  pagination: { page: number; has_more: boolean };
+};
