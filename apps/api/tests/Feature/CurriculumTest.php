@@ -168,6 +168,7 @@ class CurriculumTest extends TestCase
             DB::table('migrations')->where('migration', '2026_09_28_010000_create_study_groups')->delete();
         });
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->center->run(fn () => $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attendance_entries')));
         $level = $this->sequence($this->north, 'Alpha curriculum');
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
         $this->getJson("{$this->base}/levels/{$level['id']}")->assertOk()->assertJsonCount(2, 'branches');
@@ -175,6 +176,7 @@ class CurriculumTest extends TestCase
             'name' => 'Beta', 'slug' => 'beta', 'subdomain' => 'beta', 'plan' => 'starter', 'owner_email' => 'owner@beta.test',
         ])->assertCreated();
         $beta = Center::where('slug', 'beta')->firstOrFail();
+        $beta->run(fn () => $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attendance_entries')));
         CenterMembership::create(['tenant_id' => $beta->id, 'user_id' => $this->owner->id, 'status' => 'active']);
         $beta->run(fn () => DB::table('center_grants')->insert(['user_id' => $this->owner->id, 'role' => 'center_owner']));
         $this->actingAs($this->owner, 'web')->withSession(['center_id' => $beta->id]);

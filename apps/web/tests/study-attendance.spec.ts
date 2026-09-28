@@ -2,8 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-test.skip(!process.env.COURSES_ATTENDANCE_CREDENTIALS || !process.env.COURSES_ATTENDANCE_DB_PORT,
-  "Requires a disposable PostgreSQL center and browser credentials.");
+test.skip(!process.env.COURSES_ATTENDANCE_CREDENTIALS || !process.env.COURSES_ATTENDANCE_DB_PORT || !process.env.COURSES_ATTENDANCE_QUERY_LOG,
+  "Requires a disposable PostgreSQL center, browser credentials, and the SSR query log.");
 const origin = process.env.COURSES_ATTENDANCE_ORIGIN ?? "http://alpha.courses.test:8057";
 const credentials = process.env.COURSES_ATTENDANCE_CREDENTIALS
   ? JSON.parse(readFileSync(process.env.COURSES_ATTENDANCE_CREDENTIALS, "utf8")) : {};
@@ -90,22 +90,60 @@ test("records whole-session attendance, undoes the last entry, closes absences, 
     const response = await owner.request.get(`${origin}/api/v1/center/${path}`);
     expect(Number(response.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
     expect((await response.json()).students).toHaveLength(2);
+    const logPath = process.env.COURSES_ATTENDANCE_QUERY_LOG!;
+    const beforeSsr = readFileSync(logPath, "utf8").trim().split("\n").length;
     const html = await (await owner.request.get(url)).text();
     expect(html).toContain(students[0].name);
     expect(html).toContain("غير مسجل");
+    const ssrReads = readFileSync(logPath, "utf8").trim().split("\n").slice(beforeSsr)
+      .map(line => JSON.parse(line) as { path: string; count: number | null })
+      .filter(read => read.path.startsWith(`/api/v1/center/${path}`));
+    expect(ssrReads.length).toBeGreaterThan(0);
+    expect(ssrReads.every(read => Number.isInteger(read.count) && read.count! <= 6)).toBe(true);
     await owner.goto(`${origin}/admin/groups/${groupId}/sessions`);
     await owner.getByRole("link", { name: "كشف الحضور" }).click();
     await expect(owner).toHaveURL(url);
     const row = owner.getByRole("row", { name: new RegExp(students[0].name) });
-    await row.getByRole("button", { name: "حاضر محتسب" }).click();
+    await row.getByRole("button", { name: "تسجيل الحضور" }).click();
+    await owner.getByRole("button", { name: "إلغاء" }).click();
+    await expect(row.getByRole("button", { name: "تسجيل الحضور" })).toBeFocused();
+    await row.getByRole("button", { name: "تسجيل الحضور" }).click();
+    await owner.getByRole("button", { name: "حاضر محتسب" }).click();
     await expect(row).toContainText("حاضر محتسب");
-    await row.getByRole("button", { name: "تراجع عن آخر إدخال" }).click();
+    await row.getByRole("button", { name: "عرض التراجع" }).click();
+    await owner.getByRole("button", { name: "تأكيد التراجع" }).click();
     await expect(row).toContainText("غير مسجل");
-    await row.getByRole("button", { name: "حاضر غير محتسب" }).click();
+    await row.getByRole("button", { name: "تسجيل الحضور" }).click();
+    await owner.getByRole("button", { name: "حاضر غير محتسب" }).click();
     await expect(row).toContainText("حاضر غير محتسب");
+    await row.getByRole("button", { name: "عرض التراجع" }).click();
+    await owner.getByRole("button", { name: "تأكيد التراجع" }).click();
+    await expect(row).toContainText("غير مسجل");
+    const beforeParallel = await (await owner.request.get(`${origin}/api/v1/center/${path}`)).json();
+    await owner.evaluate(() => fetch("/sanctum/csrf-cookie", { credentials: "same-origin" }));
+    const xsrf = (await owner.context().cookies(origin)).find(cookie => cookie.name === "XSRF-TOKEN")?.value ?? "";
+    const headers = { Accept: "application/json", "X-XSRF-TOKEN": decodeURIComponent(xsrf) };
+    const payload = { attempt_id: students[0].attemptId, revision: beforeParallel.session.revision };
+    const [first, second] = await Promise.all([
+      owner.request.post(`http://alpha.courses.test:8157/api/v1/center/${path}`, { headers,
+        data: { ...payload, status: "counted", request_id: crypto.randomUUID() } }),
+      owner.request.post(`http://alpha.courses.test:8158/api/v1/center/${path}`, { headers,
+        data: { ...payload, status: "not_counted", request_id: crypto.randomUUID() } }),
+    ]);
+    expect([first.status(), second.status()].sort()).toEqual([201, 409]);
     const recordedRoster = await (await owner.request.get(`${origin}/api/v1/center/${path}`)).json();
     const entryId = recordedRoster.students.find((item: { attempt_id: string }) => item.attempt_id === students[0].attemptId)?.entry_id;
     expect(entryId).toBeTruthy();
+    const entryCount = execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_ATTENDANCE_DB_PORT!, "-U", "postgres", "-d", tenantDb,
+      "-Atc", `SELECT count(*) FROM study_attendance_entries WHERE session_id = '${sessionId}' AND attempt_id = '${students[0].attemptId}' AND status IS NOT NULL`], { encoding: "utf8" }).trim();
+    expect(entryCount).toBe("1");
+    await owner.getByRole("button", { name: "إغلاق كشف المحاضرة" }).click();
+    await owner.getByRole("button", { name: "تأكيد الإغلاق" }).click();
+    await expect(owner.getByRole("button", { name: "تحميل أحدث البيانات" })).toBeVisible();
+    await owner.getByRole("button", { name: "تحميل أحدث البيانات" }).click();
+    await expect(owner.getByRole("row", { name: new RegExp(students[0].name) })).toContainText(
+      first.status() === 201 ? "حاضر محتسب" : "حاضر غير محتسب");
+    await owner.getByRole("button", { name: "إلغاء" }).click();
 
     const members = await (await owner.request.get(`${origin}/api/v1/center/member-workspace`)).json();
     const membershipId = members.members.find((item: { user: { email: string } }) => item.user.email === credentials.staff.email)?.id;
@@ -115,16 +153,17 @@ test("records whole-session attendance, undoes the last entry, closes absences, 
     await staff.goto(url);
     await expect(staff.getByText(students[0].name)).toBeVisible();
     await expect(staff.getByRole("button", { name: "إغلاق كشف المحاضرة" })).toHaveCount(0);
-    expect((await write(staff, path, { attempt_id: students[1].attemptId, status: "counted", revision: 4,
+    expect((await write(staff, path, { attempt_id: students[1].attemptId, status: "counted", revision: recordedRoster.session.revision,
       request_id: crypto.randomUUID() })).status).toBe(403);
-    expect((await write(staff, `groups/${groupId}/sessions/${sessionId}/close`, { revision: 4,
+    expect((await write(staff, `groups/${groupId}/sessions/${sessionId}/close`, { revision: recordedRoster.session.revision,
       request_id: crypto.randomUUID() })).status).toBe(403);
 
     await owner.getByRole("button", { name: "إغلاق كشف المحاضرة" }).click();
     await owner.getByRole("button", { name: "تأكيد الإغلاق" }).click();
     await expect(owner.getByRole("row", { name: new RegExp(students[1].name) })).toContainText("غائب");
     expect(await owner.locator("body").innerText()).not.toContain(students[2].name);
-    expect((await write(owner, `${path}/${entryId}/undo`, { revision: 5, request_id: crypto.randomUUID() })).status).toBe(409);
+    expect((await write(owner, `${path}/${entryId}/undo`, { revision: recordedRoster.session.revision + 1,
+      request_id: crypto.randomUUID() })).status).toBe(409);
     await owner.setViewportSize({ width: 390, height: 844 });
     expect(await owner.locator("html").getAttribute("dir")).toBe("rtl");
     await owner.getByRole("button", { name: "القائمة" }).click();

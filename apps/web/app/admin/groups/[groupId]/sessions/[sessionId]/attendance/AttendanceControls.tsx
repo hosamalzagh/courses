@@ -12,6 +12,7 @@ import type { AttendanceContext, AttendanceRow } from "@/lib/groups";
 import { formatSessionTime } from "@/lib/session-time";
 
 type Action = { kind: "record" | "undo" | "close"; key: string; requestId: string };
+type Selection = { attemptId: string; mode: "record" | "undo" };
 
 export function AttendanceControls({ context }: { context: AttendanceContext }) {
   const router = useRouter();
@@ -23,12 +24,14 @@ export function AttendanceControls({ context }: { context: AttendanceContext }) 
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [selected, setSelected] = useState<Selection | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   if (loadedContext !== context) {
     setLoadedContext(context);
     setCurrent(context);
     setConflict(false);
+    setSelected(null);
   }
 
   const { group, session } = current;
@@ -37,12 +40,14 @@ export function AttendanceControls({ context }: { context: AttendanceContext }) 
   const started = current.has_started;
   const canRecord = open && started && current.can_record;
   const canClose = open && started && current.can_close;
+  const selectedRow = current.students.find(row => row.attempt_id === selected?.attemptId);
 
   async function reload() {
     const response = await centerRequest(`${path}/attendance?page=${current.pagination.page}`, "GET");
     if (!response.ok) throw new Error(await responseMessage(response));
     setCurrent((await response.json()) as AttendanceContext);
     setConflict(false);
+    setSelected(null);
     router.refresh();
   }
 
@@ -81,10 +86,30 @@ export function AttendanceControls({ context }: { context: AttendanceContext }) 
     void action("record", `${row.attempt_id}-${status}`, `${path}/attendance`, { attempt_id: row.attempt_id, status });
   }
 
+  function select(row: AttendanceRow, mode: Selection["mode"]) {
+    setConfirmClose(false);
+    setSelected({ attemptId: row.attempt_id, mode });
+    requestAnimationFrame(() => document.getElementById(`${titleId}-selection`)?.focus());
+  }
+
+  function cancelSelection() {
+    const target = selected ? `${titleId}-${selected.attemptId}-${selected.mode}` : "";
+    setSelected(null);
+    requestAnimationFrame(() => document.getElementById(target)?.focus());
+  }
+
   return <>
     <CenterPageActions context={current} actions={<Link href={`/admin/groups/${group.id}/sessions`}>العودة لجدول المحاضرات</Link>} />
-    {canClose && !confirmClose ? <CenterHeaderActions><Button id={`${titleId}-close`} variant="primary" disabled={busy || conflict}
+    {canClose && !confirmClose && !selected ? <CenterHeaderActions><Button id={`${titleId}-close`} variant="primary" disabled={busy || conflict}
       onClick={() => { setConfirmClose(true); requestAnimationFrame(() => document.getElementById(`${titleId}-confirm`)?.focus()); }}>إغلاق كشف المحاضرة</Button></CenterHeaderActions> : null}
+    {selected && selectedRow && !conflict ? <CenterHeaderActions>
+      {selected.mode === "record" ? <>
+        <Button variant="primary" busy={busy} onClick={() => record(selectedRow, "counted")}>حاضر محتسب</Button>
+        <Button busy={busy} onClick={() => record(selectedRow, "not_counted")}>حاضر غير محتسب</Button>
+      </> : <Button variant="primary" busy={busy} onClick={() => void action("undo", selectedRow.attempt_id,
+        `${path}/attendance/${selectedRow.entry_id}/undo`, {})}>تأكيد التراجع</Button>}
+      <Button disabled={busy} onClick={cancelSelection}>إلغاء</Button>
+    </CenterHeaderActions> : null}
     {confirmClose ? <CenterHeaderActions><Button variant="primary" busy={busy} disabled={conflict}
       onClick={() => void action("close", session.id, `${path}/close`, {})}>تأكيد الإغلاق</Button>
       <Button disabled={busy} onClick={() => { setConfirmClose(false); requestAnimationFrame(() => document.getElementById(`${titleId}-close`)?.focus()); }}>إلغاء</Button></CenterHeaderActions> : null}
@@ -96,6 +121,10 @@ export function AttendanceControls({ context }: { context: AttendanceContext }) 
       <p>الموعد: {formatSessionTime(session.scheduled_at)}. {session.status === "cancelled" ? "المحاضرة ملغاة ولا يُعتمد عنها غياب." : session.closed_at ? "كشف الحضور مغلق." : "غير المسجل لا يُحسب غائبًا قبل الإغلاق."}</p>
       {!started && open ? <p>يمكن تسجيل الحضور بعد موعد المحاضرة.</p> : null}
       {confirmClose ? <div id={`${titleId}-confirm`} tabIndex={-1} role="status">سيصبح الطلاب المستحقون غير المسجلين غائبين. راجع الكشف قبل التأكيد.</div> : null}
+      {selectedRow ? <div id={`${titleId}-selection`} tabIndex={-1} role="status">
+        {selected?.mode === "record" ? `اختر نوع الحضور للطالب ${selectedRow.name} من إجراءات أعلى الصفحة.`
+          : `راجع آخر إدخال للطالب ${selectedRow.name}، ثم أكد التراجع من إجراءات أعلى الصفحة.`}
+      </div> : null}
     </section>
     <DataTable id={`attendance-${session.id}`} title="كشف الطلاب المستحقين" description="يعرض الطلاب المرتبطين بالمجموعة في تاريخ المحاضرة فقط." rows={current.students}
       rowKey={row => row.attempt_id} searchText={row => `${row.name} ${row.student_number}`} emptyMessage="لا يوجد طلاب مستحقون لهذه المحاضرة."
@@ -104,11 +133,10 @@ export function AttendanceControls({ context }: { context: AttendanceContext }) 
         { key: "number", label: "رقم الطالب", render: row => row.student_number.toLocaleString("ar-EG") },
         { key: "status", label: "الحضور", render: row => row.status === "counted" ? "حاضر محتسب" : row.status === "not_counted" ? "حاضر غير محتسب" : row.status === "absent" ? "غائب" : "غير مسجل" },
         { key: "actions", label: "الإجراءات", actions: true, render: row => canRecord && !row.status && row.student_status === "active"
-          ? <span className="flex flex-wrap gap-2"><Button id={`${titleId}-${row.attempt_id}-counted`} disabled={busy || conflict} onClick={() => record(row, "counted")}>حاضر محتسب</Button>
-              <Button id={`${titleId}-${row.attempt_id}-not_counted`} disabled={busy || conflict} onClick={() => record(row, "not_counted")}>حاضر غير محتسب</Button></span>
+          ? <Button id={`${titleId}-${row.attempt_id}-record`} disabled={busy || conflict} onClick={() => select(row, "record")}>تسجيل الحضور</Button>
           : open && current.can_undo_own && row.entry_id && row.recorded_by === current.user.id && current.last_own_attempt_id === row.attempt_id && row.status !== "absent"
-            ? <Button id={`${titleId}-${row.attempt_id}`} disabled={busy || conflict}
-                onClick={() => void action("undo", row.attempt_id, `${path}/attendance/${row.entry_id}/undo`, {})}>تراجع عن آخر إدخال</Button>
+            ? <Button id={`${titleId}-${row.attempt_id}-undo`} disabled={busy || conflict}
+                onClick={() => select(row, "undo")}>عرض التراجع</Button>
             : "—" },
       ]}
       serverPagination={{ page: current.pagination.page, hasMore: current.pagination.has_more, batchSize: 20,
