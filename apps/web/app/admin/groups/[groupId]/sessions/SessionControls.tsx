@@ -142,8 +142,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
   }
 
   return <>
-    <p><Link href={`/admin/groups/${group.id}/coverage`}>تقرير تغطية المحتوى وأهلية الإتمام</Link></p>
-    <CenterPageActions context={context} actions={<Link href="/admin/groups">العودة للمجموعات</Link>} />
+    <CenterPageActions context={context} actions={<><Link href={`/admin/groups/${group.id}/coverage`}>تقرير تغطية المحتوى وأهلية الإتمام</Link><Link href="/admin/groups">العودة للمجموعات</Link></>} />
     <UnsavedChangesGuard dirty={dirty} guardHistory />
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}

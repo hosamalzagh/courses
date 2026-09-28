@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { CenterPageActions } from "@/components/CenterShell";
 import { DataTable } from "@/components/DataTable";
 import { PrefetchLink as Link } from "@/components/PrefetchLink";
 import type { CoverageContext, CoverageRow } from "@/lib/groups";
@@ -9,7 +10,6 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   const router = useRouter();
   const group = context.group;
   const base = `/admin/groups/${group.id}/coverage`;
-  const requiredForEligibility = Math.ceil(group.required_count * group.completion_threshold / 100);
   const href = (page: number, q = search) => {
     const params = new URLSearchParams();
     if (page > 1) params.set("page", String(page));
@@ -28,9 +28,9 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   };
 
   return <>
-    <p className="muted">{group.name} · المطلوب {group.required_count.toLocaleString("ar-EG")} محاضرة · حد الإتمام {group.completion_threshold.toLocaleString("ar-EG")}% ({requiredForEligibility.toLocaleString("ar-EG")} محاضرة كاملة على الأقل).</p>
+    <CenterPageActions context={context} actions={<><Link href={`/admin/groups/${group.id}/sessions`}>جدول محاضرات المجموعة</Link><Link href="/admin/groups">العودة للمجموعات</Link></>} />
+    <p className="muted">{group.name} · المطلوب {group.required_count.toLocaleString("ar-EG")} محاضرة · حد التسجيلات الجديدة {group.completion_threshold.toLocaleString("ar-EG")}%.</p>
     <p className="muted">المحاضرات السابقة لانضمام الطالب تبقى ضمن المطلوب، لكنها ليست غيابًا عليه. النسبة هنا لتغطية المحتوى فقط؛ بلوغ الحد لا يعتمد إتمام الدراسة تلقائيًا.</p>
-    <p><Link href={`/admin/groups/${group.id}/sessions`}>جدول محاضرات المجموعة</Link></p>
     <DataTable id="study-coverage" title="تقرير أهلية إتمام الدراسة" description="المحتسب من محاضرات الخطة مرة واحدة. الحضور في محاضرة مفتوحة مبدئي حتى الإغلاق." rows={context.students}
       rowKey={row => row.attempt_id} searchText={row => `${row.name} ${row.student_number}`} emptyMessage="لا توجد محاولات دراسة مطابقة في هذه المجموعة."
       serverSearch={{ value: search, onSearch: value => router.push(href(1, value)) }}
@@ -43,6 +43,7 @@ export function CoverageControls({ context, search }: { context: CoverageContext
         { key: "result", label: "أهلية الإتمام", render: result },
       ]}
       expanded={row => <div className="space-y-2"><p><strong>المستوفى:</strong> {label(row.covered_numbers)}</p><p><strong>الناقص:</strong> {label(row.missing_numbers)}</p>
+        <p>حد هذه المحاولة: {row.completion_threshold.toLocaleString("ar-EG")}% ({Math.ceil(row.required_count * row.completion_threshold / 100).toLocaleString("ar-EG")} محاضرة كاملة على الأقل).</p>
         {row.open_numbers.length ? <p role="status"><strong>حضور مبدئي في محاضرات مفتوحة:</strong> {label(row.open_numbers)}. قد تتغير النسبة عند التراجع، ولا يجوز اعتماد الإتمام حتى الإغلاق وإعادة المراجعة.</p> : null}
         <p className="muted">تاريخ الانضمام: {row.joined_on} · حالة محاولة الدراسة: {row.attempt_status === "withdrawn" ? "منسحب" : row.attempt_status === "completed" ? "مكتملة" : "نشطة"}</p>
       </div>} />

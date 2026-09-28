@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\ActiveStudentAllocations;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
-use App\Support\ActiveStudentAllocations;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
@@ -118,7 +118,8 @@ class CenterStudyEnrollmentController extends Controller
                 ->where('study_groups.id', $data['group_id'])
                 ->lockForUpdate()
                 ->first(['study_groups.id', 'study_groups.level_id', 'study_groups.plan_version_id',
-                    'study_groups.approved_price', 'study_groups.revision', 'study_groups.status', 'courses.branch_id']);
+                    'study_groups.approved_price', 'study_groups.revision', 'study_groups.status', 'courses.branch_id',
+                    DB::raw('COALESCE(study_groups.completion_threshold, levels.completion_threshold, stages.completion_threshold, courses.completion_threshold) AS completion_threshold')]);
             abort_unless($group && $permissions->can('enrollment.manage', (int) $group->branch_id), 404);
             $student = StudentPhotos::visibleStudent($studentId, $permissions, 'enrollment.manage')
                 ->whereExists(DB::connection('tenant')->table('student_branches')
@@ -166,6 +167,7 @@ class CenterStudyEnrollmentController extends Controller
                 'id' => $attemptId, 'student_id' => $studentId, 'level_id' => $group->level_id,
                 'plan_version_id' => $group->plan_version_id, 'current_group_id' => $group->id,
                 'branch_id' => $group->branch_id, 'joined_on' => $data['joined_on'], 'status' => 'active',
+                'completion_threshold' => $group->completion_threshold,
                 'created_by' => $request->user()->id, 'created_by_name' => $request->user()->name,
                 'request_id' => $data['request_id'], 'request_hash' => $hash, 'created_at' => $now, 'updated_at' => $now,
             ]);
@@ -221,7 +223,7 @@ class CenterStudyEnrollmentController extends Controller
             ->select(['study_attempts.id', 'study_attempts.level_id', 'study_attempts.plan_version_id',
                 'study_attempts.current_group_id', 'study_attempts.branch_id', 'study_attempts.joined_on',
                 'study_attempts.status', 'study_attempts.created_at', 'study_groups.name as group_name', 'levels.name as level_name'])
-            ->selectRaw("(SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id) AS requirements_count")
+            ->selectRaw('(SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id) AS requirements_count')
             ->addSelect(['fees.id as fee_id', 'fees.original_price', 'fees.discount', 'fees.net_amount',
                 'fees.currency', 'fees.discount_reason', 'fees.actor_name', 'fees.branch_id as event_branch_id',
                 'note.id as note_id', 'note.body as note_body', 'note.important as note_important',

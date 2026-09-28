@@ -39,6 +39,7 @@ class CenterStudyCoverageController extends Controller
             ->where('attempts.current_group_id', $groupId)
             ->where('attempts.plan_version_id', $group->plan_version_id)
             ->select(['attempts.id as attempt_id', 'attempts.status as attempt_status', 'attempts.joined_on',
+                'attempts.completion_threshold',
                 'students.id as student_id', 'students.name', 'students.student_number', 'students.status as student_status'])
             ->selectRaw(<<<'SQL'
 COALESCE((SELECT json_agg(json_build_object('number', covered.number, 'final', covered.final) ORDER BY covered.number)
@@ -64,7 +65,7 @@ SQL);
         }
         $rows = $students->orderBy('students.student_number')->orderBy('attempts.id')
             ->offset(($page - 1) * 20)->limit(21)->get();
-        $report = $rows->take(20)->map(function (object $row) use ($requiredNumbers, $requiredCount, $threshold): array {
+        $report = $rows->take(20)->map(function (object $row) use ($requiredNumbers, $requiredCount): array {
             $coverage = json_decode($row->coverage, true);
             $coveredNumbers = array_column($coverage, 'number');
             $openNumbers = array_values(array_column(array_filter($coverage, fn (array $entry): bool => ! $entry['final']), 'number'));
@@ -75,13 +76,14 @@ SQL);
                 'name' => $row->name, 'student_number' => $row->student_number,
                 'joined_on' => $row->joined_on, 'attempt_status' => $row->attempt_status,
                 'student_status' => $row->student_status,
+                'completion_threshold' => (int) $row->completion_threshold,
                 'covered_numbers' => $coveredNumbers,
                 'missing_numbers' => array_values(array_diff($requiredNumbers, $coveredNumbers)),
                 'open_numbers' => $openNumbers,
                 'covered_count' => $coveredCount,
                 'required_count' => $requiredCount,
                 'percentage' => $requiredCount === 0 ? 0 : round($coveredCount * 100 / $requiredCount, 2),
-                'eligible' => $requiredCount > 0 && $coveredCount * 100 >= $threshold * $requiredCount,
+                'eligible' => $requiredCount > 0 && $coveredCount * 100 >= (int) $row->completion_threshold * $requiredCount,
             ];
         });
 

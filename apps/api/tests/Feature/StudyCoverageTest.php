@@ -97,11 +97,18 @@ class StudyCoverageTest extends TestCase
         $this->getJson($path)->assertOk()->assertJsonPath('students.0.covered_count', 8)
             ->assertJsonPath('students.0.open_numbers', [])->assertJsonPath('students.0.eligible', true);
 
+        $this->center->run(fn () => DB::table('study_groups')->where('id', $group['id'])
+            ->update(['completion_threshold' => 90]));
+        $this->getJson($path)->assertOk()->assertJsonPath('group.completion_threshold', 90)
+            ->assertJsonPath('students.0.completion_threshold', 80)
+            ->assertJsonPath('students.0.eligible', true);
+
         $late = $this->student();
         $lateAttempt = $this->enroll($late['id'], [...$group, 'revision' => 3], $start->copy()->addWeeks(7)->format('Y-m-d'));
         $result = $this->getJson("{$path}?q=".rawurlencode($late['name']))->assertOk()
             ->assertJsonCount(1, 'students')->assertJsonPath('students.0.attempt_id', $lateAttempt['id'])
-            ->assertJsonPath('students.0.covered_count', 0)->assertJsonPath('students.0.required_count', 10);
+            ->assertJsonPath('students.0.covered_count', 0)->assertJsonPath('students.0.required_count', 10)
+            ->assertJsonPath('students.0.completion_threshold', 90);
         $this->assertSame(range(1, 10), $result->json('students.0.missing_numbers'));
         $this->center->run(fn () => $this->assertSame(0, DB::table('study_attempts')->where('status', 'completed')->count()));
     }

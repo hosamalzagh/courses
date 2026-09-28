@@ -59,7 +59,7 @@ export type CoverageRow = {
   attempt_id: string; student_id: string; name: string; student_number: number;
   joined_on: string; attempt_status: string; student_status: "active" | "suspended";
   covered_numbers: number[]; missing_numbers: number[]; open_numbers: number[];
-  covered_count: number; required_count: number; percentage: number; eligible: boolean;
+  covered_count: number; required_count: number; completion_threshold: number; percentage: number; eligible: boolean;
 };
 
 export type CoverageContext = CenterContext & {

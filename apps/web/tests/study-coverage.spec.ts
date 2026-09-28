@@ -89,8 +89,9 @@ test("coverage is provisional until closure and hidden branch data stays denied"
     expect(reads.length).toBeGreaterThan(0);
     expect(reads.every(read => Number.isInteger(read.count) && read.count! <= 6)).toBe(true);
     await owner.goto(`${origin}/admin/groups/${groupId}/sessions`);
-    await owner.getByRole("link", { name: "تقرير تغطية المحتوى وأهلية الإتمام" }).click();
+    await owner.locator("header.center-topbar").getByRole("link", { name: "تقرير تغطية المحتوى وأهلية الإتمام" }).click();
     await expect(owner).toHaveURL(url);
+    await expect(owner.locator("header.center-topbar").getByRole("link", { name: "جدول محاضرات المجموعة" })).toBeVisible();
     await expect(owner.getByRole("row", { name: new RegExp(student.body.student.name) })).toContainText("٠/١");
 
     const attendance = `groups/${groupId}/sessions/${sessionId}/attendance`;
