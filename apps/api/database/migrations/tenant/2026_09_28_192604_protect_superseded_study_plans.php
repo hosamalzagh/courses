@@ -7,21 +7,26 @@ return new class extends Migration
 {
     public function up(): void
     {
+        DB::statement('ALTER TABLE study_plan_versions ADD COLUMN sealed_at timestamp NULL');
+        DB::statement('UPDATE study_plan_versions SET sealed_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP) WHERE version > 1');
         DB::unprepared(<<<'SQL'
 CREATE OR REPLACE FUNCTION protect_used_plan_lecture() RETURNS trigger AS $$
 DECLARE plan_id uuid;
 DECLARE already_used timestamp;
+DECLARE sealed_at timestamp;
 DECLARE superseded boolean;
 BEGIN
     plan_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.plan_version_id ELSE NEW.plan_version_id END;
-    SELECT plans.used_at, EXISTS(SELECT 1 FROM study_plan_versions AS later WHERE later.level_id = plans.level_id AND later.version > plans.version)
-        INTO already_used, superseded FROM study_plan_versions AS plans WHERE plans.id = plan_id FOR UPDATE;
+    SELECT plans.used_at, plans.sealed_at, EXISTS(SELECT 1 FROM study_plan_versions AS later WHERE later.level_id = plans.level_id AND later.version > plans.version)
+        INTO already_used, sealed_at, superseded FROM study_plan_versions AS plans WHERE plans.id = plan_id FOR UPDATE;
     IF already_used IS NOT NULL THEN RAISE EXCEPTION 'Used study plan is immutable'; END IF;
+    IF sealed_at IS NOT NULL THEN RAISE EXCEPTION 'Sealed study plan is immutable'; END IF;
     IF superseded THEN RAISE EXCEPTION 'Superseded study plan is immutable'; END IF;
     IF TG_OP = 'UPDATE' AND OLD.plan_version_id <> NEW.plan_version_id THEN
-        SELECT plans.used_at, EXISTS(SELECT 1 FROM study_plan_versions AS later WHERE later.level_id = plans.level_id AND later.version > plans.version)
-            INTO already_used, superseded FROM study_plan_versions AS plans WHERE plans.id = OLD.plan_version_id FOR UPDATE;
+        SELECT plans.used_at, plans.sealed_at, EXISTS(SELECT 1 FROM study_plan_versions AS later WHERE later.level_id = plans.level_id AND later.version > plans.version)
+            INTO already_used, sealed_at, superseded FROM study_plan_versions AS plans WHERE plans.id = OLD.plan_version_id FOR UPDATE;
         IF already_used IS NOT NULL THEN RAISE EXCEPTION 'Used study plan is immutable'; END IF;
+        IF sealed_at IS NOT NULL THEN RAISE EXCEPTION 'Sealed study plan is immutable'; END IF;
         IF superseded THEN RAISE EXCEPTION 'Superseded study plan is immutable'; END IF;
     END IF;
     RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
@@ -32,14 +37,14 @@ DECLARE superseded boolean;
 BEGIN
     SELECT EXISTS(SELECT 1 FROM study_plan_versions AS later WHERE later.level_id = OLD.level_id AND later.version > OLD.version)
         INTO superseded;
-    IF TG_OP = 'DELETE' AND OLD.used_at IS NOT NULL THEN
-        RAISE EXCEPTION 'Used study plan is immutable';
-    END IF;
-    IF TG_OP = 'DELETE' AND superseded THEN
-        RAISE EXCEPTION 'Superseded study plan is immutable';
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.used_at IS NOT NULL THEN RAISE EXCEPTION 'Used study plan is immutable'; END IF;
+        IF OLD.sealed_at IS NOT NULL THEN RAISE EXCEPTION 'Sealed study plan is immutable'; END IF;
+        IF superseded THEN RAISE EXCEPTION 'Superseded study plan is immutable'; END IF;
     END IF;
     IF TG_OP = 'UPDATE' AND (NEW.id <> OLD.id OR NEW.level_id <> OLD.level_id OR NEW.version <> OLD.version
         OR (OLD.used_at IS NOT NULL AND (NEW.used_at IS DISTINCT FROM OLD.used_at OR NEW.revision <> OLD.revision))
+        OR (OLD.sealed_at IS NOT NULL AND (NEW.sealed_at IS DISTINCT FROM OLD.sealed_at OR NEW.revision <> OLD.revision))
         OR (superseded AND NEW.revision <> OLD.revision)) THEN
         RAISE EXCEPTION 'Study plan identity and protected content are immutable';
     END IF;
@@ -76,5 +81,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 SQL);
+        DB::statement('ALTER TABLE study_plan_versions DROP COLUMN sealed_at');
     }
 };

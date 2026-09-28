@@ -123,6 +123,22 @@ test("plan versions preserve history, show their difference and enforce current 
       write(owner, versionPath, { ...payload, lectures: [{ number: 1, content: "إصدار منافس", planned_hours: 2 }], request_id: crypto.randomUUID() }),
     ]);
     expect(concurrent.map(result => result.status).sort()).toEqual([201, 409]);
+    let currentPlan = concurrent.find(result => result.status === 201)!.body.plan as { id: string; revision: number };
+    for (let version = 5; version <= 21; version++) {
+      const next = await write(owner, versionPath, { base_plan_version_id: currentPlan.id,
+        base_revision: currentPlan.revision, request_id: crypto.randomUUID(),
+        lectures: [{ number: 1, content: `محتوى الإصدار ${version}`, planned_hours: 2 }] });
+      expect(next.status).toBe(201);
+      currentPlan = next.body.plan;
+    }
+    await owner.goto(pageUrl);
+    const history = owner.getByRole("table", { name: "إصدارات خطة المستوى" });
+    await owner.getByRole("button", { name: "الصفحة التالية في إصدارات خطة المستوى" }).click();
+    await expect(history.getByRole("row", { name: /الإصدار ٢/ })).toBeVisible();
+    await owner.getByRole("link", { name: "الدفعة التالية" }).click();
+    await expect(owner).toHaveURL(/versions_page=2/);
+    await expect(history.getByRole("row", { name: /الإصدار ١/ })).toBeVisible();
+    await expect(owner.getByRole("button", { name: "الصفحة السابقة في إصدارات خطة المستوى" })).toBeDisabled();
     await owner.goto(`${origin}/admin/audit`);
     await expect(owner.getByText("إنشاء إصدار خطة المستوى").first()).toBeVisible();
     await owner.getByText("عرض تغيير المنهج").first().click();

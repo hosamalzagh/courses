@@ -143,6 +143,7 @@ class CurriculumTest extends TestCase
             ->assertJsonPath('levels.0.latest_version', 2);
         $this->getJson("{$this->base}/curriculum-workspace")->assertOk()->assertJsonPath('levels.0.plan.id', $saved['id']);
         $this->getJson("{$this->base}/levels/{$level['id']}?plan_version=3")->assertNotFound();
+        $this->getJson("{$this->base}/levels/{$level['id']}?plan_version=3000000000")->assertUnprocessable();
         $this->getJson("{$this->base}/curriculum/submissions/{$payload['request_id']}")->assertOk()
             ->assertJsonPath('record.plan.id', $saved['id']);
         $this->getJson("{$this->base}/groups/{$group['id']}")->assertOk()
@@ -201,6 +202,19 @@ class CurriculumTest extends TestCase
                 $this->fail('An unused but superseded version must still be immutable.');
             } catch (QueryException $exception) {
                 $this->assertStringContainsString('Superseded study plan is immutable', $exception->getMessage());
+            }
+            $this->assertNotNull(DB::table('study_plan_versions')->where('id', $saved['id'])->value('sealed_at'));
+            try {
+                DB::table('plan_lectures')->where('plan_version_id', $saved['id'])->update(['content' => 'Silent rewrite']);
+                $this->fail('A new version must be immutable immediately after saving.');
+            } catch (QueryException $exception) {
+                $this->assertStringContainsString('Sealed study plan is immutable', $exception->getMessage());
+            }
+            try {
+                DB::table('study_plan_versions')->where('id', $saved['id'])->update(['sealed_at' => null]);
+                $this->fail('A finalized version must not be reopened.');
+            } catch (QueryException $exception) {
+                $this->assertStringContainsString('protected content are immutable', $exception->getMessage());
             }
             $this->assertSame('Revised', DB::table('plan_lectures')->where('plan_version_id', $saved['id'])->value('content'));
         });

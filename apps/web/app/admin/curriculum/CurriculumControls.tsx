@@ -55,6 +55,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   const versionHref = (version: number, page = detailLevel?.plan_history_pagination?.page ?? 1) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set('plan_version', String(version));
+    if (page !== detailLevel?.plan_history_pagination?.page) params.delete('curriculum-plan-history-page');
     if (page > 1) params.set('versions_page', String(page)); else params.delete('versions_page');
     return `/admin/curriculum/${detailLevel?.id}?${params}`;
   };
@@ -351,7 +352,8 @@ export function CurriculumControls({ context, detail = false, section = 'courses
           { key: 'before', label: 'الإصدار السابق', render: row => lectureSummary(row.before) },
           { key: 'after', label: 'الإصدار المعروض', render: row => lectureSummary(row.after) },
         ]} /> : null}
-      {detailLevel?.plan_history ? <><DataTable id='curriculum-plan-history' title='إصدارات خطة المستوى'
+      {detailLevel?.plan_history ? <><DataTable key={`plan-history-batch-${detailLevel.plan_history_pagination?.page ?? 1}`}
+        id='curriculum-plan-history' title='إصدارات خطة المستوى'
         description='كل إصدار يحتفظ بهويته ومتطلباته. تطبيق إصدار جديد على دراسة قائمة يتطلب معاينة واعتمادًا منفصلين.'
         rows={detailLevel.plan_history} rowKey={row => row.id} searchText={row => `${row.version} ${row.lecture_count}`}
         emptyMessage='لا توجد إصدارات في هذه الدفعة.' columns={[

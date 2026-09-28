@@ -22,7 +22,7 @@ class CenterCurriculumController extends Controller
             'stages_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'levels_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'branches_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
-            'plan_version' => ['sometimes', 'integer', 'min:1'],
+            'plan_version' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'versions_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
         ]);
         if ($levelId !== null) {
@@ -219,6 +219,7 @@ class CenterCurriculumController extends Controller
                 'created_at' => now(), 'updated_at' => now(),
             ]);
             $this->insertLectures($planId, $lectures);
+            DB::connection('tenant')->table('study_plan_versions')->where('id', $planId)->update(['sealed_at' => now()]);
             DB::connection('tenant')->table('curriculum_submissions')->insert([
                 'request_id' => $data['request_id'], 'created_by' => $request->user()->id,
                 'branch_id' => $level['branch_id'], 'kind' => 'plan_versions', 'record_id' => $planId,
