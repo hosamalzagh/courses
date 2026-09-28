@@ -82,6 +82,11 @@ test("plan versions preserve history, show their difference and enforce current 
     await expect(owner.getByRole("row", { name: /الإصدار ٢/ }).getByText("معروض")).toBeVisible();
     await owner.getByRole("row", { name: /الإصدار ١/ }).getByRole("link", { name: "عرض الإصدار" }).click();
     await expect(owner).toHaveURL(/plan_version=1/);
+    const historicalReadStart = queryRows().length;
+    await owner.reload();
+    const historicalReads = queryRows().slice(historicalReadStart).filter(row => row.path.startsWith("/api/v1/center/"));
+    expect(historicalReads.length).toBeGreaterThan(0);
+    expect(historicalReads.reduce((sum, row) => sum + row.count!, 0)).toBeLessThanOrEqual(6);
     await expect(owner.getByText("الحروف", { exact: true }).first()).toBeVisible();
     await expect(owner.getByText("الكلمات", { exact: true })).toHaveCount(0);
     await owner.getByRole("button", { name: "إنشاء إصدار جديد" }).click();
@@ -137,6 +142,11 @@ test("plan versions preserve history, show their difference and enforce current 
     await expect(history.getByRole("row", { name: /الإصدار ٢/ })).toBeVisible();
     await owner.getByRole("link", { name: "الدفعة التالية" }).click();
     await expect(owner).toHaveURL(/versions_page=2/);
+    const batchReadStart = queryRows().length;
+    await owner.reload();
+    const batchReads = queryRows().slice(batchReadStart).filter(row => row.path.startsWith("/api/v1/center/"));
+    expect(batchReads.length).toBeGreaterThan(0);
+    expect(batchReads.reduce((sum, row) => sum + row.count!, 0)).toBeLessThanOrEqual(6);
     await expect(history.getByRole("row", { name: /الإصدار ١/ })).toBeVisible();
     await expect(owner.getByRole("button", { name: "الصفحة السابقة في إصدارات خطة المستوى" })).toBeDisabled();
     await owner.goto(`${origin}/admin/curriculum?tab=levels`);

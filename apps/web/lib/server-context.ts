@@ -224,7 +224,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
     const id = decodeURIComponent(detail[2]);
     if (detail[1] === "students") return loadStudentWorkspace(query(["status_page", "tab", "custom_history_page", "attachments_page", "attachments_status"]), id);
     if (detail[1] === "instructors") return loadInstructorWorkspace("", id);
-    return loadCurriculumWorkspace("", id);
+    return loadCurriculumWorkspace(query(["plan_version", "versions_page"]), id);
   }
   notFound();
 }
