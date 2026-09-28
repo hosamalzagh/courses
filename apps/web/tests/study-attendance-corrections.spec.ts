@@ -58,7 +58,7 @@ test("academic owner corrects and revokes a held lecture with visible impact whi
       expect((await write(owner, "financial-currency", { currency: "EGP", revision: account.account.currency_revision }, "PATCH")).status).toBe(200);
     }
     const enrollment = await (await owner.request.get(`${origin}/api/v1/center/students/${student.body.student.id}/enrollments`)).json();
-    const joinedOn = new Date().toLocaleDateString("sv-SE", { timeZone: "Africa/Cairo" });
+    const joinedOn = new Date(Date.now() - 26 * 3_600_000).toLocaleDateString("sv-SE", { timeZone: "Africa/Cairo" });
     const saved = await write(owner, `students/${student.body.student.id}/enrollments`, {
       group_id: group.body.group.id, group_revision: group.body.group.revision,
       currency_revision: enrollment.student.currency_revision, joined_on: joinedOn,
