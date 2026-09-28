@@ -265,6 +265,107 @@ class StudyEnrollmentTest extends TestCase
             ->assertJsonPath('suspensions.0.suspended_reason', 'وقف مؤقت')->assertJsonPath('suspensions.0.lifted_reason', 'انتهى الإيقاف');
     }
 
+    public function test_enrollment_note_keeps_versions_importance_and_event_permissions_without_changing_fee(): void
+    {
+        $group = $this->group($this->north, '150.00');
+        $student = $this->student([$this->north]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $workspaceUrl = "{$this->base}/students/{$student['id']}/enrollments";
+        $preview = $this->getJson($workspaceUrl)->assertOk()->json();
+        $attempt = $this->postJson($workspaceUrl, ['group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $preview['student']['currency_revision'], 'joined_on' => '2026-09-28',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $preview['student']['version'],
+            'request_id' => (string) Str::uuid()])->assertCreated()->json('attempt');
+        $url = "{$workspaceUrl}/{$attempt['id']}/note";
+        $this->getJson($url)->assertOk()->assertJsonPath('note', null)->assertJsonCount(0, 'versions');
+        $requestId = (string) Str::uuid();
+        $creation = ['body' => 'اتفقنا على مراجعة الموعد', 'important' => false, 'revision' => 0, 'request_id' => $requestId];
+        $note = $this->putJson($url, $creation)->assertCreated()->assertJsonPath('note.revision', 1)->json('note');
+        $this->putJson($url, $creation)->assertOk()->assertJsonPath('note.id', $note['id']);
+        $this->putJson($url, [...$creation, 'body' => 'نص آخر'])->assertConflict()->assertJsonPath('code', 'note_request_changed');
+        $this->putJson($url, [...$creation, 'request_id' => (string) Str::uuid()])->assertConflict()->assertJsonPath('code', 'note_changed');
+        $this->putJson($url, ['body' => 'موعد جديد بموافقة الطالب', 'important' => true,
+            'revision' => 1, 'request_id' => (string) Str::uuid()])->assertOk()->assertJsonPath('note.revision', 2)
+            ->assertJsonPath('note.important', true);
+        $this->putJson($url, ['body' => 'موعد جديد بموافقة الطالب', 'important' => false,
+            'revision' => 2, 'request_id' => (string) Str::uuid()])->assertOk()->assertJsonPath('note.revision', 3)
+            ->assertJsonPath('note.important', false);
+        $history = $this->getJson($url)->assertOk()->assertJsonCount(3, 'versions')
+            ->assertJsonPath('versions.0.important', false)->assertJsonPath('versions.1.important', true)
+            ->assertJsonPath('versions.2.body', 'اتفقنا على مراجعة الموعد');
+        $this->assertNotNull($history->headers->get('X-Courses-Query-Count'));
+        $this->assertLessThanOrEqual(6, (int) $history->headers->get('X-Courses-Query-Count'));
+        $notesUrl = "{$this->base}/students/{$student['id']}/enrollment-notes";
+        $notes = $this->getJson($notesUrl)->assertOk()->assertJsonCount(1, 'entries')
+            ->assertJsonPath('entries.0.attempt_id', $attempt['id'])
+            ->assertJsonPath('entries.0.body', 'موعد جديد بموافقة الطالب');
+        $this->assertNotNull($notes->headers->get('X-Courses-Query-Count'));
+        $this->assertLessThanOrEqual(6, (int) $notes->headers->get('X-Courses-Query-Count'));
+        $this->getJson($workspaceUrl)->assertOk()->assertJsonPath('attempts.0.note.revision', 3)
+            ->assertJsonPath('attempts.0.note.important', false)
+            ->assertJsonPath('attempts.0.fee.net_amount', '150.00')->assertJsonPath('attempts.0.status', 'active');
+        $this->center->run(function () use ($note): void {
+            $this->assertSame(1, DB::table('student_event_notes')->count());
+            $this->assertSame(3, DB::table('student_event_note_revisions')->where('note_id', $note['id'])->count());
+            $this->assertSame(1, DB::table('study_attempt_fees')->count());
+            $this->assertStringNotContainsString('اتفقنا', DB::table('center_audit_logs')->where('event', 'student.study_attempt_note_created')->value('details'));
+        });
+        $this->grant([$this->north => ['branch_viewer']]);
+        $this->asUser($this->staff);
+        $this->getJson($url)->assertOk()->assertJsonCount(3, 'versions');
+        $this->getJson($notesUrl)->assertOk()->assertJsonCount(1, 'entries');
+        $this->getJson($workspaceUrl)->assertNotFound();
+        $this->putJson($url, ['body' => 'تعديل غير مخول', 'important' => true, 'revision' => 3,
+            'request_id' => (string) Str::uuid()])->assertNotFound();
+        $this->grant([$this->south => ['registration']]);
+        $this->asUser($this->staff);
+        $this->getJson($url)->assertNotFound();
+        $this->getJson($notesUrl)->assertNotFound();
+        $this->putJson($url, ['body' => 'تعديل فرع آخر', 'important' => true, 'revision' => 3,
+            'request_id' => (string) Str::uuid()])->assertNotFound();
+        $this->grant([$this->north => ['branch_auditor']]);
+        $this->asUser($this->staff);
+        $this->assertStringNotContainsString('student.study_attempt_note_', $this->getJson("{$this->base}/audit")->assertOk()->getContent());
+        $this->grant([$this->north => ['branch_auditor', 'registration']]);
+        $this->asUser($this->staff);
+        $this->assertStringContainsString('student.study_attempt_note_created', $this->getJson("{$this->base}/audit")->assertOk()->getContent());
+    }
+
+    public function test_enrollment_note_audit_failure_rolls_back_and_versions_cannot_be_rewritten(): void
+    {
+        $group = $this->group($this->north, '30.00');
+        $student = $this->student([$this->north]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $workspaceUrl = "{$this->base}/students/{$student['id']}/enrollments";
+        $preview = $this->getJson($workspaceUrl)->json();
+        $attempt = $this->postJson($workspaceUrl, ['group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $preview['student']['currency_revision'], 'joined_on' => '2026-09-28',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $preview['student']['version'],
+            'request_id' => (string) Str::uuid()])->assertCreated()->json('attempt');
+        $url = "{$workspaceUrl}/{$attempt['id']}/note";
+        $payload = ['body' => 'متابعة بعد التسجيل', 'important' => true, 'revision' => 0,
+            'request_id' => (string) Str::uuid()];
+        $this->center->run(fn () => DB::statement("ALTER TABLE center_audit_logs ADD CONSTRAINT note_audit_failure CHECK (event <> 'student.study_attempt_note_created') NOT VALID"));
+        try {
+            $this->putJson($url, $payload)->assertServerError();
+        } finally {
+            $this->center->run(fn () => DB::statement('ALTER TABLE center_audit_logs DROP CONSTRAINT note_audit_failure'));
+        }
+        $this->center->run(function (): void {
+            $this->assertSame(0, DB::table('student_event_notes')->count());
+            $this->assertSame(0, DB::table('student_event_note_revisions')->count());
+        });
+        $note = $this->putJson($url, $payload)->assertCreated()->json('note');
+        $this->center->run(function () use ($note): void {
+            try {
+                DB::table('student_event_note_revisions')->where('note_id', $note['id'])->update(['body' => 'محو التاريخ']);
+                $this->fail('Note revisions must be immutable.');
+            } catch (QueryException $exception) {
+                $this->assertStringContainsString('Student event note revisions are immutable', $exception->getMessage());
+            }
+        });
+    }
+
     private function group(int $branchId, string $price): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => 'Course '.Str::random(5), 'request_id' => (string) Str::uuid()])->assertCreated()->json('course');

@@ -85,6 +85,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('students/{studentId}/account', [CenterStudentFinanceController::class, 'account']);
         Route::get('students/{studentId}/enrollments', [CenterStudyEnrollmentController::class, 'workspace']);
         Route::post('students/{studentId}/enrollments', [CenterStudyEnrollmentController::class, 'store']);
+        Route::get('students/{studentId}/enrollment-notes', [CenterStudentEventNoteController::class, 'index']);
         Route::get('students/{studentId}/enrollments/{attemptId}/note', [CenterStudentEventNoteController::class, 'show']);
         Route::put('students/{studentId}/enrollments/{attemptId}/note', [CenterStudentEventNoteController::class, 'save']);
         Route::post('students/{studentId}/payments', [CenterStudentFinanceController::class, 'recordPayment']);

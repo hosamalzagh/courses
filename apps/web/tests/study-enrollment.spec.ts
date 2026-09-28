@@ -279,3 +279,99 @@ test("a lost enrollment response retries the original request without another fe
   expect(saved.attempts).toHaveLength(1);
   expect(saved.balance.debt).toBe("30.00");
 });
+
+test("registration note stays on its event with version history and importance", async ({ page, browser }) => {
+  await signIn(page);
+  const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+  const branchId = workspace.branches[0].id;
+  const createdGroup = await group(page, branchId, "120.00");
+  const created = await write(page, "students", { name: `ملاحظة تسجيل ${Date.now()}`, branch_ids: [branchId], request_id: crypto.randomUUID() });
+  expect(created.status).toBe(201);
+  const studentId = created.body.student.id;
+  const settings = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
+  if (!settings.account.currency) expect((await write(page, "financial-currency", { currency: "EGP", revision: settings.account.currency_revision }, "PATCH")).status).toBe(200);
+  const preview = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+  const enrolled = await write(page, `students/${studentId}/enrollments`, {
+    group_id: createdGroup.id, group_revision: createdGroup.revision, currency_revision: preview.student.currency_revision,
+    joined_on: "2026-09-28", discount: "0.00", discount_reason: null, version: preview.student.version, request_id: crypto.randomUUID(),
+  });
+  expect(enrolled.status).toBe(201);
+  const attemptId = enrolled.body.attempt.id;
+  await page.goto(`${origin}/admin/students/${studentId}/enrollments`);
+  await page.getByRole("button", { name: "إضافة ملاحظة" }).click();
+  await expect(page.getByRole("heading", { name: `ملاحظة تسجيل ${createdGroup.name}` })).toBeVisible();
+  await page.getByRole("textbox", { name: "نص الملاحظة" }).fill("متابعة موعد المجموعة");
+  await page.getByRole("searchbox", { name: "بحث في محاولات الدراسة" }).fill("لا توجد نتيجة");
+  await expect(page.getByRole("textbox", { name: "نص الملاحظة" })).toHaveValue("متابعة موعد المجموعة");
+  await page.getByRole("searchbox", { name: "بحث في محاولات الدراسة" }).fill("");
+  await page.getByRole("checkbox", { name: "ملاحظة مهمة" }).check();
+  await page.getByRole("button", { name: "إضافة الملاحظة" }).click();
+  await expect(page.getByText("حُفظت الملاحظة ونسخة تعديلها", { exact: false })).toBeVisible();
+  await expect(page.getByText("نسخة ١", { exact: false })).toBeVisible();
+  await page.getByRole("textbox", { name: "نص الملاحظة" }).fill("موعد جديد بموافقة الطالب");
+  await page.route(`**/api/v1/center/students/${studentId}/enrollments/${attemptId}/note`, async route => {
+    if (route.request().method() !== "PUT") { await route.continue(); return; }
+    await route.fetch();
+    await route.abort("failed");
+    await page.unroute(`**/api/v1/center/students/${studentId}/enrollments/${attemptId}/note`);
+  });
+  await page.getByRole("button", { name: "حفظ تعديل الملاحظة" }).click();
+  await expect(page.getByRole("button", { name: "التحقق من الحفظ" })).toBeVisible();
+  await page.getByRole("button", { name: "التحقق من الحفظ" }).click();
+  await expect(page.getByText("نسخة ٢", { exact: false })).toBeVisible();
+  await page.getByRole("checkbox", { name: "ملاحظة مهمة" }).uncheck();
+  await page.getByRole("button", { name: "حفظ تعديل الملاحظة" }).click();
+  await expect(page.getByText("نسخة ٣", { exact: false })).toBeVisible();
+  const noteResponse = await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/note`);
+  expect(Number(noteResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+  const note = await noteResponse.json();
+  expect(note.note).toMatchObject({ body: "موعد جديد بموافقة الطالب", important: false, revision: 3 });
+  expect(note.versions).toHaveLength(3);
+  const after = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+  expect(after.attempts[0]).toMatchObject({ id: attemptId, note: { revision: 3, important: false }, fee: { net_amount: "120.00" } });
+  await page.getByRole("textbox", { name: "نص الملاحظة" }).fill("مسودة الموظف بعد التعارض");
+  expect((await write(page, `students/${studentId}/enrollments/${attemptId}/note`, {
+    body: "تعديل متزامن", important: false, revision: 3, request_id: crypto.randomUUID(),
+  }, "PUT")).status).toBe(200);
+  await page.getByRole("button", { name: "حفظ تعديل الملاحظة" }).click();
+  await expect(page.getByText("تغيرت الملاحظة منذ فتحها", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "تحميل أحدث نسخة" }).click();
+  await expect(page.getByRole("textbox", { name: "نص الملاحظة" })).toHaveValue("مسودة الموظف بعد التعارض");
+  await expect(page.getByText("تعديل متزامن").first()).toBeVisible();
+  await page.getByRole("button", { name: "حفظ تعديل الملاحظة" }).click();
+  await expect(page.getByText("نسخة ٥", { exact: false })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+  await page.getByRole("button", { name: "القائمة" }).click();
+  await page.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("button", { name: "إغلاق القائمة" }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole("button", { name: "إلغاء", exact: true }).click();
+  await expect(page.getByRole("button", { name: "عرض/تعديل الملاحظة" })).toBeFocused();
+  await page.goto(`${origin}/admin/students/${studentId}?tab=enrollment-notes`);
+  await expect(page.getByRole("heading", { name: "ملاحظات التسجيل الدراسي" })).toBeVisible();
+  await expect(page.getByText("مسودة الموظف بعد التعارض").first()).toBeVisible();
+  await page.getByRole("button", { name: "عرض تاريخ التعديل" }).click();
+  await expect(page.getByRole("heading", { name: `تاريخ ملاحظة ${createdGroup.name}` })).toBeVisible();
+  await expect(page.getByText("نسخة ٥", { exact: false })).toBeVisible();
+  await page.goto(`${origin}/admin/audit`);
+  await expect(page.getByText("تعديل ملاحظة تسجيل الطالب").first()).toBeVisible();
+  await page.getByText("تفاصيل ملاحظة التسجيل").first().click();
+  await expect(page.getByText(`المحاولة: ${attemptId}`, { exact: false }).first()).toBeVisible();
+  await expect(page.getByText("موعد جديد بموافقة الطالب")).toHaveCount(0);
+  expect((await write(page, `members/${credentials.staff.membership_id}/grants`, {
+    center_roles: [], branch_roles: { [branchId]: ["branch_viewer"] },
+  }, "PUT")).status).toBe(200);
+  const viewer = await browser.newPage();
+  try {
+    await signIn(viewer, "staff");
+    await viewer.goto(`${origin}/admin/students/${studentId}`);
+    await viewer.getByRole("link", { name: "ملاحظات التسجيل" }).click();
+    await expect(viewer.getByText("مسودة الموظف بعد التعارض").first()).toBeVisible();
+    await viewer.getByRole("button", { name: "عرض تاريخ التعديل" }).click();
+    await expect(viewer.getByText("نسخة ٥", { exact: false })).toBeVisible();
+    await expect(viewer.getByRole("link", { name: "التسجيل ومحاولات الدراسة" })).toHaveCount(0);
+    await expect(viewer.getByText("120.00 EGP")).toHaveCount(0);
+  } finally { await viewer.close(); }
+});

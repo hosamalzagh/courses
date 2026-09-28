@@ -74,9 +74,11 @@ export type StudyEnrollmentContext = CenterContext & {
   student: { id: string; name: string; student_number: number; status: "active" | "suspended"; currency: string | null; currency_revision: number; version: string };
   balance: { available_credit: string; debt: string };
   groups: { id: string; name: string; status: string; approved_price: string; revision: number; level_id: string; plan_version_id: string; branch_id: number; branch_name: string; level_name: string }[];
-  attempts: { id: string; level_id: string; plan_version_id: string; current_group_id: string; branch_id: number; joined_on: string; status: string; created_at: string; group_name: string; level_name: string; requirements_count: number; fee: { id: string; original_price: string; discount: string; net_amount: string; currency: string; discount_reason: string | null; actor_name: string } }[];
+  attempts: { id: string; level_id: string; plan_version_id: string; current_group_id: string; branch_id: number; event_branch_id: number; joined_on: string; status: string; created_at: string; group_name: string; level_name: string; requirements_count: number; fee: { id: string; original_price: string; discount: string; net_amount: string; currency: string; discount_reason: string | null; actor_name: string }; note: StudyAttemptNote | null }[];
   pagination: { page: number; has_more: boolean; groups_page: number; groups_has_more: boolean };
 };
+
+export type StudyAttemptNote = { id: string; body: string; important: boolean; revision: number; updated_by_name: string };
 
 export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable" | "student_unavailable";
 
@@ -201,7 +203,11 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   const detail = path.match(/^\/admin\/(students|instructors|curriculum)\/([^/]+)$/);
   if (detail) {
     const id = decodeURIComponent(detail[2]);
-    if (detail[1] === "students") return loadStudentWorkspace(query(["status_page", "tab", "custom_history_page", "attachments_page", "attachments_status"]), id);
+    if (detail[1] === "students") {
+      const tab = url.searchParams.get("tab");
+      return loadStudentWorkspace(tab === "enrollment-notes" ? query(["status_page"])
+        : query(["status_page", "tab", "custom_history_page", "attachments_page", "attachments_status"]), id);
+    }
     if (detail[1] === "instructors") return loadInstructorWorkspace("", id);
     return loadCurriculumWorkspace("", id);
   }

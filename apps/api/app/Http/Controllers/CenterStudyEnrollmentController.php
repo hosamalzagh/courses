@@ -197,8 +197,14 @@ class CenterStudyEnrollmentController extends Controller
             ->join('study_groups', 'study_groups.id', '=', 'study_attempts.current_group_id')
             ->join('levels', 'levels.id', '=', 'study_attempts.level_id')
             ->join('study_attempt_fees as fees', 'fees.attempt_id', '=', 'study_attempts.id')
-            ->leftJoin('student_event_notes as note', function ($join): void {
-                $join->on('note.event_id', '=', 'study_attempts.id')->where('note.event_type', 'study_attempt');
+            ->leftJoin('student_event_notes as note', function ($join) use ($permissions): void {
+                $join->on('note.event_id', '=', 'study_attempts.id')->on('note.branch_id', '=', 'fees.branch_id')
+                    ->where('note.event_type', 'study_attempt');
+                if (! $permissions->isCenterManager()) {
+                    $readableBranches = array_keys(array_filter($permissions->branchRoles,
+                        fn (array $roles): bool => in_array('read', CenterPermissions::actions($roles), true)));
+                    $join->whereIn('note.branch_id', $readableBranches);
+                }
             })
             ->where('study_attempts.student_id', $studentId)
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('study_attempts.branch_id', $this->scope($permissions)))
@@ -207,7 +213,7 @@ class CenterStudyEnrollmentController extends Controller
                 'study_attempts.status', 'study_attempts.created_at', 'study_groups.name as group_name', 'levels.name as level_name'])
             ->selectRaw("(SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id) AS requirements_count")
             ->addSelect(['fees.id as fee_id', 'fees.original_price', 'fees.discount', 'fees.net_amount',
-                'fees.currency', 'fees.discount_reason', 'fees.actor_name',
+                'fees.currency', 'fees.discount_reason', 'fees.actor_name', 'fees.branch_id as event_branch_id',
                 'note.id as note_id', 'note.body as note_body', 'note.important as note_important',
                 'note.revision as note_revision', 'note.updated_by_name as note_updated_by_name']);
     }
@@ -216,6 +222,7 @@ class CenterStudyEnrollmentController extends Controller
     {
         return ['id' => $row->id, 'level_id' => $row->level_id, 'plan_version_id' => $row->plan_version_id,
             'current_group_id' => $row->current_group_id, 'branch_id' => (int) $row->branch_id,
+            'event_branch_id' => (int) $row->event_branch_id,
             'joined_on' => $row->joined_on, 'status' => $row->status, 'created_at' => $row->created_at,
             'group_name' => $row->group_name, 'level_name' => $row->level_name,
             'requirements_count' => (int) $row->requirements_count,
