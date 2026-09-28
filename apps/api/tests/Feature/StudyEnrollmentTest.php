@@ -18,11 +18,17 @@ class StudyEnrollmentTest extends TestCase
     use CleansCenterDatabases, RefreshDatabase;
 
     private Center $center;
+
     private User $owner;
+
     private User $staff;
+
     private CenterMembership $membership;
+
     private int $north;
+
     private int $south;
+
     private string $base = 'http://alpha.courses.test/api/v1/center';
 
     protected function setUp(): void
@@ -400,6 +406,11 @@ class StudyEnrollmentTest extends TestCase
         $targets = [['attempt_id' => $options->json('fees.0.attempt_id'), 'amount' => '90.00'],
             ['attempt_id' => $options->json('fees.1.attempt_id'), 'amount' => '60.00']];
         $request = ['targets' => $targets, 'version' => $options->json('version'), 'request_id' => (string) Str::uuid()];
+        foreach (['+5', '.5'] as $invalidAmount) {
+            $this->postJson("{$url}/allocations", [...$request, 'targets' => [[
+                'attempt_id' => $targets[0]['attempt_id'], 'amount' => $invalidAmount,
+            ]]])->assertUnprocessable()->assertJsonValidationErrors('targets.0.amount');
+        }
         $this->postJson("{$url}/allocations", [...$request, 'targets' => [['attempt_id' => $targets[0]['attempt_id'], 'amount' => '151.00']]])
             ->assertConflict()->assertJsonPath('code', 'payment_not_available');
         $this->center->run(fn () => DB::statement("ALTER TABLE center_audit_logs ADD CONSTRAINT allocation_audit_failure CHECK (event <> 'student.payment_allocated') NOT VALID"));
@@ -470,6 +481,17 @@ class StudyEnrollmentTest extends TestCase
             }
             $this->assertSame(3, DB::table('student_payment_allocations')->count());
         });
+        $this->grant([$this->north => ['branch_auditor']]);
+        $this->asUser($this->staff);
+        $branchAudit = $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent();
+        $this->assertStringNotContainsString('student.payment_allocated', $branchAudit);
+        $this->assertStringNotContainsString('student.payment_allocation_reversed', $branchAudit);
+        $this->assertStringNotContainsString('تخصيص للمجموعة الخطأ', $branchAudit);
+        $this->grant([$this->north => ['branch_auditor', 'accounting']]);
+        $this->asUser($this->staff);
+        $visibleAudit = $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent();
+        $this->assertStringContainsString('student.payment_allocated', $visibleAudit);
+        $this->assertStringContainsString('student.payment_allocation_reversed', $visibleAudit);
     }
 
     public function test_allocation_keeps_source_and_target_in_one_authorized_branch(): void
@@ -511,7 +533,7 @@ class StudyEnrollmentTest extends TestCase
         $allocation = $this->postJson("{$northUrl}/allocations", [...$request, 'version' => $staffOptions->json('version')])
             ->assertCreated()->json('allocations.0');
         $this->assertStringContainsString('student.payment_allocated', $this->getJson("{$this->base}/audit")->assertOk()->getContent());
-        $this->center->run(function () use ($northGroup, $southGroup, $attempts): void {
+        $this->center->run(function () use ($southGroup, $attempts): void {
             DB::table('study_groups')->where('id', $southGroup['id'])->update(['name' => 'South private group']);
             DB::table('study_attempts')->where('id', $attempts[0]['id'])
                 ->update(['current_group_id' => $southGroup['id']]);

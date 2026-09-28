@@ -218,7 +218,7 @@ export function StudentFinanceControls({ initial, search }: { initial: StudentAc
         { key: "available", label: "المتاح", render: (row) => <bdi dir="ltr">{row.available_amount} {row.currency}</bdi> },
         { key: "method", label: "الطريقة", render: (row) => paymentMethodLabels[row.method] ?? row.method },
         { key: "actor", label: "الموظف", render: (row) => row.actor_name },
-        { key: "allocations", label: "التخصيصات", render: (row) => <Button id={`${formPrefix}-payment-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedPaymentId(row.id); requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-payment-allocation-title]")?.focus()); }}>عرض وتخصيص</Button> },
+        { key: "allocations", label: "التخصيصات", actions: true, render: (row) => <Button id={`${formPrefix}-payment-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedPaymentId(row.id); requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-payment-allocation-title]")?.focus()); }}>عرض وتخصيص</Button> },
       ]} />
     {selectedPayment ? <StudentPaymentAllocations studentId={studentId} payment={selectedPayment}
       onClose={() => { setSelectedPaymentId(null); focus(`payment-${selectedPayment.id}`); }} onChanged={refreshAfterAllocation} onDirtyChange={setAllocationDirty} /> : null}

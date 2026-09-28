@@ -45,7 +45,7 @@ class CenterStudentAllocationController extends Controller
             ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'payments.id')
                 ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'used_amount')
             ->selectSub(DB::connection('tenant')->query()->fromSub($historyQuery, 'history_rows')
-                ->selectRaw("COALESCE(json_agg(history_rows), '[]'::json)"), 'history_rows')->first();
+                ->selectRaw("COALESCE(json_agg(history_rows ORDER BY created_at DESC, id DESC), '[]'::json)"), 'history_rows')->first();
         abort_unless($payment && $permissions->can('finance.read', (int) $payment->branch_id), 404);
 
         $history = collect(json_decode($payment->history_rows ?? '[]'));
@@ -58,6 +58,7 @@ class CenterStudentAllocationController extends Controller
             ->selectSub($this->originalFeeGroupName(), 'group_name')
             ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.fee_id', 'fees.id')
                 ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'paid_amount')->get();
+
         return response()->json([
             'payment' => ['id' => $payment->id, 'branch_id' => (int) $payment->branch_id,
                 'amount' => $payment->amount, 'currency' => $payment->currency,
@@ -82,7 +83,7 @@ class CenterStudentAllocationController extends Controller
         $data = $request->validate([
             'targets' => ['required', 'array', 'min:1', 'max:20'],
             'targets.*.attempt_id' => ['required', 'uuid', 'distinct'],
-            'targets.*.amount' => ['required', 'numeric', 'decimal:0,2', 'gt:0', 'max:9999999999.99'],
+            'targets.*.amount' => ['required', 'numeric', 'decimal:0,2', 'gt:0', 'max:9999999999.99', 'regex:/^\d{1,10}(?:\.\d{1,2})?$/'],
             'version' => ['required', 'regex:/^[a-f0-9]{64}$/'],
             'request_id' => ['required', 'uuid'],
         ]);

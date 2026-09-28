@@ -158,7 +158,7 @@ export function StudentPaymentAllocations({ studentId, payment, onClose, onChang
         { key: "amount", label: "المبلغ", render: (row) => <bdi dir="ltr">{row.amount} {row.currency}</bdi> },
         { key: "status", label: "الحالة", render: (row) => row.reversal_id ? `معكوس: ${row.reversal_reason}` : "معتمد" },
         { key: "actor", label: "الموظف", render: (row) => row.actor_name },
-        { key: "action", label: "تصحيح", render: (row) => options?.can_correct && !row.reversal_id ? <Button id={`${prefix}-reverse-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => { setReversing(row.id); setReason(""); requestId.current = null; focus(`${prefix}-reason`); }}>عكس التخصيص</Button> : "—" },
+        { key: "action", label: "تصحيح", actions: true, render: (row) => options?.can_correct && !row.reversal_id ? <Button id={`${prefix}-reverse-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => { setReversing(row.id); setReason(""); requestId.current = null; focus(`${prefix}-reason`); }}>عكس التخصيص</Button> : "—" },
       ]} />
     {options && (options.pagination.history_page > 1 || options.pagination.history_has_more) ? <CenterHeaderActions>
       {options.pagination.history_page > 1 ? <Button disabled={dirty || busy || uncertain} onClick={() => changePage(options.pagination.page, options.pagination.history_page - 1)}>حركات سابقة</Button> : null}
