@@ -27,6 +27,9 @@ const eventNames: Record<string, string> = {
   "center.student_search_changed": "تغيير إتاحة البحث عن طلاب المركز",
   "curriculum.course_created": "إنشاء كورس", "curriculum.stage_created": "إنشاء مرحلة دراسية",
   "curriculum.level_created": "إنشاء مستوى", "curriculum.plan_updated": "تعديل الخطة الأولى",
+  "curriculum.completion_threshold_changed": "تغيير نسبة إتمام المنهج",
+  "study_group.created": "إنشاء مجموعة", "study_group.started": "بدء مجموعة",
+  "study_group.settings_updated": "تعديل إعدادات مجموعة",
 };
 
 export function AuditWorkspace({ context, initialEntries }: { context: CenterContext; initialEntries: AuditEntry[] }) {

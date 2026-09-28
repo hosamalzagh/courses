@@ -159,6 +159,50 @@ class CenterCurriculumController extends Controller
         });
     }
 
+    public function updateCourseThreshold(Request $request, string $courseId): JsonResponse
+    {
+        return $this->updateThreshold($request, 'courses', $courseId);
+    }
+
+    public function updateStageThreshold(Request $request, string $stageId): JsonResponse
+    {
+        return $this->updateThreshold($request, 'stages', $stageId);
+    }
+
+    public function updateLevelThreshold(Request $request, string $levelId): JsonResponse
+    {
+        return $this->updateThreshold($request, 'levels', $levelId);
+    }
+
+    private function updateThreshold(Request $request, string $kind, string $id): JsonResponse
+    {
+        abort_unless(Str::isUuid($id), 404);
+        $data = $request->validate([
+            'revision' => ['required', 'integer', 'min:1'],
+            'completion_threshold' => [$kind === 'courses' ? 'required' : 'present', 'nullable', 'integer', 'between:1,100'],
+        ]);
+
+        return $this->write($request, function (CenterPermissions $permissions) use ($request, $kind, $id, $data): JsonResponse {
+            $before = $this->read($kind, $id, $permissions);
+            $this->authorize($permissions, $before['branch_id']);
+            $row = DB::connection('tenant')->table($kind)->where('id', $id)->lockForUpdate()->first();
+            if ($row->completion_revision !== (int) $data['revision']) {
+                $this->conflict('curriculum_changed');
+            }
+            if ($row->completion_threshold == $data['completion_threshold']) {
+                return response()->json(['record' => $before]);
+            }
+            DB::connection('tenant')->table($kind)->where('id', $id)->update([
+                'completion_threshold' => $data['completion_threshold'],
+                'completion_revision' => $row->completion_revision + 1, 'updated_at' => now(),
+            ]);
+            $after = $this->read($kind, $id, $permissions);
+            $this->audit($request, 'curriculum.completion_threshold_changed', $before['branch_id'], $kind, $before, $after);
+
+            return response()->json(['record' => $after]);
+        });
+    }
+
     private function records(string $kind, CenterPermissions $permissions, bool $includeLectures = true): Builder
     {
         $query = DB::connection('tenant')->table('courses');
@@ -173,7 +217,7 @@ class CenterCurriculumController extends Controller
         if (! $permissions->isCenterManager()) {
             $query->whereIn('courses.branch_id', $this->scope($permissions));
         }
-        $query->select([$kind.'.id', $kind.'.name', 'courses.branch_id']);
+        $query->select([$kind.'.id', $kind.'.name', $kind.'.completion_threshold', $kind.'.completion_revision', 'courses.branch_id']);
         if ($kind !== 'courses') {
             $query->addSelect(['stages.course_id', 'courses.name as course_name']);
         }

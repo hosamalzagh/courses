@@ -147,12 +147,13 @@ class CurriculumTest extends TestCase
     public function test_curriculum_migration_supports_existing_and_new_centers_without_linking_their_data(): void
     {
         $this->center->run(function (): void {
-            foreach (['curriculum_submissions', 'plan_lectures', 'study_plan_versions', 'levels', 'stages', 'courses'] as $table) {
+            foreach (['study_group_instructors', 'study_groups', 'curriculum_submissions', 'plan_lectures', 'study_plan_versions', 'levels', 'stages', 'courses'] as $table) {
                 DB::statement('DROP TABLE '.$table);
             }
             DB::statement('DROP FUNCTION protect_used_plan_lecture()');
             DB::statement('DROP FUNCTION protect_used_plan_version()');
             DB::table('migrations')->where('migration', '2026_09_26_201718_create_branch_curricula')->delete();
+            DB::table('migrations')->where('migration', '2026_09_28_010000_create_study_groups')->delete();
         });
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
         $level = $this->sequence($this->north, 'Alpha curriculum');
@@ -188,6 +189,131 @@ class CurriculumTest extends TestCase
         $this->getJson("{$this->base}/curriculum-workspace?courses_page=2&stages_page=2&levels_page=2")->assertOk()->assertJsonCount(2, 'courses')->assertJsonCount(2, 'stages')->assertJsonCount(2, 'levels');
         $this->getJson("{$this->base}/curriculum-workspace?levels_page=-1")->assertUnprocessable();
         $this->getJson("{$this->base}/levels/invalid")->assertNotFound();
+    }
+
+    public function test_academic_employee_creates_and_starts_a_group_with_its_own_plan_price_and_instructors(): void
+    {
+        $level = $this->sequence($this->north, 'Arabic');
+        $instructor = $this->postJson("{$this->base}/instructors", [
+            'name' => 'Mona', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('instructor');
+        $this->grant([$this->north => ['academic_admin']]);
+        $this->asUser($this->staff);
+
+        $payload = [
+            'level_id' => $level['id'], 'plan_version_id' => $level['plan']['id'],
+            'name' => 'صباح الأحد', 'approved_price' => '0.00',
+            'completion_threshold' => 80, 'instructor_ids' => [$instructor['id']],
+            'request_id' => (string) Str::uuid(),
+        ];
+        $created = $this->postJson("{$this->base}/groups", $payload)->assertCreated()
+            ->assertJsonPath('group.status', 'waiting')
+            ->assertJsonPath('group.plan_version_id', $level['plan']['id'])
+            ->assertJsonPath('group.approved_lecture_count', 1)
+            ->assertJsonPath('group.instructors.0.name', 'Mona')
+            ->json('group');
+        $this->postJson("{$this->base}/groups", $payload)->assertOk()->assertJsonPath('group.id', $created['id']);
+        $detail = $this->getJson("{$this->base}/groups/{$created['id']}")->assertOk()
+            ->assertJsonPath('groups.0.approved_price', '0.00')
+            ->assertJsonPath('groups.0.approved_lectures.0.content', 'Content')
+            ->assertJsonPath('groups.0.approved_lectures.0.number', 1);
+        $this->assertLessThanOrEqual(6, (int) $detail->headers->get('X-Courses-Query-Count'));
+        $this->postJson("{$this->base}/groups/{$created['id']}/start", ['revision' => 1])
+            ->assertOk()->assertJsonPath('group.status', 'started')->assertJsonPath('group.revision', 2);
+        $this->getJson("{$this->base}/group-workspace")->assertOk()->assertJsonCount(1, 'groups');
+        $workspace = $this->getJson("{$this->base}/group-workspace")->assertOk();
+        $this->assertNotNull($workspace->headers->get('X-Courses-Query-Count'));
+        $this->assertLessThanOrEqual(6, (int) $workspace->headers->get('X-Courses-Query-Count'));
+    }
+
+    public function test_group_completion_threshold_inherits_course_stage_and_level_settings_with_a_group_override(): void
+    {
+        $level = $this->sequence($this->north, 'Inheritance');
+        $instructor = $this->postJson("{$this->base}/instructors", [
+            'name' => 'Hala', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('instructor');
+        $group = $this->postJson("{$this->base}/groups", [
+            'level_id' => $level['id'], 'plan_version_id' => $level['plan']['id'], 'name' => 'Group A',
+            'approved_price' => '1500.00', 'instructor_ids' => [$instructor['id']], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->assertJsonPath('group.completion_threshold', 80)->json('group');
+
+        $this->patchJson("{$this->base}/courses/{$level['course_id']}/completion-threshold", ['revision' => 1, 'completion_threshold' => 85])->assertOk();
+        $this->getJson("{$this->base}/groups/{$group['id']}")->assertJsonPath('groups.0.completion_threshold', 85);
+        $this->patchJson("{$this->base}/stages/{$level['stage_id']}/completion-threshold", ['revision' => 1, 'completion_threshold' => 90])->assertOk();
+        $this->getJson("{$this->base}/groups/{$group['id']}")->assertJsonPath('groups.0.completion_threshold', 90);
+        $this->patchJson("{$this->base}/levels/{$level['id']}/completion-threshold", ['revision' => 1, 'completion_threshold' => 70])->assertOk();
+        $this->getJson("{$this->base}/groups/{$group['id']}")->assertJsonPath('groups.0.completion_threshold', 70);
+        $this->patchJson("{$this->base}/groups/{$group['id']}/settings", [
+            'revision' => 1, 'approved_price' => '0.00', 'completion_threshold' => 60,
+            'instructor_ids' => [$instructor['id']],
+        ])->assertOk()->assertJsonPath('group.completion_threshold', 60)->assertJsonPath('group.approved_price', '0.00');
+        $this->patchJson("{$this->base}/groups/{$group['id']}/settings", [
+            'revision' => 1, 'approved_price' => '500.00', 'completion_threshold' => null,
+            'instructor_ids' => [$instructor['id']],
+        ])->assertConflict()->assertJsonPath('code', 'group_changed');
+        $this->patchJson("{$this->base}/groups/{$group['id']}/settings", [
+            'revision' => 2, 'approved_price' => '0.00', 'completion_threshold' => null,
+            'instructor_ids' => [$instructor['id']],
+        ])->assertOk()->assertJsonPath('group.completion_threshold', 70);
+    }
+
+    public function test_groups_and_their_plan_and_instructor_choices_respect_current_branch_grants(): void
+    {
+        $north = $this->sequence($this->north, 'Visible');
+        $south = $this->sequence($this->south, 'Hidden');
+        $northInstructor = $this->postJson("{$this->base}/instructors", [
+            'name' => 'Visible teacher', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('instructor');
+        $southInstructor = $this->postJson("{$this->base}/instructors", [
+            'name' => 'Hidden teacher', 'branch_ids' => [$this->south], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('instructor');
+        $payload = fn (array $level, string $instructorId): array => [
+            'level_id' => $level['id'], 'plan_version_id' => $level['plan']['id'], 'name' => 'Group',
+            'approved_price' => '100.00', 'instructor_ids' => [$instructorId], 'request_id' => (string) Str::uuid(),
+        ];
+        $visible = $this->postJson("{$this->base}/groups", $payload($north, $northInstructor['id']))->assertCreated()->json('group');
+        $hidden = $this->postJson("{$this->base}/groups", $payload($south, $southInstructor['id']))->assertCreated()->json('group');
+        $this->grant([$this->north => ['academic_admin']]);
+        $this->asUser($this->staff);
+        $workspace = $this->getJson("{$this->base}/group-workspace")->assertOk()->assertJsonCount(1, 'groups')
+            ->assertJsonCount(1, 'level_choices')
+            ->assertJsonPath('groups.0.id', $visible['id']);
+        $this->assertStringNotContainsString('Hidden', $workspace->getContent());
+        $this->getJson("{$this->base}/group-instructor-options?branch_id={$this->north}")->assertOk()
+            ->assertJsonCount(1, 'instructors')->assertJsonPath('instructors.0.name', 'Visible teacher');
+        $this->getJson("{$this->base}/group-instructor-options?branch_id={$this->south}")->assertNotFound();
+        $this->getJson("{$this->base}/groups/{$hidden['id']}")->assertNotFound();
+        $this->postJson("{$this->base}/groups/{$hidden['id']}/start", ['revision' => 1])->assertNotFound();
+        $this->postJson("{$this->base}/groups", $payload($south, $southInstructor['id']))->assertNotFound();
+        $this->postJson("{$this->base}/groups", $payload($north, $southInstructor['id']))->assertUnprocessable();
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $this->postJson("{$this->base}/groups/{$visible['id']}/start", ['revision' => 1])->assertForbidden();
+    }
+
+    public function test_group_instructor_options_are_searchable_and_bounded_by_branch(): void
+    {
+        $this->center->run(function (): void {
+            $instructors = collect(range(1, 52))->map(fn (int $number): array => [
+                'id' => (string) Str::uuid(), 'name' => sprintf('Teacher %02d', $number),
+                'name_search' => sprintf('teacher %02d', $number), 'request_id' => (string) Str::uuid(),
+                'request_hash' => str_repeat('a', 64), 'created_by' => $this->owner->id,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+            DB::table('instructors')->insert($instructors->all());
+            DB::table('instructor_branches')->insert($instructors->map(fn (array $teacher): array => [
+                'instructor_id' => $teacher['id'], 'branch_id' => $this->north, 'created_at' => now(),
+            ])->all());
+        });
+        $first = $this->getJson("{$this->base}/group-instructor-options?branch_id={$this->north}")->assertOk()
+            ->assertJsonCount(50, 'instructors')->assertJsonPath('pagination.has_more', true);
+        $this->assertLessThanOrEqual(6, (int) $first->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$this->base}/group-instructor-options?branch_id={$this->north}&page=2")->assertOk()
+            ->assertJsonCount(2, 'instructors')->assertJsonPath('pagination.has_more', false);
+        $this->getJson("{$this->base}/group-instructor-options?branch_id={$this->north}&q=Teacher%2052")->assertOk()
+            ->assertJsonCount(1, 'instructors')->assertJsonPath('instructors.0.name', 'Teacher 52');
+        $this->getJson("{$this->base}/group-instructor-options?branch_id={$this->north}&q=Teacher%20%20%2052")->assertOk()
+            ->assertJsonCount(1, 'instructors')->assertJsonPath('instructors.0.name', 'Teacher 52');
     }
 
     private function sequence(int $branchId, string $name = 'Course'): array

@@ -135,11 +135,14 @@ class InstructorProfilesTest extends TestCase
     {
         $this->createInstructor('Alpha only', [$this->north]);
         $this->center->run(function (): void {
+            $groupsMigration = glob(database_path('migrations/tenant/*_create_study_groups.php'))[0];
+            (require $groupsMigration)->down();
             DB::statement('DROP TABLE instructor_branches');
             DB::statement('DROP TABLE instructors');
+            DB::table('migrations')->where('migration', '2026_09_28_010000_create_study_groups')->delete();
             DB::table('migrations')->where('migration', '2026_09_26_201733_create_instructor_profiles')->delete();
         });
-        $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']), Artisan::output());
         $instructor = $this->createInstructor('Migrated', [$this->north]);
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
         $this->getJson("{$this->base}/instructor-workspace")->assertOk()->assertJsonCount(1, 'instructors')->assertJsonCount(2, 'branches');

@@ -1,10 +1,32 @@
 import type { AuditEntry } from '@/lib/server-context';
 export function CurriculumAuditDetails({ entry }: { entry: AuditEntry }) {
-  if (!entry.event.startsWith('curriculum.')) return null;
+  if (!entry.event.startsWith('curriculum.') && !entry.event.startsWith('study_group.')) return null;
   let details = entry.details;
   if (typeof details === 'string') { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== 'object' || Array.isArray(details)) return null;
   const data = details as Record<string, unknown>;
+  if (entry.event.startsWith('study_group.')) {
+    const group = (record: unknown) => {
+      if (!record || typeof record !== 'object' || Array.isArray(record)) return 'لم تكن المجموعة موجودة';
+      const item = record as Record<string, unknown>;
+      const instructors = Array.isArray(item.instructors) ? item.instructors
+        .filter((person): person is { name: string } => Boolean(person && typeof person === 'object' && typeof person.name === 'string'))
+        .map(person => person.name).join('، ') : '';
+      return <>{typeof item.name === 'string' ? item.name : 'بدون اسم'} · {item.status === 'waiting' ? 'تنتظر البدء' : item.status === 'started' ? 'بدأت' : 'مكتملة'} · السعر {typeof item.approved_price === 'string' ? item.approved_price : 'غير مسجل'} · نسبة الإتمام {typeof item.completion_threshold === 'number' ? `${item.completion_threshold.toLocaleString('ar-EG')}٪` : 'غير مسجلة'} · إصدار الخطة {typeof item.plan_version === 'number' ? item.plan_version.toLocaleString('ar-EG') : 'غير مسجل'} · المحاضرون: {instructors || 'غير مسجلين'}</>;
+    };
+    return <details><summary>عرض تغيير المجموعة</summary><p>قبل التغيير: {group(data.before)}</p><p>بعد التغيير: {group(data.after)}</p></details>;
+  }
+  if (entry.event === 'curriculum.completion_threshold_changed') {
+    const value = (record: unknown) => record && typeof record === 'object' && !Array.isArray(record)
+      ? record as Record<string, unknown> : null;
+    const before = value(data.before);
+    const after = value(data.after);
+    return <details><summary>عرض تغيير نسبة الإتمام</summary>
+      <p>{typeof after?.name === 'string' ? after.name : 'بدون اسم'} · {data.kind === 'courses' ? 'كورس' : data.kind === 'stages' ? 'مرحلة' : 'مستوى'}</p>
+      <p>قبل: {typeof before?.completion_threshold === 'number' ? `${before.completion_threshold.toLocaleString('ar-EG')}٪` : 'موروثة'}</p>
+      <p>بعد: {typeof after?.completion_threshold === 'number' ? `${after.completion_threshold.toLocaleString('ar-EG')}٪` : 'موروثة'}</p>
+    </details>;
+  }
   function value(record: unknown) {
     if (!record || typeof record !== 'object' || Array.isArray(record)) return <p>لم يكن السجل موجودًا</p>;
     const item = record as Record<string, unknown>;
