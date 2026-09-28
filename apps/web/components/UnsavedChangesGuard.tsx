@@ -78,6 +78,7 @@ export function UnsavedChangesGuard({ dirty, guardHistory = false, onDiscard }: 
       if (!anchor || anchor.download || (anchor.target && anchor.target !== "_self")) return;
       const url = new URL(anchor.href, window.location.href);
       if (!["http:", "https:"].includes(url.protocol) || url.href === window.location.href || (url.origin === location.origin && url.pathname === location.pathname && url.search === location.search)) return;
+      if (anchor.dataset.preserveDirtyNavigation === "true" && url.origin === location.origin && url.pathname === location.pathname) return;
       event.preventDefault();
       event.stopPropagation();
       historyDelta.current = null;

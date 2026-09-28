@@ -466,3 +466,54 @@ test("withdraws and repeats study with preserved fees, SSR, SQL budget, and mobi
   await page.getByRole("button", { name: "إغلاق القائمة" }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test("repeat group batch links prefetch and keep the repeat form open", async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+  const branchId = workspace.branches[0].id;
+  const sourceGroup = await group(page, branchId, "0.00");
+  for (let index = 0; index < 50; index++) {
+    const created = await write(page, "groups", {
+      level_id: sourceGroup.level_id, plan_version_id: sourceGroup.plan_version_id,
+      name: `Batch ${index} ${crypto.randomUUID().slice(0, 6)}`, approved_price: "0.00",
+      instructor_ids: sourceGroup.instructors.map((instructor: { id: string }) => instructor.id), request_id: crypto.randomUUID(),
+    });
+    expect(created.status).toBe(201);
+  }
+  const created = await write(page, "students", { name: `طالب صفحات الإعادة ${Date.now()}`, branch_ids: [branchId], request_id: crypto.randomUUID() });
+  expect(created.status).toBe(201);
+  const studentId = created.body.student.id;
+  const account = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
+  if (!account.account.currency) expect((await write(page, "financial-currency", { currency: "EGP", revision: account.account.currency_revision }, "PATCH")).status).toBe(200);
+  const preview = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+  const enrolled = await write(page, `students/${studentId}/enrollments`, {
+    group_id: sourceGroup.id, group_revision: sourceGroup.revision, currency_revision: preview.student.currency_revision,
+    joined_on: "2026-09-28", discount: "0.00", discount_reason: null,
+    version: preview.student.version, request_id: crypto.randomUUID(),
+  });
+  expect(enrolled.status).toBe(201);
+  expect((await write(page, `students/${studentId}/enrollments/${enrolled.body.attempt.id}/withdraw`, {
+    withdrawn_on: "2026-09-28", reason: "إعادة الدراسة", revision: 1, request_id: crypto.randomUUID(),
+  })).status).toBe(200);
+  await page.goto(`${origin}/admin/students/${studentId}/enrollments`);
+  await page.getByRole("button", { name: "إعادة الدراسة", exact: true }).click();
+  await page.getByLabel("تاريخ الانضمام الفعلي").fill("2026-09-28");
+  for (let index = 0; index < 4; index++) {
+    await page.getByRole("button", { name: "الصفحة التالية في المجموعات المتاحة للتسجيل" }).click();
+  }
+  const nextBatch = page.getByRole("link", { name: "الصفحة التالية في المجموعات المتاحة للتسجيل" });
+  await expect(nextBatch).toHaveAttribute("href", /groups_page=2/);
+  const prefetched = page.waitForRequest(request => request.method() === "GET" && request.url().includes("groups_page=2"));
+  await nextBatch.hover();
+  await prefetched;
+  await nextBatch.click();
+  await expect(page).toHaveURL(/groups_page=2/);
+  await expect(page.getByRole("heading", { name: "إعادة الدراسة بمحاولة جديدة" })).toBeVisible();
+  await expect(page.getByLabel("تاريخ الانضمام الفعلي")).toHaveValue("2026-09-28");
+  const previousBatch = page.getByRole("link", { name: "الصفحة السابقة في المجموعات المتاحة للتسجيل" });
+  await previousBatch.hover();
+  await previousBatch.click();
+  await expect(page).toHaveURL(/groups_page=1/);
+  await expect(page.getByLabel("تاريخ الانضمام الفعلي")).toHaveValue("2026-09-28");
+});
