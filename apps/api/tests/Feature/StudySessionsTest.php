@@ -773,6 +773,14 @@ class StudySessionsTest extends TestCase
             $this->assertSame(1, DB::table('center_audit_logs')->where('event', 'study_session.revoked')->count());
             $this->assertSame(0, DB::table('student_payments')->count());
         });
+        $attempts = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")->assertOk()->json('attempts');
+        $attempt = collect($attempts)->firstWhere('id', $row['attempt_id']);
+        $this->postJson("{$this->base}/students/{$student['id']}/enrollments/{$row['attempt_id']}/withdraw", [
+            'withdrawn_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'انسحاب بعد إلغاء اعتماد المحاضرة',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk()->assertJsonPath('attempt.status', 'withdrawn');
+        $this->center->run(fn () => $this->assertSame('counted',
+            DB::table('study_attendance_entries')->where('id', $row['entry_id'])->value('status')));
     }
 
     private function group(int $branchId, string $name, int $lectureCount = 3): array
