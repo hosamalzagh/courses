@@ -192,6 +192,91 @@ test("suspended student with an incomplete old profile can settle existing fees 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test("edits payment and allocation notes while financial permissions hide other branches", async ({ page }) => {
+  await signIn(page);
+  const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+  const north = workspace.branches.find((branch: { slug: string }) => branch.slug === "north").id;
+  const south = workspace.branches.find((branch: { slug: string }) => branch.slug === "south").id;
+  expect((await write(page, `members/${credentials.staff.membership_id}/grants`, {
+    center_roles: [], branch_roles: { [north]: ["registration"] },
+  }, "PUT")).status).toBe(200);
+  const group = await pricedGroup(page, north);
+  const definitions = await (await page.request.get(`${origin}/api/v1/center/student-custom-fields?manage=1`)).json();
+  const customValues = Object.fromEntries(definitions.fields
+    .filter((field: { active: boolean; required: boolean }) => field.active && field.required)
+    .map((field: { id: string; type: string; options: string[] }) => [field.id,
+      field.type === "number" ? "1" : field.type === "date" ? "2000-01-01" :
+        field.type === "select" ? field.options[0] : field.type === "boolean" ? false : "مكتمل"]));
+  const student = await write(page, "students", { name: `ملاحظات مالية ${Date.now()}`, branch_ids: [north, south], request_id: crypto.randomUUID(),
+    custom_fields_revision: definitions.revision, custom_values: customValues });
+  expect(student.status).toBe(201);
+  const studentId = student.body.student.id;
+  const accountPath = `students/${studentId}/account`;
+  const settings = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  if (!settings.account.currency) expect((await write(page, "financial-currency", { currency: "EGP", revision: settings.account.currency_revision }, "PATCH")).status).toBe(200);
+  const enrollment = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+  expect((await write(page, `students/${studentId}/enrollments`, { group_id: group.id, group_revision: group.revision,
+    currency_revision: enrollment.student.currency_revision, joined_on: "2026-09-28", discount: "0.00", discount_reason: null,
+    version: enrollment.student.version, request_id: crypto.randomUUID() })).status).toBe(201);
+  const before = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  const payment = await write(page, `students/${studentId}/payments`, { branch_id: north, method: "cash", received_on: "2026-09-28",
+    amount: "80.00", version: before.account.version, request_id: crypto.randomUUID() });
+  expect(payment.status).toBe(201);
+  const northPaymentId = payment.body.payment.id;
+  const next = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  const southPayment = await write(page, `students/${studentId}/payments`, { branch_id: south, method: "cash", received_on: "2026-09-28",
+    amount: "15.00", version: next.account.version, request_id: crypto.randomUUID() });
+  expect(southPayment.status).toBe(201);
+
+  await page.goto(`${origin}/admin/students/${studentId}/account`);
+  await page.getByRole("row").filter({ hasText: "الفرع الشمالي" }).getByRole("button", { name: "عرض وتخصيص" }).click();
+  await page.getByRole("button", { name: "ملاحظة الدفعة وتاريخها" }).click();
+  await page.getByRole("textbox", { name: "نص الملاحظة" }).fill("تحقق من إيصال الدفعة");
+  await page.getByRole("checkbox", { name: "ملاحظة مهمة" }).check();
+  await page.getByRole("button", { name: "إضافة الملاحظة" }).click();
+  await expect(page.getByText("تحقق من إيصال الدفعة")).toBeVisible();
+  await expect(page.getByText("نسخة ١")).toBeVisible();
+  await page.getByRole("button", { name: "إغلاق الملاحظة" }).click();
+  await page.getByLabel(/المستحق 100.00.*المتبقي 100.00/).fill("30.00");
+  await page.getByRole("button", { name: "تخصيص المبالغ المحددة" }).click();
+  await expect(page.getByText("حُفظ التخصيص", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "ملاحظة التخصيص" }).click();
+  await page.getByRole("textbox", { name: "نص الملاحظة" }).fill("تخصيص لأول رسوم");
+  await page.getByRole("button", { name: "إضافة الملاحظة" }).click();
+  await expect(page.getByText("تخصيص لأول رسوم")).toBeVisible();
+  const account = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  expect(account.account).toMatchObject({ received_total: "95.00", paid_total: "30.00", available_balance: "65.00" });
+  expect(JSON.stringify(account)).not.toContain("تحقق من إيصال الدفعة");
+  const noteResponse = await page.request.get(`${origin}/api/v1/center/students/${studentId}/payments/${northPaymentId}/note`);
+  expect(Number(noteResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+
+  await page.context().clearCookies();
+  await signIn(page, "staff");
+  expect((await page.request.get(`${origin}/api/v1/center/students/${studentId}/payments/${northPaymentId}/note`)).status()).toBe(404);
+  expect((await page.request.get(`${origin}/api/v1/center/${accountPath}`)).status()).toBe(404);
+  await page.context().clearCookies();
+  await signIn(page);
+  expect((await write(page, `members/${credentials.staff.membership_id}/grants`, {
+    center_roles: [], branch_roles: { [north]: ["accounting"] },
+  }, "PUT")).status).toBe(200);
+  await page.context().clearCookies();
+  await signIn(page, "staff");
+  await page.goto(`${origin}/admin/students/${studentId}/account`);
+  await expect(page.getByText("80.00 EGP").first()).toBeVisible();
+  await expect(page.getByText("15.00 EGP")).toHaveCount(0);
+  const hidden = await page.request.get(`${origin}/api/v1/center/students/${studentId}/payments/${southPayment.body.payment.id}/note`);
+  expect(hidden.status()).toBe(404);
+  const shown = await page.request.get(`${origin}/api/v1/center/students/${studentId}/payments/${northPaymentId}/note`);
+  expect(shown.status()).toBe(200);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+  await page.getByRole("button", { name: "القائمة" }).click();
+  await page.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("button", { name: "إغلاق القائمة" }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
 test("simultaneous allocations cannot spend one payment twice", async ({ page }) => {
   await signIn(page);
   const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();

@@ -9,6 +9,7 @@ import { FieldGroup, FieldSet } from "@/components/ui/field";
 import { InlineNotice } from "@/components/InlineNotice";
 import { centerRequest, newSubmissionId, responseMessage } from "@/lib/client-api";
 import type { StudentPayment } from "@/lib/server-context";
+import { FinancialEventNoteEditor } from "./FinancialEventNoteEditor";
 
 type Fee = { id: string; attempt_id: string; group_name: string | null; fee_created_at: string; net_amount: string; paid_amount: string; remaining_amount: string; currency: string };
 type Allocation = { id: string; fee_id: string; attempt_id: string; group_name: string | null; fee_created_at: string; amount: string; currency: string; actor_name: string; created_at: string; reversal_id: string | null; reversal_reason: string | null; reversed_by_name: string | null; reversed_at: string | null };
@@ -29,6 +30,8 @@ export function StudentPaymentAllocations({ studentId, payment, onClose, onChang
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [selectedFees, setSelectedFees] = useState<Record<string, Fee>>({});
   const [reversing, setReversing] = useState<string | null>(null);
+  const [selectedNote, setSelectedNote] = useState<{ type: "payment" | "allocation"; id: string; label: string } | null>(null);
+  const [noteDirty, setNoteDirty] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -38,7 +41,7 @@ export function StudentPaymentAllocations({ studentId, payment, onClose, onChang
   const [notice, setNotice] = useState("");
   const requestId = useRef<string | null>(null);
   const submitting = useRef(false);
-  const dirty = Object.values(amounts).some(Boolean) || Boolean(reason);
+  const dirty = Object.values(amounts).some(Boolean) || Boolean(reason) || noteDirty;
   const path = `students/${studentId}/payments/${payment.id}`;
 
   const load = useCallback(async (page = 1, historyPage = 1) => {
@@ -125,6 +128,9 @@ export function StudentPaymentAllocations({ studentId, payment, onClose, onChang
     <h2 id={`${prefix}-title`} data-payment-allocation-title tabIndex={-1}>تخصيص الدفعة المستلمة في <bdi dir="ltr">{payment.received_on}</bdi></h2>
     <p>المبلغ: <bdi dir="ltr">{payment.amount} {payment.currency}</bdi> — المتاح حاليًا: <strong><bdi dir="ltr">{options?.payment.available_amount ?? payment.available_amount} {payment.currency}</bdi></strong></p>
     <p className="muted">اختر المحاولات والمبالغ صراحةً. التخصيص لا يغيّر الدفعة أو الرسوم الأصلية، والتصحيح يُسجل كحركة عكس مستقلة.</p>
+    <CenterHeaderActions><Button id={`${prefix}-payment-note`} disabled={busy || dirty} onClick={() => setSelectedNote({ type: "payment", id: payment.id, label: "الدفعة" })}>ملاحظة الدفعة وتاريخها</Button></CenterHeaderActions>
+    {selectedNote?.type === "payment" ? <FinancialEventNoteEditor studentId={studentId} type="payment" eventId={payment.id} label="الدفعة"
+      onDirtyChange={setNoteDirty} onClose={() => { setSelectedNote(null); focus(`${prefix}-payment-note`); }} /> : null}
     {loading ? <p role="status">جارٍ تحميل الرسوم والحركات…</p> : null}
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
@@ -158,8 +164,13 @@ export function StudentPaymentAllocations({ studentId, payment, onClose, onChang
         { key: "amount", label: "المبلغ", render: (row) => <bdi dir="ltr">{row.amount} {row.currency}</bdi> },
         { key: "status", label: "الحالة", render: (row) => row.reversal_id ? `معكوس: ${row.reversal_reason}` : "معتمد" },
         { key: "actor", label: "الموظف", render: (row) => row.actor_name },
-        { key: "action", label: "تصحيح", actions: true, render: (row) => options?.can_correct && !row.reversal_id ? <Button id={`${prefix}-reverse-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => { setReversing(row.id); setReason(""); requestId.current = null; focus(`${prefix}-reason`); }}>عكس التخصيص</Button> : "—" },
+        { key: "action", label: "إجراءات", actions: true, render: (row) => <CenterHeaderActions>
+          <Button id={`${prefix}-allocation-note-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => setSelectedNote({ type: "allocation", id: row.id, label: "التخصيص" })}>ملاحظة التخصيص</Button>
+          {options?.can_correct && !row.reversal_id ? <Button id={`${prefix}-reverse-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => { setReversing(row.id); setReason(""); requestId.current = null; focus(`${prefix}-reason`); }}>عكس التخصيص</Button> : null}
+        </CenterHeaderActions> },
       ]} />
+    {selectedNote?.type === "allocation" ? <FinancialEventNoteEditor key={selectedNote.id} studentId={studentId} type="allocation" eventId={selectedNote.id} label="التخصيص"
+      onDirtyChange={setNoteDirty} onClose={() => { const trigger = selectedNote.id; setSelectedNote(null); focus(`${prefix}-allocation-note-${trigger}`); }} /> : null}
     {options && (options.pagination.history_page > 1 || options.pagination.history_has_more) ? <CenterHeaderActions>
       {options.pagination.history_page > 1 ? <Button disabled={dirty || busy || uncertain} onClick={() => changePage(options.pagination.page, options.pagination.history_page - 1)}>حركات سابقة</Button> : null}
       {options.pagination.history_has_more ? <Button disabled={dirty || busy || uncertain} onClick={() => changePage(options.pagination.page, options.pagination.history_page + 1)}>حركات تالية</Button> : null}
