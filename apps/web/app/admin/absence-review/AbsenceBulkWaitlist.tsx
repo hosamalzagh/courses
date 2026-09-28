@@ -78,6 +78,7 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
       const response = await centerRequest(`absence-review/waitlist-batches/${id}?page=${page}`, "GET");
       if (!response.ok) { setError(await responseMessage(response)); errorRef.current?.focus(); return; }
       setResult(await response.json() as BatchResult);
+      if (!result) setSavedDraftKey(draftKey);
     } catch { setError("تعذر تحميل المعاينة. حاول مرة أخرى."); errorRef.current?.focus(); }
     finally { setBusy(null); }
   }
@@ -123,7 +124,7 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
   }
 
   async function execute() {
-    if (!result || busy || result.batch.pending === 0) return;
+    if (!result || busy || result.batch.pending === 0 || draftKey !== savedDraftKey) return;
     setBusy("execute"); setError(""); setNotice("");
     let current = result;
     try {
@@ -136,10 +137,10 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
       setNotice(current.batch.skipped > 0
         ? `اكتمل النقل جزئيًا: نُقل ${current.batch.moved.toLocaleString("ar-EG")} واستُبعد ${current.batch.skipped.toLocaleString("ar-EG")}. راجع سبب كل حالة أدناه.`
         : `اكتمل نقل ${current.batch.moved.toLocaleString("ar-EG")} طالب إلى الانتظار.`);
-    } catch { setError("انقطع الاتصال أثناء التنفيذ. ما تم حفظه ظاهر أدناه؛ اضغط استكمال التنفيذ لإعادة الفحص دون تكرار النقل."); errorRef.current?.focus(); }
-    finally {
       onSelectionChange([]);
       setSavedDraftKey(JSON.stringify([mode, enteredOn, reason, []]));
+    } catch { setError("انقطع الاتصال أثناء التنفيذ. ما تم حفظه ظاهر أدناه؛ اضغط استكمال التنفيذ لإعادة الفحص دون تكرار النقل."); errorRef.current?.focus(); }
+    finally {
       router.refresh();
       setBusy(null);
     }
@@ -198,7 +199,7 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
       <CenterHeaderActions>
         {result.pagination.page > 1 ? <Button disabled={Boolean(busy)} onClick={() => void loadBatch(result.batch.id, result.pagination.page - 1)}>السابق</Button> : null}
         {result.pagination.has_more ? <Button disabled={Boolean(busy)} onClick={() => void loadBatch(result.batch.id, result.pagination.page + 1)}>التالي</Button> : null}
-        {result.batch.pending > 0 ? <Button variant="primary" busy={busy === "execute"} disabled={Boolean(busy)} onClick={() => void execute()}>
+        {result.batch.pending > 0 ? <Button variant="primary" busy={busy === "execute"} disabled={Boolean(busy) || draftKey !== savedDraftKey} onClick={() => void execute()}>
           {result.batch.moved || result.batch.skipped ? "استكمال التنفيذ" : "تأكيد نقل المؤهلين"}
         </Button> : null}
       </CenterHeaderActions>

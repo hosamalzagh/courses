@@ -115,6 +115,10 @@ test("bulk preview, individual outcome, forbidden branch, and SSR budget", async
     await expect(owner.getByRole("heading", { name: "معاينة الدفعة ونتيجتها" })).toBeFocused();
     await expect(owner.getByText("الإجمالي: ١ · نُقل: ٠ · استُبعد: ٠ · ينتظر التنفيذ: ١")).toBeVisible();
     await expect(owner.getByRole("region", { name: "نتائج النقل الجماعي" })).toContainText(people[0].name);
+    await owner.getByLabel("سبب النقل").fill("سبب معدل بعد المعاينة");
+    await expect(owner.getByRole("button", { name: "تأكيد نقل المؤهلين" })).toBeDisabled();
+    await owner.getByLabel("سبب النقل").fill("مراجعة جماعية بعد الغياب");
+    await expect(owner.getByRole("button", { name: "تأكيد نقل المؤهلين" })).toBeEnabled();
     await owner.reload();
     await expect(owner.getByRole("region", { name: "نتائج النقل الجماعي" })).toContainText(people[0].name);
     await owner.getByRole("button", { name: "تأكيد نقل المؤهلين" }).click();
