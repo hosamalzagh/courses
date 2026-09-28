@@ -797,6 +797,22 @@ class StudyEnrollmentTest extends TestCase
             $this->assertSame(1, DB::table('center_audit_logs')->where('event', 'student.study_withdrawn')->count());
             $this->assertSame(1, DB::table('center_audit_logs')->where('event', 'student.study_repeated')->count());
         });
+        $auditUrls = ["{$this->base}/audit", "{$this->base}/branches/{$this->north}/audit"];
+        $this->grant([$this->north => ['branch_auditor']]);
+        $this->asUser($this->staff);
+        foreach ($auditUrls as $auditUrl) {
+            $hidden = $this->getJson($auditUrl)->assertOk()->getContent();
+            $this->assertStringNotContainsString('student.study_withdrawn', $hidden);
+            $this->assertStringNotContainsString('student.study_repeated', $hidden);
+            $this->assertStringNotContainsString($withdrawal['reason'], $hidden);
+        }
+        $this->grant([$this->north => ['branch_auditor', 'registration']]);
+        $this->asUser($this->staff);
+        foreach ($auditUrls as $auditUrl) {
+            $visible = $this->getJson($auditUrl)->assertOk()->getContent();
+            $this->assertStringContainsString('student.study_withdrawn', $visible);
+            $this->assertStringContainsString('student.study_repeated', $visible);
+        }
     }
 
     public function test_repeat_lineage_prevents_rollback_even_without_a_withdrawal(): void

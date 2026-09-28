@@ -14,6 +14,9 @@ class CenterAuditController extends Controller
         'student.payment_note_created', 'student.payment_note_updated',
         'student.allocation_note_created', 'student.allocation_note_updated'];
 
+    public const ENROLLMENT_EVENTS = ['student.enrolled', 'student.study_repeated', 'student.study_withdrawn',
+        'student.study_attempt_note_created', 'student.study_attempt_note_updated'];
+
     public function index(Request $request): JsonResponse
     {
         return response()->json(['entries' => self::visibleEntries($request)])
@@ -36,8 +39,7 @@ class CenterAuditController extends Controller
             $enrollmentBranches = array_keys(array_filter($permissions->branchRoles,
                 fn ($roles) => in_array('enrollment.manage', CenterPermissions::actions($roles), true)));
             $financialEvents = self::FINANCIAL_EVENTS;
-            $enrollmentEvents = ['student.enrolled', 'student.study_repeated', 'student.study_withdrawn',
-                'student.study_attempt_note_created', 'student.study_attempt_note_updated'];
+            $enrollmentEvents = self::ENROLLMENT_EVENTS;
             $attendanceEvents = ['student.attendance_note_created', 'student.attendance_note_updated'];
             $attendanceBranches = array_keys(array_filter($permissions->branchRoles,
                 fn ($roles) => in_array('attendance.record', CenterPermissions::actions($roles), true)
