@@ -285,6 +285,8 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
         }} /> : null}
     {openWaitlistId && current.attempts.find(attempt => attempt.id === openWaitlistId) ?
       <StudyWaitlistEditor key={openWaitlistId} studentId={studentId} attempt={current.attempts.find(attempt => attempt.id === openWaitlistId)!}
-        onClose={closeWaitlist} onDirtyChange={setWaitlistDirty} onSaved={() => { void reload(); setNotice("حُفظ قرار الانتظار أو الإلحاق دون رسوم أو تخصيص جديد."); }} /> : null}
+        onClose={closeWaitlist} onDirtyChange={setWaitlistDirty}
+        onReload={() => { closeWaitlist(); void reload(); }}
+        onSaved={() => { void reload(); setNotice("حُفظ قرار الانتظار أو الإلحاق دون رسوم أو تخصيص جديد."); }} /> : null}
   </>;
 }

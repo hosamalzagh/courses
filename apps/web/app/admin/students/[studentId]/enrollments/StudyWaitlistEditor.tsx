@@ -18,8 +18,9 @@ type Waitlist = NonNullable<Attempt["latest_waitlist"]>;
 type Options = { attempt_revision: number; groups: { id: string; name: string; revision: number }[];
   history: Waitlist[]; pagination: { page: number; has_more: boolean; history_page: number; history_has_more: boolean } };
 
-export function StudyWaitlistEditor({ studentId, attempt, onClose, onSaved, onDirtyChange }: {
-  studentId: string; attempt: Attempt; onClose: () => void; onSaved: () => void; onDirtyChange: (dirty: boolean) => void;
+export function StudyWaitlistEditor({ studentId, attempt, onClose, onSaved, onReload, onDirtyChange }: {
+  studentId: string; attempt: Attempt; onClose: () => void; onSaved: () => void; onReload: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const prefix = useId();
   const waiting = attempt.current_group_id === null;
@@ -136,7 +137,7 @@ export function StudyWaitlistEditor({ studentId, attempt, onClose, onSaved, onDi
         {uncertain ? "التحقق من القرار" : waiting ? "إعادة الإلحاق" : "نقل إلى الانتظار"}
       </Button>
       <Button type="button" disabled={busy || uncertain} onClick={onClose}>إلغاء</Button>
-      {conflict ? <Button type="button" onClick={onSaved}>تحميل أحدث البيانات</Button> : null}
+      {conflict ? <Button type="button" onClick={onReload}>تحميل أحدث البيانات</Button> : null}
     </CenterHeaderActions>
     {options?.history.length ? <DataTable id={`${prefix}-wait-history`} title="سجل انتظار المستوى" rows={options.history} rowKey={row => row.id}
       searchText={row => `${row.reason} ${row.entered_by_name} ${row.entered_on}`} emptyMessage="لا يوجد انتظار مسجل."

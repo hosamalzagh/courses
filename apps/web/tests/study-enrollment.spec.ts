@@ -515,6 +515,21 @@ test("waitlists and reattaches within one attempt through the employee page", as
   expect(final.attempts).toHaveLength(1);
   expect(final.attempts[0]).toMatchObject({ id: attemptId, current_group_id: second.body.group.id,
     fee: { net_amount: "120.00" }, latest_waitlist: { reason: "جدول المجموعة لا يناسب الطالب", left_on: "2026-09-28" } });
+  await page.reload();
+  await page.locator(`[id$="-waitlist-${attemptId}"]`).click();
+  await page.getByLabel("تاريخ بداية الانتظار").fill("2026-09-28");
+  await page.getByLabel("سبب الانتظار").fill("طلب لم يعد صالحًا");
+  const changedElsewhere = await write(page, `students/${studentId}/enrollments/${attemptId}/waitlist`, {
+    entered_on: "2026-09-28", reason: "قرار موظف آخر", revision: final.attempts[0].revision,
+    request_id: crypto.randomUUID(),
+  });
+  expect(changedElsewhere.status).toBe(201);
+  await page.getByRole("button", { name: "نقل إلى الانتظار", exact: true }).first().click();
+  await page.getByRole("button", { name: "تأكيد الانتظار" }).click();
+  await expect(page.getByText("تغيرت المحاولة أو المجموعة. حمّل أحدث البيانات قبل القرار.")).toBeVisible();
+  await page.getByRole("button", { name: "تحميل أحدث البيانات" }).click();
+  await expect(page.getByText("انتظار منذ 2026-09-28")).toBeVisible();
+  await expect(page.getByText("حُفظ قرار الانتظار أو الإلحاق دون رسوم أو تخصيص جديد.")).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
   await page.getByRole("button", { name: "القائمة" }).click();

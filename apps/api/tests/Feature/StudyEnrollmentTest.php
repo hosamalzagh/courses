@@ -212,12 +212,23 @@ class StudyEnrollmentTest extends TestCase
         $this->getJson("{$this->base}/absence-review?view=all")->assertOk()->assertJsonCount(0, 'students');
         $this->asUser($this->staff);
         $revision = $this->getJson($url)->json('attempts.0.revision');
-        $this->postJson("{$url}/{$saved['id']}/withdraw", ['withdrawn_on' => '2026-09-28',
+        $this->travelTo(now('Africa/Cairo')->addDay()->setTime(12, 0));
+        $this->postJson("{$url}/{$saved['id']}/withdraw", ['withdrawn_on' => '2026-09-29',
             'reason' => 'انسحاب أثناء الانتظار', 'revision' => $revision,
             'request_id' => (string) Str::uuid()])->assertOk();
-        $this->getJson($url)->assertOk()->assertJsonPath('attempts.0.status', 'withdrawn')
-            ->assertJsonPath('attempts.0.latest_waitlist.left_on', '2026-09-28');
+        $afterWithdrawal = $this->getJson($url)->assertOk()->assertJsonPath('attempts.0.status', 'withdrawn')
+            ->assertJsonPath('attempts.0.latest_waitlist.left_on', '2026-09-29')->json();
         $this->center->run(fn () => $this->assertSame(1, DB::table('study_attempt_fees')->count()));
+        $repeatGroup = collect($afterWithdrawal['groups'])->firstWhere('id', $second['id']);
+        $repeat = ['group_id' => $second['id'], 'group_revision' => $repeatGroup['revision'],
+            'currency_revision' => $afterWithdrawal['student']['currency_revision'],
+            'joined_on' => '2026-09-28', 'discount' => '0.00', 'discount_reason' => null,
+            'repeated_from_attempt_id' => $saved['id'], 'version' => $afterWithdrawal['student']['version'],
+            'request_id' => (string) Str::uuid()];
+        $this->postJson($url, $repeat)->assertUnprocessable();
+        $this->postJson($url, [...$repeat, 'joined_on' => '2026-09-29',
+            'request_id' => (string) Str::uuid()])->assertCreated();
+        $this->center->run(fn () => $this->assertSame(2, DB::table('study_attempt_fees')->count()));
     }
 
     public function test_discount_permission_zero_price_branch_scope_and_stale_enrollment(): void
