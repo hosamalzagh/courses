@@ -77,6 +77,9 @@ test("schedule preview, confirmation, postponement and branch permissions throug
     await owner.getByLabel("بداية أول موعد بتوقيت القاهرة").fill(local);
     await owner.getByRole("button", { name: "معاينة المواعيد" }).click();
     await expect(owner.getByRole("heading", { name: "تأكيد المواعيد" })).toBeFocused();
+    await owner.getByRole("button", { name: "إلغاء المعاينة" }).click();
+    await expect(owner.getByRole("button", { name: "معاينة المواعيد" })).toBeFocused();
+    await owner.getByRole("button", { name: "معاينة المواعيد" }).click();
     await expect(owner.getByRole("heading", { name: "تأكيد المواعيد" }).locator("..")).toContainText("محاضرة الخطة ١");
     await owner.getByRole("button", { name: /تأكيد وحفظ ٢ موعد/ }).click();
     await expect(owner.getByText("حُفظت المواعيد وربطت بمحاضرات الخطة المعتمدة.")).toBeVisible();

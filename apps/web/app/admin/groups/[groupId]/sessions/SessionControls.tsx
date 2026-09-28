@@ -46,7 +46,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
     setPreview(null);
     setConflict(false);
   }
-  const dirty = Boolean(preview || draft.start_at || draft.title || selected || postponeAt || reason);
+  const dirty = Boolean(preview || JSON.stringify(draft) !== JSON.stringify(initialDraft) || selected || postponeAt || reason);
   const prefix = `groups/${group.id}/sessions`;
   const available = group.requirements.filter(requirement => !group.scheduled_requirements.includes(requirement.number));
 
@@ -174,12 +174,12 @@ export function SessionControls({ context }: { context: SessionContext }) {
           <FormField id={`${formId}-interval`} label="الفاصل بالأسابيع" value={draft.interval_weeks} onChange={interval_weeks => changeDraft({ interval_weeks })} type="number" direction="ltr" error={fieldErrors.interval_weeks} disabled={busy || conflict} hint="من أسبوع إلى أربعة أسابيع." />
         </>}
         <FormField id={`${formId}-start`} label={draft.kind === "weekly" ? "بداية أول موعد بتوقيت القاهرة" : "موعد المحاضرة بتوقيت القاهرة"} value={draft.start_at} onChange={start_at => changeDraft({ start_at })} type="datetime-local" direction="ltr" error={fieldErrors.start_at} disabled={busy || conflict} required />
-        {!preview ? <CenterHeaderActions><Button form={`${formId}-schedule`} type="submit" variant="primary" busy={busy} disabled={conflict || !draft.start_at || (draft.kind === "single" && !draft.plan_lecture_number)}>معاينة المواعيد</Button></CenterHeaderActions> : null}
+        {!preview ? <CenterHeaderActions><Button id={`${formId}-review`} form={`${formId}-schedule`} type="submit" variant="primary" busy={busy} disabled={conflict || !draft.start_at || (draft.kind === "single" && !draft.plan_lecture_number)}>معاينة المواعيد</Button></CenterHeaderActions> : null}
         {preview ? <section className="form-stack" aria-labelledby={`${formId}-preview`}>
           <h3 id={`${formId}-preview`} tabIndex={-1}>تأكيد المواعيد</h3>
           <ol>{preview.sessions.map(item => <li key={item.number}>موعد {item.number.toLocaleString("ar-EG")} · محاضرة الخطة {item.plan_lecture_number.toLocaleString("ar-EG")} · <bdi dir="ltr">{item.local_at.replace("T", " ")}</bdi> القاهرة{item.title ? ` · ${item.title}` : ""}</li>)}</ol>
           <p>راجع الترتيب والمواعيد قبل الحفظ؛ سيتحقق النظام من الحالة مجددًا عند التأكيد.</p>
-          <CenterHeaderActions><Button form={`${formId}-schedule`} type="submit" variant="primary" busy={busy} disabled={conflict}>تأكيد وحفظ {preview.sessions.length.toLocaleString("ar-EG")} موعد</Button><Button disabled={busy} onClick={() => setPreview(null)}>إلغاء المعاينة</Button></CenterHeaderActions>
+          <CenterHeaderActions><Button form={`${formId}-schedule`} type="submit" variant="primary" busy={busy} disabled={conflict}>تأكيد وحفظ {preview.sessions.length.toLocaleString("ar-EG")} موعد</Button><Button disabled={busy} onClick={() => { setPreview(null); requestAnimationFrame(() => document.getElementById(`${formId}-review`)?.focus()); }}>إلغاء المعاينة</Button></CenterHeaderActions>
         </section> : null}
       </form> : group.status === "completed" ? <p>المجموعة مكتملة؛ جدولها متاح للقراءة فقط.</p> : !group.can_manage ? <p>جدول المجموعة متاح للقراءة. تعديل المواعيد يتطلب صلاحية إدارة المنهج في الفرع.</p> : <p>جُدولت جميع محاضرات الخطة المعتمدة.</p>}
     </section>
