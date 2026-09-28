@@ -178,7 +178,15 @@ test("records whole-session attendance, undoes the last entry, closes absences, 
       request_id: crypto.randomUUID() })).status).toBe(403);
 
     await owner.getByRole("button", { name: "إغلاق كشف المحاضرة" }).click();
+    const latest = await (await owner.request.get(`${origin}/api/v1/center/${path}`)).json();
+    expect((await write(owner, `groups/${groupId}/sessions/${sessionId}/close`, {
+      revision: latest.session.revision, request_id: crypto.randomUUID(),
+    })).status).toBe(200);
     await owner.getByRole("button", { name: "تأكيد الإغلاق" }).click();
+    await expect(owner.getByRole("button", { name: "تحميل أحدث البيانات" })).toBeVisible();
+    await owner.getByRole("button", { name: "تحميل أحدث البيانات" }).click();
+    await expect(owner.getByRole("button", { name: "تأكيد الإغلاق" })).toHaveCount(0);
+    await expect(owner.getByRole("button", { name: "إلغاء" })).toHaveCount(0);
     await expect(owner.getByRole("row", { name: new RegExp(students[1].name) })).toContainText("غائب");
     expect(await owner.locator("body").innerText()).not.toContain(students[2].name);
     expect((await write(owner, `${path}/${entryId}/undo`, { revision: recordedRoster.session.revision + 1,

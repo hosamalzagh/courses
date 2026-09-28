@@ -118,7 +118,7 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
         `${path}/attendance/${selectedRow.entry_id}/undo`, {})}>تأكيد التراجع</Button>}
       <Button disabled={busy} onClick={cancelSelection}>إلغاء</Button>
     </CenterHeaderActions> : null}
-    {confirmClose ? <CenterHeaderActions><Button variant="primary" busy={busy} disabled={conflict}
+    {confirmClose && canClose ? <CenterHeaderActions><Button variant="primary" busy={busy} disabled={conflict}
       onClick={() => void action("close", session.id, `${path}/close`, {})}>تأكيد الإغلاق</Button>
       <Button disabled={busy} onClick={() => { setConfirmClose(false); requestAnimationFrame(() => document.getElementById(`${titleId}-close`)?.focus()); }}>إلغاء</Button></CenterHeaderActions> : null}
     {conflict ? <CenterHeaderActions><Button disabled={busy} onClick={() => void reload().then(() => setNotice("حُمّل أحدث كشف؛ راجع الحالة قبل إعادة الإجراء.")).catch(failure => setError(failure instanceof Error ? failure.message : "تعذر التحديث."))}>تحميل أحدث البيانات</Button></CenterHeaderActions> : null}
