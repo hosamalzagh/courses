@@ -161,6 +161,41 @@ class StudyCoverageTest extends TestCase
         $this->getJson("{$this->base}/groups/not-a-uuid/coverage")->assertNotFound();
     }
 
+    public function test_threshold_backfill_replays_historical_overrides_for_existing_attempts(): void
+    {
+        $group = $this->group($this->north, 2);
+        $first = $this->student();
+        $original = $this->enroll($first['id'], $group, now('Africa/Cairo')->format('Y-m-d'));
+        $curriculum = $this->center->run(fn () => DB::table('study_groups as groups')
+            ->join('levels', 'levels.id', '=', 'groups.level_id')
+            ->join('stages', 'stages.id', '=', 'levels.stage_id')
+            ->where('groups.id', $group['id'])
+            ->first(['levels.id as level_id', 'stages.course_id']));
+        $this->patchJson("{$this->base}/courses/{$curriculum->course_id}/completion-threshold", [
+            'revision' => 1, 'completion_threshold' => 85,
+        ])->assertOk();
+        $this->patchJson("{$this->base}/levels/{$curriculum->level_id}/completion-threshold", [
+            'revision' => 1, 'completion_threshold' => 70,
+        ])->assertOk();
+        $this->patchJson("{$this->base}/groups/{$group['id']}/settings", [
+            'revision' => 1, 'approved_price' => '0.00', 'completion_threshold' => 60,
+            'instructor_ids' => array_column($group['instructors'], 'id'),
+        ])->assertOk();
+        $second = $this->student();
+        $later = $this->enroll($second['id'], [...$group, 'revision' => 2], now('Africa/Cairo')->format('Y-m-d'));
+
+        $this->center->run(function () use ($original, $later): void {
+            DB::statement('ALTER TABLE study_attempts DROP CONSTRAINT study_attempt_completion_threshold_valid');
+            DB::statement('ALTER TABLE study_attempts DROP COLUMN completion_threshold');
+            $migration = require database_path('migrations/tenant/2026_09_28_180100_snapshot_attempt_completion_threshold.php');
+            $migration->up();
+            $thresholds = DB::table('study_attempts')->whereIn('id', [$original['id'], $later['id']])
+                ->pluck('completion_threshold', 'id');
+            $this->assertSame(80, $thresholds[$original['id']]);
+            $this->assertSame(60, $thresholds[$later['id']]);
+        });
+    }
+
     public function test_report_paginates_students_on_the_server_without_per_row_queries(): void
     {
         $group = $this->group($this->north, 3);
