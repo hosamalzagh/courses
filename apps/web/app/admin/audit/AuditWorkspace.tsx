@@ -56,6 +56,7 @@ const eventNames: Record<string, string> = {
   "curriculum.plan_version_created": "إنشاء إصدار خطة المستوى",
   "content.equivalence_approved": "اعتماد معادلة المحتوى",
   "curriculum.completion_threshold_changed": "تغيير نسبة إتمام المنهج",
+  "study_attempts.completion_threshold_applied": "تطبيق نسبة الإتمام على تسجيلات قائمة",
   "study_group.created": "إنشاء مجموعة", "study_group.started": "بدء مجموعة",
   "study_group.settings_updated": "تعديل إعدادات مجموعة",
   "study_sessions.scheduled": "جدولة محاضرات مجموعة",

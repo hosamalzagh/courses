@@ -18,7 +18,8 @@ class CenterAuditController extends Controller
 
     public const ENROLLMENT_EVENTS = ['student.enrolled', 'student.study_repeated', 'student.study_withdrawn',
         'student.study_waitlisted', 'student.study_reattached', 'student.study_transferred',
-        'student.study_attempt_note_created', 'student.study_attempt_note_updated'];
+        'student.study_attempt_note_created', 'student.study_attempt_note_updated',
+        'study_attempts.completion_threshold_applied'];
 
     public function index(Request $request): JsonResponse
     {
