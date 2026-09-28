@@ -897,6 +897,34 @@ class StudyEnrollmentTest extends TestCase
             'version' => $this->getJson("{$paymentUrl}/allocation-options")->json('version'),
             'request_id' => (string) Str::uuid(),
         ])->assertCreated()->json('allocations.0');
+        $transferGroup = $this->group($this->south, '0.00');
+        [$sourceLecture, $destinationLecture] = $this->center->run(fn () => [
+            DB::table('plan_lectures')->where('plan_version_id', $northGroup['plan_version_id'])->value('id'),
+            DB::table('plan_lectures')->where('plan_version_id', $transferGroup['plan_version_id'])->value('id'),
+        ]);
+        $this->postJson("{$this->base}/content-equivalences", [
+            'source_plan_version_id' => $northGroup['plan_version_id'],
+            'target_plan_version_id' => $transferGroup['plan_version_id'],
+            'source_lecture_ids' => [$sourceLecture], 'target_lecture_ids' => [$destinationLecture],
+            'reason' => 'معادلة قبل نقل الدراسة', 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $transferUrl = "{$enrollmentUrl}/{$attempts[0]['id']}/transfer";
+        $transferPreview = $this->getJson("{$transferUrl}/preview?".http_build_query([
+            'group_id' => $transferGroup['id'], 'transferred_on' => '2026-09-28',
+        ]))->assertOk()->json('preview');
+        $this->postJson($transferUrl, [
+            'group_id' => $transferGroup['id'], 'group_revision' => $transferGroup['revision'],
+            'transferred_on' => '2026-09-28', 'revision' => $attempts[0]['revision'],
+            'preview_hash' => $transferPreview['hash'], 'reason' => 'نقل أكاديمي مستقل عن المال',
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->getJson($accountUrl)->assertJsonPath('account.available_balance', '600.00')
+            ->assertJsonPath('account.paid_total', '400.00');
+        $this->center->run(function () use ($attempts): void {
+            $this->assertSame(1, DB::table('student_payment_allocations')->count());
+            $this->assertSame($this->south, (int) DB::table('study_attempts')->where('id', $attempts[0]['id'])->value('branch_id'));
+            $this->assertSame($this->north, (int) DB::table('study_attempt_fees')->where('attempt_id', $attempts[0]['id'])->value('branch_id'));
+        });
         $url = "{$this->base}/students/{$student['id']}/allocations/{$allocation['id']}/corrections";
         $version = $this->getJson($accountUrl)->json('account.version');
         $previewRequest = ['target_attempt_id' => $attempts[1]['id'], 'version' => $version];
@@ -948,6 +976,12 @@ class StudyEnrollmentTest extends TestCase
             $this->assertSame($saved['reversal']['submission_id'], $saved['allocation']['submission_id']);
             $this->assertSame($allocation['id'], $saved['reversal']['allocation_id']);
             $this->assertSame('خُصص للتسجيل الخطأ', $saved['reversal']['reason']);
+            try {
+                (require database_path('migrations/tenant/2026_09_29_020000_allow_student_allocation_corrections.php'))->down();
+                $this->fail('Approved corrections must prevent rollback of their submission kind.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString('Cannot roll back', $exception->getMessage());
+            }
         });
         $this->grant([$this->north => ['accounting', 'branch_auditor', 'financial_approval']]);
         $this->asUser($this->staff);

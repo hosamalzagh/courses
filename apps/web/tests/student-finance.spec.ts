@@ -256,7 +256,7 @@ test("corrects an allocation to another branch while retaining the original rece
     if (!initial.account.currency) expect((await write(owner, "financial-currency", {
       currency: "EGP", revision: initial.account.currency_revision,
     }, "PATCH")).status).toBe(200);
-    const attempts = [];
+    const attempts: { id: string }[] = [];
     for (const group of [wrongGroup, rightGroup]) {
       const enrollment = await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
       const saved = await write(owner, `students/${studentId}/enrollments`, {
@@ -287,12 +287,14 @@ test("corrects an allocation to another branch while retaining the original rece
     await staff.goto(`${origin}/admin/students/${studentId}/account`);
     await staff.getByRole("button", { name: "عرض وتخصيص" }).click();
     await staff.getByRole("button", { name: "تصحيح التخصيص" }).click();
-    await expect(staff.getByRole("combobox", { name: "التسجيل الصحيح" })).toBeVisible();
+    await expect(staff.getByRole("combobox", { name: "التسجيل الصحيح" })).toBeFocused();
     const staffOptions = await (await staff.request.get(`${origin}/api/v1/center/${paymentPath}/allocation-options`)).json();
     expect(staffOptions.fees.some((fee: { attempt_id: string }) => fee.attempt_id === attempts[1].id)).toBe(false);
     expect((await write(staff, `${correctionPath}/preview`, {
       target_attempt_id: attempts[1].id, version: staffOptions.version,
     })).status).toBe(403);
+    await staff.getByRole("button", { name: "إلغاء التصحيح" }).click();
+    await expect(staff.getByRole("button", { name: "تصحيح التخصيص" })).toBeFocused();
 
     expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, {
       center_roles: [], branch_roles: { [north.id]: ["accounting", "branch_auditor", "financial_approval"],
@@ -313,7 +315,7 @@ test("corrects an allocation to another branch while retaining the original rece
     await staff.getByRole("button", { name: "اعتماد التصحيح" }).click();
     await expect(staff.getByRole("alertdialog")).toContainText(south.name);
     await staff.getByRole("button", { name: "إلغاء", exact: true }).click();
-    await expect(staff.locator("[data-payment-allocation-title]")).toBeVisible();
+    await expect(staff.getByRole("button", { name: "اعتماد التصحيح" })).toBeFocused();
     expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, {
       center_roles: [], branch_roles: { [north.id]: ["accounting", "branch_auditor", "financial_approval"], [south.id]: ["accounting"] },
     }, "PUT")).status).toBe(200);

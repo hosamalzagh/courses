@@ -321,7 +321,7 @@ export function StudentPaymentAllocations({ studentId, payment, focusNote, onClo
         <p>رصيد الحساب المرئي: <bdi dir="ltr">{correctionPreview.account.available_before}</bdi> ← <bdi dir="ltr">{correctionPreview.account.available_after}</bdi>؛ المديونية: <bdi dir="ltr">{correctionPreview.account.debt_before}</bdi> ← <bdi dir="ltr">{correctionPreview.account.debt_after} {correctionPreview.source.currency}</bdi>.</p>
       </section> : null}
       <CenterHeaderActions>
-        <Button form={correctionFormId} type="submit" variant="primary" busy={busy} disabled={conflict || !correctionTarget || !correctionReason.trim()}>{uncertain ? "التحقق من التصحيح" : correctionPreview ? "اعتماد التصحيح" : "معاينة التصحيح"}</Button>
+        <Button id={`${prefix}-correction-submit`} form={correctionFormId} type="submit" variant="primary" busy={busy} disabled={conflict || !correctionTarget || !correctionReason.trim()}>{uncertain ? "التحقق من التصحيح" : correctionPreview ? "اعتماد التصحيح" : "معاينة التصحيح"}</Button>
         <Button disabled={busy || uncertain} onClick={() => { const trigger = correcting.id; setCorrecting(null); setCorrectionTarget(null); setCorrectionReason(""); setCorrectionPreview(null); requestId.current = null; setError(""); focus(`${prefix}-correct-${trigger}`); }}>إلغاء التصحيح</Button>
       </CenterHeaderActions>
     </section> : null}
@@ -331,7 +331,7 @@ export function StudentPaymentAllocations({ studentId, payment, focusNote, onClo
       onConfirm={() => { setConfirmCrossBranch(false); void commitAllocation(preview.targets.map(target => ({ attempt_id: target.attempt_id, amount: target.amount }))); }} /> : null}
     {confirmCorrection && correctionPreview ? <ConfirmationDialog title="اعتماد تصحيح التخصيص"
       description={`سيُعكس تخصيص ${correctionPreview.original.amount} ${correctionPreview.source.currency} من ${correctionPreview.original.branch_name} ويُسجل على ${correctionPreview.target?.branch_name ?? "الرصيد المتاح"}، مع بقاء الدفعة الأصلية.`}
-      confirmLabel="تأكيد التصحيح" onCancel={() => { setConfirmCorrection(false); focus(`${prefix}-correction-preview`); }}
+      confirmLabel="تأكيد التصحيح" onCancel={() => { setConfirmCorrection(false); focus(`${prefix}-correction-submit`); }}
       onConfirm={() => { setConfirmCorrection(false); void commitCorrection(); }} /> : null}
     <CenterHeaderActions><Button disabled={busy || uncertain || dirty} onClick={onClose}>إغلاق تفاصيل الدفعة</Button></CenterHeaderActions>
   </section>;
