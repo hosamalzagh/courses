@@ -8,6 +8,7 @@ import { CurriculumAuditDetails } from "@/components/CurriculumAuditDetails";
 import { StudentFinanceAuditDetails } from "@/components/StudentFinanceAuditDetails";
 import { StudentEventNoteAuditDetails } from "@/components/StudentEventNoteAuditDetails";
 import { StudySessionAuditDetails } from "@/components/StudySessionAuditDetails";
+import { AbsenceAuditDetails } from "@/components/AbsenceAuditDetails";
 import type { AuditEntry, CenterContext } from "@/lib/server-context";
 import { AuditControls, type AuditRow } from "./AuditControls";
 
@@ -52,6 +53,7 @@ const eventNames: Record<string, string> = {
   "study_attendance.undone": "التراجع عن حضور طالب",
   "study_attendance.closed": "إغلاق كشف حضور محاضرة",
   "study_attendance.suspension_backfilled": "إضافة استثناءات إيقاف إلى كشف مغلق",
+  "study_absence.rule_changed": "تعديل قاعدة تنبيه الغياب",
 };
 
 export function AuditWorkspace({ context, initialEntries }: { context: CenterContext; initialEntries: AuditEntry[] }) {
@@ -62,7 +64,7 @@ export function AuditWorkspace({ context, initialEntries }: { context: CenterCon
     time: new Date(entry.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" }),
     createdAt: entry.created_at, branch: entry.branch_id !== null,
     search: `${eventNames[entry.event] ?? entry.event} ${entry.branch_id ?? ""} ${entry.actor_id ?? ""}`,
-    details: <><GrantAuditDetails entry={entry} /><StudentAuditDetails entry={entry} /><StudentFinanceAuditDetails entry={entry} /><StudentEventNoteAuditDetails entry={entry} /><InstructorAuditDetails entry={entry} /><StudentSearchAuditDetails entry={entry} /><StudentNumberingAuditDetails entry={entry} /><CurriculumAuditDetails entry={entry} /><StudySessionAuditDetails entry={entry} /></>,
+    details: <><GrantAuditDetails entry={entry} /><StudentAuditDetails entry={entry} /><StudentFinanceAuditDetails entry={entry} /><StudentEventNoteAuditDetails entry={entry} /><InstructorAuditDetails entry={entry} /><StudentSearchAuditDetails entry={entry} /><StudentNumberingAuditDetails entry={entry} /><CurriculumAuditDetails entry={entry} /><StudySessionAuditDetails entry={entry} /><AbsenceAuditDetails entry={entry} /></>,
   }));
   return <CenterPage context={context} path="/admin/audit"><AuditControls rows={rows} /></CenterPage>;
 }

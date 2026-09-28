@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\CenterAbsenceReviewController;
 use App\Http\Controllers\CenterAuditController;
 use App\Http\Controllers\CenterAuthController;
 use App\Http\Controllers\CenterBranchController;
@@ -141,6 +142,9 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::patch('stages/{stageId}/completion-threshold', [CenterCurriculumController::class, 'updateStageThreshold']);
         Route::patch('levels/{levelId}/completion-threshold', [CenterCurriculumController::class, 'updateLevelThreshold']);
         Route::get('group-workspace', [CenterStudyGroupController::class, 'workspace']);
+        Route::get('absence-review', [CenterAbsenceReviewController::class, 'workspace']);
+        Route::get('absence-options', [CenterAbsenceReviewController::class, 'optionsPage']);
+        Route::patch('absence-rules/{kind}/{id}', [CenterAbsenceReviewController::class, 'updateRule']);
         Route::get('group-instructor-options', [CenterStudyGroupController::class, 'instructorOptions']);
         Route::get('groups/{groupId}', [CenterStudyGroupController::class, 'workspace']);
         Route::post('groups', [CenterStudyGroupController::class, 'store']);
