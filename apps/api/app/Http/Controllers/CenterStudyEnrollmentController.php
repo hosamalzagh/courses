@@ -326,7 +326,14 @@ class CenterStudyEnrollmentController extends Controller
         return DB::connection('tenant')->table('study_attempts')
             ->leftJoin('study_groups', 'study_groups.id', '=', 'study_attempts.current_group_id')
             ->join('levels', 'levels.id', '=', 'study_attempts.level_id')
-            ->join('study_attempt_fees as fees', 'fees.attempt_id', '=', 'study_attempts.id')
+            ->leftJoin('study_attempt_fees as fees', function ($join) use ($permissions): void {
+                $join->on('fees.attempt_id', '=', 'study_attempts.id');
+                if (! $permissions->isCenterManager()) {
+                    $readableBranches = array_keys(array_filter($permissions->branchRoles,
+                        fn (array $roles): bool => in_array('read', CenterPermissions::actions($roles), true)));
+                    $join->whereIn('fees.branch_id', $readableBranches);
+                }
+            })
             ->leftJoin('study_attempt_withdrawals as withdrawal', 'withdrawal.attempt_id', '=', 'study_attempts.id')
             ->leftJoin('student_event_notes as note', function ($join) use ($permissions): void {
                 $join->on('note.event_id', '=', 'study_attempts.id')->on('note.branch_id', '=', 'fees.branch_id')
@@ -338,6 +345,9 @@ class CenterStudyEnrollmentController extends Controller
                 }
             })
             ->where('study_attempts.student_id', $studentId)
+            ->whereExists(DB::connection('tenant')->table('student_branches as current_association')
+                ->whereColumn('current_association.student_id', 'study_attempts.student_id')
+                ->whereColumn('current_association.branch_id', 'study_attempts.branch_id')->selectRaw('1'))
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('study_attempts.branch_id', $this->scope($permissions)))
             ->select(['study_attempts.id', 'study_attempts.level_id', 'study_attempts.plan_version_id',
                 'study_attempts.current_group_id', 'study_attempts.branch_id', 'study_attempts.joined_on',
@@ -346,7 +356,7 @@ class CenterStudyEnrollmentController extends Controller
                 'withdrawal.withdrawn_on', 'withdrawal.reason as withdrawal_reason', 'withdrawal.actor_name as withdrawal_actor_name'])
             ->selectRaw('(SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id) AS requirements_count')
             ->selectRaw('CASE WHEN EXISTS (SELECT 1 FROM study_attempts AS repeated WHERE repeated.repeated_from_attempt_id = study_attempts.id) THEN 1 ELSE 0 END AS has_repeat')
-            ->selectRaw('(SELECT row_to_json(waitlist) FROM (SELECT id, from_group_id, to_group_id, entered_on, left_on, reason, entered_by_name, left_by_name FROM study_attempt_waitlists WHERE attempt_id = study_attempts.id ORDER BY entered_on DESC, created_at DESC LIMIT 1) AS waitlist) AS latest_waitlist')
+            ->selectRaw('(SELECT row_to_json(waitlist) FROM (SELECT id, from_group_id, to_group_id, entered_on, left_on, reason, entered_by_name, left_by_name FROM study_attempt_waitlists WHERE attempt_id = study_attempts.id AND branch_id = study_attempts.branch_id ORDER BY entered_on DESC, created_at DESC LIMIT 1) AS waitlist) AS latest_waitlist')
             ->selectRaw(EffectiveStudyFees::amount('fees').' AS current_due')
             ->addSelect(['fees.id as fee_id', 'fees.original_price', 'fees.discount', 'fees.net_amount',
                 'fees.currency', 'fees.discount_reason', 'fees.actor_name', 'fees.branch_id as event_branch_id',
@@ -358,7 +368,7 @@ class CenterStudyEnrollmentController extends Controller
     {
         return ['id' => $row->id, 'level_id' => $row->level_id, 'plan_version_id' => $row->plan_version_id,
             'current_group_id' => $row->current_group_id, 'branch_id' => (int) $row->branch_id,
-            'event_branch_id' => (int) $row->event_branch_id,
+            'event_branch_id' => $row->event_branch_id === null ? null : (int) $row->event_branch_id,
             'joined_on' => $row->joined_on, 'status' => $row->status, 'revision' => (int) $row->revision,
             'repeated_from_attempt_id' => $row->repeated_from_attempt_id,
             'has_repeat' => (bool) (int) $row->has_repeat,
@@ -368,7 +378,7 @@ class CenterStudyEnrollmentController extends Controller
             'group_name' => $row->group_name, 'level_name' => $row->level_name,
             'requirements_count' => (int) $row->requirements_count,
             'latest_waitlist' => $row->latest_waitlist === null ? null : json_decode($row->latest_waitlist, true),
-            'fee' => ['id' => $row->fee_id, 'original_price' => $row->original_price,
+            'fee' => $row->fee_id === null ? null : ['id' => $row->fee_id, 'original_price' => $row->original_price,
                 'discount' => $row->discount, 'net_amount' => $row->net_amount,
                 'current_due' => $row->current_due,
                 'currency' => $row->currency, 'discount_reason' => $row->discount_reason,

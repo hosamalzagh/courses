@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Support\ActiveStudentAllocations;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -1527,11 +1528,176 @@ class StudyEnrollmentTest extends TestCase
         $this->asUser($this->staff);
         $this->getJson($url)->assertOk()->assertJsonCount(1, 'attempts')
             ->assertJsonPath('attempts.0.branch_id', $this->south)
-            ->assertJsonPath('attempts.0.event_branch_id', $this->north);
+            ->assertJsonPath('attempts.0.event_branch_id', null)
+            ->assertJsonPath('attempts.0.fee', null);
         $this->postJson("{$url}/{$attempt['id']}/withdraw", [
             'withdrawn_on' => '2026-09-28', 'reason' => 'انسحاب بعد النقل', 'revision' => 1,
             'request_id' => (string) Str::uuid(),
         ])->assertOk()->assertJsonPath('attempt.status', 'withdrawn');
+    }
+
+    public function test_transfer_rechecks_approved_coverage_and_preserves_source_money_attendance_and_privacy(): void
+    {
+        $source = $this->group($this->north, '100.00');
+        $target = $this->group($this->south, '250.00');
+        $secondTarget = $this->postJson("{$this->base}/groups", [
+            'level_id' => $target['level_id'], 'plan_version_id' => $target['plan_version_id'],
+            'name' => 'South second', 'approved_price' => '250.00',
+            'instructor_ids' => array_column($target['instructors'], 'id'), 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $student = $this->student([$this->north, $this->south]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($url)->assertOk()->json();
+        $attempt = $this->postJson($url, [
+            'group_id' => $source['id'], 'group_revision' => $source['revision'],
+            'currency_revision' => $workspace['student']['currency_revision'], 'joined_on' => '2026-09-26',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $workspace['student']['version'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $sourceLecture = $this->center->run(fn () => DB::table('plan_lectures')->where('plan_version_id', $source['plan_version_id'])->value('id'));
+        $targetLecture = $this->center->run(fn () => DB::table('plan_lectures')->where('plan_version_id', $target['plan_version_id'])->value('id'));
+        $sessionId = (string) Str::uuid();
+        $this->center->run(function () use ($source, $attempt, $sourceLecture, $sessionId): void {
+            DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $source['id'],
+                'plan_lecture_id' => $sourceLecture, 'number' => 1, 'scheduled_at' => '2026-09-27 08:00:00+00',
+                'status' => 'held', 'closed_at' => now(), 'closed_by' => $this->owner->id,
+                'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
+                'created_at' => now(), 'updated_at' => now()]);
+            DB::table('study_attendance_entries')->insert(['id' => (string) Str::uuid(), 'session_id' => $sessionId,
+                'attempt_id' => $attempt['id'], 'status' => 'counted', 'recorded_by' => $this->owner->id,
+                'recorded_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+        });
+        $transferUrl = "{$url}/{$attempt['id']}/transfer";
+        $previewUrl = "{$transferUrl}/preview?".http_build_query(['group_id' => $target['id'], 'transferred_on' => '2026-09-28']);
+        $beforeApproval = $this->getJson($previewUrl)->assertOk()->assertJsonPath('preview.equivalence_ready', false)
+            ->assertJsonPath('preview.credited_count', 0)->json('preview');
+        $this->postJson("{$this->base}/content-equivalences", [
+            'source_plan_version_id' => $source['plan_version_id'], 'target_plan_version_id' => $target['plan_version_id'],
+            'source_lecture_ids' => [$sourceLecture], 'target_lecture_ids' => [$targetLecture],
+            'reason' => 'اعتماد محتوى المحاضرة كاملة', 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $previewResponse = $this->getJson($previewUrl)->assertOk()->assertJsonPath('preview.equivalence_ready', true)
+            ->assertJsonPath('preview.credited_count', 1)->assertJsonPath('preview.required_count', 1)
+            ->assertJsonPath('preview.balance.debt', '100.00');
+        $this->assertLessThanOrEqual(6, (int) $previewResponse->headers->get('X-Courses-Query-Count'));
+        $preview = $previewResponse->json('preview');
+        $payload = ['group_id' => $target['id'], 'group_revision' => $target['revision'],
+            'transferred_on' => '2026-09-28', 'revision' => $attempt['revision'],
+            'preview_hash' => $beforeApproval['hash'], 'reason' => 'نقل للفرع الجنوبي', 'request_id' => (string) Str::uuid()];
+        $this->postJson($transferUrl, $payload)->assertConflict()->assertJsonPath('code', 'transfer_preview_changed');
+        $this->center->run(fn () => DB::table('students')->where('id', $student['id'])
+            ->increment('financial_account_revision'));
+        $this->postJson($transferUrl, [...$payload, 'preview_hash' => $preview['hash'],
+            'request_id' => (string) Str::uuid()])->assertConflict()->assertJsonPath('code', 'transfer_preview_changed');
+        $payload['preview_hash'] = $this->getJson($previewUrl)->assertOk()->json('preview.hash');
+        $payload['request_id'] = (string) Str::uuid();
+        $this->postJson($transferUrl, $payload)->assertCreated()->assertJsonPath('transfer.attempt_id', $attempt['id']);
+        $this->postJson($transferUrl, $payload)->assertOk()->assertJsonPath('replayed', true);
+        $this->postJson($transferUrl, [...$payload, 'reason' => 'سبب مختلف'])->assertConflict()
+            ->assertJsonPath('code', 'transfer_request_changed');
+        $this->getJson($url)->assertOk()->assertJsonPath('attempts.0.id', $attempt['id'])
+            ->assertJsonPath('attempts.0.branch_id', $this->south)
+            ->assertJsonPath('attempts.0.current_group_id', $target['id'])
+            ->assertJsonPath('attempts.0.fee.net_amount', '100.00');
+        $coverage = $this->getJson("{$this->base}/groups/{$target['id']}/coverage")
+            ->assertOk()->assertJsonPath('students.0.covered_count', 1)->assertJsonPath('students.0.missing_numbers', []);
+        $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
+        $this->center->run(function () use ($attempt, $target): void {
+            $this->assertSame(1, DB::table('study_attempt_transfers')->where('attempt_id', $attempt['id'])->count());
+            $this->assertSame(1, DB::table('study_attempt_fees')->where('attempt_id', $attempt['id'])->count());
+            $this->assertSame($this->north, (int) DB::table('study_attempt_fees')->where('attempt_id', $attempt['id'])->value('branch_id'));
+            $this->assertSame(1, DB::table('study_attendance_entries')->where('attempt_id', $attempt['id'])->count());
+            $this->assertSame(2, DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])->count());
+            $this->assertSame(1, DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])->whereNull('left_on')->count());
+            $this->assertSame($target['plan_version_id'], DB::table('study_attempts')->where('id', $attempt['id'])->value('plan_version_id'));
+            $this->assertSame(2, DB::table('center_audit_logs')->where('event', 'student.study_transferred')->count());
+        });
+        $this->grant([$this->south => ['registration']]);
+        $this->asUser($this->staff);
+        $this->getJson($url)->assertOk()->assertJsonPath('attempts.0.fee', null)
+            ->assertJsonPath('attempts.0.event_branch_id', null);
+        $this->getJson("{$transferUrl}/preview?".http_build_query([
+            'group_id' => $source['id'], 'transferred_on' => '2026-09-29',
+        ]))->assertNotFound();
+        $hiddenHistory = $this->getJson("{$transferUrl}/preview?".http_build_query([
+            'group_id' => $secondTarget['id'], 'transferred_on' => '2026-09-29',
+        ]))->assertOk()->assertJsonCount(0, 'history');
+        $this->assertLessThanOrEqual(6, (int) $hiddenHistory->headers->get('X-Courses-Query-Count'));
+    }
+
+    public function test_waitlisted_attempt_moves_to_a_different_plan_only_with_current_permissions(): void
+    {
+        $source = $this->group($this->north, '75.00');
+        $target = $this->group($this->south, '175.00');
+        $student = $this->student([$this->north, $this->south]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($url)->assertOk()->json();
+        $attempt = $this->postJson($url, [
+            'group_id' => $source['id'], 'group_revision' => $source['revision'],
+            'currency_revision' => $workspace['student']['currency_revision'], 'joined_on' => '2026-09-26',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $workspace['student']['version'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $waiting = $this->postJson("{$url}/{$attempt['id']}/waitlist", [
+            'entered_on' => '2026-09-28', 'reason' => 'انتظار وجهة أخرى',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('waitlist');
+        $sourceLecture = $this->center->run(fn () => DB::table('plan_lectures')->where('plan_version_id', $source['plan_version_id'])->value('id'));
+        $targetLecture = $this->center->run(fn () => DB::table('plan_lectures')->where('plan_version_id', $target['plan_version_id'])->value('id'));
+        $this->postJson("{$this->base}/content-equivalences", [
+            'source_plan_version_id' => $source['plan_version_id'], 'target_plan_version_id' => $target['plan_version_id'],
+            'source_lecture_ids' => [$sourceLecture], 'target_lecture_ids' => [$targetLecture],
+            'reason' => 'معادلة الخطة للوجهة الجديدة', 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->grant([$this->north => ['registration'], $this->south => ['registration']]);
+        $this->asUser($this->staff);
+        $transferUrl = "{$url}/{$attempt['id']}/transfer";
+        $preview = $this->getJson("{$transferUrl}/preview?".http_build_query([
+            'group_id' => $target['id'], 'transferred_on' => '2026-09-29',
+        ]))->assertOk()->assertJsonPath('preview.equivalence_ready', true)->json('preview');
+        $payload = ['group_id' => $target['id'], 'group_revision' => $target['revision'],
+            'transferred_on' => '2026-09-29', 'revision' => $preview['revision'],
+            'preview_hash' => $preview['hash'], 'reason' => 'إلحاق المنتظر بوجهة أخرى',
+            'request_id' => (string) Str::uuid()];
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $this->postJson($transferUrl, $payload)->assertNotFound();
+        $this->grant([$this->north => ['registration'], $this->south => ['registration']]);
+        $this->asUser($this->staff);
+        $this->postJson($transferUrl, $payload)->assertCreated()->assertJsonPath('transfer.to.group_id', $target['id']);
+        $this->getJson($url)->assertOk()->assertJsonPath('attempts.0.id', $attempt['id'])
+            ->assertJsonPath('attempts.0.current_group_id', $target['id'])
+            ->assertJsonPath('attempts.0.latest_waitlist', null);
+        $this->center->run(function () use ($attempt, $waiting, $target): void {
+            $this->assertSame($target['id'], DB::table('study_attempt_waitlists')->where('id', $waiting['id'])->value('to_group_id'));
+            $this->assertSame('2026-09-29', DB::table('study_attempt_waitlists')->where('id', $waiting['id'])->value('left_on'));
+            $this->assertSame(1, DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])->whereNull('left_on')->count());
+            $this->assertSame(1, DB::table('study_attempt_fees')->where('attempt_id', $attempt['id'])->count());
+            $this->assertSame(1, DB::table('study_attempt_transfers')->where('attempt_id', $attempt['id'])->count());
+        });
+        $this->grant([$this->south => ['registration']]);
+        $this->asUser($this->staff);
+        $this->getJson("{$url}/{$attempt['id']}/waitlist")->assertOk()->assertJsonCount(0, 'history');
+        $this->getJson($url)->assertOk()->assertJsonPath('attempts.0.latest_waitlist', null)
+            ->assertJsonPath('attempts.0.fee', null);
+    }
+
+    public function test_transfer_migration_reaches_existing_and_new_centers(): void
+    {
+        $this->center->run(function (): void {
+            DB::statement('DROP TABLE study_attempt_transfers');
+            DB::table('migrations')->where('migration', '2026_09_29_000000_create_study_attempt_transfers')->delete();
+        });
+        $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->center->run(fn () => $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attempt_transfers')));
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform')
+            ->postJson('http://courses.test/api/v1/platform/centers', [
+                'name' => 'Beta', 'slug' => 'beta', 'subdomain' => 'beta', 'plan' => 'starter', 'owner_email' => 'owner@beta.test',
+            ])->assertCreated();
+        Center::where('slug', 'beta')->firstOrFail()->run(
+            fn () => $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attempt_transfers')));
     }
 
     private function group(int $branchId, string $price): array

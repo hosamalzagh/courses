@@ -43,14 +43,30 @@ class CenterStudyCoverageController extends Controller
                 'students.id as student_id', 'students.name', 'students.student_number', 'students.status as student_status'])
             ->selectRaw(<<<'SQL'
 COALESCE((SELECT json_agg(json_build_object('number', covered.number, 'final', covered.final) ORDER BY covered.number)
-FROM (SELECT lectures.number, bool_or(sessions.closed_at IS NOT NULL) AS final
+FROM (WITH counted AS (
+    SELECT lectures.id, bool_or(sessions.closed_at IS NOT NULL) AS final
     FROM study_attendance_entries AS entries
     JOIN study_sessions AS sessions ON sessions.id = entries.session_id
     JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id
-    WHERE entries.attempt_id = attempts.id AND entries.status = 'counted'
-      AND sessions.status <> 'cancelled'
-      AND lectures.plan_version_id = attempts.plan_version_id
-    GROUP BY lectures.number) AS covered), '[]'::json) AS coverage
+    WHERE entries.attempt_id = attempts.id AND entries.status = 'counted' AND sessions.status <> 'cancelled'
+    GROUP BY lectures.id
+), credited AS (
+    SELECT targets.number,
+        EXISTS (SELECT 1 FROM counted WHERE counted.id = targets.id AND counted.final) OR
+        EXISTS (SELECT 1 FROM content_equivalences AS approvals
+            WHERE approvals.target_plan_version_id = attempts.plan_version_id
+              AND jsonb_exists(approvals.target_lecture_ids, targets.id::text)
+              AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(approvals.source_lecture_ids) AS source(id)
+                  WHERE NOT EXISTS (SELECT 1 FROM counted WHERE counted.id::text = source.id AND counted.final))) AS final
+    FROM plan_lectures AS targets
+    WHERE targets.plan_version_id = attempts.plan_version_id
+      AND (EXISTS (SELECT 1 FROM counted WHERE counted.id = targets.id)
+        OR EXISTS (SELECT 1 FROM content_equivalences AS approvals
+            WHERE approvals.target_plan_version_id = attempts.plan_version_id
+              AND jsonb_exists(approvals.target_lecture_ids, targets.id::text)
+              AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(approvals.source_lecture_ids) AS source(id)
+                  WHERE NOT EXISTS (SELECT 1 FROM counted WHERE counted.id::text = source.id))))
+) SELECT number, final FROM credited) AS covered), '[]'::json) AS coverage
 SQL);
         if (isset($data['q']) && trim($data['q']) !== '') {
             $search = mb_strtolower(preg_replace('/\s+/u', ' ', trim($data['q'])));
