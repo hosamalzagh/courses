@@ -291,6 +291,9 @@ class CurriculumTest extends TestCase
             $waitlistMigration = glob(database_path('migrations/tenant/*_create_study_attempt_waitlists.php'))[0];
             (require $waitlistMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($waitlistMigration, PATHINFO_FILENAME))->delete();
+            $equivalencesMigration = glob(database_path('migrations/tenant/*_create_content_equivalences.php'))[0];
+            (require $equivalencesMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($equivalencesMigration, PATHINFO_FILENAME))->delete();
             $attendanceMigration = glob(database_path('migrations/tenant/*_create_study_attendance.php'))[0];
             (require $attendanceMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($attendanceMigration, PATHINFO_FILENAME))->delete();
@@ -317,6 +320,7 @@ class CurriculumTest extends TestCase
         });
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
         $this->center->run(function (): void {
+            $this->assertTrue(DB::getSchemaBuilder()->hasTable('content_equivalences'));
             $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attendance_entries'));
             $this->assertTrue(DB::table('pg_indexes')->where('indexname', 'study_periods_group_date_attempt_idx')->exists());
             $this->assertStringContainsString('Superseded study plan is immutable', DB::selectOne("SELECT pg_get_functiondef('protect_used_plan_lecture()'::regprocedure) AS definition")->definition);
@@ -329,6 +333,7 @@ class CurriculumTest extends TestCase
         ])->assertCreated();
         $beta = Center::where('slug', 'beta')->firstOrFail();
         $beta->run(function (): void {
+            $this->assertTrue(DB::getSchemaBuilder()->hasTable('content_equivalences'));
             $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attendance_entries'));
             $this->assertTrue(DB::table('pg_indexes')->where('indexname', 'study_periods_group_date_attempt_idx')->exists());
             $this->assertStringContainsString('Superseded study plan is immutable', DB::selectOne("SELECT pg_get_functiondef('protect_used_plan_lecture()'::regprocedure) AS definition")->definition);

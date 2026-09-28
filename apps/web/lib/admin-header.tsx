@@ -10,6 +10,7 @@ export function getAdminHeader(path: string, context: CenterContext): { title: s
     "/admin/student-profile-choices": { title: "قوائم بيانات الطالب", description: "اختيارات مشتركة بين فروع المركز. التعطيل يحفظ استعمالات الملفات السابقة." },
     "/admin/settings": { title: "إعدادات المركز", description: "بيانات التواصل والعنوان المستخدمة في التشغيل اليومي." },
     "/admin/curriculum": { title: "منهج الفرع", description: 'كورس ← مرحلة دراسية ← مستوى. كل فرع يحفظ منهجه مستقلًا، والساعات المخططة منفصلة عن عدد المحاضرات.' },
+    "/admin/equivalences": { title: "معادلة المحتوى", description: "اعتماد صريح لمحاضرات بديلة تستوفي متطلبات كاملة بين إصدارات خطط مختلفة، بسبب وهوية وتاريخ محفوظين." },
     "/admin/groups": { title: "المجموعات الدراسية", description: 'كل مجموعة ترتبط بإصدار خطة محدد، ولها محاضرون وسعر وحالة تشغيل مستقلة.' },
     "/admin/absence-review": { title: "مراجعة الغياب", description: "يعرض الغياب النهائي المستحق وفق قاعدة المجموعة الموروثة. القرار بشأن الطالب إجراء يدوي." },
     "/admin/security": { title: "التحقق بخطوتين", description: <>حسابك <bdi dir="ltr">{context.user.email}</bdi> مشترك بين المراكز. التفعيل اختياري ويطبق على دخولك إلى جميعها.</> },
