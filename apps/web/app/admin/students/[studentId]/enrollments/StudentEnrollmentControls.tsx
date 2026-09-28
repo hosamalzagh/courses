@@ -16,6 +16,7 @@ import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } 
 import type { StudyEnrollmentContext, StudyAttemptNote } from "@/lib/server-context";
 import { StudyAttemptNoteEditor } from "./StudyAttemptNoteEditor";
 import { StudyWithdrawalEditor } from "./StudyWithdrawalEditor";
+import { StudyWaitlistEditor } from "./StudyWaitlistEditor";
 
 export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: { initial: StudyEnrollmentContext; search: string; linkedAttemptId?: string }) {
   const router = useRouter();
@@ -41,6 +42,9 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
   const [repeatId, setRepeatId] = useState<string | null>(null);
   const [openWithdrawalId, setOpenWithdrawalId] = useState<string | null>(null);
   const [withdrawalDirty, setWithdrawalDirty] = useState(false);
+  const [openWaitlistId, setOpenWaitlistId] = useState<string | null>(null);
+  const [waitlistDirty, setWaitlistDirty] = useState(false);
+  const waitlistOpener = useRef<string | null>(null);
   const repeatOpener = useRef<string | null>(null);
   const withdrawalOpener = useRef<string | null>(null);
   const noteOpener = useRef<string | null>(null);
@@ -49,7 +53,7 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
   if (loadedInitial !== initial) {
     setLoadedInitial(initial); setCurrent(initial);
     if (current.student.id !== initial.student.id) {
-      setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason(""); setRepeatId(null); setOpenWithdrawalId(null);
+      setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason(""); setRepeatId(null); setOpenWithdrawalId(null); setOpenWaitlistId(null);
     }
   }
   const studentId = current.student.id;
@@ -57,7 +61,7 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
   const discountAllowed = Boolean(selected && (current.permissions.can_manage_center ||
     current.permissions.branch_actions?.[String(selected.branch_id)]?.includes("fees.discount")));
   const registrationDirty = Boolean(groupId || joinedOn || discount !== "0.00" || reason || repeatId);
-  const dirty = registrationDirty || noteDirty || withdrawalDirty;
+  const dirty = registrationDirty || noteDirty || withdrawalDirty || waitlistDirty;
   const path = `/admin/students/${studentId}/enrollments`;
   const query = new URLSearchParams({ page: String(current.pagination.page), groups_page: String(current.pagination.groups_page), ...(search ? { q: search } : {}), ...(linkedAttemptId ? { attempt_id: linkedAttemptId } : {}) });
   const endpoint = `students/${studentId}/enrollments?${query}`;
@@ -80,7 +84,12 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
     requestAnimationFrame(() => { if (withdrawalOpener.current) document.getElementById(withdrawalOpener.current)?.focus(); });
   }
 
-  function discard() { reset(); closeNote(); closeWithdrawal(); }
+  function closeWaitlist() {
+    setOpenWaitlistId(null); setWaitlistDirty(false);
+    requestAnimationFrame(() => { if (waitlistOpener.current) document.getElementById(waitlistOpener.current)?.focus(); });
+  }
+
+  function discard() { reset(); closeNote(); closeWithdrawal(); closeWaitlist(); }
 
   function openNote(attemptId: string) {
     if (openNoteId === attemptId) return;
@@ -232,12 +241,12 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
       serverPagination={{ page: current.pagination.page, hasMore: current.pagination.has_more, batchSize: 20,
         previousHref: page(current.pagination.page - 1),
         nextHref: page(current.pagination.page + 1) }}
-      searchText={row => `${row.group_name} ${row.level_name} ${row.fee.net_amount}`}
+      searchText={row => `${row.group_name ?? "انتظار المستوى"} ${row.level_name} ${row.fee.net_amount}`}
       emptyMessage="لا توجد محاولات دراسة في فروع صلاحيتك." description="آخر ٢٠ محاولة في الدفعة الحالية. الرسوم المعتمدة محفوظة مع سبب الخصم والموظف."
       columns={[
-        { key: "group", label: "المجموعة / المستوى", render: row => `${row.group_name} — ${row.level_name}` },
+        { key: "group", label: "المجموعة / المستوى", render: row => `${row.group_name ?? "انتظار المستوى"} — ${row.level_name}` },
         { key: "joined", label: "الانضمام", render: row => <bdi dir="ltr">{row.joined_on}</bdi> },
-        { key: "status", label: "الحالة", render: row => <span>{row.status === "active" ? "نشطة" : row.status === "withdrawn" ? `انسحب في ${row.withdrawal?.withdrawn_on ?? "—"}` : "مكتملة"}{row.repeated_from_attempt_id ? " — إعادة دراسة" : ""}{row.withdrawal ? <small className="muted"> — {row.withdrawal.reason} ({row.withdrawal.actor_name})</small> : null}</span> },
+        { key: "status", label: "الحالة", render: row => <span>{row.status === "active" ? row.current_group_id ? "نشطة" : `انتظار منذ ${row.latest_waitlist?.entered_on ?? "—"}` : row.status === "withdrawn" ? `انسحب في ${row.withdrawal?.withdrawn_on ?? "—"}` : "مكتملة"}{row.repeated_from_attempt_id ? " — إعادة دراسة" : ""}{row.withdrawal ? <small className="muted"> — {row.withdrawal.reason} ({row.withdrawal.actor_name})</small> : null}</span> },
         { key: "requirements", label: "متطلبات الخطة", render: row => row.requirements_count.toLocaleString("ar-EG") },
         { key: "fee", label: "الرسوم بعد الخصم", render: row => <bdi dir="ltr">{row.fee.net_amount} {row.fee.currency}</bdi> },
         { key: "actor", label: "سجلها", render: row => row.fee.actor_name },
@@ -249,6 +258,9 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
             current.permissions.branch_actions?.[String(row.event_branch_id)]?.includes("enrollment.manage");
           if ((!canManageAttempt || (row.status !== "active" && row.has_repeat)) && !canManageNote) return <span className="muted">غير متاح</span>;
           return <div className="form-actions">
+            {canManageAttempt && row.status === "active" ? <Button id={`${prefix}-waitlist-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
+              waitlistOpener.current = event.currentTarget.id; setOpenWaitlistId(row.id);
+            }}>{row.current_group_id ? "نقل إلى الانتظار" : "إعادة الإلحاق"}</Button> : null}
             {canManageAttempt && row.status === "active" ? <Button id={`${prefix}-withdraw-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
               withdrawalOpener.current = event.currentTarget.id; setOpenWithdrawalId(row.id);
             }}>انسحاب</Button> : null}
@@ -271,5 +283,8 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
           setCurrent(previous => ({ ...previous, attempts: previous.attempts.map(attempt => attempt.id === updated.id ? updated : attempt) }));
           setNotice("حُفظ الانسحاب. الرسوم والدفعات والمديونية لم تتغير؛ التسوية المالية إجراء مستقل.");
         }} /> : null}
+    {openWaitlistId && current.attempts.find(attempt => attempt.id === openWaitlistId) ?
+      <StudyWaitlistEditor key={openWaitlistId} studentId={studentId} attempt={current.attempts.find(attempt => attempt.id === openWaitlistId)!}
+        onClose={closeWaitlist} onDirtyChange={setWaitlistDirty} onSaved={() => { void reload(); setNotice("حُفظ قرار الانتظار أو الإلحاق دون رسوم أو تخصيص جديد."); }} /> : null}
   </>;
 }

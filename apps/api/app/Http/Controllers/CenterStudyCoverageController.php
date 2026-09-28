@@ -48,7 +48,7 @@ FROM (SELECT lectures.number, bool_or(sessions.closed_at IS NOT NULL) AS final
     JOIN study_sessions AS sessions ON sessions.id = entries.session_id
     JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id
     WHERE entries.attempt_id = attempts.id AND entries.status = 'counted'
-      AND sessions.group_id = attempts.current_group_id AND sessions.status <> 'cancelled'
+      AND sessions.status <> 'cancelled'
       AND lectures.plan_version_id = attempts.plan_version_id
     GROUP BY lectures.number) AS covered), '[]'::json) AS coverage
 SQL);

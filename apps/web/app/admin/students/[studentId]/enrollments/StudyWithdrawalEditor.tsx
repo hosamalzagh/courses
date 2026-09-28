@@ -77,8 +77,8 @@ export function StudyWithdrawalEditor({ studentId, attempt, onClose, onSaved, on
     } finally { submitting.current = false; setBusy(false); }
   }
 
-  return <section className="context-card form-stack" aria-label={`انسحاب من ${attempt.group_name}`}>
-    <h2>انسحاب من {attempt.group_name}</h2>
+  return <section className="context-card form-stack" aria-label={`انسحاب من ${attempt.group_name ?? "انتظار المستوى"}`}>
+    <h2>انسحاب من {attempt.group_name ?? "انتظار المستوى"}</h2>
     <p className="muted">يغلق الانسحاب ارتباط الطالب بالمجموعة في التاريخ المحدد. تبقى المحاولة والحضور والرسوم والدفعات محفوظة. أي تسوية أو استرداد مالي يتطلب إجراءً مستقلًا.</p>
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     <form id={formId} onSubmit={prepare} noValidate><FieldGroup>
@@ -94,7 +94,7 @@ export function StudyWithdrawalEditor({ studentId, attempt, onClose, onSaved, on
       <Button type="button" disabled={busy || uncertain} onClick={onClose}>إلغاء الانسحاب</Button>
       {conflict ? <Button type="button" onClick={() => { onClose(); router.refresh(); }}>تحميل أحدث البيانات</Button> : null}
     </CenterHeaderActions>
-    {confirm ? <ConfirmationDialog title="تأكيد الانسحاب" description={`سيغلق ارتباط الطالب بمجموعة ${attempt.group_name} بتاريخ ${withdrawnOn}. تبقى الرسوم والحركات المالية كما هي.`}
+    {confirm ? <ConfirmationDialog title="تأكيد الانسحاب" description={`سينهي ارتباط الطالب ${attempt.group_name ? `بمجموعة ${attempt.group_name}` : "بانتظار المستوى"} بتاريخ ${withdrawnOn}. تبقى الرسوم والحركات المالية كما هي.`}
       confirmLabel="تأكيد الانسحاب" onCancel={() => setConfirm(false)} onConfirm={save} /> : null}
   </section>;
 }

@@ -468,6 +468,61 @@ test("withdraws and repeats study with preserved fees, SSR, SQL budget, and mobi
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test("waitlists and reattaches within one attempt through the employee page", async ({ page }) => {
+  await signIn(page);
+  const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+  const branchId = workspace.branches[0].id;
+  const first = await group(page, branchId, "120.00");
+  const second = await write(page, "groups", { level_id: first.level_id, plan_version_id: first.plan_version_id,
+    name: `إلحاق ${crypto.randomUUID().slice(0, 6)}`, approved_price: "180.00",
+    instructor_ids: first.instructors.map((item: { id: string }) => item.id), request_id: crypto.randomUUID() });
+  expect(second.status).toBe(201);
+  const student = await write(page, "students", { name: `منتظر ${Date.now()}`, branch_ids: [branchId], request_id: crypto.randomUUID() });
+  expect(student.status).toBe(201);
+  const studentId = student.body.student.id;
+  const account = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
+  if (!account.account.currency) expect((await write(page, "financial-currency", { currency: "EGP", revision: account.account.currency_revision }, "PATCH")).status).toBe(200);
+  const preview = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+  const enrolled = await write(page, `students/${studentId}/enrollments`, {
+    group_id: first.id, group_revision: first.revision, currency_revision: preview.student.currency_revision,
+    joined_on: "2026-09-27", discount: "0.00", discount_reason: null, version: preview.student.version, request_id: crypto.randomUUID(),
+  });
+  expect(enrolled.status).toBe(201);
+  const attemptId = enrolled.body.attempt.id;
+  await page.goto(`${origin}/admin/students/${studentId}/enrollments`);
+  await page.locator(`[id$="-waitlist-${attemptId}"]`).click();
+  await page.getByLabel("تاريخ بداية الانتظار").fill("2026-09-28");
+  await page.getByLabel("سبب الانتظار").fill("جدول المجموعة لا يناسب الطالب");
+  await page.getByRole("button", { name: "نقل إلى الانتظار", exact: true }).first().click();
+  await expect(page.getByRole("alertdialog")).toContainText("ستغلق فترة المجموعة الحالية");
+  await page.getByRole("button", { name: "تأكيد الانتظار" }).click();
+  await expect(page.getByText("انتظار منذ 2026-09-28")).toBeVisible();
+  const waitingResponse = await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`);
+  expect(Number(waitingResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+  const waiting = await waitingResponse.json();
+  expect(waiting.attempts[0].current_group_id).toBeNull();
+  expect(waiting.balance.debt).toBe("120.00");
+  await page.locator(`[id$="-waitlist-${attemptId}"]`).click();
+  await expect(page.getByRole("heading", { name: "إعادة إلحاق Level" })).toBeVisible();
+  await page.getByRole("combobox", { name: "المجموعة الجديدة" }).selectOption(second.body.group.id);
+  await page.getByLabel("تاريخ الإلحاق الفعلي").fill("2026-09-28");
+  await page.getByRole("button", { name: "إعادة الإلحاق", exact: true }).first().click();
+  await page.getByRole("button", { name: "تأكيد الإلحاق" }).click();
+  await expect(page.getByRole("table", { name: "محاولات الدراسة" }).getByRole("row", { name: new RegExp(second.body.group.name) })).toBeVisible();
+  const finalResponse = await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`);
+  expect(Number(finalResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+  const final = await finalResponse.json();
+  expect(final.attempts).toHaveLength(1);
+  expect(final.attempts[0]).toMatchObject({ id: attemptId, current_group_id: second.body.group.id,
+    fee: { net_amount: "120.00" }, latest_waitlist: { reason: "جدول المجموعة لا يناسب الطالب", left_on: "2026-09-28" } });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+  await page.getByRole("button", { name: "القائمة" }).click();
+  await page.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
 test("repeat group batch links prefetch and keep the repeat form open", async ({ page }) => {
   test.setTimeout(90_000);
   await signIn(page);

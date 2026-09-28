@@ -5,7 +5,8 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
   if (!['student.payment_recorded', 'student.payment_allocated', 'student.payment_allocation_reversed',
     'student.payment_note_created', 'student.payment_note_updated',
     'student.allocation_note_created', 'student.allocation_note_updated',
-    'center.financial_currency_changed', 'student.enrolled', 'student.study_repeated', 'student.study_withdrawn'].includes(entry.event)) return null;
+    'center.financial_currency_changed', 'student.enrolled', 'student.study_repeated', 'student.study_withdrawn',
+    'student.study_waitlisted', 'student.study_reattached'].includes(entry.event)) return null;
   let details = entry.details;
   if (typeof details === "string") { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;
@@ -24,6 +25,16 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
     return <details><summary>تفاصيل انسحاب الطالب</summary>
       <p>الطالب: <bdi dir="ltr">{String(data.student_id ?? "")}</bdi> — المحاولة: <bdi dir="ltr">{String(data.attempt_id ?? "")}</bdi></p>
       <p>المجموعة: <bdi dir="ltr">{String(data.group_id ?? "")}</bdi> — تاريخ الانسحاب: <bdi dir="ltr">{String(data.withdrawn_on ?? "")}</bdi></p>
+      <p>السبب: {String(data.reason ?? "")}</p>
+    </details>;
+  }
+  if (entry.event === "student.study_waitlisted" || entry.event === "student.study_reattached") {
+    return <details><summary>تفاصيل انتقال محاولة الدراسة</summary>
+      <p>الطالب: <bdi dir="ltr">{String(data.student_id ?? "")}</bdi> — المحاولة: <bdi dir="ltr">{String(data.attempt_id ?? "")}</bdi></p>
+      <p>المجموعة السابقة: <bdi dir="ltr">{String(data.from_group_id ?? "")}</bdi>
+        {data.to_group_id ? <> — المجموعة الجديدة: <bdi dir="ltr">{String(data.to_group_id)}</bdi></> : null}</p>
+      <p>تاريخ الانتظار: <bdi dir="ltr">{String(data.entered_on ?? data.waitlisted_on ?? "")}</bdi>
+        {data.joined_on ? <> — تاريخ الإلحاق: <bdi dir="ltr">{String(data.joined_on)}</bdi></> : null}</p>
       <p>السبب: {String(data.reason ?? "")}</p>
     </details>;
   }

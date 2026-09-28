@@ -108,6 +108,118 @@ class StudyEnrollmentTest extends TestCase
         $this->assertStringContainsString('student.enrolled', $this->getJson("{$this->base}/audit")->assertOk()->getContent());
     }
 
+    public function test_level_waitlist_and_reattachment_keep_attempt_fee_and_group_history(): void
+    {
+        $first = $this->group($this->north, '150.00');
+        $second = $this->postJson("{$this->base}/groups", [
+            'level_id' => $first['level_id'], 'plan_version_id' => $first['plan_version_id'],
+            'name' => 'Second Group', 'approved_price' => '200.00',
+            'instructor_ids' => array_column($first['instructors'], 'id'), 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $other = $this->group($this->south, '0.00');
+        $student = $this->student([$this->north, $this->south]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($url)->assertOk()->json();
+        $saved = $this->postJson($url, [
+            'group_id' => $first['id'], 'group_revision' => $first['revision'],
+            'currency_revision' => $workspace['student']['currency_revision'], 'joined_on' => '2026-09-27',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $workspace['student']['version'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $this->center->run(function () use ($first, $saved): void {
+            $lecture = DB::table('plan_lectures')->where('plan_version_id', $first['plan_version_id'])->firstOrFail();
+            $sessionId = (string) Str::uuid();
+            DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $first['id'],
+                'plan_lecture_id' => $lecture->id, 'number' => $lecture->number,
+                'scheduled_at' => '2026-09-27 08:00:00+00', 'status' => 'held', 'revision' => 2,
+                'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
+                'closed_at' => now(), 'closed_by' => $this->owner->id, 'created_at' => now(), 'updated_at' => now()]);
+            DB::table('study_attendance_entries')->insert(['id' => (string) Str::uuid(), 'session_id' => $sessionId,
+                'attempt_id' => $saved['id'], 'status' => 'counted', 'revision' => 1,
+                'recorded_by' => $this->owner->id, 'recorded_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+        });
+        $this->getJson("{$this->base}/groups/{$first['id']}/coverage")
+            ->assertOk()->assertJsonPath('students.0.covered_count', 1);
+        $waitUrl = "{$url}/{$saved['id']}/waitlist";
+        $enter = ['entered_on' => '2026-09-28', 'reason' => 'بانتظار موعد مناسب',
+            'revision' => $saved['revision'], 'request_id' => (string) Str::uuid()];
+        $this->postJson($waitUrl, [...$enter, 'entered_on' => '2026-09-26', 'request_id' => (string) Str::uuid()])->assertUnprocessable();
+        $waiting = $this->postJson($waitUrl, $enter)->assertCreated()->assertJsonPath('waitlist.reason', $enter['reason'])->json('waitlist');
+        $this->postJson($waitUrl, $enter)->assertOk()->assertJsonPath('waitlist.id', $waiting['id']);
+        $this->postJson($waitUrl, [...$enter, 'request_id' => (string) Str::uuid()])->assertConflict();
+        $current = $this->getJson($url)->assertOk()->assertJsonPath('attempts.0.id', $saved['id'])
+            ->assertJsonPath('attempts.0.current_group_id', null)->assertJsonPath('attempts.0.latest_waitlist.reason', $enter['reason'])
+            ->assertJsonPath('balance.debt', '150.00');
+        $this->assertLessThanOrEqual(6, (int) $current->headers->get('X-Courses-Query-Count'));
+        $choices = $this->getJson($waitUrl)->assertOk()->assertJsonCount(2, 'groups')
+            ->assertJsonCount(1, 'history')->assertJsonPath('history.0.id', $waiting['id']);
+        $this->assertLessThanOrEqual(6, (int) $choices->headers->get('X-Courses-Query-Count'));
+        $this->grant([$this->north => ['branch_auditor']]);
+        $this->asUser($this->staff);
+        $this->getJson($waitUrl)->assertNotFound();
+        $this->postJson($waitUrl, [...$enter, 'request_id' => (string) Str::uuid()])->assertNotFound();
+        $this->assertStringNotContainsString('student.study_waitlisted', $this->getJson("{$this->base}/audit")->assertOk()->getContent());
+        $this->assertStringNotContainsString('student.study_waitlisted', $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent());
+        $this->grant([$this->north => ['registration', 'branch_auditor']]);
+        $this->asUser($this->staff);
+        $this->assertStringContainsString('student.study_waitlisted', $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent());
+        $rejoin = ['group_id' => $second['id'], 'group_revision' => $second['revision'],
+            'joined_on' => '2026-09-28', 'revision' => $choices->json('attempt_revision'),
+            'request_id' => (string) Str::uuid()];
+        $this->postJson("{$url}/{$saved['id']}/reattach", [...$rejoin, 'group_id' => $other['id'],
+            'request_id' => (string) Str::uuid()])->assertNotFound();
+        $this->postJson("{$url}/{$saved['id']}/reattach", [...$rejoin, 'revision' => $saved['revision'],
+            'request_id' => (string) Str::uuid()])->assertConflict();
+        $this->postJson("{$url}/{$saved['id']}/reattach", $rejoin)->assertCreated()
+            ->assertJsonPath('waitlist.to_group_id', $second['id']);
+        $this->postJson("{$url}/{$saved['id']}/reattach", $rejoin)->assertOk();
+        $this->getJson($url)->assertOk()->assertJsonPath('attempts.0.id', $saved['id'])
+            ->assertJsonPath('attempts.0.current_group_id', $second['id'])
+            ->assertJsonPath('attempts.0.latest_waitlist.left_on', '2026-09-28')
+            ->assertJsonPath('attempts.0.fee.net_amount', '150.00');
+        $this->getJson("{$this->base}/groups/{$first['id']}/coverage")->assertOk()->assertJsonCount(0, 'students');
+        $coverage = $this->getJson("{$this->base}/groups/{$second['id']}/coverage")
+            ->assertOk()->assertJsonPath('students.0.attempt_id', $saved['id'])
+            ->assertJsonPath('students.0.covered_count', 1);
+        $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
+        $this->center->run(function () use ($saved, $first, $second): void {
+            $this->assertSame(1, DB::table('study_attempts')->count());
+            $this->assertSame(1, DB::table('study_attempt_fees')->count());
+            $periods = DB::table('study_attempt_group_periods')->where('attempt_id', $saved['id'])
+                ->orderBy('joined_on')->orderBy('created_at')->get();
+            $this->assertCount(2, $periods);
+            $this->assertSame($first['id'], $periods[0]->group_id);
+            $this->assertSame('2026-09-28', $periods[0]->left_on);
+            $this->assertSame($second['id'], $periods[1]->group_id);
+            $this->assertNull($periods[1]->left_on);
+        });
+        $this->center->run(fn () => DB::table('study_attendance_entries')->where('attempt_id', $saved['id'])
+            ->update(['status' => 'absent']));
+        $this->asUser($this->owner);
+        $absences = $this->getJson("{$this->base}/absence-review?view=all")->assertOk()
+            ->assertJsonPath('students.0.id', $saved['id'])
+            ->assertJsonPath('students.0.total_absences', 0)
+            ->assertJsonPath('students.0.historical_absences', 1);
+        $this->assertLessThanOrEqual(6, (int) $absences->headers->get('X-Courses-Query-Count'));
+        $this->asUser($this->staff);
+        $revision = $this->getJson($url)->json('attempts.0.revision');
+        $this->postJson($waitUrl, ['entered_on' => '2026-09-28', 'reason' => 'تعذر الاستمرار',
+            'revision' => $revision, 'request_id' => (string) Str::uuid()])->assertCreated();
+        $this->asUser($this->owner);
+        $this->getJson("{$this->base}/absence-review?view=all")->assertOk()->assertJsonCount(0, 'students');
+        $this->asUser($this->staff);
+        $revision = $this->getJson($url)->json('attempts.0.revision');
+        $this->postJson("{$url}/{$saved['id']}/withdraw", ['withdrawn_on' => '2026-09-28',
+            'reason' => 'انسحاب أثناء الانتظار', 'revision' => $revision,
+            'request_id' => (string) Str::uuid()])->assertOk();
+        $this->getJson($url)->assertOk()->assertJsonPath('attempts.0.status', 'withdrawn')
+            ->assertJsonPath('attempts.0.latest_waitlist.left_on', '2026-09-28');
+        $this->center->run(fn () => $this->assertSame(1, DB::table('study_attempt_fees')->count()));
+    }
+
     public function test_discount_permission_zero_price_branch_scope_and_stale_enrollment(): void
     {
         $paid = $this->group($this->north, '100.00');

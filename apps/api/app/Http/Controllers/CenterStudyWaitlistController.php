@@ -22,9 +22,15 @@ class CenterStudyWaitlistController extends Controller
             'q' => ['sometimes', 'string', 'max:100'],
         ]);
         $permissions = $request->attributes->get('center_permissions');
-        abort_unless(StudentPhotos::visibleStudent($studentId, $permissions, 'enrollment.manage')->exists(), 404);
-        $attempt = DB::connection('tenant')->table('study_attempts')->where('id', $attemptId)
-            ->where('student_id', $studentId)->first(['id', 'level_id', 'plan_version_id', 'branch_id', 'status', 'current_group_id', 'revision']);
+        $attempt = StudentPhotos::visibleStudent($studentId, $permissions, 'enrollment.manage')
+            ->join('study_attempts as attempts', 'attempts.student_id', '=', 'students.id')
+            ->join('student_branches as association', function ($join): void {
+                $join->on('association.student_id', '=', 'students.id')
+                    ->on('association.branch_id', '=', 'attempts.branch_id');
+            })
+            ->where('attempts.id', $attemptId)
+            ->first(['attempts.id', 'attempts.level_id', 'attempts.plan_version_id',
+                'attempts.branch_id', 'attempts.status', 'attempts.current_group_id', 'attempts.revision']);
         abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
         $page = (int) ($data['page'] ?? 1);
         $historyPage = (int) ($data['history_page'] ?? 1);
@@ -75,6 +81,8 @@ class CenterStudyWaitlistController extends Controller
                 ->lockForUpdate()->first(['students.id', 'students.status']);
             abort_unless($student, 404);
             $attempt = $this->attempt($studentId, $attemptId, $permissions);
+            abort_unless(DB::connection('tenant')->table('student_branches')->where('student_id', $studentId)
+                ->where('branch_id', $attempt->branch_id)->exists(), 404);
             $previous = DB::connection('tenant')->table('study_attempt_waitlists')
                 ->where('entry_request_id', $data['request_id'])->first();
             if ($previous !== null) {
@@ -147,6 +155,8 @@ class CenterStudyWaitlistController extends Controller
                 ->lockForUpdate()->first(['students.id', 'students.status']);
             abort_unless($student, 404);
             $attempt = $this->attempt($studentId, $attemptId, $permissions);
+            abort_unless(DB::connection('tenant')->table('student_branches')->where('student_id', $studentId)
+                ->where('branch_id', $attempt->branch_id)->exists(), 404);
             $previous = DB::connection('tenant')->table('study_attempt_waitlists')
                 ->where('exit_request_id', $data['request_id'])->first();
             if ($previous !== null) {

@@ -269,8 +269,11 @@ class CenterStudyEnrollmentController extends Controller
             abort_if($data['withdrawn_on'] < $attempt->joined_on, 422, 'تاريخ الانسحاب يسبق تاريخ الانضمام.');
             $period = DB::connection('tenant')->table('study_attempt_group_periods')
                 ->where('attempt_id', $attemptId)->whereNull('left_on')->lockForUpdate()->first(['id', 'joined_on']);
-            abort_unless($period, 409, 'لا توجد مجموعة نشطة لهذه المحاولة.');
-            abort_if($data['withdrawn_on'] < $period->joined_on, 422, 'تاريخ الانسحاب يسبق الانضمام الحالي.');
+            $waitlist = $attempt->current_group_id === null ? DB::connection('tenant')->table('study_attempt_waitlists')
+                ->where('attempt_id', $attemptId)->whereNull('left_on')->lockForUpdate()->first(['id', 'entered_on', 'from_group_id']) : null;
+            abort_unless(($period && $attempt->current_group_id !== null) || $waitlist, 409, 'تغير ارتباط المحاولة بالمجموعة.');
+            abort_if($data['withdrawn_on'] < ($period?->joined_on ?? $waitlist->entered_on), 422,
+                'تاريخ الانسحاب يسبق الارتباط الحالي.');
             $laterAttendance = DB::connection('tenant')->table('study_attendance_entries as entries')
                 ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
                 ->where('entries.attempt_id', $attemptId)->whereNotNull('entries.status')
@@ -278,7 +281,14 @@ class CenterStudyEnrollmentController extends Controller
                 ->exists();
             abort_if($laterAttendance, 422, 'تاريخ الانسحاب يسبق حضورًا مسجلًا أو يوافق يومه.');
             $now = now();
-            DB::connection('tenant')->table('study_attempt_group_periods')->where('id', $period->id)->update(['left_on' => $data['withdrawn_on']]);
+            if ($period) {
+                DB::connection('tenant')->table('study_attempt_group_periods')->where('id', $period->id)->update(['left_on' => $data['withdrawn_on']]);
+            } else {
+                DB::connection('tenant')->table('study_attempt_waitlists')->where('id', $waitlist->id)->update([
+                    'left_on' => $data['withdrawn_on'], 'left_by' => $request->user()->id,
+                    'left_by_name' => $request->user()->name, 'updated_at' => now(),
+                ]);
+            }
             DB::connection('tenant')->table('study_attempts')->where('id', $attemptId)->update([
                 'status' => 'withdrawn', 'revision' => $attempt->revision + 1, 'updated_at' => $now,
             ]);
@@ -292,7 +302,8 @@ class CenterStudyEnrollmentController extends Controller
                 'actor_id' => $request->user()->id, 'branch_id' => $attempt->branch_id,
                 'event' => 'student.study_withdrawn',
                 'details' => json_encode(['student_id' => $studentId, 'attempt_id' => $attemptId,
-                    'group_id' => $attempt->current_group_id, 'withdrawn_on' => $data['withdrawn_on'], 'reason' => $data['reason']]),
+                    'group_id' => $attempt->current_group_id ?? $waitlist?->from_group_id,
+                    'withdrawn_on' => $data['withdrawn_on'], 'reason' => $data['reason']]),
                 'created_at' => $now,
             ]);
 
@@ -325,7 +336,7 @@ class CenterStudyEnrollmentController extends Controller
                 'withdrawal.withdrawn_on', 'withdrawal.reason as withdrawal_reason', 'withdrawal.actor_name as withdrawal_actor_name'])
             ->selectRaw('(SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id) AS requirements_count')
             ->selectRaw('CASE WHEN EXISTS (SELECT 1 FROM study_attempts AS repeated WHERE repeated.repeated_from_attempt_id = study_attempts.id) THEN 1 ELSE 0 END AS has_repeat')
-            ->selectRaw("(SELECT row_to_json(waitlist) FROM (SELECT id, from_group_id, to_group_id, entered_on, left_on, reason, entered_by_name, left_by_name FROM study_attempt_waitlists WHERE attempt_id = study_attempts.id ORDER BY entered_on DESC, created_at DESC LIMIT 1) AS waitlist) AS latest_waitlist")
+            ->selectRaw('(SELECT row_to_json(waitlist) FROM (SELECT id, from_group_id, to_group_id, entered_on, left_on, reason, entered_by_name, left_by_name FROM study_attempt_waitlists WHERE attempt_id = study_attempts.id ORDER BY entered_on DESC, created_at DESC LIMIT 1) AS waitlist) AS latest_waitlist')
             ->addSelect(['fees.id as fee_id', 'fees.original_price', 'fees.discount', 'fees.net_amount',
                 'fees.currency', 'fees.discount_reason', 'fees.actor_name', 'fees.branch_id as event_branch_id',
                 'note.id as note_id', 'note.body as note_body', 'note.important as note_important',
