@@ -16,6 +16,7 @@ import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } 
 import type { StudentAccountContext } from "@/lib/server-context";
 import { paymentMethodLabels } from "@/lib/student-finance";
 import { StudentPaymentAllocations } from "./StudentPaymentAllocations";
+import { StudentFeeAdjustmentEditor } from "./StudentFeeAdjustmentEditor";
 
 const currencies = ["EGP", "SAR", "AED", "USD", "EUR", "GBP"];
 
@@ -54,6 +55,8 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(
     initial.payments.some(payment => payment.id === paymentId) ? paymentId! : null);
   const [allocationDirty, setAllocationDirty] = useState(false);
+  const [selectedFeeId, setSelectedFeeId] = useState<string | null>(null);
+  const [feeDirty, setFeeDirty] = useState(false);
   const submitting = useRef(false);
   const requestId = useRef<string | null>(null);
   if (loadedInitial !== initial) {
@@ -66,14 +69,16 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   const studentId = current.account.student_id;
   const accountPath = `students/${studentId}/account?${new URLSearchParams({
     page: String(current.pagination.page), branches_page: String(current.pagination.branches_page),
-    ...(search ? { q: search } : {}), ...(paymentId ? { payment_id: paymentId } : {}),
+    fees_page: String(current.pagination.fees_page), ...(search ? { q: search } : {}),
+    ...(paymentId ? { payment_id: paymentId } : {}),
   })}`;
   const currencyForm = `${formPrefix}-currency`;
   const paymentForm = `${formPrefix}-payment`;
   const paymentDirty = Boolean(amount || receivedOn || method !== "cash" ||
     (current.recordable_branches[0] && branch !== String(current.recordable_branches[0].id)));
-  const dirty = Boolean((currency && currency !== current.account.currency) || paymentDirty || allocationDirty);
+  const dirty = Boolean((currency && currency !== current.account.currency) || paymentDirty || allocationDirty || feeDirty);
   const selectedPayment = current.payments.find((item) => item.id === selectedPaymentId);
+  const selectedFee = current.fees.find((item) => item.id === selectedFeeId);
 
   function focus(field: string) {
     requestAnimationFrame(() => document.getElementById(`${formPrefix}-${field}`)?.focus());
@@ -162,8 +167,9 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
     finally { submitting.current = false; setBusy(false); }
   }
 
-  const paymentPage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(page), branches_page: String(current.pagination.branches_page), ...(search ? { q: search } : {}) })}`;
-  const branchPage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(current.pagination.page), branches_page: String(page), ...(search ? { q: search } : {}) })}`;
+  const paymentPage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(page), branches_page: String(current.pagination.branches_page), fees_page: String(current.pagination.fees_page), ...(search ? { q: search } : {}) })}`;
+  const branchPage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(current.pagination.page), branches_page: String(page), fees_page: String(current.pagination.fees_page), ...(search ? { q: search } : {}) })}`;
+  const feePage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(current.pagination.page), branches_page: String(current.pagination.branches_page), fees_page: String(page), ...(search ? { q: search } : {}) })}`;
   const cancelCurrency = () => { setCurrency(current.account.currency ?? ""); setFieldErrors({}); setError(""); focus("currency"); };
   const cancelPayment = () => {
     if (uncertain) return;
@@ -212,8 +218,27 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
         {current.pagination.branches_has_more ? <Link className={buttonVariants({ variant: "outline" })} href={branchPage(current.pagination.branches_page + 1)}>فروع الاستلام التالية</Link> : null}
       </CenterHeaderActions> : null}
     </section> : null}
+    <DataTable id="student-fees" title="رسوم محاولات الدراسة" rows={current.fees} rowKey={row => row.id} pageSize={20}
+      searchText={row => `${row.group_name ?? ""} ${row.branch_name} ${row.net_amount} ${row.current_due}`}
+      emptyMessage="لا توجد رسوم لمحاولات دراسة في فروع صلاحيتك." description="المستحق الحالي يشمل قرارات التسوية المسببة، مع حفظ رسوم التسجيل الأصلية."
+      columns={[
+        { key: "group", label: "المجموعة", render: row => row.group_name ?? "مجموعة غير متاحة" },
+        { key: "branch", label: "فرع الرسوم", render: row => row.branch_name },
+        { key: "status", label: "الدراسة", render: row => row.withdrawn_on ? `انسحب في ${row.withdrawn_on}` : row.status === "active" ? "نشطة" : "منتهية" },
+        { key: "original", label: "رسوم التسجيل", render: row => <bdi dir="ltr">{row.net_amount} {row.currency}</bdi> },
+        { key: "due", label: "المستحق الحالي", render: row => <bdi dir="ltr">{row.current_due} {row.currency}</bdi> },
+        { key: "paid", label: "المسدد", render: row => <bdi dir="ltr">{row.paid_amount} {row.currency}</bdi> },
+        { key: "actions", label: "الإجراءات", actions: true, render: row => row.can_approve ?
+          <Button id={`${formPrefix}-fee-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedFeeId(row.id); setSelectedPaymentId(null); }}>تسوية أو تصحيح</Button> : <span className="muted">للقراءة فقط</span> },
+      ]} />
+    {selectedFee ? <StudentFeeAdjustmentEditor key={selectedFee.id} studentId={studentId} fee={selectedFee}
+      onClose={() => { setSelectedFeeId(null); focus(`fee-${selectedFee.id}`); }} onChanged={refreshAfterAllocation} onDirtyChange={setFeeDirty} /> : null}
+    <CenterHeaderActions>
+      {current.pagination.fees_page > 1 ? <Link className={buttonVariants({ variant: "outline" })} href={feePage(current.pagination.fees_page - 1)}>رسوم أحدث</Link> : null}
+      {current.pagination.fees_has_more ? <Link className={buttonVariants({ variant: "outline" })} href={feePage(current.pagination.fees_page + 1)}>رسوم أقدم</Link> : null}
+    </CenterHeaderActions>
     <DataTable id="student-payments" title="حركات الدفعات المقدمة" rows={current.payments} rowKey={(row) => row.id} pageSize={20}
-      serverSearch={{ value: search, onSearch: (value) => router.push(`/admin/students/${studentId}/account?${new URLSearchParams({ page: "1", branches_page: String(current.pagination.branches_page), ...(value ? { q: value } : {}) })}`) }}
+      serverSearch={{ value: search, onSearch: (value) => router.push(`/admin/students/${studentId}/account?${new URLSearchParams({ page: "1", branches_page: String(current.pagination.branches_page), fees_page: String(current.pagination.fees_page), ...(value ? { q: value } : {}) })}`) }}
       searchText={(row) => `${row.branch_name ?? ""} ${paymentMethodLabels[row.method] ?? row.method} ${row.amount} ${row.actor_name}`}
       emptyMessage="لا توجد دفعات مقدمة في فروع صلاحيتك." description="آخر ٢٠ حركة في الدفعة المعروضة. الحركات المعتمدة محفوظة دون تعديل أو حذف."
       columns={[

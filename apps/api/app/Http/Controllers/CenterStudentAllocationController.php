@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Support\ActiveStudentAllocations;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use App\Support\EffectiveStudyFees;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
@@ -57,6 +58,7 @@ class CenterStudentAllocationController extends Controller
             ->offset(($page - 1) * 20)->limit(21)
             ->select(['fees.id', 'fees.attempt_id', 'fees.branch_id', 'fees.net_amount', 'fees.currency',
                 'fees.created_at as fee_created_at'])
+            ->selectRaw(EffectiveStudyFees::amount('fees').' AS current_due')
             ->selectSub($this->originalFeeGroupName(), 'group_name')
             ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.fee_id', 'fees.id')
                 ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'paid_amount')->get();
@@ -71,7 +73,7 @@ class CenterStudentAllocationController extends Controller
             'fees' => $fees->take(20)->map(fn (object $row) => [
                 ...(array) $row,
                 'paid_amount' => StudentMoney::format(StudentMoney::cents($row->paid_amount)),
-                'remaining_amount' => StudentMoney::format(StudentMoney::cents($row->net_amount) - StudentMoney::cents($row->paid_amount)),
+                'remaining_amount' => StudentMoney::format(StudentMoney::cents($row->current_due) - StudentMoney::cents($row->paid_amount)),
             ])->values(),
             'history' => $history->take(20)->values(),
             'pagination' => ['page' => $page, 'has_more' => $fees->count() > 20,
@@ -122,6 +124,7 @@ class CenterStudentAllocationController extends Controller
                 ->where('branch_id', $payment->branch_id)
                 ->whereIn('attempt_id', array_column($targets, 'attempt_id'))
                 ->select(['id', 'attempt_id', 'net_amount', 'currency'])
+                ->selectRaw(EffectiveStudyFees::amount('study_attempt_fees').' AS current_due')
                 ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.fee_id', 'study_attempt_fees.id')
                     ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'paid_amount')
                 ->get()->keyBy('attempt_id');
@@ -134,7 +137,7 @@ class CenterStudentAllocationController extends Controller
                 abort_unless($fee && $fee->currency === $payment->currency, 422, 'عملة الرسوم لا تطابق الدفعة.');
                 $amount = StudentMoney::cents($target['amount']);
                 $alreadyPaid = StudentMoney::cents($fee->paid_amount);
-                $dueBefore = StudentMoney::cents($fee->net_amount) - $alreadyPaid;
+                $dueBefore = StudentMoney::cents($fee->current_due) - $alreadyPaid;
                 if ($amount > $dueBefore) {
                     $this->conflict('fee_already_paid');
                 }

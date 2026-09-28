@@ -247,6 +247,9 @@ class StudentProfilesTest extends TestCase
             $waitlistMigration = glob(database_path('migrations/tenant/*_create_study_attempt_waitlists.php'))[0];
             (require $waitlistMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($waitlistMigration, PATHINFO_FILENAME))->delete();
+            $adjustmentsMigration = glob(database_path('migrations/tenant/*_create_study_fee_adjustments.php'))[0];
+            (require $adjustmentsMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($adjustmentsMigration, PATHINFO_FILENAME))->delete();
             $attendanceMigration = glob(database_path('migrations/tenant/*_create_study_attendance.php'))[0];
             (require $attendanceMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($attendanceMigration, PATHINFO_FILENAME))->delete();

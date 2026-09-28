@@ -294,6 +294,9 @@ class CurriculumTest extends TestCase
             $equivalencesMigration = glob(database_path('migrations/tenant/*_create_content_equivalences.php'))[0];
             (require $equivalencesMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($equivalencesMigration, PATHINFO_FILENAME))->delete();
+            $adjustmentsMigration = glob(database_path('migrations/tenant/*_create_study_fee_adjustments.php'))[0];
+            (require $adjustmentsMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($adjustmentsMigration, PATHINFO_FILENAME))->delete();
             $attendanceMigration = glob(database_path('migrations/tenant/*_create_study_attendance.php'))[0];
             (require $attendanceMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($attendanceMigration, PATHINFO_FILENAME))->delete();

@@ -11,7 +11,7 @@ import { centerRequest, newSubmissionId, responseMessage } from "@/lib/client-ap
 import type { StudentPayment } from "@/lib/server-context";
 import { FinancialEventNoteEditor } from "./FinancialEventNoteEditor";
 
-type Fee = { id: string; attempt_id: string; group_name: string | null; fee_created_at: string; net_amount: string; paid_amount: string; remaining_amount: string; currency: string };
+type Fee = { id: string; attempt_id: string; group_name: string | null; fee_created_at: string; net_amount: string; current_due: string; paid_amount: string; remaining_amount: string; currency: string };
 type Allocation = { id: string; fee_id: string; attempt_id: string; group_name: string | null; fee_created_at: string; amount: string; currency: string; actor_name: string; created_at: string; reversal_id: string | null; reversal_reason: string | null; reversed_by_name: string | null; reversed_at: string | null };
 type Options = { payment: { id: string; available_amount: string; amount: string; currency: string }; version: string; can_allocate: boolean; can_correct: boolean; fees: Fee[]; history: Allocation[]; pagination: { page: number; has_more: boolean; history_page: number; history_has_more: boolean } };
 
@@ -145,7 +145,7 @@ export function StudentPaymentAllocations({ studentId, payment, focusNote, onClo
         {Object.values(selectedFees).some((fee) => amounts[fee.attempt_id]?.trim()) ? <p>المحاولات المحددة عبر الصفحات: {Object.values(selectedFees).filter((fee) => amounts[fee.attempt_id]?.trim()).length} — إجمالي المبالغ: <bdi dir="ltr">{(Object.values(selectedFees).reduce((sum, fee) => sum + (/^\d{1,10}(?:\.\d{1,2})?$/.test(amounts[fee.attempt_id] ?? "") ? cents(amounts[fee.attempt_id]) : 0), 0) / 100).toFixed(2)} {options.payment.currency}</bdi></p> : null}
         <FieldSet disabled={busy || uncertain || conflict} className="border-0 p-0"><FieldGroup>
           {options.fees.length ? options.fees.map((fee) => <FormField key={fee.id} id={`${prefix}-${fee.attempt_id}`}
-            label={`${fee.group_name ?? "مجموعة غير متاحة"} — محاولة ${fee.attempt_id.slice(0, 8)} بتاريخ ${fee.fee_created_at.slice(0, 10)} — المستحق ${fee.net_amount}، المسدد ${fee.paid_amount}، المتبقي ${fee.remaining_amount} ${fee.currency}`}
+            label={`${fee.group_name ?? "مجموعة غير متاحة"} — محاولة ${fee.attempt_id.slice(0, 8)} بتاريخ ${fee.fee_created_at.slice(0, 10)} — المستحق الحالي ${fee.current_due}، المسدد ${fee.paid_amount}، المتبقي ${fee.remaining_amount} ${fee.currency}`}
             type="text" direction="ltr" value={amounts[fee.attempt_id] ?? ""}
             onChange={(value) => { setAmounts((items) => ({ ...items, [fee.attempt_id]: value })); setSelectedFees((items) => value.trim() ? { ...items, [fee.attempt_id]: fee } : Object.fromEntries(Object.entries(items).filter(([id]) => id !== fee.attempt_id))); setError(""); requestId.current = null; }}
             disabled={cents(fee.remaining_amount) === 0}

@@ -15,6 +15,7 @@ use App\Http\Controllers\CenterStudentAttachmentController;
 use App\Http\Controllers\CenterStudentController;
 use App\Http\Controllers\CenterStudentCustomFieldController;
 use App\Http\Controllers\CenterStudentEventNoteController;
+use App\Http\Controllers\CenterStudentFeeAdjustmentController;
 use App\Http\Controllers\CenterStudentFinanceController;
 use App\Http\Controllers\CenterStudentFinancialNoteController;
 use App\Http\Controllers\CenterStudentNotesController;
@@ -92,6 +93,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::patch('student-profile-choices/{choiceId}', [CenterStudentProfileChoiceController::class, 'update']);
         Route::get('student-workspace', [CenterStudentController::class, 'workspace']);
         Route::get('students/{studentId}/account', [CenterStudentFinanceController::class, 'account']);
+        Route::get('students/{studentId}/fees/{feeId}/adjustments', [CenterStudentFeeAdjustmentController::class, 'show']);
+        Route::post('students/{studentId}/fees/{feeId}/adjustments', [CenterStudentFeeAdjustmentController::class, 'store']);
         Route::get('students/{studentId}/enrollments', [CenterStudyEnrollmentController::class, 'workspace']);
         Route::post('students/{studentId}/enrollments', [CenterStudyEnrollmentController::class, 'store']);
         Route::post('students/{studentId}/enrollments/{attemptId}/withdraw', [CenterStudyEnrollmentController::class, 'withdraw']);

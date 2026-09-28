@@ -241,14 +241,14 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
       serverPagination={{ page: current.pagination.page, hasMore: current.pagination.has_more, batchSize: 20,
         previousHref: page(current.pagination.page - 1),
         nextHref: page(current.pagination.page + 1) }}
-      searchText={row => `${row.group_name ?? "انتظار المستوى"} ${row.level_name} ${row.fee.net_amount}`}
+      searchText={row => `${row.group_name ?? "انتظار المستوى"} ${row.level_name} ${row.fee.net_amount} ${row.fee.current_due}`}
       emptyMessage="لا توجد محاولات دراسة في فروع صلاحيتك." description="آخر ٢٠ محاولة في الدفعة الحالية. الرسوم المعتمدة محفوظة مع سبب الخصم والموظف."
       columns={[
         { key: "group", label: "المجموعة / المستوى", render: row => `${row.group_name ?? "انتظار المستوى"} — ${row.level_name}` },
         { key: "joined", label: "الانضمام", render: row => <bdi dir="ltr">{row.joined_on}</bdi> },
         { key: "status", label: "الحالة", render: row => <span>{row.status === "active" ? row.current_group_id ? "نشطة" : `انتظار منذ ${row.latest_waitlist?.entered_on ?? "—"}` : row.status === "withdrawn" ? `انسحب في ${row.withdrawal?.withdrawn_on ?? "—"}` : "مكتملة"}{row.repeated_from_attempt_id ? " — إعادة دراسة" : ""}{row.withdrawal ? <small className="muted"> — {row.withdrawal.reason} ({row.withdrawal.actor_name})</small> : null}</span> },
         { key: "requirements", label: "متطلبات الخطة", render: row => row.requirements_count.toLocaleString("ar-EG") },
-        { key: "fee", label: "الرسوم بعد الخصم", render: row => <bdi dir="ltr">{row.fee.net_amount} {row.fee.currency}</bdi> },
+        { key: "fee", label: "المستحق الحالي", render: row => <span><bdi dir="ltr">{row.fee.current_due} {row.fee.currency}</bdi>{row.fee.current_due !== row.fee.net_amount ? <small className="muted"> (رسوم التسجيل {row.fee.net_amount})</small> : null}</span> },
         { key: "actor", label: "سجلها", render: row => row.fee.actor_name },
         { key: "note", label: "ملاحظة التسجيل", render: row => row.note ? <span>{row.note.important ? "★ " : ""}{row.note.body.slice(0, 80)}{row.note.body.length > 80 ? "…" : ""}</span> : "—" },
         { key: "actions", label: "الإجراءات", actions: true, render: row => {
