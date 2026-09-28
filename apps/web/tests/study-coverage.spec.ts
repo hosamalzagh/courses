@@ -88,8 +88,8 @@ test("coverage is provisional until closure and hidden branch data stays denied"
       .map(line => JSON.parse(line) as { path: string; count: number | null }).filter(read => read.path === `/api/v1/center/${path}`);
     expect(reads.length).toBeGreaterThan(0);
     expect(reads.every(read => Number.isInteger(read.count) && read.count! <= 6)).toBe(true);
-    await owner.goto(`${origin}/admin/groups`);
-    await owner.getByRole("row", { name: new RegExp(group.body.group.name) }).getByRole("link", { name: "تقرير التغطية" }).click();
+    await owner.goto(`${origin}/admin/groups/${groupId}/sessions`);
+    await owner.getByRole("link", { name: "تقرير تغطية المحتوى وأهلية الإتمام" }).click();
     await expect(owner).toHaveURL(url);
     await expect(owner.getByRole("row", { name: new RegExp(student.body.student.name) })).toContainText("٠/١");
 
