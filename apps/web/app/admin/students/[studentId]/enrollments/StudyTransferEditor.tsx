@@ -64,7 +64,7 @@ export function StudyTransferEditor({ studentId, attempt, groups, initialGroupsP
   useEffect(() => {
     if (!initialChoicesLoaded.current) { initialChoicesLoaded.current = true; return; }
     let cancelled = false;
-    centerRequest(`students/${studentId}/enrollments?${new URLSearchParams({ q: query, groups_page: String(groupsPage) })}`, "GET")
+    centerRequest(`students/${studentId}/enrollments?${new URLSearchParams({ ...(query ? { q: query } : {}), groups_page: String(groupsPage) })}`, "GET")
       .then(async response => {
         if (!response.ok) throw new Error(await responseMessage(response));
         return response.json() as Promise<StudyEnrollmentContext>;

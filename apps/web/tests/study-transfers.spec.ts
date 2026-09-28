@@ -124,8 +124,12 @@ test('moves an active attempt across branches with a reviewed preview and denies
     await owner.locator(`[id$="-transfer-${attemptId}"]`).click();
     const laterPageEditor = owner.getByRole('region', { name: 'نقل الطالب بين المجموعات والفروع' });
     await expect(laterPageEditor.getByRole('button', { name: 'المجموعات السابقة' })).toBeEnabled();
+    const firstGroupPage = owner.waitForResponse(response => response.request().method() === 'GET'
+      && response.url().includes(`/students/${studentId}/enrollments?`)
+      && response.url().includes('groups_page=1'));
     await laterPageEditor.getByRole('button', { name: 'المجموعات السابقة' }).click();
-    await expect(laterPageEditor.getByLabel('مجموعة الوجهة').locator('option', { hasText: source.group.name })).toHaveCount(1);
+    expect((await firstGroupPage).status()).toBe(200);
+    await expect(laterPageEditor.getByRole('button', { name: 'المجموعات السابقة' })).toBeDisabled();
     await signIn(staff, 'staff');
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).status()).toBe(404);
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/transfer/preview?group_id=${source.group.id}&transferred_on=2026-09-29`)).status()).toBe(404);
