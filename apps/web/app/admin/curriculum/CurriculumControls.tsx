@@ -4,6 +4,7 @@ import { useId } from "react";
 
 import { Field } from "@/components/ui/field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 
 import { FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/field";
 
@@ -19,7 +20,7 @@ import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard';
 import { InlineNotice } from '@/components/InlineNotice';
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from '@/lib/client-api';
 import type { Course, CurriculumContext, Level, PlanLecture, Stage } from '@/lib/curriculum';
-type Editor = { kind: 'course' } | { kind: 'stage'; course: Course } | { kind: 'level'; stage: Stage } | { kind: 'plan'; level: Level };
+type Editor = { kind: 'course' } | { kind: 'stage'; course: Course } | { kind: 'level'; stage: Stage } | { kind: 'plan'; level: Level } | { kind: 'threshold'; scope: 'course' | 'stage' | 'level'; record: Course | Stage | Level };
 type LectureDraft = Omit<PlanLecture, 'planned_hours'> & { planned_hours: string };
 const blankLecture = (): LectureDraft => ({ number: 1, content: '', title: null, planned_hours: '1' });
 export function CurriculumControls({ context, detail = false, section = 'courses' }: { context: CurriculumContext; detail?: boolean; section?: 'courses' | 'stages' | 'levels' }) {
@@ -43,6 +44,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   const [name, setName] = useState('');
   const [branchId, setBranchId] = useState(0);
   const [lectures, setLectures] = useState<LectureDraft[]>([blankLecture()]);
+  const [threshold, setThreshold] = useState('');
   const [requestId, setRequestId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -62,18 +64,20 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   }, [section]);
   const [baseline, setBaseline] = useState('');
   if (loadedSection !== section) { setLoadedSection(section); setEditor(null); setError(''); setConflict(false); setFieldErrors({}); }
-  const dirty = editor !== null && baseline !== JSON.stringify([name, branchId, lectures]);
+  const dirty = editor !== null && baseline !== JSON.stringify([name, branchId, lectures, threshold]);
   const trigger = useRef<HTMLElement | null>(null);
   const manageable = context.branches.filter((branch) => context.permissions.can_manage_center || context.permissions.branch_actions?.[String(branch.id)]?.includes('curriculum.manage'));
   const branchName = (id: number) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`;
   function open(next: Editor, preserveTrigger = false) {
     if (!preserveTrigger) trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const nextName = next.kind === 'plan' ? next.level.name : '';
+    const nextName = next.kind === 'plan' ? next.level.name : next.kind === 'threshold' ? next.record.name : '';
     const nextBranch = manageable[0]?.id ?? 0;
     const nextLectures = next.kind === 'plan' ? next.level.plan.lectures.map(({ number, content, title, planned_hours }) => ({ number, content, title, planned_hours: String(planned_hours) })) : [blankLecture()];
-    setBaseline(JSON.stringify([nextName, nextBranch, nextLectures]));
-    setEditor(next); setName(nextName); setBranchId(nextBranch); setLectures(nextLectures);
+    const nextThreshold = next.kind === 'threshold' ? next.record.completion_threshold === null ? '' : String(next.record.completion_threshold) : '';
+    setBaseline(JSON.stringify([nextName, nextBranch, nextLectures, nextThreshold]));
+    setEditor(next); setName(nextName); setBranchId(nextBranch); setLectures(nextLectures); setThreshold(nextThreshold);
     setRequestId(newSubmissionId()); setError(''); setNotice(''); setFieldErrors({}); setConflict(false);
+    if (next.kind === 'threshold') requestAnimationFrame(() => document.getElementById('curriculum-completion-threshold')?.focus());
   }
   async function editPlan(level: Level) {
     if (saving.current) return;
@@ -104,7 +108,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
     requestAnimationFrame(() => {
       if (trigger.current?.isConnected) trigger.current.focus();
       else if (editor) {
-        const id = editor.kind === 'stage' ? editor.course.id : editor.kind === 'level' ? editor.stage.id : editor.kind === 'plan' ? editor.level.id : null;
+        const id = editor.kind === 'stage' ? editor.course.id : editor.kind === 'level' ? editor.stage.id : editor.kind === 'plan' ? editor.level.id : editor.kind === 'threshold' ? editor.record.id : null;
         if (id) document.querySelector<HTMLElement>(`[data-curriculum-edit="${id}"]`)?.focus();
       }
     });
@@ -112,10 +116,41 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   function changeLecture(index: number, change: Partial<LectureDraft>) {
     setLectures((items) => items.map((item, position) => position === index ? { ...item, ...change } : item)); setFieldErrors({});
   }
+  function focusFieldError(errors: Record<string, string>) {
+    const key = Object.keys(errors)[0] ?? '';
+    const lecture = key.match(/^lectures\.(\d+)\.(content|title|planned_hours)$/);
+    const id = lecture ? `lecture-${lecture[2] === 'planned_hours' ? 'hours' : lecture[2]}-${lecture[1]}`
+      : key === 'completion_threshold' ? 'curriculum-completion-threshold' : 'curriculum-name';
+    requestAnimationFrame(() => {
+      if (key === 'branch_id') document.querySelector<HTMLElement>('[name="curriculum-branch"]')?.focus();
+      else document.getElementById(id)?.focus();
+    });
+  }
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editor || saving.current) return;
     setError(''); setFieldErrors({}); setNotice('');
+    if (editor.kind === 'threshold') {
+      if ((editor.scope === 'course' && !threshold) || (threshold && (!/^\d{1,3}$/.test(threshold) || Number(threshold) < 1 || Number(threshold) > 100))) {
+        setFieldErrors({ completion_threshold: 'أدخل نسبة بين ١ و١٠٠، أو اختر التوريث للمرحلة والمستوى.' });
+        focusFieldError({ completion_threshold: 'invalid' });
+        return;
+      }
+      saving.current = true; setBusy(true);
+      try {
+        const response = await centerRequest(`${editor.scope}s/${editor.record.id}/completion-threshold`, 'PATCH', {
+          revision: editor.record.completion_revision, completion_threshold: threshold ? Number(threshold) : null,
+        });
+        if (!response.ok) {
+          if (response.status === 409) { setConflict(true); setError('تغيرت قاعدة الإتمام. حمّل القائمة الحالية ثم افتحها مرة أخرى.'); }
+          else { const validation = await responseFieldErrors(response); setFieldErrors(validation); setError(await responseMessage(response)); if (Object.keys(validation).length) focusFieldError(validation); }
+          return;
+        }
+        close(); setNotice('حُفظت نسبة الإتمام للطلاب الجدد ضمن هذا النطاق.'); router.refresh();
+      } catch { setError('تعذر التأكد من تغيير النسبة. حمّل البيانات الحالية قبل إعادة المحاولة.'); }
+      finally { saving.current = false; setBusy(false); }
+      return;
+    }
     const errors: Record<string, string> = {};
     if (editor.kind !== 'plan' && !name.trim()) errors.name = 'أدخل الاسم.';
     if (editor.kind === 'course' && !branchId) errors.branch_id = 'اختر فرعًا مصرحًا به.';
@@ -123,7 +158,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
       if (!lecture.content.trim()) errors[`lectures.${index}.content`] = 'أدخل محتوى المحاضرة.';
       if (!lecture.planned_hours.trim() || !Number.isFinite(Number(lecture.planned_hours)) || Number(lecture.planned_hours) <= 0 || Number(lecture.planned_hours) > 9999.99 || !/^\d+(?:\.\d{1,2})?$/.test(lecture.planned_hours)) errors[`lectures.${index}.planned_hours`] = 'أدخل ساعات أكبر من صفر وبحد أقصى منزلتين عشريتين.';
     }
-    if (Object.keys(errors).length) { setFieldErrors(errors); return; }
+    if (Object.keys(errors).length) { setFieldErrors(errors); focusFieldError(errors); return; }
     saving.current = true; setBusy(true);
     try {
       const path = editor.kind === 'course' ? 'courses' : editor.kind === 'stage' ? `courses/${editor.course.id}/stages` : editor.kind === 'level' ? `stages/${editor.stage.id}/levels` : `levels/${editor.level.id}/first-plan`;
@@ -134,7 +169,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
         if (response.status === 409 && data.code === 'plan_used') setError('استُخدمت هذه الخطة؛ لا يمكن تغيير محتواها. التعديل الدراسي يحتاج إصدارًا لاحقًا مستقلًا.');
         else if (response.status === 409) { setConflict(true); setError('تغيّرت الخطة أو حُفظ الطلب سابقًا ببيانات مختلفة. حمّل البيانات الحالية قبل الحفظ.'); }
         else if (response.status === 404) setError('هذا السجل لم يعد متاحًا ضمن صلاحيتك.');
-        else { setFieldErrors(await responseFieldErrors(response)); setError(await responseMessage(response)); }
+        else { const validation = await responseFieldErrors(response); setFieldErrors(validation); setError(await responseMessage(response)); if (Object.keys(validation).length) focusFieldError(validation); }
         return;
       }
       close(); setNotice('حُفظ المنهج داخل الفرع مع هوية ثابتة لإصدار الخطة.');
@@ -145,6 +180,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   }
   async function recover() {
     if (!editor || saving.current) return;
+    if (editor.kind === 'threshold') { close(); router.refresh(); setNotice('حُمّلت القائمة الحالية. افتح نسبة الإتمام مرة أخرى لمراجعتها.'); return; }
     const load = new AbortController();
     workspaceRead.current = load;
     saving.current = true; setBusy(true);
@@ -177,9 +213,18 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   }
   const editorForm = editor ? <form id={`${formPrefix}-0`} className='context-card form-stack' aria-label='إدارة منهج الفرع' noValidate onSubmit={save}>
 <FieldGroup>
-        <h2>{editor.kind === 'course' ? 'كورس جديد' : editor.kind === 'stage' ? `مرحلة دراسية في ${editor.course.name}` : editor.kind === 'level' ? `مستوى في ${editor.stage.name}` : `تعديل الخطة الأولى — ${editor.level.name}`}</h2>
+        <h2>{editor.kind === 'course' ? 'كورس جديد' : editor.kind === 'stage' ? `مرحلة دراسية في ${editor.course.name}` : editor.kind === 'level' ? `مستوى في ${editor.stage.name}` : editor.kind === 'threshold' ? `نسبة الإتمام — ${editor.record.name}` : `تعديل الخطة الأولى — ${editor.level.name}`}</h2>
         <FieldSet disabled={busy} className="form-stack" style={{ border: 0, padding: 0, margin: 0 }}>
-          {editor.kind !== 'plan' ? <FormField id='curriculum-name' label={editor.kind === 'course' ? 'اسم الكورس' : editor.kind === 'stage' ? 'اسم المرحلة الدراسية' : 'اسم المستوى'} value={name} onChange={(value) => { setName(value); setFieldErrors({}); }} required error={fieldErrors.name} focusOnMount /> : null}
+          {editor.kind !== 'plan' && editor.kind !== 'threshold' ? <FormField id='curriculum-name' label={editor.kind === 'course' ? 'اسم الكورس' : editor.kind === 'stage' ? 'اسم المرحلة الدراسية' : 'اسم المستوى'} value={name} onChange={(value) => { setName(value); setFieldErrors({}); }} required error={fieldErrors.name} focusOnMount /> : null}
+          {editor.kind === 'threshold' ? <Field data-invalid={Boolean(fieldErrors.completion_threshold)}>
+            <FieldLabel htmlFor='curriculum-completion-threshold'>نسبة الإتمام المطلوبة</FieldLabel>
+            <NativeSelect id='curriculum-completion-threshold' value={threshold} onChange={event => { setThreshold(event.target.value); setFieldErrors({}); }}>
+              {editor.scope !== 'course' ? <NativeSelectOption value=''>توريث النسبة من المستوى الأعلى</NativeSelectOption> : null}
+              {Array.from({ length: 100 }, (_, index) => index + 1).map(value => <NativeSelectOption key={value} value={String(value)}>{value.toLocaleString('ar-EG')}٪</NativeSelectOption>)}
+            </NativeSelect>
+            <p className='muted'>تطبق النسبة على التسجيلات الجديدة. تغيير تسجيلات قائمة يحتاج معاينة واعتمادًا مستقلًا.</p>
+            {fieldErrors.completion_threshold ? <p className='field-error' role='alert'>{fieldErrors.completion_threshold}</p> : null}
+          </Field> : null}
           {editor.kind === 'course' ? <FieldSet ><FieldLegend>الفرع الذي يملك الكورس</FieldLegend><Field data-invalid={Boolean(fieldErrors.branch_id)}><RadioGroup disabled={busy} aria-invalid={Boolean(fieldErrors.branch_id)} name='curriculum-branch' value={String(branchId)} onValueChange={(value) => setBranchId(Number(value))}>{manageable.map((branch) => <FieldLabel className="flex items-center gap-2" key={branch.id}><RadioGroupItem value={String(branch.id)} />{branch.name}</FieldLabel>)}</RadioGroup></Field>{fieldErrors.branch_id ? <p className='field-error' role='alert'>{fieldErrors.branch_id}</p> : null}</FieldSet> : null}
           {editor.kind === 'level' || editor.kind === 'plan' ? <>
             <p className='muted'>كل بند محاضرة مطلوبة كاملة. الترقيم متتابع، والعنوان اختياري، ولا تحتاج إلى تقسيم الموضوع. حتى ٢٠٠ محاضرة في الإصدار الأول.</p>
@@ -191,20 +236,22 @@ export function CurriculumControls({ context, detail = false, section = 'courses
             </FieldSet>)}
             <Button disabled={lectures.length >= 200} onClick={() => setLectures((items) => [...items, { ...blankLecture(), number: items.length + 1 }])}>إضافة محاضرة كاملة</Button>
           </> : null}
-<CenterHeaderActions>{conflict ? <Button onClick={recover}>تحميل البيانات الحالية للمنهج</Button> : null}<Button form={`${formPrefix}-0`} type='submit' variant='primary' busy={busy} disabled={conflict}>حفظ المنهج</Button><Button disabled={busy} onClick={close}>إلغاء</Button></CenterHeaderActions>
+<CenterHeaderActions>{conflict ? <Button onClick={recover}>تحميل البيانات الحالية للمنهج</Button> : null}<Button form={`${formPrefix}-0`} type='submit' variant='primary' busy={busy} disabled={conflict}>{editor.kind === 'threshold' ? 'حفظ نسبة الإتمام' : 'حفظ المنهج'}</Button><Button disabled={busy} onClick={close}>إلغاء</Button></CenterHeaderActions>
         </FieldSet>
       </FieldGroup>
 </form> : null;
   const courses = <>        <DataTable id='curriculum-courses' title='الكورسات' description='المناهج المتاحة في الفروع المصرح بها. البحث والتصفية ضمن الدفعة المعروضة.' rows={context.courses} rowKey={(row) => row.id} searchText={(row) => `${row.name} ${branchName(row.branch_id)}`} emptyMessage='لا توجد كورسات متاحة. أنشئ كورسًا إذا كانت لديك صلاحية الإدارة الأكاديمية.' columns={[
           { key: 'name', label: 'الكورس', filterText: (row) => row.name, render: (row) => <h3>{row.name}</h3> },
           { key: 'branch', label: 'الفرع', filterText: (row) => branchName(row.branch_id), render: (row) => branchName(row.branch_id) },
-          { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => row.can_manage ? <Button data-curriculum-edit={row.id} disabled={busy || editor !== null} onClick={() => open({ kind: 'stage', course: row })}>إضافة مرحلة دراسية</Button> : 'عرض فقط' },
+          { key: 'threshold', label: 'نسبة الإتمام', render: (row) => `${row.completion_threshold.toLocaleString('ar-EG')}٪` },
+          { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => row.can_manage ? <span className='flex flex-wrap gap-2'><Button data-curriculum-edit={row.id} disabled={busy || editor !== null} onClick={() => open({ kind: 'stage', course: row })}>إضافة مرحلة دراسية</Button><Button disabled={busy || editor !== null} onClick={() => open({ kind: 'threshold', scope: 'course', record: row })}>تحديد نسبة الإتمام</Button></span> : 'عرض فقط' },
         ]} />{batch('courses')}
 </>;
   const stages = <>        <DataTable id='curriculum-stages' title='المراحل الدراسية' rows={context.stages} rowKey={(row) => row.id} searchText={(row) => `${row.name} ${row.course_name}`} emptyMessage='لا توجد مراحل دراسية متاحة. أضف مرحلة من الكورس.' columns={[
           { key: 'name', label: 'المرحلة الدراسية', filterText: (row) => row.name, render: (row) => <h3>{row.name}</h3> },
           { key: 'course', label: 'الكورس والفرع', filterText: (row) => `${row.course_name} ${branchName(row.branch_id)}`, render: (row) => `${row.course_name} · ${branchName(row.branch_id)}` },
-          { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => row.can_manage ? <Button data-curriculum-edit={row.id} disabled={busy || editor !== null} onClick={() => open({ kind: 'level', stage: row })}>إضافة مستوى وخطته</Button> : 'عرض فقط' },
+          { key: 'threshold', label: 'نسبة الإتمام', render: (row) => row.completion_threshold === null ? 'موروثة من الكورس' : `${row.completion_threshold.toLocaleString('ar-EG')}٪` },
+          { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => row.can_manage ? <span className='flex flex-wrap gap-2'><Button data-curriculum-edit={row.id} disabled={busy || editor !== null} onClick={() => open({ kind: 'level', stage: row })}>إضافة مستوى وخطته</Button><Button disabled={busy || editor !== null} onClick={() => open({ kind: 'threshold', scope: 'stage', record: row })}>تحديد نسبة الإتمام</Button></span> : 'عرض فقط' },
         ]} />{batch('stages')}
 </>;
   const levels = <>      <DataTable id='curriculum-levels' title='المستويات وخططها' rows={context.levels} rowKey={(row) => row.id} searchText={(row) => `${row.name} ${row.stage_name} ${row.course_name}`} emptyMessage='لا توجد مستويات متاحة. أضف مستوى وخطته من المرحلة الدراسية.' columns={[
@@ -212,7 +259,8 @@ export function CurriculumControls({ context, detail = false, section = 'courses
         { key: 'sequence', label: 'الكورس والمرحلة والفرع', filterText: (row) => `${row.course_name} ${row.stage_name} ${branchName(row.branch_id)}`, render: (row) => `${row.course_name} ← ${row.stage_name} · ${branchName(row.branch_id)}` },
         { key: 'plan', label: 'الخطة الأولى', render: (row) => `${row.plan.lecture_count.toLocaleString('ar-EG')} محاضرة مطلوبة · ${row.plan.planned_hours.toLocaleString('ar-EG')} ساعة مخططة` },
         { key: 'status', label: 'حالة الخطة', render: (row) => row.plan.used_at ? 'مستخدمة — محتوى ثابت' : 'لم تستخدم بعد' },
-        { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => row.can_manage && !row.plan.used_at ? <Button data-curriculum-edit={row.id} disabled={busy || editor !== null} onClick={() => editPlan(row)}>تعديل الخطة الأولى</Button> : <span className='muted'>{row.plan.used_at ? 'التعديل يحتاج إصدارًا جديدًا' : 'عرض فقط'}</span> },
+        { key: 'threshold', label: 'نسبة الإتمام', render: (row) => row.completion_threshold === null ? 'موروثة من المرحلة أو الكورس' : `${row.completion_threshold.toLocaleString('ar-EG')}٪` },
+        { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => row.can_manage ? <span className='flex flex-wrap gap-2'>{!row.plan.used_at ? <Button data-curriculum-edit={row.id} disabled={busy || editor !== null} onClick={() => editPlan(row)}>تعديل الخطة الأولى</Button> : <span className='muted'>التعديل يحتاج إصدارًا جديدًا</span>}<Button disabled={busy || editor !== null} onClick={() => open({ kind: 'threshold', scope: 'level', record: row })}>تحديد نسبة الإتمام</Button></span> : 'عرض فقط' },
       ]} />{!detail ? batch('levels') : null}
 </>;
   const branchChoices = <>      {!detail && (context.pagination.branches.has_more || context.pagination.branches.page > 1) ? <section className='context-card'><p>فروع إنشاء الكورس في هذه الدفعة.</p>{batch('branches')}</section> : null}
