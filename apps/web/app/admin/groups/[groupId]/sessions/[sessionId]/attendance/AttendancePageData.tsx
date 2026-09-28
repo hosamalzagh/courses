@@ -9,10 +9,12 @@ export async function AttendancePageData({ params, searchParams }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [{ groupId, sessionId }, query] = await Promise.all([params, searchParams]);
-  const page = typeof query.page === "string" ? `page=${encodeURIComponent(query.page)}` : "";
-  const context = await loadGroupAttendance(groupId, sessionId, page);
+  const page = typeof query.page === "string" ? query.page : "";
+  const search = typeof query.q === "string" ? query.q : "";
+  const context = await loadGroupAttendance(groupId, sessionId,
+    new URLSearchParams({ ...(page ? { page } : {}), ...(search ? { q: search } : {}) }).toString());
   if (typeof context === "string") return <CenterAccessState state={context} />;
   return <CenterPage context={context} path={`/admin/groups/${groupId}/sessions/${sessionId}/attendance`}>
-    <AttendanceControls context={context} />
+    <AttendanceControls context={context} search={search} />
   </CenterPage>;
 }

@@ -178,6 +178,10 @@ class StudySessionsTest extends TestCase
             'revision' => 1, 'request_id' => (string) Str::uuid()])->assertConflict();
 
         $this->travelTo($scheduled->copy()->addHour());
+        $this->postJson("{$this->base}/students/{$first['id']}/status", [
+            'status' => 'suspended', 'reason' => 'إيقاف بعد انتهاء المحاضرة',
+            'status_revision' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
         $requestId = (string) Str::uuid();
         $payload = ['attempt_id' => $firstAttempt, 'status' => 'counted', 'revision' => 1, 'request_id' => $requestId];
         $recorded = $this->postJson($attendance, $payload)->assertCreated()->assertJsonPath('revision', 2)->json('entry');
@@ -205,6 +209,34 @@ class StudySessionsTest extends TestCase
             $this->assertSame(4, DB::table('study_attendance_events')->count());
             $this->assertSame(4, DB::table('center_audit_logs')->where('event', 'like', 'study_attendance.%')->count());
         });
+    }
+
+    public function test_attendance_search_covers_later_server_pages_without_unbounded_rows(): void
+    {
+        $group = $this->group($this->north, 'Roster search');
+        $scheduled = now('Africa/Cairo')->addDays(14)->setTime(16, 0);
+        $session = $this->postJson("{$this->base}/groups/{$group['id']}/sessions", [
+            'kind' => 'single', 'revision' => 1, 'start_at' => $scheduled->format('Y-m-d\TH:i'),
+            'plan_lecture_number' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
+        $group['revision'] = 2;
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $last = null;
+        for ($index = 0; $index < 21; $index++) {
+            $last = $this->student();
+            $this->enroll($last['id'], $group, now('Africa/Cairo')->format('Y-m-d'));
+        }
+        $path = "{$this->base}/groups/{$group['id']}/sessions/{$session['id']}/attendance";
+        $firstPage = $this->getJson($path)->assertOk()->assertJsonCount(20, 'students')
+            ->assertJsonPath('pagination.has_more', true);
+        $this->assertLessThanOrEqual(6, (int) $firstPage->headers->get('X-Courses-Query-Count'));
+        $this->assertNotContains($last['id'], collect($firstPage->json('students'))->pluck('student_id'));
+        $secondPage = $this->getJson("{$path}?page=2")->assertOk()->assertJsonCount(1, 'students')
+            ->assertJsonPath('students.0.student_id', $last['id']);
+        $this->assertLessThanOrEqual(6, (int) $secondPage->headers->get('X-Courses-Query-Count'));
+        $matching = $this->getJson("{$path}?q=".rawurlencode($last['name']))->assertOk()
+            ->assertJsonCount(1, 'students')->assertJsonPath('students.0.student_id', $last['id']);
+        $this->assertLessThanOrEqual(6, (int) $matching->headers->get('X-Courses-Query-Count'));
     }
 
     public function test_cancelled_session_cannot_record_or_close_attendance(): void

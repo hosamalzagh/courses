@@ -14,7 +14,7 @@ import { formatSessionTime } from "@/lib/session-time";
 type Action = { kind: "record" | "undo" | "close"; key: string; requestId: string };
 type Selection = { attemptId: string; mode: "record" | "undo" };
 
-export function AttendanceControls({ context }: { context: AttendanceContext }) {
+export function AttendanceControls({ context, search }: { context: AttendanceContext; search: string }) {
   const router = useRouter();
   const titleId = useId();
   const busyRef = useRef(false);
@@ -36,6 +36,10 @@ export function AttendanceControls({ context }: { context: AttendanceContext }) 
 
   const { group, session } = current;
   const path = `groups/${group.id}/sessions/${session.id}`;
+  const attendanceUrl = (page: number, q = search) => {
+    const params = new URLSearchParams({ ...(page > 1 ? { page: String(page) } : {}), ...(q ? { q } : {}) });
+    return `/admin/${path}/attendance${params.size ? `?${params}` : ""}`;
+  };
   const open = !session.closed_at && session.status !== "cancelled";
   const started = current.has_started;
   const canRecord = open && started && current.can_record;
@@ -43,7 +47,8 @@ export function AttendanceControls({ context }: { context: AttendanceContext }) 
   const selectedRow = current.students.find(row => row.attempt_id === selected?.attemptId);
 
   async function reload() {
-    const response = await centerRequest(`${path}/attendance?page=${current.pagination.page}`, "GET");
+    const params = new URLSearchParams({ page: String(current.pagination.page), ...(search ? { q: search } : {}) });
+    const response = await centerRequest(`${path}/attendance?${params}`, "GET");
     if (!response.ok) throw new Error(await responseMessage(response));
     setCurrent((await response.json()) as AttendanceContext);
     setConflict(false);
@@ -128,11 +133,12 @@ export function AttendanceControls({ context }: { context: AttendanceContext }) 
     </section>
     <DataTable id={`attendance-${session.id}`} title="كشف الطلاب المستحقين" description="يعرض الطلاب المرتبطين بالمجموعة في تاريخ المحاضرة فقط." rows={current.students}
       rowKey={row => row.attempt_id} searchText={row => `${row.name} ${row.student_number}`} emptyMessage="لا يوجد طلاب مستحقون لهذه المحاضرة."
+      serverSearch={{ value: search, onSearch: value => router.push(attendanceUrl(1, value)) }}
       columns={[
         { key: "student", label: "الطالب", render: row => <Link href={`/admin/students/${row.student_id}`}>{row.name}</Link> },
         { key: "number", label: "رقم الطالب", render: row => row.student_number.toLocaleString("ar-EG") },
         { key: "status", label: "الحضور", render: row => row.status === "counted" ? "حاضر محتسب" : row.status === "not_counted" ? "حاضر غير محتسب" : row.status === "absent" ? "غائب" : "غير مسجل" },
-        { key: "actions", label: "الإجراءات", actions: true, render: row => canRecord && !row.status && row.student_status === "active"
+        { key: "actions", label: "الإجراءات", actions: true, render: row => canRecord && !row.status
           ? <Button id={`${titleId}-${row.attempt_id}-record`} disabled={busy || conflict} onClick={() => select(row, "record")}>تسجيل الحضور</Button>
           : open && current.can_undo_own && row.entry_id && row.recorded_by === current.user.id && current.last_own_attempt_id === row.attempt_id && row.status !== "absent"
             ? <Button id={`${titleId}-${row.attempt_id}-undo`} disabled={busy || conflict}
@@ -140,7 +146,7 @@ export function AttendanceControls({ context }: { context: AttendanceContext }) 
             : "—" },
       ]}
       serverPagination={{ page: current.pagination.page, hasMore: current.pagination.has_more, batchSize: 20,
-        previousHref: `/admin/groups/${group.id}/sessions/${session.id}/attendance${current.pagination.page > 2 ? `?page=${current.pagination.page - 1}` : ""}`,
-        nextHref: `/admin/groups/${group.id}/sessions/${session.id}/attendance?page=${current.pagination.page + 1}` }} />
+        previousHref: attendanceUrl(current.pagination.page - 1),
+        nextHref: attendanceUrl(current.pagination.page + 1) }} />
   </>;
 }

@@ -205,7 +205,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   if (path === "/admin/curriculum") return loadCurriculumWorkspace(query(["courses_page", "stages_page", "levels_page", "branches_page"]));
   if (path === "/admin/groups") return loadGroupWorkspace(query(["page", "levels_page", "instructors_page"]));
   const groupAttendance = path.match(/^\/admin\/groups\/([^/]+)\/sessions\/([^/]+)\/attendance$/);
-  if (groupAttendance) return loadGroupAttendance(decodeURIComponent(groupAttendance[1]), decodeURIComponent(groupAttendance[2]), query(["page"]));
+  if (groupAttendance) return loadGroupAttendance(decodeURIComponent(groupAttendance[1]), decodeURIComponent(groupAttendance[2]), query(["page", "q"]));
   const groupSessions = path.match(/^\/admin\/groups\/([^/]+)\/sessions$/);
   if (groupSessions) return loadGroupSessions(decodeURIComponent(groupSessions[1]), query(["page"]));
   if (path === "/admin/student-search") {

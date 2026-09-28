@@ -17,11 +17,22 @@ class CenterStudyAttendanceController extends Controller
 {
     public function workspace(Request $request, string $groupId, string $sessionId): JsonResponse
     {
-        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
+        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'q' => ['nullable', 'string', 'max:255']]);
         $permissions = $request->attributes->get('center_permissions');
         $session = $this->session($groupId, $sessionId, $permissions, false, $request->user()->id);
         $page = (int) ($data['page'] ?? 1);
-        $rows = $this->roster($session)->orderBy('students.student_number')->orderBy('attempts.id')
+        $roster = $this->roster($session);
+        if (isset($data['q']) && trim($data['q']) !== '') {
+            $search = mb_strtolower(preg_replace('/\s+/u', ' ', trim($data['q'])));
+            $roster->where(function (Builder $query) use ($search, $data): void {
+                $query->whereRaw('strpos(students.name_search, ?) > 0', [$search]);
+                if (ctype_digit(trim($data['q'])) && strlen(trim($data['q'])) <= 18) {
+                    $query->orWhere('students.student_number', (int) trim($data['q']));
+                }
+            });
+        }
+        $rows = $roster->orderBy('students.student_number')->orderBy('attempts.id')
             ->offset(($page - 1) * 20)->limit(21)->get();
 
         return response()->json([
@@ -58,7 +69,6 @@ class CenterStudyAttendanceController extends Controller
             $this->open($session, (int) $data['revision']);
             $eligible = $this->roster($session)->where('attempts.id', $data['attempt_id'])->first();
             abort_unless($eligible, 404);
-            abort_if($eligible->student_status !== 'active', 409, 'الطالب موقوف؛ لا يمكن تسجيل حضوره.');
             abort_if($eligible->status !== null, 409, 'سجل الحضور تغير؛ حمّل أحدث البيانات.');
             $now = now();
             $entryId = $eligible->entry_id ?? (string) Str::uuid();

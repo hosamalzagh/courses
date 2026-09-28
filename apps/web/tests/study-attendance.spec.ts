@@ -103,6 +103,14 @@ test("records whole-session attendance, undoes the last entry, closes absences, 
     await owner.goto(`${origin}/admin/groups/${groupId}/sessions`);
     await owner.getByRole("link", { name: "كشف الحضور" }).click();
     await expect(owner).toHaveURL(url);
+    await owner.getByRole("searchbox", { name: "بحث في كشف الطلاب المستحقين" }).fill(students[1].name);
+    await owner.getByRole("button", { name: "بحث في جميع كشف الطلاب المستحقين" }).click();
+    await expect(owner).toHaveURL(/\?q=/);
+    expect(new URL(owner.url()).searchParams.get("q")).toBe(students[1].name);
+    await expect(owner.getByRole("row", { name: new RegExp(students[1].name) })).toBeVisible();
+    await expect(owner.getByRole("row", { name: new RegExp(students[0].name) })).toHaveCount(0);
+    await owner.getByRole("button", { name: "مسح البحث في كشف الطلاب المستحقين" }).click();
+    await expect(owner).toHaveURL(url);
     const row = owner.getByRole("row", { name: new RegExp(students[0].name) });
     await row.getByRole("button", { name: "تسجيل الحضور" }).click();
     await owner.getByRole("button", { name: "إلغاء" }).click();
