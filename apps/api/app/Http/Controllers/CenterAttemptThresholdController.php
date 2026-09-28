@@ -151,7 +151,7 @@ SQL)
             ->orderBy('attempts.id')->get();
         abort_unless($rows->count() === count($change['attempt_ids']), 404);
         $requiredIds = DB::connection('tenant')->table('plan_lectures')
-            ->where('plan_version_id', $group->plan_version_id)->pluck('id')->all();
+            ->where('plan_version_id', $group->plan_version_id)->orderBy('id')->pluck('id')->all();
         $required = count($requiredIds);
         abort_if($required === 0, 409, 'لا توجد محاضرات معتمدة للمجموعة.');
         $target = (int) $group->target_threshold;
