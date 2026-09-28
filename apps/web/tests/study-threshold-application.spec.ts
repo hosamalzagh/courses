@@ -87,6 +87,12 @@ test("selected existing attempts keep their threshold until reviewed and approve
     await expect(owner.getByText("حد هذه المحاولة: ٨٠%", { exact: false })).toBeVisible();
     await owner.getByRole("checkbox", { name: `اختيار تسجيل ${student.body.student.name} لتطبيق نسبة الإتمام` }).check();
     await owner.getByRole("textbox", { name: "سبب التطبيق" }).fill("قرار أكاديمي موثق بعد مراجعة نسبة المجموعة");
+    await owner.getByRole("searchbox", { name: "بحث في تقرير أهلية إتمام الدراسة" }).fill("بحث آخر");
+    await owner.getByRole("button", { name: "بحث في جميع تقرير أهلية إتمام الدراسة" }).click();
+    await expect(owner.getByRole("alertdialog", { name: "مغادرة دون تطبيق" })).toBeVisible();
+    await owner.getByRole("button", { name: "إلغاء" }).click();
+    await expect(owner.getByRole("checkbox", { name: `اختيار تسجيل ${student.body.student.name} لتطبيق نسبة الإتمام` })).toBeChecked();
+    await expect(owner.getByRole("textbox", { name: "سبب التطبيق" })).toHaveValue("قرار أكاديمي موثق بعد مراجعة نسبة المجموعة");
     await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة أثر النسبة" }).click();
     await expect(owner.getByText(/٨٠٪ \(٨ محاضرات\) ← ٦٠٪ \(٦ محاضرات\)/)).toBeVisible();
     await owner.locator("header.center-topbar").getByRole("button", { name: "اعتماد التطبيق على المختارين" }).click();

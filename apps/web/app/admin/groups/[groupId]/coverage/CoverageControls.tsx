@@ -4,6 +4,7 @@ import { useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions, CenterPageActions } from "@/components/CenterShell";
+import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { DataTable } from "@/components/DataTable";
 import { InlineNotice } from "@/components/InlineNotice";
 import { PrefetchLink as Link } from "@/components/PrefetchLink";
@@ -24,6 +25,7 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   const reasonId = useId();
   const previewButton = useRef<HTMLButtonElement>(null);
   const reasonInput = useRef<HTMLTextAreaElement>(null);
+  const navigationFocus = useRef<HTMLElement | null>(null);
   const [loadedContext, setLoadedContext] = useState(context);
   const [selected, setSelected] = useState<string[]>([]);
   const [reason, setReason] = useState("");
@@ -33,6 +35,7 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [conflict, setConflict] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<string | null>(null);
   if (loadedContext !== context) {
     setLoadedContext(context);
     setSelected([]);
@@ -44,8 +47,18 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   const canManage = context.permissions.can_manage_center || context.permissions.branch_actions?.[String(group.branch_id)]?.includes("curriculum.manage");
   const selectable = context.students.filter(row => row.completion_threshold !== group.completion_threshold);
   const selectedOnPage = selected.filter(id => selectable.some(row => row.attempt_id === id));
+  const dirty = selectedOnPage.length > 0 || Boolean(preview) || reason.length > 0;
   const base = `/admin/groups/${group.id}/coverage`;
   const thresholdPath = `groups/${group.id}/completion-threshold`;
+  function navigate(href: string) {
+    if (busy) return;
+    if (dirty) {
+      navigationFocus.current = document.activeElement as HTMLElement;
+      setPendingNavigation(href);
+      return;
+    }
+    router.push(href);
+  }
   function invalidatePreview() { setPreview(null); setRequestId(newSubmissionId()); setConflict(false); setError(""); setNotice(""); }
   function toggle(id: string, checked: boolean) {
     setSelected(current => checked ? [...current.filter(item => item !== id), id] : current.filter(item => item !== id));
@@ -97,7 +110,8 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   };
 
   return <>
-    <UnsavedChangesGuard dirty={selectedOnPage.length > 0 || Boolean(preview) || reason.length > 0} />
+    <UnsavedChangesGuard dirty={dirty} guardHistory />
+    {pendingNavigation ? <ConfirmationDialog title="مغادرة دون تطبيق" description="اخترت تسجيلات أو أدخلت سببًا لتغيير نسبة الإتمام ولم تعتمد القرار. هل تريد الانتقال والتخلي عن المعاينة؟" confirmLabel="الانتقال دون تطبيق" onCancel={() => { setPendingNavigation(null); requestAnimationFrame(() => navigationFocus.current?.focus()); }} onConfirm={() => { const next = pendingNavigation; setPendingNavigation(null); setSelected([]); setReason(""); setPreview(null); router.push(next); }} /> : null}
     <CenterPageActions context={context} actions={<><Link href={`/admin/groups/${group.id}/sessions`}>جدول محاضرات المجموعة</Link><Link href="/admin/groups">العودة للمجموعات</Link></>} />
     <p className="muted">{group.name} · المطلوب {group.required_count.toLocaleString("ar-EG")} محاضرة · حد التسجيلات الجديدة {group.completion_threshold.toLocaleString("ar-EG")}%.</p>
     <p className="muted">المحاضرات السابقة لانضمام الطالب تبقى ضمن المطلوب، لكنها ليست غيابًا عليه. النسبة هنا لتغطية المحتوى فقط؛ بلوغ الحد لا يعتمد إتمام الدراسة تلقائيًا.</p>
@@ -126,9 +140,9 @@ export function CoverageControls({ context, search }: { context: CoverageContext
     </section> : null}
     <DataTable id="study-coverage" title="تقرير أهلية إتمام الدراسة" description="المحتسب من محاضرات الخطة مرة واحدة. الحضور في محاضرة مفتوحة مبدئي حتى الإغلاق." rows={context.students}
       rowKey={row => row.attempt_id} searchText={row => `${row.name} ${row.student_number}`} emptyMessage="لا توجد محاولات دراسة مطابقة في هذه المجموعة."
-      serverSearch={{ value: search, onSearch: value => router.push(href(1, value)) }}
+      serverSearch={{ value: search, onSearch: value => navigate(href(1, value)) }}
       serverPagination={{ page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 20,
-        previousHref: href(context.pagination.page - 1), nextHref: href(context.pagination.page + 1) }}
+        previousHref: href(context.pagination.page - 1), nextHref: href(context.pagination.page + 1), onNavigate: navigate }}
       columns={[
         ...(canManage ? [{ key: "select", label: "اختيار", render: (row: CoverageRow) => <Checkbox
           checked={selectedOnPage.includes(row.attempt_id)} disabled={busy || row.completion_threshold === group.completion_threshold}
