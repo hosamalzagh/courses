@@ -105,6 +105,14 @@ class StudyEnrollmentTest extends TestCase
             $this->assertSame(80, DB::table('study_attempts')->where('id', $attempts[1]['id'])->value('completion_threshold'));
             $this->assertSame(1, DB::table('study_attempt_threshold_history')->count());
         });
+        $this->grant([$this->north => ['academic_admin', 'branch_auditor']]);
+        $this->asUser($this->staff);
+        $this->assertStringContainsString('study_attempts.completion_threshold_applied',
+            $this->getJson("{$this->base}/audit")->assertOk()->getContent());
+        $this->grant([$this->north => ['registration', 'branch_auditor']]);
+        $this->asUser($this->staff);
+        $this->assertStringNotContainsString('study_attempts.completion_threshold_applied',
+            $this->getJson("{$this->base}/audit")->assertOk()->getContent());
     }
 
     public function test_enrollment_snapshots_price_plan_and_late_join_without_allocating_advance(): void

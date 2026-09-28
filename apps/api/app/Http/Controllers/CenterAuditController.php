@@ -18,8 +18,8 @@ class CenterAuditController extends Controller
 
     public const ENROLLMENT_EVENTS = ['student.enrolled', 'student.study_repeated', 'student.study_withdrawn',
         'student.study_waitlisted', 'student.study_reattached', 'student.study_transferred',
-        'student.study_attempt_note_created', 'student.study_attempt_note_updated',
-        'study_attempts.completion_threshold_applied'];
+        'student.study_attempt_note_created', 'student.study_attempt_note_updated'];
+    public const ACADEMIC_EVENTS = ['study_attempts.completion_threshold_applied'];
 
     public function index(Request $request): JsonResponse
     {
@@ -44,13 +44,17 @@ class CenterAuditController extends Controller
                 fn ($roles) => in_array('enrollment.manage', CenterPermissions::actions($roles), true)));
             $financialEvents = self::FINANCIAL_EVENTS;
             $enrollmentEvents = self::ENROLLMENT_EVENTS;
+            $academicEvents = self::ACADEMIC_EVENTS;
+            $academicBranches = array_keys(array_filter($permissions->branchRoles,
+                fn ($roles) => in_array('curriculum.manage', CenterPermissions::actions($roles), true)));
             $attendanceEvents = ['student.attendance_note_created', 'student.attendance_note_updated'];
             $attendanceBranches = array_keys(array_filter($permissions->branchRoles,
                 fn ($roles) => in_array('attendance.record', CenterPermissions::actions($roles), true)
                     || in_array('attendance.correct', CenterPermissions::actions($roles), true)));
-            $query->where(fn ($scope) => $scope->whereNotIn('event', [...$financialEvents, ...$enrollmentEvents, ...$attendanceEvents])
+            $query->where(fn ($scope) => $scope->whereNotIn('event', [...$financialEvents, ...$enrollmentEvents, ...$academicEvents, ...$attendanceEvents])
                 ->orWhere(fn ($event) => $event->whereIn('event', $financialEvents)->whereIn('branch_id', $financialBranches))
                 ->orWhere(fn ($event) => $event->whereIn('event', $enrollmentEvents)->whereIn('branch_id', $enrollmentBranches))
+                ->orWhere(fn ($event) => $event->whereIn('event', $academicEvents)->whereIn('branch_id', $academicBranches))
                 ->orWhere(fn ($event) => $event->whereIn('event', $attendanceEvents)->whereIn('branch_id', $attendanceBranches)));
             self::scopeRelatedBranchVisibility($query, $financialBranches);
         }

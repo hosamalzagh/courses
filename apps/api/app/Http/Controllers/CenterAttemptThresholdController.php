@@ -49,6 +49,8 @@ class CenterAttemptThresholdController extends Controller
                 return response()->json(json_decode($previous->result, true))
                     ->header('Cache-Control', 'private, no-store');
             }
+            $db->table('study_attempts')->whereIn('id', $change['attempt_ids'])
+                ->orderBy('id')->lockForUpdate()->get(['id']);
             $impact = $this->impact($group, $change);
             if (! hash_equals($impact['preview_token'], $confirmation['preview_token'])) {
                 $this->conflict('threshold_preview_changed');
