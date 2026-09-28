@@ -137,6 +137,7 @@ class CenterStudentAttachmentController extends Controller
             ->get(['id', 'version', 'classification', 'mime', 'size_bytes', 'actor_id', 'actor_name', 'created_at']);
 
         return response()->json([
+            'attachment' => StudentAttachments::payload($attachment),
             'versions' => $rows->take(20)->map(fn (stdClass $row): array => [
                 'id' => $row->id, 'version' => $row->version, 'classification' => $row->classification,
                 'mime' => $row->mime, 'size_bytes' => $row->size_bytes, 'actor_id' => $row->actor_id,

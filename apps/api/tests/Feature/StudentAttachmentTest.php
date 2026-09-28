@@ -164,7 +164,8 @@ class StudentAttachmentTest extends TestCase
         $url = "{$this->base}/students/{$student['id']}/attachments/{$attachment['id']}";
         $this->post("{$url}/replace", $replace, ['Accept' => 'application/json'])->assertOk()->assertJsonPath('attachment.current_version', 2)->assertJsonPath('attachment_revision', 3);
         $this->post("{$url}/replace", $replace, ['Accept' => 'application/json'])->assertOk()->assertJsonPath('attachment.current_version', 2);
-        $history = $this->getJson("{$url}/versions")->assertOk()->assertJsonCount(2, 'versions');
+        $history = $this->getJson("{$url}/versions")->assertOk()->assertJsonCount(2, 'versions')
+            ->assertJsonPath('attachment.title', 'نسخة محدثة')->assertJsonPath('attachment_revision', 3);
         $this->assertNotNull($history->headers->get('X-Courses-Query-Count'));
         $this->assertLessThanOrEqual(6, (int) $history->headers->get('X-Courses-Query-Count'));
         $history->assertJsonPath('versions.0.actor_name', $this->owner->name);

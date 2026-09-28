@@ -7,6 +7,20 @@ import type { AuditEntry } from '@/lib/server-context';
 
 export function StudentAuditDetails({ entry }: { entry: AuditEntry }) {
   if (entry.event === 'student.photo_changed') return <p>حُفظت صورة شخصية جديدة للطالب. محتوى الصور يعرض داخل الملف المصرح به.</p>;
+  if (entry.event === 'student.attachments_added' || entry.event.startsWith('student.attachment_')) {
+    let details = entry.details;
+    if (typeof details === 'string') { try { details = JSON.parse(details); } catch { return null; } }
+    if (!details || typeof details !== 'object' || Array.isArray(details)) return null;
+    const data = details as Record<string, unknown>;
+    const classification = (value: unknown) => value === 'identity' ? 'هوية' : value === 'general' ? 'عام' : 'غير محدد';
+    const count = typeof data.count === 'number' ? data.count : 0;
+    const change = entry.event === 'student.attachments_added' ? `أُضيف ${count.toLocaleString('ar-EG')} مرفق.`
+      : entry.event === 'student.attachment_replace' ? `حُفظت نسخة جديدة رقم ${typeof data.to_version === 'number' ? data.to_version.toLocaleString('ar-EG') : 'غير محدد'}.`
+      : entry.event === 'student.attachment_classify' ? `تغير التصنيف من ${classification(data.from_classification)} إلى ${classification(data.to_classification)}.`
+      : entry.event === 'student.attachment_archive' ? 'أُرشفت الوثيقة مع بقاء نسخها.'
+      : 'استُعيدت الوثيقة.';
+    return <p>{change} تُعرض الوثيقة ونسخها داخل ملف الطالب حسب الصلاحية الحالية.</p>;
+  }
   if (entry.event === 'center.student_custom_field_changed') {
     let details=entry.details;if(typeof details === 'string') {try{details=JSON.parse(details);}catch{return null;}}
     if(!details || typeof details !== 'object' || Array.isArray(details) || !('after' in details) || !details.after)return null;

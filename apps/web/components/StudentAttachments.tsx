@@ -141,7 +141,7 @@ export function StudentAttachments({ student, page, canRestore }: { student: Stu
           <Button disabled={Boolean(selectedAttachment)} onClick={event => { selectionTrigger.current = event.currentTarget; setSelectedAttachment(row); }}>نسخ وإجراءات {row.title}</Button>
         </span> },
       ]} />
-    {selectedAttachment ? <StudentAttachmentManagement key={selectedAttachment.id} student={student} attachment={selectedAttachment} revision={revision} onRevision={setRevision} onDirtyChange={setManagementDirty} canRestore={canRestore} onClose={() => { setManagementDirty(false); setSelectedAttachment(null); selectionTrigger.current?.focus(); }} /> : null}
+    {selectedAttachment ? <StudentAttachmentManagement key={selectedAttachment.id} student={student} attachment={selectedAttachment} revision={revision} onRevision={setRevision} onDirtyChange={setManagementDirty} canRestore={canRestore} onClose={(message) => { setManagementDirty(false); setSelectedAttachment(null); if (message) setNotice(message); requestAnimationFrame(() => { if (message) fileInput.current?.focus(); else selectionTrigger.current?.focus(); }); }} /> : null}
     {student.can_manage ? <>
       <UnsavedChangesGuard dirty={selected.length > 0 || managementDirty} guardHistory />
       <form id={formId} aria-label="رفع مرفقات الطالب" onSubmit={save} noValidate className="context-card form-stack">
@@ -204,7 +204,7 @@ export function StudentAttachments({ student, page, canRestore }: { student: Stu
 }
 
 function StudentAttachmentManagement({ student, attachment, revision, onRevision, onDirtyChange, canRestore, onClose }: {
-  student: Student; attachment: StudentAttachment; revision: number; onRevision: (value: number) => void; onDirtyChange: (value: boolean) => void; canRestore: boolean; onClose: () => void;
+  student: Student; attachment: StudentAttachment; revision: number; onRevision: (value: number) => void; onDirtyChange: (value: boolean) => void; canRestore: boolean; onClose: (message?: string) => void;
 }) {
   const router = useRouter();
   const formId = useId();
@@ -280,15 +280,19 @@ function StudentAttachmentManagement({ student, attachment, revision, onRevision
       const result = await response.json();
       onRevision(result.attachment_revision);
       setCurrent(result.attachment);
-      setTitle(result.attachment.title);
-      setClassification(result.attachment.classification);
-      setFile(null);
-      if (fileInput.current) fileInput.current.value = "";
+      setTitle(kind === "classification" ? title : result.attachment.title);
+      setClassification(kind === "replace" ? classification : result.attachment.classification);
+      if (kind !== "classification") {
+        setFile(null);
+        if (fileInput.current) fileInput.current.value = "";
+      }
       lastKind.current = null;
       setRequestId(newSubmissionId());
-      setNotice(kind === "replace" ? "حُفظت نسخة جديدة وبقيت النسخ السابقة." : kind === "classification" ? "تغير التصنيف؛ ستُفحص صلاحية كل نسخة عند فتحها." : kind === "archive" ? "أُرشف المرفق مع نسخه." : "استُعيد المرفق.");
-      setLoadingVersions(true);
+      const message = kind === "replace" ? "حُفظت نسخة جديدة وبقيت النسخ السابقة." : kind === "classification" ? "تغير التصنيف؛ ستُفحص صلاحية كل نسخة عند فتحها." : kind === "archive" ? "أُرشف المرفق مع نسخه." : "استُعيد المرفق.";
+      setNotice(message);
       router.refresh();
+      if (kind === "archive" && !canRestore) { onClose(message); return; }
+      setLoadingVersions(true);
     } catch {
       setError("تعذر التأكد من الإجراء. أعد المحاولة بنفس الطلب.");
     } finally {
@@ -302,10 +306,17 @@ function StudentAttachmentManagement({ student, attachment, revision, onRevision
     running.current = true;
     setBusy(true);
     try {
-      const response = await centerRequest(`students/${student.id}?tab=attachments`, "GET");
+      const response = await centerRequest(`students/${student.id}/attachments/${attachment.id}/versions`, "GET");
       if (!response.ok) throw new Error(await responseMessage(response));
-      const latest = ((await response.json()) as StudentContext).students[0];
+      const latest = (await response.json()) as { attachment: StudentAttachment; attachment_revision: number; versions: StudentAttachmentVersion[]; pagination: { has_more: boolean } };
       onRevision(latest.attachment_revision);
+      setCurrent(latest.attachment);
+      setTitle(latest.attachment.title);
+      setClassification(latest.attachment.classification);
+      setVersions(latest.versions);
+      setVersionPage(1);
+      setHasMore(latest.pagination.has_more);
+      setLoadingVersions(false);
       setRequestId(newSubmissionId());
       lastKind.current = null;
       setConflict(false);
