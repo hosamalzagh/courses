@@ -65,6 +65,15 @@ test("academic owner corrects and revokes a held lecture with visible impact whi
       discount: "0.00", discount_reason: null, version: enrollment.student.version, request_id: crypto.randomUUID(),
     });
     expect(saved.status).toBe(201);
+    const otherStudent = await write(owner, "students", { name: `طالب آخر ${Date.now()}`, branch_ids: [north], request_id: crypto.randomUUID() });
+    expect(otherStudent.status).toBe(201);
+    const otherEnrollment = await (await owner.request.get(`${origin}/api/v1/center/students/${otherStudent.body.student.id}/enrollments`)).json();
+    const otherSaved = await write(owner, `students/${otherStudent.body.student.id}/enrollments`, {
+      group_id: group.body.group.id, group_revision: group.body.group.revision,
+      currency_revision: otherEnrollment.student.currency_revision, joined_on: joinedOn,
+      discount: "0.00", discount_reason: null, version: otherEnrollment.student.version, request_id: crypto.randomUUID(),
+    });
+    expect(otherSaved.status).toBe(201);
     const start = new Date(Date.now() + 14 * 86_400_000).toLocaleString("sv-SE", { timeZone: "Africa/Cairo" }).slice(0, 16).replace(" ", "T");
     const session = await write(owner, `groups/${group.body.group.id}/sessions`, {
       kind: "single", revision: 1, start_at: start, plan_lecture_number: 1, request_id: crypto.randomUUID(),
@@ -97,6 +106,8 @@ test("academic owner corrects and revokes a held lecture with visible impact whi
     await owner.getByRole("row").filter({ hasText: student.body.student.name }).getByRole("button", { name: "تصحيح الحضور" }).click();
     await owner.getByLabel("الحالة الصحيحة").selectOption("counted");
     await owner.getByLabel("سبب التصحيح").fill("حضر مثبتًا في الكشف الورقي");
+    await expect(owner.getByRole("row").filter({ hasText: otherStudent.body.student.name }).getByRole("button", { name: "تصحيح الحضور" })).toBeDisabled();
+    await expect(owner.getByLabel("سبب التصحيح")).toHaveValue("حضر مثبتًا في الكشف الورقي");
     await owner.getByRole("banner").getByRole("button", { name: "حفظ التصحيح" }).click();
     await expect(owner.getByText("حُفظ تصحيح الحضور وسببه في سجل التدقيق.")).toBeVisible();
     await expect(owner.getByRole("row").filter({ hasText: student.body.student.name })).toContainText("حاضر محتسب");

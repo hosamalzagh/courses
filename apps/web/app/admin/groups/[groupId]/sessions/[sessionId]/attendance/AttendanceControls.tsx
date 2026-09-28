@@ -72,6 +72,7 @@ export function AttendanceControls({ context, search, linkedEntryId }: { context
   const selectedRow = current.students.find(row => row.attempt_id === selected?.attemptId);
   const noteRow = current.students.find(row => row.entry_id === selectedNote?.entryId && row.status !== null);
   const canEditNote = current.can_record || current.can_correct;
+  const correctionDraftOpen = selected?.mode === "correct" && correctReason.trim().length > 0;
 
   async function reload() {
     const params = new URLSearchParams({ page: String(current.pagination.page), ...(search ? { q: search } : {}), ...(linkedEntryId ? { entry_id: linkedEntryId } : {}) });
@@ -122,6 +123,7 @@ export function AttendanceControls({ context, search, linkedEntryId }: { context
   }
 
   function select(row: AttendanceRow, mode: Selection["mode"]) {
+    if (correctionDraftOpen) { setNotice("ألغِ التصحيح الحالي قبل اختيار طالب آخر."); return; }
     setSelectedNote(null);
     setConfirmClose(false);
     setRevokePreview(null);
@@ -269,7 +271,9 @@ export function AttendanceControls({ context, search, linkedEntryId }: { context
     <DataTable id={`attendance-${session.id}`} title="كشف الطلاب المستحقين" description="يعرض الطلاب المرتبطين بالمجموعة وقت المحاضرة، مع فترات الإيقاف المستبعدة من الحضور والغياب." rows={current.students}
       rowKey={row => row.attempt_id} searchText={row => `${row.name} ${row.student_number}`} emptyMessage="لا يوجد طلاب مستحقون لهذه المحاضرة."
       serverSearch={{ value: search, onSearch: value => {
-        if (noteDirty) { setNotice("احفظ الملاحظة أو ألغِ تعديلها قبل البحث."); return; }
+        if (noteDirty || correctionDraftOpen || revokeReason.trim()) {
+          setNotice("احفظ التعديل أو ألغِه قبل البحث."); return;
+        }
         router.push(attendanceUrl(1, value));
       } }}
       columns={[
@@ -287,9 +291,9 @@ export function AttendanceControls({ context, search, linkedEntryId }: { context
           {open && current.can_undo_own && row.entry_id && row.recorded_by === current.user.id && current.last_own_attempt_id === row.attempt_id && row.status !== "absent"
             ? <Button id={`${titleId}-${row.attempt_id}-undo`} disabled={busy || conflict || Boolean(selectedNote)}
                 onClick={() => select(row, "undo")}>عرض التراجع</Button> : null}
-          {canCorrect && row.status && row.entry_id && row.entry_revision !== null ? <Button id={`${titleId}-${row.attempt_id}-correct`} size="sm" disabled={busy || conflict || Boolean(selectedNote) || Boolean(revokePreview)}
+          {canCorrect && row.status && row.entry_id && row.entry_revision !== null ? <Button id={`${titleId}-${row.attempt_id}-correct`} size="sm" disabled={busy || conflict || Boolean(selectedNote) || Boolean(revokePreview) || Boolean(correctionDraftOpen)}
             onClick={() => select(row, "correct")}>تصحيح الحضور</Button> : null}
-          {row.status && row.entry_id && row.entry_revision !== null && (row.note_body || canEditNote) ? <Button id={`${titleId}-${row.entry_id}-note`} size="sm" disabled={busy || conflict || Boolean(selectedNote)}
+          {row.status && row.entry_id && row.entry_revision !== null && (row.note_body || canEditNote) ? <Button id={`${titleId}-${row.entry_id}-note`} size="sm" disabled={busy || conflict || Boolean(selectedNote) || Boolean(correctionDraftOpen)}
             onClick={() => { setSelected(null); setConfirmClose(false);
               setSelectedNote({ entryId: row.entry_id!, entryRevision: row.entry_revision! }); setDiscardNote(false); }}>
               {row.note_body ? "عرض الملاحظة" : "إضافة ملاحظة"}</Button> : null}
