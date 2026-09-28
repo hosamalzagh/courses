@@ -10,6 +10,7 @@ import { InlineNotice } from "@/components/InlineNotice";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { centerRequest, newSubmissionId, responseMessage } from "@/lib/client-api";
+import { readPendingFeeAdjustment, type PendingFeeAdjustment } from "@/lib/fee-adjustment-recovery";
 import type { StudentFee } from "@/lib/server-context";
 
 type Balance = { received_total: string; due_total: string; paid_total: string; allocated_total: string; available_balance: string; debt: string };
@@ -22,8 +23,9 @@ type Detail = { fee: { id: string; attempt_id: string; branch_id: number; status
   account: Balance; latest_active_adjustment_id: string | null; history: Adjustment[];
   pagination: { history_page: number; history_has_more: boolean }; preview: Preview | null };
 
-export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged, onDirtyChange, onUncertainChange }: {
-  studentId: string; fee: StudentFee; onClose: () => void; onChanged: () => Promise<void>;
+export function StudentFeeAdjustmentEditor({ studentId, fee, recoveryKey, onClose, onChanged, onDirtyChange, onUncertainChange }: {
+  studentId: string; fee: Pick<StudentFee, "id" | "group_name" | "currency">; recoveryKey: string;
+  onClose: () => void; onChanged: () => Promise<void>;
   onDirtyChange: (dirty: boolean) => void; onUncertainChange: (uncertain: boolean) => void;
 }) {
   const prefix = useId();
@@ -42,6 +44,7 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const requestId = useRef<string | null>(null);
+  const pendingRequest = useRef<PendingFeeAdjustment | null>(null);
   const submitting = useRef(false);
   const dirty = Boolean(newDue || reason || replacesId);
 
@@ -55,6 +58,17 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
     finally { setLoading(false); }
   }, [path]);
   useEffect(() => { const timeout = window.setTimeout(() => { void load(); }, 0); return () => window.clearTimeout(timeout); }, [load]);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const pending = readPendingFeeAdjustment(recoveryKey);
+      if (!pending || pending.fee_id !== fee.id) return;
+      pendingRequest.current = pending; requestId.current = pending.request_id;
+      setNewDue(pending.new_due); setReason(pending.reason); setReplacesId(pending.replaces_adjustment_id);
+      setUncertain(true);
+      setNotice("هناك تسوية سابقة لم تُعرف نتيجتها. تحقق من الاعتماد بالمفتاح نفسه قبل أي قرار جديد.");
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [fee.id, recoveryKey]);
   useEffect(() => {
     const frame = requestAnimationFrame(() => document.getElementById(`${prefix}-title`)?.focus());
     return () => cancelAnimationFrame(frame);
@@ -88,24 +102,41 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
   }
 
   async function save() {
-    if (!detail?.preview || submitting.current) return;
+    if (submitting.current || (!uncertain && !detail?.preview)) return;
+    requestId.current ??= newSubmissionId();
+    const payload: PendingFeeAdjustment | null = uncertain ? pendingRequest.current : detail ? {
+      fee_id: fee.id, new_due: newDue, reason: reason.trim(), replaces_adjustment_id: replacesId,
+      version: detail.version, request_id: requestId.current,
+    } : null;
+    if (!payload) { setError("تعذر استعادة طلب التسوية. حمّل حساب الطالب وراجع تاريخ الرسوم."); return; }
+    if (!uncertain) {
+      try { localStorage.setItem(recoveryKey, JSON.stringify(payload)); }
+      catch { setError("تعذر حفظ بيانات التحقق في هذا المتصفح. فعّل تخزين الموقع قبل اعتماد التسوية."); return; }
+      pendingRequest.current = payload;
+    }
     submitting.current = true; setBusy(true); setConfirm(false); setError("");
+    let committed = false;
     try {
-      requestId.current ??= newSubmissionId();
-      const response = await centerRequest(path, "POST", {
-        new_due: newDue, reason: reason.trim(), replaces_adjustment_id: replacesId,
-        version: detail.version, request_id: requestId.current,
-      });
+      const response = await centerRequest(path, "POST", payload);
       if (!response.ok) {
-        if (response.status === 409) { setConflict(true); setUncertain(false); setError("تغير الحساب أو التسوية. حمّل أحدث البيانات وراجع الأثر قبل الاعتماد."); }
-        else { setUncertain(false); setError(await responseMessage(response)); }
+        if (response.status >= 500) {
+          setUncertain(true); setError("تعذر التأكد من الاعتماد. تحقق من النتيجة بالمفتاح نفسه قبل أي قرار جديد.");
+          return;
+        }
+        const message = response.status === 409 ? "تغير الحساب أو التسوية. حمّل أحدث البيانات وراجع الأثر قبل الاعتماد." : await responseMessage(response);
+        try { localStorage.removeItem(recoveryKey); } catch { /* A stale key can only replay this same request. */ }
+        pendingRequest.current = null; requestId.current = null; setUncertain(false);
+        if (response.status === 409) setConflict(true);
+        setError(message);
         return;
       }
-      requestId.current = null; setUncertain(false); onDirtyChange(false);
-      await onChanged(); onClose();
+      try { localStorage.removeItem(recoveryKey); } catch { /* A stale key can only replay this same request. */ }
+      pendingRequest.current = null; requestId.current = null; setUncertain(false); onDirtyChange(false);
+      committed = true;
     } catch {
       setUncertain(true); setError("تعذر التأكد من الاعتماد. احتفظ بالبيانات وأعد الطلب بالمفتاح نفسه دون تكرار الحركة.");
     } finally { submitting.current = false; setBusy(false); }
+    if (committed) { try { await onChanged(); } finally { onClose(); } }
   }
 
   const latestActiveId = detail?.latest_active_adjustment_id;
@@ -117,11 +148,12 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
     {loading ? <p role="status">جارٍ تحميل الرسوم…</p> : null}
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
+    {uncertain ? <InlineNotice tone="warning">القرار المطلوب: مستحق <bdi dir="ltr">{newDue} {currency}</bdi>، والسبب: {reason}. استخدم التحقق من الاعتماد قبل المتابعة.</InlineNotice> : null}
     {!detail && !loading ? <CenterHeaderActions>
       <Button onClick={() => void load().then(success => {
         if (success) requestAnimationFrame(() => document.getElementById(`${prefix}-title`)?.focus());
       })}>إعادة تحميل سجل الرسوم</Button>
-      <Button onClick={onClose}>إغلاق محرر الرسوم</Button>
+      <Button disabled={uncertain} onClick={onClose}>إغلاق محرر الرسوم</Button>
     </CenterHeaderActions> : null}
     {detail ? <>
       <p>الرسوم المسجلة: <bdi dir="ltr">{detail.fee.net_amount} {currency}</bdi> — المستحق الحالي: <strong><bdi dir="ltr">{detail.fee.current_due} {currency}</bdi></strong> — المسدد: <bdi dir="ltr">{detail.fee.paid_amount} {currency}</bdi></p>
@@ -146,7 +178,7 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
       </section> : null}
       <CenterHeaderActions>
         {detail.can_approve ? <Button form={formId} type="submit" disabled={busy || conflict || uncertain} busy={busy}>معاينة الأثر</Button> : null}
-        {detail.can_approve && preview ? <Button variant="primary" disabled={busy || conflict} onClick={() => setConfirm(true)}>{uncertain ? "التحقق من الاعتماد" : replacesId ? "اعتماد التصحيح" : "اعتماد التسوية"}</Button> : null}
+        {detail.can_approve && (preview || uncertain) ? <Button variant="primary" disabled={busy || conflict} onClick={() => setConfirm(true)}>{uncertain ? "التحقق من الاعتماد" : replacesId ? "اعتماد التصحيح" : "اعتماد التسوية"}</Button> : null}
         {detail.can_approve && replacesId ? <Button disabled={busy || uncertain} onClick={() => { setReplacesId(null); setDetail(current => current ? { ...current, preview: null } : current); }}>إلغاء وضع التصحيح</Button> : null}
         <Button disabled={busy || uncertain} onClick={() => dirty ? setCancel(true) : onClose()}>إغلاق محرر الرسوم</Button>
         {conflict ? <Button disabled={busy} onClick={() => void load()}>تحميل أحدث الرسوم</Button> : null}
@@ -168,8 +200,9 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
         {detail.pagination.history_has_more ? <Button disabled={busy || uncertain} onClick={() => void load(detail.pagination.history_page + 1)}>قرارات أقدم</Button> : null}
       </CenterHeaderActions>
     </> : null}
-    {confirm && preview ? <ConfirmationDialog title={replacesId ? "تأكيد تصحيح التسوية" : "تأكيد تسوية الرسوم"}
-      description={`سيتغير مستحق المحاولة من ${preview.fee_before} إلى ${preview.fee_after} ${currency}، ويبقى رد المال النقدي إجراءً مستقلاً.`}
+    {confirm && (preview || uncertain) ? <ConfirmationDialog title={replacesId ? "تأكيد تصحيح التسوية" : "تأكيد تسوية الرسوم"}
+      description={preview ? `سيتغير مستحق المحاولة من ${preview.fee_before} إلى ${preview.fee_after} ${currency}، ويبقى رد المال النقدي إجراءً مستقلاً.`
+        : `تحقق من نتيجة القرار السابق بمستحق ${newDue} ${currency} والمفتاح المحفوظ، دون إنشاء قرار ثانٍ.`}
       confirmLabel={replacesId ? "تأكيد التصحيح" : "تأكيد التسوية"} onCancel={() => setConfirm(false)} onConfirm={save} /> : null}
     {cancel ? <ConfirmationDialog title="إغلاق دون اعتماد" description="ستفقد بيانات التسوية التي لم تعتمدها."
       confirmLabel="إغلاق دون اعتماد" onCancel={() => setCancel(false)} onConfirm={() => { onDirtyChange(false); onClose(); }} /> : null}

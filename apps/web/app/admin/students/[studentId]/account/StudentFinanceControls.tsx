@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions, CenterPageActions } from "@/components/CenterShell";
@@ -13,6 +13,7 @@ import { Field, FieldError, FieldGroup, FieldLabel, FieldSet } from "@/component
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { buttonVariants } from "@/components/ui/button";
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from "@/lib/client-api";
+import { feeAdjustmentRecoveryKey, readPendingFeeAdjustment } from "@/lib/fee-adjustment-recovery";
 import type { StudentAccountContext } from "@/lib/server-context";
 import { paymentMethodLabels } from "@/lib/student-finance";
 import { StudentPaymentAllocations } from "./StudentPaymentAllocations";
@@ -56,6 +57,7 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
     initial.payments.some(payment => payment.id === paymentId) ? paymentId! : null);
   const [allocationDirty, setAllocationDirty] = useState(false);
   const [selectedFeeId, setSelectedFeeId] = useState<string | null>(null);
+  const [restoredFeeId, setRestoredFeeId] = useState<string | null>(null);
   const [feeDirty, setFeeDirty] = useState(false);
   const [feeUncertain, setFeeUncertain] = useState(false);
   const submitting = useRef(false);
@@ -68,6 +70,14 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   }
 
   const studentId = current.account.student_id;
+  const feeRecoveryKey = feeAdjustmentRecoveryKey(current.center.id, current.user.id, studentId);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const pending = readPendingFeeAdjustment(feeRecoveryKey);
+      if (pending) { setRestoredFeeId(pending.fee_id); setSelectedFeeId(pending.fee_id); }
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [feeRecoveryKey]);
   const accountPath = `students/${studentId}/account?${new URLSearchParams({
     page: String(current.pagination.page), branches_page: String(current.pagination.branches_page),
     fees_page: String(current.pagination.fees_page), ...(search ? { q: search } : {}),
@@ -79,7 +89,8 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
     (current.recordable_branches[0] && branch !== String(current.recordable_branches[0].id)));
   const dirty = Boolean((currency && currency !== current.account.currency) || paymentDirty || allocationDirty || feeDirty);
   const selectedPayment = current.payments.find((item) => item.id === selectedPaymentId);
-  const selectedFee = current.fees.find((item) => item.id === selectedFeeId);
+  const selectedFee = current.fees.find((item) => item.id === selectedFeeId) ??
+    (restoredFeeId && restoredFeeId === selectedFeeId ? { id: restoredFeeId, group_name: null, currency: current.account.currency ?? "" } : undefined);
 
   function focus(field: string) {
     requestAnimationFrame(() => document.getElementById(`${formPrefix}-${field}`)?.focus());
@@ -234,8 +245,9 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
             {row.can_approve ? "تسوية أو تصحيح" : "عرض سجل الرسوم"}
           </Button> },
       ]} />
-    {selectedFee ? <StudentFeeAdjustmentEditor key={selectedFee.id} studentId={studentId} fee={selectedFee}
-      onClose={() => { setSelectedFeeId(null); setFeeDirty(false); setFeeUncertain(false); focus(`fee-${selectedFee.id}`); }} onChanged={refreshAfterAllocation}
+    {selectedFee ? <StudentFeeAdjustmentEditor key={selectedFee.id} studentId={studentId} fee={selectedFee} recoveryKey={feeRecoveryKey}
+      onClose={() => { setSelectedFeeId(null); setRestoredFeeId(null); setFeeDirty(false); setFeeUncertain(false);
+        requestAnimationFrame(() => (document.getElementById(`${formPrefix}-fee-${selectedFee.id}`) ?? document.getElementById("center-content"))?.focus()); }} onChanged={refreshAfterAllocation}
       onDirtyChange={setFeeDirty} onUncertainChange={setFeeUncertain} /> : null}
     <CenterHeaderActions>
       {current.pagination.fees_page > 1 ? <Link className={buttonVariants({ variant: "outline" })} href={feePage(current.pagination.fees_page - 1)}>رسوم أحدث</Link> : null}

@@ -1039,6 +1039,7 @@ class StudyEnrollmentTest extends TestCase
         $this->getJson($accountUrl)->assertJsonPath('account.due_total', '1000.00')
             ->assertJsonPath('account.paid_total', '900.00');
         $url = "{$this->base}/students/{$student['id']}/fees/{$attempt['fee']['id']}/adjustments";
+        $this->getJson("{$url}?new_due=1000.00")->assertUnprocessable();
         $preview = $this->getJson("{$url}?new_due=800.00")->assertOk()
             ->assertJsonPath('preview.fee_before', '1000.00')
             ->assertJsonPath('preview.account_after.due_total', '800.00')

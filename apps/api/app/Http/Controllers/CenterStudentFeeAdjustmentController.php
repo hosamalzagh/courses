@@ -37,6 +37,8 @@ class CenterStudentFeeAdjustmentController extends Controller
             abort_unless($permissions->can('finance.approve', (int) $fee->branch_id), 403);
             $replacement = $this->replacement($feeId, $data['replaces_adjustment_id'] ?? null);
             $target = StudentMoney::cents($data['new_due']);
+            abort_if($replacement === null && $target === StudentMoney::cents($fee->current_due), 422,
+                'أدخل مستحقًا مختلفًا لاعتماد تسوية جديدة.');
             $allocations = $this->allocations($feeId);
             [$release, $released] = $this->releasePlan($allocations, StudentMoney::cents($fee->paid_amount), $target);
             $this->authorizeRelease($permissions, $release);
