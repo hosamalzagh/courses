@@ -5,12 +5,13 @@ import { Button } from "@/components/Button";
 import { CenterHeaderActions } from "@/components/CenterShell";
 import { DataTable } from "@/components/DataTable";
 import { FormField } from "@/components/FormField";
+import { FieldGroup, FieldSet } from "@/components/ui/field";
 import { InlineNotice } from "@/components/InlineNotice";
 import { centerRequest, newSubmissionId, responseMessage } from "@/lib/client-api";
 import type { StudentPayment } from "@/lib/server-context";
 
-type Fee = { id: string; attempt_id: string; group_name: string | null; status: string; net_amount: string; paid_amount: string; remaining_amount: string; currency: string };
-type Allocation = { id: string; fee_id: string; attempt_id: string; group_name: string | null; amount: string; currency: string; actor_name: string; created_at: string; reversal_id: string | null; reversal_reason: string | null; reversed_by_name: string | null; reversed_at: string | null };
+type Fee = { id: string; attempt_id: string; group_name: string | null; fee_created_at: string; net_amount: string; paid_amount: string; remaining_amount: string; currency: string };
+type Allocation = { id: string; fee_id: string; attempt_id: string; group_name: string | null; fee_created_at: string; amount: string; currency: string; actor_name: string; created_at: string; reversal_id: string | null; reversal_reason: string | null; reversed_by_name: string | null; reversed_at: string | null };
 type Options = { payment: { id: string; available_amount: string; amount: string; currency: string }; version: string; can_allocate: boolean; can_correct: boolean; fees: Fee[]; history: Allocation[]; pagination: { page: number; has_more: boolean; history_page: number; history_has_more: boolean } };
 
 function cents(value: string): number {
@@ -132,12 +133,14 @@ export function StudentPaymentAllocations({ studentId, payment, onClose, onChang
       <form id={formId} noValidate onSubmit={allocate} className="form-stack">
         <h3>رسوم المحاولات في فرع الدفعة</h3>
         {Object.values(selectedFees).some((fee) => amounts[fee.attempt_id]?.trim()) ? <p>المحاولات المحددة عبر الصفحات: {Object.values(selectedFees).filter((fee) => amounts[fee.attempt_id]?.trim()).length} — إجمالي المبالغ: <bdi dir="ltr">{(Object.values(selectedFees).reduce((sum, fee) => sum + (/^\d{1,10}(?:\.\d{1,2})?$/.test(amounts[fee.attempt_id] ?? "") ? cents(amounts[fee.attempt_id]) : 0), 0) / 100).toFixed(2)} {options.payment.currency}</bdi></p> : null}
-        {options.fees.length ? options.fees.map((fee) => <FormField key={fee.id} id={`${prefix}-${fee.attempt_id}`}
-          label={`${fee.group_name ?? fee.attempt_id} — المستحق ${fee.net_amount}، المسدد ${fee.paid_amount}، المتبقي ${fee.remaining_amount} ${fee.currency}`}
-          type="text" direction="ltr" value={amounts[fee.attempt_id] ?? ""}
-          onChange={(value) => { setAmounts((items) => ({ ...items, [fee.attempt_id]: value })); setSelectedFees((items) => value.trim() ? { ...items, [fee.attempt_id]: fee } : Object.fromEntries(Object.entries(items).filter(([id]) => id !== fee.attempt_id))); setError(""); requestId.current = null; }}
-          disabled={busy || uncertain || conflict || cents(fee.remaining_amount) === 0}
-          hint="أدخل المبلغ المراد تخصيصه، أو اتركه فارغًا." />) : <p className="muted">لا توجد رسوم في هذا الفرع.</p>}
+        <FieldSet disabled={busy || uncertain || conflict} className="border-0 p-0"><FieldGroup>
+          {options.fees.length ? options.fees.map((fee) => <FormField key={fee.id} id={`${prefix}-${fee.attempt_id}`}
+            label={`${fee.group_name ?? "مجموعة غير متاحة"} — محاولة ${fee.attempt_id.slice(0, 8)} بتاريخ ${fee.fee_created_at.slice(0, 10)} — المستحق ${fee.net_amount}، المسدد ${fee.paid_amount}، المتبقي ${fee.remaining_amount} ${fee.currency}`}
+            type="text" direction="ltr" value={amounts[fee.attempt_id] ?? ""}
+            onChange={(value) => { setAmounts((items) => ({ ...items, [fee.attempt_id]: value })); setSelectedFees((items) => value.trim() ? { ...items, [fee.attempt_id]: fee } : Object.fromEntries(Object.entries(items).filter(([id]) => id !== fee.attempt_id))); setError(""); requestId.current = null; }}
+            disabled={cents(fee.remaining_amount) === 0}
+            hint={`معرّف المحاولة ${fee.attempt_id}. أدخل المبلغ أو اتركه فارغًا.`} />) : <p className="muted">لا توجد رسوم في هذا الفرع.</p>}
+        </FieldGroup></FieldSet>
       </form>
       <CenterHeaderActions>
         <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || !Object.values(selectedFees).length || cents(options.payment.available_amount) === 0}>{uncertain ? "التحقق من التخصيص" : "تخصيص المبالغ المحددة"}</Button>
@@ -149,13 +152,13 @@ export function StudentPaymentAllocations({ studentId, payment, onClose, onChang
       </CenterHeaderActions> : null}
     </> : <p className="muted">لديك صلاحية عرض الحركات دون تخصيص مبالغ.</p>}
     <DataTable id={`${prefix}-history`} title="سجل التخصيص والعكس" rows={options?.history ?? []} rowKey={(row) => row.id} pageSize={20}
-      searchText={(row) => `${row.group_name} ${row.amount} ${row.actor_name} ${row.reversal_reason ?? ""}`}
+      searchText={(row) => `${row.group_name ?? ""} ${row.attempt_id} ${row.amount} ${row.actor_name} ${row.reversal_reason ?? ""}`}
       emptyMessage="لم تُسجل تخصيصات لهذه الدفعة." columns={[
-        { key: "group", label: "المجموعة", render: (row) => row.group_name ?? <bdi dir="ltr">{row.attempt_id}</bdi> },
+        { key: "group", label: "المحاولة", render: (row) => <>{row.group_name ?? "مجموعة غير متاحة"} — <bdi dir="ltr" title={row.attempt_id}>{row.attempt_id.slice(0, 8)}</bdi></> },
         { key: "amount", label: "المبلغ", render: (row) => <bdi dir="ltr">{row.amount} {row.currency}</bdi> },
         { key: "status", label: "الحالة", render: (row) => row.reversal_id ? `معكوس: ${row.reversal_reason}` : "معتمد" },
         { key: "actor", label: "الموظف", render: (row) => row.actor_name },
-        { key: "action", label: "تصحيح", render: (row) => options?.can_correct && !row.reversal_id ? <Button disabled={busy || uncertain || dirty} onClick={() => { setReversing(row.id); setReason(""); requestId.current = null; focus(`${prefix}-reason`); }}>عكس التخصيص</Button> : "—" },
+        { key: "action", label: "تصحيح", render: (row) => options?.can_correct && !row.reversal_id ? <Button id={`${prefix}-reverse-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => { setReversing(row.id); setReason(""); requestId.current = null; focus(`${prefix}-reason`); }}>عكس التخصيص</Button> : "—" },
       ]} />
     {options && (options.pagination.history_page > 1 || options.pagination.history_has_more) ? <CenterHeaderActions>
       {options.pagination.history_page > 1 ? <Button disabled={dirty || busy || uncertain} onClick={() => changePage(options.pagination.page, options.pagination.history_page - 1)}>حركات سابقة</Button> : null}
@@ -163,8 +166,8 @@ export function StudentPaymentAllocations({ studentId, payment, onClose, onChang
     </CenterHeaderActions> : null}
     {reversing ? <section className="form-stack" aria-label="عكس التخصيص">
       <h3>عكس التخصيص</h3>
-      <form id={reversalFormId} noValidate onSubmit={reverse}><FormField id={`${prefix}-reason`} label="سبب العكس" type="text" value={reason} onChange={(value) => { setReason(value); setError(""); requestId.current = null; }} disabled={busy || uncertain || conflict} hint="سيبقى التخصيص الأصلي ظاهرًا في السجل مع سبب العكس." /></form>
-      <CenterHeaderActions><Button form={reversalFormId} type="submit" variant="primary" busy={busy} disabled={conflict}>{uncertain ? "التحقق من العكس" : "اعتماد العكس"}</Button><Button disabled={busy || uncertain} onClick={() => { setReversing(null); setReason(""); requestId.current = null; }}>إلغاء التصحيح</Button></CenterHeaderActions>
+      <form id={reversalFormId} noValidate onSubmit={reverse}><FieldSet disabled={busy || uncertain || conflict} className="border-0 p-0"><FieldGroup><FormField id={`${prefix}-reason`} label="سبب العكس" type="text" value={reason} onChange={(value) => { setReason(value); setError(""); requestId.current = null; }} hint="سيبقى التخصيص الأصلي ظاهرًا في السجل مع سبب العكس." /></FieldGroup></FieldSet></form>
+      <CenterHeaderActions><Button form={reversalFormId} type="submit" variant="primary" busy={busy} disabled={conflict}>{uncertain ? "التحقق من العكس" : "اعتماد العكس"}</Button><Button disabled={busy || uncertain} onClick={() => { const trigger = reversing; setReversing(null); setReason(""); requestId.current = null; focus(`${prefix}-reverse-${trigger}`); }}>إلغاء التصحيح</Button></CenterHeaderActions>
     </section> : null}
     <CenterHeaderActions><Button disabled={busy || uncertain || dirty} onClick={onClose}>إغلاق تفاصيل الدفعة</Button></CenterHeaderActions>
   </section>;

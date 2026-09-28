@@ -218,10 +218,10 @@ export function StudentFinanceControls({ initial, search }: { initial: StudentAc
         { key: "available", label: "المتاح", render: (row) => <bdi dir="ltr">{row.available_amount} {row.currency}</bdi> },
         { key: "method", label: "الطريقة", render: (row) => paymentMethodLabels[row.method] ?? row.method },
         { key: "actor", label: "الموظف", render: (row) => row.actor_name },
-        { key: "allocations", label: "التخصيصات", render: (row) => <Button disabled={busy || dirty} onClick={() => { setSelectedPaymentId(row.id); requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-payment-allocation-title]")?.focus()); }}>عرض وتخصيص</Button> },
+        { key: "allocations", label: "التخصيصات", render: (row) => <Button id={`${formPrefix}-payment-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedPaymentId(row.id); requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-payment-allocation-title]")?.focus()); }}>عرض وتخصيص</Button> },
       ]} />
     {selectedPayment ? <StudentPaymentAllocations studentId={studentId} payment={selectedPayment}
-      onClose={() => setSelectedPaymentId(null)} onChanged={refreshAfterAllocation} onDirtyChange={setAllocationDirty} /> : null}
+      onClose={() => { setSelectedPaymentId(null); focus(`payment-${selectedPayment.id}`); }} onChanged={refreshAfterAllocation} onDirtyChange={setAllocationDirty} /> : null}
     <CenterHeaderActions>
       {current.pagination.page > 1 ? <Link className={buttonVariants({ variant: "outline" })} href={paymentPage(current.pagination.page - 1)}>الحركات السابقة</Link> : null}
       {current.pagination.has_more ? <Link className={buttonVariants({ variant: "outline" })} href={paymentPage(current.pagination.page + 1)}>الحركات التالية</Link> : null}

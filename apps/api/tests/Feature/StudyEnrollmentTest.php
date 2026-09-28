@@ -511,6 +511,15 @@ class StudyEnrollmentTest extends TestCase
         $allocation = $this->postJson("{$northUrl}/allocations", [...$request, 'version' => $staffOptions->json('version')])
             ->assertCreated()->json('allocations.0');
         $this->assertStringContainsString('student.payment_allocated', $this->getJson("{$this->base}/audit")->assertOk()->getContent());
+        $this->center->run(function () use ($northGroup, $southGroup, $attempts): void {
+            DB::table('study_groups')->where('id', $southGroup['id'])->update(['name' => 'South private group']);
+            DB::table('study_attempts')->where('id', $attempts[0]['id'])
+                ->update(['current_group_id' => $southGroup['id']]);
+        });
+        $afterMove = $this->getJson("{$northUrl}/allocation-options")->assertOk()
+            ->assertJsonPath('fees.0.group_name', $northGroup['name'])
+            ->assertJsonPath('history.0.group_name', $northGroup['name']);
+        $this->assertStringNotContainsString('South private group', $afterMove->getContent());
         $this->grant([$this->south => ['accounting']]);
         $this->asUser($this->staff);
         $this->getJson("{$northUrl}/allocation-options")->assertNotFound();

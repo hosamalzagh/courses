@@ -86,6 +86,11 @@ test("allocates a payment, reverses it with a reason, and updates the visible ba
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.getByRole("button", { name: "إغلاق القائمة" }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.goto(`${origin}/admin/audit`);
+  await expect(page.getByText("تخصيص دفعة مقدمة لرسوم محاولة الدراسة").first()).toBeVisible();
+  await expect(page.getByText("عكس تخصيص دفعة مقدمة").first()).toBeVisible();
+  await page.getByText("تفاصيل عكس التخصيص").first().click();
+  await expect(page.getByText("سجل على المجموعة خطأ").first()).toBeVisible();
 });
 
 test("simultaneous allocations cannot spend one payment twice", async ({ page }) => {

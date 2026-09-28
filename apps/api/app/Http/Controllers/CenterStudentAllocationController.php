@@ -8,6 +8,7 @@ use App\Support\CenterWrites;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,21 +27,21 @@ class CenterStudentAllocationController extends Controller
         $historyPage = (int) ($data['history_page'] ?? 1);
         $historyQuery = DB::connection('tenant')->table('student_payment_allocations as allocations')
             ->join('study_attempt_fees as fees', 'fees.id', '=', 'allocations.fee_id')
-            ->join('study_attempts as attempts', 'attempts.id', '=', 'fees.attempt_id')
-            ->leftJoin('study_groups as groups', 'groups.id', '=', 'attempts.current_group_id')
             ->leftJoin('student_payment_allocation_reversals as reversals', 'reversals.allocation_id', '=', 'allocations.id')
             ->whereColumn('allocations.payment_id', 'payments.id')->where('allocations.student_id', $studentId)
             ->orderByDesc('allocations.created_at')->orderByDesc('allocations.id')
             ->offset(($historyPage - 1) * 20)->limit(21)
             ->select(['allocations.id', 'allocations.fee_id', 'allocations.currency', 'allocations.actor_name',
-                'allocations.created_at', 'groups.name as group_name', 'fees.attempt_id',
+                'allocations.created_at', 'fees.attempt_id', 'fees.created_at as fee_created_at',
                 'reversals.id as reversal_id', 'reversals.reason as reversal_reason',
                 'reversals.actor_name as reversed_by_name', 'reversals.created_at as reversed_at'])
-            ->selectRaw('allocations.amount::text as amount');
+            ->selectRaw('allocations.amount::text as amount')
+            ->selectSub($this->originalFeeGroupName(), 'group_name');
         $payment = StudentPhotos::visibleStudent($studentId, $permissions, 'finance.read')
             ->join('student_payments as payments', 'payments.student_id', '=', 'students.id')
             ->where('payments.id', $paymentId)
-            ->select(['payments.*', 'students.financial_account_revision'])
+            ->select(['payments.id', 'payments.branch_id', 'payments.amount', 'payments.currency',
+                'students.financial_account_revision'])
             ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'payments.id')
                 ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'used_amount')
             ->selectSub(DB::connection('tenant')->query()->fromSub($historyQuery, 'history_rows')
@@ -49,13 +50,12 @@ class CenterStudentAllocationController extends Controller
 
         $history = collect(json_decode($payment->history_rows ?? '[]'));
         $fees = DB::connection('tenant')->table('study_attempt_fees as fees')
-            ->join('study_attempts as attempts', 'attempts.id', '=', 'fees.attempt_id')
-            ->leftJoin('study_groups as groups', 'groups.id', '=', 'attempts.current_group_id')
             ->where('fees.student_id', $studentId)->where('fees.branch_id', $payment->branch_id)
             ->orderByDesc('fees.created_at')->orderByDesc('fees.id')
             ->offset(($page - 1) * 20)->limit(21)
             ->select(['fees.id', 'fees.attempt_id', 'fees.branch_id', 'fees.net_amount', 'fees.currency',
-                'groups.name as group_name', 'attempts.status'])
+                'fees.created_at as fee_created_at'])
+            ->selectSub($this->originalFeeGroupName(), 'group_name')
             ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.fee_id', 'fees.id')
                 ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'paid_amount')->get();
         return response()->json([
@@ -118,7 +118,10 @@ class CenterStudentAllocationController extends Controller
             $fees = DB::connection('tenant')->table('study_attempt_fees')->where('student_id', $studentId)
                 ->where('branch_id', $payment->branch_id)
                 ->whereIn('attempt_id', array_column($targets, 'attempt_id'))
-                ->get(['id', 'attempt_id', 'net_amount', 'currency'])->keyBy('attempt_id');
+                ->select(['id', 'attempt_id', 'net_amount', 'currency'])
+                ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.fee_id', 'study_attempt_fees.id')
+                    ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'paid_amount')
+                ->get()->keyBy('attempt_id');
             abort_unless($fees->count() === count($targets), 404);
             $ids = [];
             $rows = [];
@@ -127,8 +130,7 @@ class CenterStudentAllocationController extends Controller
                 $fee = $fees->get($target['attempt_id']);
                 abort_unless($fee && $fee->currency === $payment->currency, 422, 'عملة الرسوم لا تطابق الدفعة.');
                 $amount = StudentMoney::cents($target['amount']);
-                $alreadyPaid = StudentMoney::cents(ActiveStudentAllocations::query()->where('allocations.fee_id', $fee->id)
-                    ->sum('allocations.amount'));
+                $alreadyPaid = StudentMoney::cents($fee->paid_amount);
                 $dueBefore = StudentMoney::cents($fee->net_amount) - $alreadyPaid;
                 if ($amount > $dueBefore) {
                     $this->conflict('fee_already_paid');
@@ -246,6 +248,19 @@ class CenterStudentAllocationController extends Controller
         abort_unless($payment && $permissions->can('finance.read', (int) $payment->branch_id), 404);
 
         return $payment;
+    }
+
+    private function originalFeeGroupName(): Builder
+    {
+        return DB::connection('tenant')->table('study_attempt_group_periods as original_periods')
+            ->join('study_groups as original_groups', 'original_groups.id', '=', 'original_periods.group_id')
+            ->join('levels as original_levels', 'original_levels.id', '=', 'original_groups.level_id')
+            ->join('stages as original_stages', 'original_stages.id', '=', 'original_levels.stage_id')
+            ->join('courses as original_courses', 'original_courses.id', '=', 'original_stages.course_id')
+            ->whereColumn('original_periods.attempt_id', 'fees.attempt_id')
+            ->whereColumn('original_courses.branch_id', 'fees.branch_id')
+            ->orderBy('original_periods.created_at')->orderBy('original_periods.id')
+            ->limit(1)->select('original_groups.name');
     }
 
     private function used(string $paymentId): int
