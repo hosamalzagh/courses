@@ -208,6 +208,29 @@ class StudyAbsenceReviewTest extends TestCase
             ->assertOk()->assertJsonPath('batch.moved', 1)->assertJsonPath('batch.skipped', 0);
     }
 
+    public function test_bulk_waitlist_materializes_a_multi_page_report_once(): void
+    {
+        $scope = $this->group($this->north, 'Large batch');
+        foreach (range(1, 51) as $_) {
+            $student = $this->student();
+            $this->enroll($student['id'], $scope['group']);
+        }
+        $reportQueries = 0;
+        DB::listen(function ($query) use (&$reportQueries): void {
+            if (str_contains($query->sql, 'WITH candidates AS')) {
+                $reportQueries++;
+            }
+        });
+        $preview = $this->postJson("{$this->base}/absence-review/waitlist-batches", [
+            'selection_mode' => 'all', 'group_id' => $scope['group']['id'], 'view' => 'all',
+            'entered_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'تقرير متعدد الدفعات',
+        ])->assertCreated()->assertJsonPath('batch.total', 51)->assertJsonCount(50, 'items');
+
+        $this->assertSame(1, $reportQueries);
+        $this->getJson("{$this->base}/absence-review/waitlist-batches/{$preview->json('batch.id')}?page=2")
+            ->assertOk()->assertJsonCount(1, 'items');
+    }
+
     public function test_bulk_waitlist_rejects_hidden_branch_and_revoked_permissions(): void
     {
         $scope = $this->group($this->north, 'Visible');

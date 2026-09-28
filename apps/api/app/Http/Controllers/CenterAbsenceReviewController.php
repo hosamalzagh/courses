@@ -148,9 +148,8 @@ class CenterAbsenceReviewController extends Controller
 
             $seen = [];
             $count = 0;
-            for ($page = 1; ; $page++) {
-                $rows = $this->report($permissions, [...$scope, 'page' => $page], $selected ?: null);
-                $visible = array_slice($rows, 0, 50);
+            $scopedRows = $this->report($permissions, $scope, $selected ?: null, true);
+            foreach (array_chunk($scopedRows, 50) as $visible) {
                 foreach ($visible as $row) {
                     $seen[$row['id']] = true;
                 }
@@ -171,9 +170,6 @@ class CenterAbsenceReviewController extends Controller
                 if ($items !== []) {
                     DB::connection('tenant')->table('study_waitlist_batch_items')->insert($items);
                     $count += count($items);
-                }
-                if (count($rows) <= 50) {
-                    break;
                 }
             }
             abort_if($selected !== [] && count($seen) !== count($selected), 422, 'تغير نطاق التقرير أو لم تعد بعض الحالات ظاهرة. حدّث الصفحة وراجع الاختيار.');
@@ -390,10 +386,11 @@ SQL;
         ];
     }
 
-    private function report(CenterPermissions $permissions, array $data, ?array $attemptIds = null): array
+    private function report(CenterPermissions $permissions, array $data, ?array $attemptIds = null, bool $allRows = false): array
     {
         $scope = $this->scopeSql($permissions, 'courses.branch_id');
         $periodScope = $this->scopeSql($permissions, 'period_courses.branch_id');
+        $pagination = $allRows ? '' : 'OFFSET ? LIMIT 51';
         $sql = <<<SQL
 WITH candidates AS (
  SELECT attempts.id, attempts.student_id, students.name AS student_name, students.student_number,
@@ -459,7 +456,7 @@ SELECT id, student_id, student_name, student_number, student_status, attempt_rev
   level_name, group_name, effective_mode, effective_limit, total_absences, consecutive_absences,
   historical_absences, needs_review
 FROM calculated WHERE (?::text = 'all' OR needs_review)
-ORDER BY student_name, student_number, id OFFSET ? LIMIT 51
+ORDER BY student_name, student_number, id {$pagination}
 SQL;
         $idArray = $attemptIds === null ? null : '{'.implode(',', $attemptIds).'}';
         $bindings = [...$scope['bindings'], $idArray, $idArray];
@@ -476,7 +473,9 @@ SQL;
         $bindings = [...$bindings, $search, $search, $number, $number];
         $bindings = [...$bindings, ...$periodScope['bindings']];
         $bindings[] = $data['view'] ?? 'review';
-        $bindings[] = ((int) ($data['page'] ?? 1) - 1) * 50;
+        if (! $allRows) {
+            $bindings[] = ((int) ($data['page'] ?? 1) - 1) * 50;
+        }
 
         return array_map(fn ($row) => (array) $row, DB::connection('tenant')->select($sql, $bindings));
     }
