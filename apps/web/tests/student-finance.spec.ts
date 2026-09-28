@@ -262,6 +262,8 @@ test("edits payment and allocation notes while financial permissions hide other 
   const preserved = await (await page.request.get(`${origin}/api/v1/center/${paymentNotePath}`)).json();
   expect(preserved.note.body).toBe("تعديل موظف آخر");
   await page.getByRole("button", { name: "إلغاء التعديل" }).click();
+  await expect(page.getByRole("textbox", { name: "نص الملاحظة" })).toHaveValue("تعديل موظف آخر");
+  await expect(page.getByRole("button", { name: "حفظ تعديل الملاحظة" })).toBeDisabled();
   await page.getByRole("button", { name: "إغلاق الملاحظة" }).click();
   await page.getByLabel(/المستحق 100.00.*المتبقي 100.00/).fill("30.00");
   await page.getByRole("button", { name: "تخصيص المبالغ المحددة" }).click();

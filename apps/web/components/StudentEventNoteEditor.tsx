@@ -62,7 +62,7 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
     return () => { active = false; onDirtyChange(false); };
   }, [path, onDirtyChange, expectedEntryRevision]);
 
-  async function reload() {
+  async function reload(discardDraft = false) {
     setBusy(true); setError("");
     try {
       if (staleOccurrence && onOccurrenceChanged) {
@@ -72,7 +72,7 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
       const response = await centerRequest(path, "GET");
       if (!response.ok) { setError(await responseMessage(response)); return; }
       const fresh = await response.json() as Detail;
-      const preserveDraft = conflict && dirty && !staleOccurrence;
+      const preserveDraft = !discardDraft && conflict && dirty && !staleOccurrence;
       setDetail(fresh);
       if (!preserveDraft) { setBody(fresh.note?.body ?? ""); setImportant(fresh.note?.important ?? false); }
       setConflict(false); setStaleOccurrence(false); setUncertain(false); requestId.current = null;
@@ -161,7 +161,7 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
     {loading ? <><p role="status">جارٍ تحميل الملاحظة…</p>{!hideActions ? <CenterHeaderActions>
       <Button onClick={onClose}>{closeLabel}</Button>
     </CenterHeaderActions> : null}</> : !detail ? !hideActions ? <CenterHeaderActions>
-      <Button disabled={busy} onClick={reload}>{staleOccurrence ? "تحميل الواقعة الحالية" : "إعادة المحاولة"}</Button>
+      <Button disabled={busy} onClick={() => reload()}>{staleOccurrence ? "تحميل الواقعة الحالية" : "إعادة المحاولة"}</Button>
       <Button disabled={busy} onClick={onClose}>{closeLabel}</Button>
     </CenterHeaderActions> : null : <>
       {editable ? <form id={formId} onSubmit={save} noValidate className="form-stack">
@@ -177,8 +177,9 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
       </form> : detail.note ? <p>{detail.note.body}{detail.note.important ? " · مهمة" : ""}</p> : <p>{emptyMessage}</p>}
       {!hideActions ? <CenterHeaderActions>
         {editable ? <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || (!dirty && !uncertain)}>{uncertain ? "التحقق من الحفظ" : detail.note ? "حفظ تعديل الملاحظة" : "إضافة الملاحظة"}</Button> : null}
-        {conflict ? <Button disabled={busy} onClick={reload}>{staleOccurrence ? "تحميل الواقعة الحالية" : "تحميل أحدث نسخة"}</Button> : null}
+        {conflict ? <Button disabled={busy} onClick={() => reload()}>{staleOccurrence ? "تحميل الواقعة الحالية" : "تحميل أحدث نسخة"}</Button> : null}
         {resetAction && editable && (dirty || uncertain || conflict) ? <Button disabled={busy} onClick={() => {
+          if (conflict || uncertain) { void reload(true); return; }
           setBody(detail.note?.body ?? ""); setImportant(detail.note?.important ?? false);
           setConflict(false); setStaleOccurrence(false); setUncertain(false); setError(""); requestId.current = null;
           document.getElementById(`${prefix}-body`)?.focus();
