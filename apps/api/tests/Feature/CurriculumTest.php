@@ -147,6 +147,9 @@ class CurriculumTest extends TestCase
     public function test_curriculum_migration_supports_existing_and_new_centers_without_linking_their_data(): void
     {
         $this->center->run(function (): void {
+            $attendanceMigration = glob(database_path('migrations/tenant/*_create_study_attendance.php'))[0];
+            (require $attendanceMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($attendanceMigration, PATHINFO_FILENAME))->delete();
             $allocationsMigration = glob(database_path('migrations/tenant/*_create_student_payment_allocations.php'))[0];
             (require $allocationsMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($allocationsMigration, PATHINFO_FILENAME))->delete();
@@ -165,6 +168,10 @@ class CurriculumTest extends TestCase
             DB::table('migrations')->where('migration', '2026_09_28_010000_create_study_groups')->delete();
         });
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->center->run(function (): void {
+            $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attendance_entries'));
+            $this->assertTrue(DB::table('pg_indexes')->where('indexname', 'study_periods_group_date_attempt_idx')->exists());
+        });
         $level = $this->sequence($this->north, 'Alpha curriculum');
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
         $this->getJson("{$this->base}/levels/{$level['id']}")->assertOk()->assertJsonCount(2, 'branches');
@@ -172,6 +179,10 @@ class CurriculumTest extends TestCase
             'name' => 'Beta', 'slug' => 'beta', 'subdomain' => 'beta', 'plan' => 'starter', 'owner_email' => 'owner@beta.test',
         ])->assertCreated();
         $beta = Center::where('slug', 'beta')->firstOrFail();
+        $beta->run(function (): void {
+            $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attendance_entries'));
+            $this->assertTrue(DB::table('pg_indexes')->where('indexname', 'study_periods_group_date_attempt_idx')->exists());
+        });
         CenterMembership::create(['tenant_id' => $beta->id, 'user_id' => $this->owner->id, 'status' => 'active']);
         $beta->run(fn () => DB::table('center_grants')->insert(['user_id' => $this->owner->id, 'role' => 'center_owner']));
         $this->actingAs($this->owner, 'web')->withSession(['center_id' => $beta->id]);

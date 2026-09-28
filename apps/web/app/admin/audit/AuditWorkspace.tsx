@@ -42,6 +42,9 @@ const eventNames: Record<string, string> = {
   "study_group.settings_updated": "تعديل إعدادات مجموعة",
   "study_sessions.scheduled": "جدولة محاضرات مجموعة",
   "study_session.postponed": "تأجيل محاضرة مجموعة",
+  "study_attendance.recorded": "تسجيل حضور طالب",
+  "study_attendance.undone": "التراجع عن حضور طالب",
+  "study_attendance.closed": "إغلاق كشف حضور محاضرة",
 };
 
 export function AuditWorkspace({ context, initialEntries }: { context: CenterContext; initialEntries: AuditEntry[] }) {

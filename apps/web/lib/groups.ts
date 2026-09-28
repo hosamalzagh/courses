@@ -35,3 +35,21 @@ export type SessionContext = CenterContext & {
   sessions: StudySession[];
   pagination: { page: number; has_more: boolean };
 };
+
+export type AttendanceRow = {
+  attempt_id: string; student_id: string; name: string; student_number: number;
+  student_status: "active" | "suspended"; entry_id: string | null;
+  status: "counted" | "not_counted" | "absent" | null;
+  entry_revision: number | null; recorded_by: number | null;
+};
+
+export type AttendanceContext = CenterContext & {
+  group: { id: string; name: string; branch_id: number };
+  session: { id: string; group_id: string; number: number; title: string | null; scheduled_at: string;
+    status: "planned" | "held" | "cancelled"; revision: number; closed_at: string | null; closed_by: number | null };
+  students: AttendanceRow[];
+  pagination: { page: number; has_more: boolean };
+  can_record: boolean; can_close: boolean; can_undo_own: boolean;
+  has_started: boolean;
+  last_own_attempt_id: string | null;
+};
