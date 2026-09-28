@@ -182,7 +182,8 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   return <>
     <UnsavedChangesGuard dirty={dirty || anyBusy} guardHistory blockDiscard={anyBusy || completionUncertain}
       blockDiscardTitle="انتظر نتيجة الطلب"
-      blockDiscardDescription="طلب اعتماد قيد التنفيذ. ابق في الصفحة حتى تظهر نتيجته؛ المغادرة الآن قد تترك حالة القرار غير واضحة." />
+      blockDiscardDescription="طلب اعتماد قيد التنفيذ. ابق في الصفحة حتى تظهر نتيجته؛ المغادرة الآن قد تترك حالة القرار غير واضحة."
+      onDiscard={() => { setSelected([]); setReason(""); setPreview(null); setError(""); setCompletionSelected({}); setCompletionPreview(null); setCompletionError(""); }} />
     {pendingNavigation ? <ConfirmationDialog title="مغادرة دون تطبيق" description="لديك اختيار أو معاينة لم تُعتمد. هل تريد الانتقال والتخلي عنها؟" confirmLabel="الانتقال دون تطبيق" onCancel={() => { setPendingNavigation(null); requestAnimationFrame(() => navigationFocus.current?.focus()); }} onConfirm={() => { const next = pendingNavigation; setPendingNavigation(null); setSelected([]); setReason(""); setPreview(null); setCompletionSelected({}); setCompletionPreview(null); router.push(next); }} /> : null}
     <CenterPageActions context={context} actions={<>
       {group.can_complete && group.status !== "waiting" ? <>
