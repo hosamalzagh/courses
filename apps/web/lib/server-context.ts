@@ -55,9 +55,10 @@ export type StudentPhoto = { id:string; preview:string; url:string };
 export type StudentAttachment = {id:string;title:string;classification:'general'|'identity';mime:string;size_bytes:number;current_version:number;archived_at:string|null;created_at:string;preview_url:string;download_url:string;versions_url:string};
 export type StudentAttachmentVersion = {id:string;version:number;classification:'general'|'identity';mime:string;size_bytes:number;actor_id:number;actor_name:string|null;created_at:string;preview_url:string;download_url:string};
 export type StudentAttachmentPage = {entries:StudentAttachment[];status:'active'|'archived';pagination:{page:number;has_more:boolean}};
+export type StudentEnrollmentNotePage = {entries:{attempt_id:string;group_name:string;body:string;important:boolean;revision:number;updated_by_name:string;updated_at:string}[];pagination:{page:number;has_more:boolean}};
 export type Student = { photo: StudentPhoto | null; photo_revision:number;attachment_revision:number;custom_values?:StudentCustomValues;missing_custom_fields:number; identity?: StudentIdentityData; can_read_identity: boolean; can_manage_identity: boolean } & StudentGeneralData & StudentContactsData & { legacy_phone: string | null; manual_code: string | null } & { profile_choices: Partial<Record<StudentChoiceKind, StudentProfileChoice>>; age: number | null; created_by: number; created_at: string; id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean; sharing_enabled: boolean; status: 'active' | 'suspended'; status_revision: number; can_change_status: boolean };
 export type StudentSuspension = { id: string; suspended_by: number; suspended_by_name: string; suspended_reason: string; suspended_at: string; lifted_by: number | null; lifted_by_name: string | null; lifted_reason: string | null; lifted_at: string | null };
-export type StudentContext = CenterContext & {custom_history?:StudentCustomHistory;attachments?:StudentAttachmentPage;custom_fields:StudentCustomFieldList; student_code_settings: {enabled:boolean;label:string;revision:number}; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
+export type StudentContext = CenterContext & {custom_history?:StudentCustomHistory;attachments?:StudentAttachmentPage;enrollment_notes?:StudentEnrollmentNotePage;custom_fields:StudentCustomFieldList; student_code_settings: {enabled:boolean;label:string;revision:number}; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type Instructor = { id: string; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
 export type InstructorContext = CenterContext & { instructors: Instructor[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type StudentSearchPolicy = { enabled: boolean; revision: number; default_sharing_enabled: boolean };
@@ -203,11 +204,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   const detail = path.match(/^\/admin\/(students|instructors|curriculum)\/([^/]+)$/);
   if (detail) {
     const id = decodeURIComponent(detail[2]);
-    if (detail[1] === "students") {
-      const tab = url.searchParams.get("tab");
-      return loadStudentWorkspace(tab === "enrollment-notes" ? query(["status_page"])
-        : query(["status_page", "tab", "custom_history_page", "attachments_page", "attachments_status"]), id);
-    }
+    if (detail[1] === "students") return loadStudentWorkspace(query(["status_page", "tab", "custom_history_page", "attachments_page", "attachments_status"]), id);
     if (detail[1] === "instructors") return loadInstructorWorkspace("", id);
     return loadCurriculumWorkspace("", id);
   }

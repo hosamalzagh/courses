@@ -338,8 +338,15 @@ test("registration note stays on its event with version history and importance",
   await page.getByRole("button", { name: "تحميل أحدث نسخة" }).click();
   await expect(page.getByRole("textbox", { name: "نص الملاحظة" })).toHaveValue("مسودة الموظف بعد التعارض");
   await expect(page.getByText("تعديل متزامن").first()).toBeVisible();
+  await page.route(`**/api/v1/center/students/${studentId}/enrollments/${attemptId}/note`, async route => {
+    if (route.request().method() !== "GET") { await route.continue(); return; }
+    await route.abort("failed");
+    await page.unroute(`**/api/v1/center/students/${studentId}/enrollments/${attemptId}/note`);
+  });
   await page.getByRole("button", { name: "حفظ تعديل الملاحظة" }).click();
-  await expect(page.getByText("نسخة ٥", { exact: false })).toBeVisible();
+  await expect(page.getByText("حُفظت الملاحظة، لكن تعذر تحديث تاريخ النسخ", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "التحقق من الحفظ" })).toHaveCount(0);
+  expect((await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/note`)).json()).note.revision).toBe(5);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
   await page.getByRole("button", { name: "القائمة" }).click();
@@ -349,7 +356,8 @@ test("registration note stays on its event with version history and importance",
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole("button", { name: "إلغاء", exact: true }).click();
   await expect(page.getByRole("button", { name: "عرض/تعديل الملاحظة" })).toBeFocused();
-  await page.goto(`${origin}/admin/students/${studentId}?tab=enrollment-notes`);
+  const profileHtml = await page.goto(`${origin}/admin/students/${studentId}?tab=enrollment-notes`);
+  expect(await profileHtml!.text()).toContain("مسودة الموظف بعد التعارض");
   await expect(page.getByRole("heading", { name: "ملاحظات التسجيل الدراسي" })).toBeVisible();
   await expect(page.getByText("مسودة الموظف بعد التعارض").first()).toBeVisible();
   await page.getByRole("button", { name: "عرض تاريخ التعديل" }).click();

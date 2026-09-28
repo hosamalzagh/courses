@@ -1,32 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/Button";
 import { InlineNotice } from "@/components/InlineNotice";
 import { centerRequest, responseMessage } from "@/lib/client-api";
+import type { StudentEnrollmentNotePage } from "@/lib/server-context";
 
 type Entry = { attempt_id: string; group_name: string; body: string; important: boolean; revision: number; updated_by_name: string; updated_at: string };
 type Version = { revision: number; body: string; important: boolean; actor_name: string; created_at: string };
-type List = { entries: Entry[]; pagination: { page: number; has_more: boolean } };
+type List = StudentEnrollmentNotePage;
 type Detail = { versions: Version[]; pagination: { page: number; has_more: boolean } };
 
-export function StudentEnrollmentNoteHistory({ studentId }: { studentId: string }) {
-  const [list, setList] = useState<List | null>(null);
+export function StudentEnrollmentNoteHistory({ studentId, initial }: { studentId: string; initial: List }) {
+  const [list, setList] = useState<List>(initial);
   const [selected, setSelected] = useState<Entry | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    centerRequest(`students/${studentId}/enrollment-notes`, "GET")
-      .then(async response => {
-        if (!response.ok) throw new Error(await responseMessage(response));
-        const result = await response.json() as List;
-        if (active) setList(result);
-      }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "تعذر تحميل ملاحظات التسجيل."); });
-    return () => { active = false; };
-  }, [studentId]);
 
   async function loadList(page: number) {
     setBusy(true); setError("");
@@ -54,15 +44,14 @@ export function StudentEnrollmentNoteHistory({ studentId }: { studentId: string 
     <h2>ملاحظات التسجيل الدراسي</h2>
     <p className="muted">الملاحظات وتاريخها ضمن فروع القراءة المصرح بها فقط.</p>
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
-    {!list && !error ? <p role="status">جارٍ تحميل الملاحظات…</p> : null}
-    {list && !list.entries.length ? <p>لا توجد ملاحظات تسجيل ضمن فروع صلاحيتك.</p> : null}
-    {list?.entries.map(entry => <article key={entry.attempt_id} className="context-card form-stack">
+    {!list.entries.length ? <p>لا توجد ملاحظات تسجيل ضمن فروع صلاحيتك.</p> : null}
+    {list.entries.map(entry => <article key={entry.attempt_id} className="context-card form-stack">
       <h3>{entry.group_name}{entry.important ? " ★" : ""}</h3>
       <p>{entry.body}</p>
       <p className="muted">{entry.updated_by_name} — <time>{entry.updated_at}</time></p>
       <Button type="button" disabled={busy} onClick={() => open(entry)}>عرض تاريخ التعديل</Button>
     </article>)}
-    {list && (list.pagination.page > 1 || list.pagination.has_more) ? <nav className="pagination" aria-label="صفحات ملاحظات التسجيل">
+    {list.pagination.page > 1 || list.pagination.has_more ? <nav className="pagination" aria-label="صفحات ملاحظات التسجيل">
       <Button disabled={busy || list.pagination.page === 1} onClick={() => loadList(list.pagination.page - 1)}>السابق</Button>
       <span>صفحة {list.pagination.page.toLocaleString("ar-EG")}</span>
       <Button disabled={busy || !list.pagination.has_more} onClick={() => loadList(list.pagination.page + 1)}>التالي</Button>

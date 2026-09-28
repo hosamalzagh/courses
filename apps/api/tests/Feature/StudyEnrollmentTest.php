@@ -301,6 +301,11 @@ class StudyEnrollmentTest extends TestCase
             ->assertJsonPath('entries.0.body', 'موعد جديد بموافقة الطالب');
         $this->assertNotNull($notes->headers->get('X-Courses-Query-Count'));
         $this->assertLessThanOrEqual(6, (int) $notes->headers->get('X-Courses-Query-Count'));
+        $profileNotes = $this->getJson("{$this->base}/students/{$student['id']}?tab=enrollment-notes")
+            ->assertOk()->assertJsonCount(1, 'enrollment_notes.entries')
+            ->assertJsonPath('enrollment_notes.entries.0.body', 'موعد جديد بموافقة الطالب');
+        $this->assertNotNull($profileNotes->headers->get('X-Courses-Query-Count'));
+        $this->assertLessThanOrEqual(6, (int) $profileNotes->headers->get('X-Courses-Query-Count'));
         $this->getJson($workspaceUrl)->assertOk()->assertJsonPath('attempts.0.note.revision', 3)
             ->assertJsonPath('attempts.0.note.important', false)
             ->assertJsonPath('attempts.0.fee.net_amount', '150.00')->assertJsonPath('attempts.0.status', 'active');
@@ -314,6 +319,8 @@ class StudyEnrollmentTest extends TestCase
         $this->asUser($this->staff);
         $this->getJson($url)->assertOk()->assertJsonCount(3, 'versions');
         $this->getJson($notesUrl)->assertOk()->assertJsonCount(1, 'entries');
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=enrollment-notes")
+            ->assertOk()->assertJsonCount(1, 'enrollment_notes.entries');
         $this->getJson($workspaceUrl)->assertNotFound();
         $this->putJson($url, ['body' => 'تعديل غير مخول', 'important' => true, 'revision' => 3,
             'request_id' => (string) Str::uuid()])->assertNotFound();

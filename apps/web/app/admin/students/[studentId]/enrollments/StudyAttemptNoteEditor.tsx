@@ -101,13 +101,18 @@ export function StudyAttemptNoteEditor({ studentId, attempt, onClose, onSaved, o
       const result = await response.json() as { note: StudyAttemptNote };
       onSaved(result.note);
       requestId.current = null; setUncertain(false); setConflict(false);
-      const fresh = await centerRequest(path, "GET");
-      if (fresh.ok) {
+      setNotice("حُفظت الملاحظة ونسخة تعديلها دون تغيير التسجيل أو الرسوم.");
+      setDetail(previous => previous ? { ...previous, note: result.note as Detail["note"] } : previous);
+      setBody(result.note.body); setImportant(result.note.important);
+      router.refresh();
+      try {
+        const fresh = await centerRequest(path, "GET");
+        if (!fresh.ok) throw new Error("refresh failed");
         const next = await fresh.json() as Detail;
         setDetail(next); setBody(next.note?.body ?? ""); setImportant(next.note?.important ?? false);
-      } else setDetail(previous => previous ? { ...previous, note: result.note as Detail["note"] } : previous);
-      setNotice("حُفظت الملاحظة ونسخة تعديلها دون تغيير التسجيل أو الرسوم.");
-      router.refresh();
+      } catch {
+        setNotice("حُفظت الملاحظة، لكن تعذر تحديث تاريخ النسخ. افتحها مرة أخرى لمراجعة التاريخ.");
+      }
     } catch {
       setUncertain(true); setError("تعذر تأكيد الحفظ. أعد المحاولة بالطلب نفسه دون تغيير النص.");
     } finally { submitting.current = false; setBusy(false); }
