@@ -83,14 +83,14 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
     try {
       requestId.current ??= newSubmissionId();
       const response = await centerRequest(`students/${studentId}/enrollments`, "POST", {
-        group_id: groupId, group_revision: selected!.revision, joined_on: joinedOn, discount,
+        group_id: groupId, group_revision: selected!.revision, currency_revision: current.student.currency_revision, joined_on: joinedOn, discount,
         discount_reason: Number(discount) > 0 ? reason.trim() : null,
         version: current.student.version, request_id: requestId.current,
       });
       if (!response.ok) {
         if (response.status === 409) {
           setConflict(true); setUncertain(false);
-          setError("تغير حساب الطالب أو تسجيله أو إعدادات المجموعة. حمّل أحدث البيانات وراجع الطلب.");
+          setError("تغير حساب الطالب أو تسجيله أو سعر المجموعة أو عملة المركز. حمّل أحدث البيانات وراجع الطلب.");
         } else {
           const errors = await responseFieldErrors(response); setFieldErrors(errors);
           setError(await responseMessage(response)); if (Object.keys(errors).length) focus(Object.keys(errors)[0]);
@@ -149,7 +149,9 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
       </CenterHeaderActions>
     </section>
     <DataTable id="enrollment-group-choices" title="المجموعات المتاحة للتسجيل" rows={current.groups} rowKey={row => row.id}
-      serverPagination={{ page: current.pagination.groups_page, hasMore: current.pagination.groups_has_more, batchSize: 50, onPageChange: number => router.push(groupsPage(number)) }}
+      serverPagination={{ page: current.pagination.groups_page, hasMore: current.pagination.groups_has_more, batchSize: 50,
+        previousHref: groupsPage(current.pagination.groups_page - 1),
+        nextHref: groupsPage(current.pagination.groups_page + 1) }}
       serverSearch={{ value: search, onSearch: value => router.push(`${path}?${new URLSearchParams({ page: String(current.pagination.page), groups_page: "1", ...(value ? { q: value } : {}) })}`) }}
       searchText={row => `${row.name} ${row.level_name} ${row.branch_name}`}
       emptyMessage="لا توجد مجموعات في فروع تسجيل الطالب ضمن هذه الدفعة." description="ابحث باسم المجموعة، ثم اخترها في نموذج التسجيل. تظهر حتى ٥٠ مجموعة في الدفعة."
@@ -160,7 +162,9 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
         { key: "price", label: "السعر المعتمد", render: row => <bdi dir="ltr">{row.approved_price} {current.student.currency ?? ""}</bdi> },
       ]} />
     <DataTable id="student-attempts" title="محاولات الدراسة" rows={current.attempts} rowKey={row => row.id}
-      serverPagination={{ page: current.pagination.page, hasMore: current.pagination.has_more, batchSize: 20, onPageChange: number => router.push(page(number)) }}
+      serverPagination={{ page: current.pagination.page, hasMore: current.pagination.has_more, batchSize: 20,
+        previousHref: page(current.pagination.page - 1),
+        nextHref: page(current.pagination.page + 1) }}
       searchText={row => `${row.group_name} ${row.level_name} ${row.fee.net_amount}`}
       emptyMessage="لا توجد محاولات دراسة في فروع صلاحيتك." description="آخر ٢٠ محاولة في الدفعة الحالية. الرسوم المعتمدة محفوظة مع سبب الخصم والموظف."
       columns={[

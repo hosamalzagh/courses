@@ -53,7 +53,7 @@ class StudyEnrollmentTest extends TestCase
         $student = $this->student([$this->north]);
         $early = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")->json('student.version');
         $this->postJson("{$this->base}/students/{$student['id']}/enrollments", [
-            'group_id' => $group['id'], 'group_revision' => $group['revision'], 'joined_on' => '2026-09-28', 'discount' => '0.00',
+            'group_id' => $group['id'], 'group_revision' => $group['revision'], 'currency_revision' => 1, 'joined_on' => '2026-09-28', 'discount' => '0.00',
             'discount_reason' => null, 'version' => $early, 'request_id' => (string) Str::uuid(),
         ])->assertConflict();
         $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
@@ -68,7 +68,7 @@ class StudyEnrollmentTest extends TestCase
         $workspace = $this->getJson($url)->assertOk()->assertJsonPath('balance.available_credit', '500.00')
             ->assertJsonPath('balance.debt', '0');
         $this->assertLessThanOrEqual(6, (int) $workspace->headers->get('X-Courses-Query-Count'));
-        $payload = ['group_id' => $group['id'], 'group_revision' => $group['revision'], 'joined_on' => '2026-09-28', 'discount' => '200.00',
+        $payload = ['group_id' => $group['id'], 'group_revision' => $group['revision'], 'currency_revision' => $workspace->json('student.currency_revision'), 'joined_on' => '2026-09-28', 'discount' => '200.00',
             'discount_reason' => 'منحة', 'version' => $workspace->json('student.version'), 'request_id' => (string) Str::uuid()];
         $this->postJson($url, [...$payload, 'discount' => '1600.00', 'request_id' => (string) Str::uuid()])->assertUnprocessable();
         $this->postJson($url, [...$payload, 'discount_reason' => null, 'request_id' => (string) Str::uuid()])->assertUnprocessable();
@@ -113,7 +113,7 @@ class StudyEnrollmentTest extends TestCase
         $this->asUser($this->staff);
         $url = "{$this->base}/students/{$student['id']}/enrollments";
         $workspace = $this->getJson($url)->assertOk()->assertJsonCount(1, 'groups');
-        $base = ['group_id' => $paid['id'], 'group_revision' => $paid['revision'], 'joined_on' => '2026-09-28', 'discount' => '0.00', 'discount_reason' => null,
+        $base = ['group_id' => $paid['id'], 'group_revision' => $paid['revision'], 'currency_revision' => $workspace->json('student.currency_revision'), 'joined_on' => '2026-09-28', 'discount' => '0.00', 'discount_reason' => null,
             'version' => $workspace->json('student.version'), 'request_id' => (string) Str::uuid()];
         $this->postJson($url, [...$base, 'discount' => '100.00', 'discount_reason' => 'منحة'])->assertForbidden();
         $this->postJson($url, [...$base, 'discount' => '101.00', 'discount_reason' => 'منحة'])->assertForbidden();
@@ -139,10 +139,10 @@ class StudyEnrollmentTest extends TestCase
         $this->asUser($this->staff);
         $url = "{$this->base}/students/{$student['id']}/enrollments";
         $version = $this->getJson($url)->json('student.version');
-        $paid = $this->postJson($url, ['group_id' => $first['id'], 'group_revision' => $first['revision'], 'joined_on' => '2026-09-28',
+        $paid = $this->postJson($url, ['group_id' => $first['id'], 'group_revision' => $first['revision'], 'currency_revision' => 2, 'joined_on' => '2026-09-28',
             'discount' => '1500.00', 'discount_reason' => 'منحة كاملة', 'version' => $version,
             'request_id' => (string) Str::uuid()])->assertCreated()->assertJsonPath('attempt.fee.net_amount', '0.00')->json('attempt');
-        $this->postJson($url, ['group_id' => $second['id'], 'group_revision' => $second['revision'], 'joined_on' => '2026-09-28',
+        $this->postJson($url, ['group_id' => $second['id'], 'group_revision' => $second['revision'], 'currency_revision' => 2, 'joined_on' => '2026-09-28',
             'discount' => '0.00', 'discount_reason' => null, 'version' => $this->getJson($url)->json('student.version'),
             'request_id' => (string) Str::uuid()])->assertCreated()->assertJsonPath('attempt.fee.net_amount', '0.00');
         $this->getJson($url)->assertJsonCount(2, 'attempts')->assertJsonPath('balance.debt', '0.00');
@@ -164,7 +164,7 @@ class StudyEnrollmentTest extends TestCase
         $student = $this->student([$this->north]);
         $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
         $url = "{$this->base}/students/{$student['id']}/enrollments";
-        $payload = ['group_id' => $group['id'], 'group_revision' => $group['revision'], 'joined_on' => '2026-09-28', 'discount' => '0.00',
+        $payload = ['group_id' => $group['id'], 'group_revision' => $group['revision'], 'currency_revision' => 2, 'joined_on' => '2026-09-28', 'discount' => '0.00',
             'discount_reason' => null, 'version' => $this->getJson($url)->json('student.version'),
             'request_id' => (string) Str::uuid()];
         $this->center->run(fn () => DB::statement("ALTER TABLE center_audit_logs ADD CONSTRAINT enrollment_audit_failure CHECK (event <> 'student.enrolled') NOT VALID"));
@@ -189,7 +189,7 @@ class StudyEnrollmentTest extends TestCase
         $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
         $url = "{$this->base}/students/{$student['id']}/enrollments";
         $preview = $this->getJson($url)->assertOk()->assertJsonPath('groups.0.approved_price', '100.00')->json();
-        $payload = ['group_id' => $group['id'], 'group_revision' => $group['revision'], 'joined_on' => '2026-09-28',
+        $payload = ['group_id' => $group['id'], 'group_revision' => $group['revision'], 'currency_revision' => $preview['student']['currency_revision'], 'joined_on' => '2026-09-28',
             'discount' => '0.00', 'discount_reason' => null, 'version' => $preview['student']['version'],
             'request_id' => (string) Str::uuid()];
         $this->patchJson("{$this->base}/groups/{$group['id']}/settings", [
@@ -201,6 +201,28 @@ class StudyEnrollmentTest extends TestCase
         $fresh = $this->getJson($url)->assertOk()->assertJsonPath('groups.0.approved_price', '200.00')->json();
         $this->postJson($url, [...$payload, 'group_revision' => $fresh['groups'][0]['revision'],
             'request_id' => (string) Str::uuid()])->assertCreated()->assertJsonPath('attempt.fee.net_amount', '200.00');
+    }
+
+    public function test_stale_currency_must_be_reviewed_before_charging_student(): void
+    {
+        $group = $this->group($this->north, '1500.00');
+        $student = $this->student([$this->north]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $preview = $this->getJson($url)->assertOk()->assertJsonPath('student.currency', 'EGP')->json();
+        $payload = ['group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $preview['student']['currency_revision'], 'joined_on' => '2026-09-28',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $preview['student']['version'],
+            'request_id' => (string) Str::uuid()];
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'USD', 'revision' => 2])->assertOk();
+        $this->postJson($url, $payload)->assertConflict()->assertJsonPath('code', 'currency_changed');
+        $this->center->run(function (): void {
+            $this->assertSame(0, DB::table('study_attempts')->count());
+            $this->assertSame(0, DB::table('study_attempt_fees')->count());
+        });
+        $fresh = $this->getJson($url)->assertOk()->assertJsonPath('student.currency', 'USD')->json();
+        $this->postJson($url, [...$payload, 'currency_revision' => $fresh['student']['currency_revision'],
+            'request_id' => (string) Str::uuid()])->assertCreated()->assertJsonPath('attempt.fee.currency', 'USD');
     }
 
     private function group(int $branchId, string $price): array

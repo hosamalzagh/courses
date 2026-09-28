@@ -144,7 +144,7 @@ test("simultaneous submissions keep one fee per request and reject stale distinc
   const enrollment = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
   await page.evaluate(() => fetch("/sanctum/csrf-cookie", { credentials: "same-origin" }));
   const xsrf = (await page.context().cookies(origin)).find(cookie => cookie.name === "XSRF-TOKEN")?.value ?? "";
-  const payload = { group_id: first.id, group_revision: first.revision, joined_on: "2026-09-28", discount: "0.00", discount_reason: null,
+  const payload = { group_id: first.id, group_revision: first.revision, currency_revision: enrollment.student.currency_revision, joined_on: "2026-09-28", discount: "0.00", discount_reason: null,
     version: enrollment.student.version, request_id: crypto.randomUUID() };
   const post = async (port: number, data: object) => {
     const response = await page.request.post(`http://alpha.courses.test:${port}/api/v1/center/students/${studentId}/enrollments`, {

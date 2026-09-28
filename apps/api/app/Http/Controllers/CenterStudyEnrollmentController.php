@@ -55,6 +55,7 @@ class CenterStudyEnrollmentController extends Controller
         $student = StudentPhotos::visibleStudent($studentId, $permissions, 'enrollment.manage')
             ->select(['students.id', 'students.name', 'students.student_number', 'students.status', 'students.financial_account_revision'])
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency'), 'currency')
+            ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency_revision'), 'currency_revision')
             ->selectSub($payments, 'available_credit')->selectSub($fees, 'debt')
             ->selectSub(DB::connection('tenant')->query()->fromSub($groups, 'choices')->selectRaw('json_agg(choices)'), 'group_choices')
             ->first();
@@ -72,6 +73,7 @@ class CenterStudyEnrollmentController extends Controller
             'permissions' => $permissions->toArray(),
             'student' => ['id' => $student->id, 'name' => $student->name, 'student_number' => (int) $student->student_number,
                 'status' => $student->status, 'currency' => $student->currency,
+                'currency_revision' => (int) $student->currency_revision,
                 'version' => StudentAccountVersion::forActor($student->id, $student->financial_account_revision, $request->user()->id)],
             'balance' => ['available_credit' => $student->available_credit, 'debt' => $student->debt],
             'groups' => $choices->take(50)->values(), 'attempts' => $attempts->take(20)->map(fn (object $row) => $this->present($row))->values(),
@@ -85,6 +87,7 @@ class CenterStudyEnrollmentController extends Controller
         abort_unless(Str::isUuid($studentId), 404);
         $data = $request->validate([
             'group_id' => ['required', 'uuid'], 'group_revision' => ['required', 'integer', 'min:1'],
+            'currency_revision' => ['required', 'integer', 'min:1'],
             'joined_on' => ['required', 'date_format:Y-m-d'],
             'discount' => ['required', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999.99'],
             'discount_reason' => ['present', 'nullable', 'string', 'max:2000'],
@@ -94,7 +97,7 @@ class CenterStudyEnrollmentController extends Controller
         $data['discount_reason'] = trim($data['discount_reason'] ?? '') ?: null;
         abort_if($data['discount'] !== '0.00' && $data['discount_reason'] === null, 422, 'أدخل سبب الخصم.');
         abort_if($data['discount'] === '0.00' && $data['discount_reason'] !== null, 422, 'لا تسجل سبب خصم دون خصم.');
-        $hash = hash('sha256', json_encode([$studentId, $data['group_id'], (int) $data['group_revision'],
+        $hash = hash('sha256', json_encode([$studentId, $data['group_id'], (int) $data['group_revision'], (int) $data['currency_revision'],
             $data['joined_on'], $data['discount'], $data['discount_reason']]));
 
         return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $studentId, $data, $hash): JsonResponse {
@@ -140,6 +143,9 @@ class CenterStudyEnrollmentController extends Controller
             abort_if($discountCents > $priceCents, 422, 'الخصم أكبر من السعر المعتمد.');
             $settings = DB::connection('tenant')->table('center_settings')->where('id', 1)->lockForUpdate()->first();
             abort_unless($settings, 503);
+            if ((int) $settings->financial_currency_revision !== (int) $data['currency_revision']) {
+                $this->conflict('currency_changed');
+            }
             abort_if($settings->financial_currency === null, 409, 'اختر عملة المركز قبل تسجيل الرسوم.');
             $attemptId = (string) Str::uuid();
             $feeId = (string) Str::uuid();
