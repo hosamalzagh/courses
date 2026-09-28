@@ -48,9 +48,9 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
     setLoading(true); setError("");
     try {
       const response = await centerRequest(`${path}?history_page=${page}`, "GET");
-      if (!response.ok) { setError(await responseMessage(response)); return; }
-      setDetail(await response.json() as Detail); setConflict(false);
-    } catch { setError("تعذر تحميل سجل الرسوم. تحقق من الاتصال وأعد المحاولة."); }
+      if (!response.ok) { setError(await responseMessage(response)); return false; }
+      setDetail(await response.json() as Detail); setConflict(false); return true;
+    } catch { setError("تعذر تحميل سجل الرسوم. تحقق من الاتصال وأعد المحاولة."); return false; }
     finally { setLoading(false); }
   }, [path]);
   useEffect(() => { const timeout = window.setTimeout(() => { void load(); }, 0); return () => window.clearTimeout(timeout); }, [load]);
@@ -115,6 +115,12 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
     {loading ? <p role="status">جارٍ تحميل الرسوم…</p> : null}
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
+    {!detail && !loading ? <CenterHeaderActions>
+      <Button onClick={() => void load().then(success => {
+        if (success) requestAnimationFrame(() => document.getElementById(`${prefix}-title`)?.focus());
+      })}>إعادة تحميل سجل الرسوم</Button>
+      <Button onClick={onClose}>إغلاق محرر الرسوم</Button>
+    </CenterHeaderActions> : null}
     {detail ? <>
       <p>الرسوم المسجلة: <bdi dir="ltr">{detail.fee.net_amount} {currency}</bdi> — المستحق الحالي: <strong><bdi dir="ltr">{detail.fee.current_due} {currency}</bdi></strong> — المسدد: <bdi dir="ltr">{detail.fee.paid_amount} {currency}</bdi></p>
       {detail.fee.withdrawn_on ? <p>انتهى الارتباط الدراسي في <bdi dir="ltr">{detail.fee.withdrawn_on}</bdi>. الانسحاب وحده لم يغير الرسوم.</p> : <p>هذه معالجة مالية صريحة لمحاولة دراسة قائمة.</p>}

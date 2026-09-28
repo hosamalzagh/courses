@@ -79,7 +79,19 @@ test("withdrawal fee settlement and correction preserve money, permissions, audi
       const detail = await response.json();
       await route.fulfill({ response, json: { ...detail, pagination: { ...detail.pagination, history_has_more: true } } });
     });
+    const initialLoadRoute = `**/api/v1/center/students/${studentId}/fees/${attempt.fee.id}/adjustments?history_page=1`;
+    let remainingInitialFailures = 2;
+    await owner.route(initialLoadRoute, async route => {
+      remainingInitialFailures--;
+      if (remainingInitialFailures === 0) await owner.unroute(initialLoadRoute);
+      await route.abort("failed");
+    });
     await owner.getByRole("button", { name: "تسوية أو تصحيح" }).click();
+    await expect(owner.getByRole("button", { name: "إعادة تحميل سجل الرسوم" })).toBeVisible();
+    await owner.getByRole("button", { name: "إغلاق محرر الرسوم" }).click();
+    await expect(owner.getByRole("button", { name: "تسوية أو تصحيح" })).toBeFocused();
+    await owner.getByRole("button", { name: "تسوية أو تصحيح" }).click();
+    await owner.getByRole("button", { name: "إعادة تحميل سجل الرسوم" }).click();
     await expect(owner.getByRole("heading", { name: new RegExp("تسوية رسوم") })).toBeFocused();
     await owner.getByLabel("المستحق الجديد (EGP)").fill("800.00");
     await owner.getByLabel("سبب التسوية أو التصحيح").fill("تسوية بعد الانسحاب");
