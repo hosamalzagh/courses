@@ -111,6 +111,11 @@ test("withdrawal fee settlement and correction preserve money, permissions, audi
     await expect(owner.getByLabel("المستحق الجديد (EGP)")).toBeDisabled();
     await expect(owner.getByLabel("سبب التسوية أو التصحيح")).toBeDisabled();
     await expect(owner.getByRole("button", { name: "قرارات أقدم" })).toBeDisabled();
+    await owner.locator('a[href="/admin"]').first().click();
+    await expect(owner.getByRole("alertdialog")).toContainText("تحقق من اعتماد التسوية أولًا");
+    await expect(owner.getByRole("button", { name: "مغادرة دون حفظ" })).toHaveCount(0);
+    await owner.getByRole("button", { name: "العودة للتحقق" }).click();
+    await expect(owner).toHaveURL(new RegExp(`/admin/students/${studentId}/account$`));
     await owner.getByRole("button", { name: "التحقق من الاعتماد" }).click();
     await owner.getByRole("button", { name: "تأكيد التسوية" }).click();
     await expect(owner.getByRole("button", { name: "تسوية أو تصحيح" })).toBeFocused();

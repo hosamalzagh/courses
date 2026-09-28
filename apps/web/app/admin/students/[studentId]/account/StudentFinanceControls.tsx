@@ -57,6 +57,7 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   const [allocationDirty, setAllocationDirty] = useState(false);
   const [selectedFeeId, setSelectedFeeId] = useState<string | null>(null);
   const [feeDirty, setFeeDirty] = useState(false);
+  const [feeUncertain, setFeeUncertain] = useState(false);
   const submitting = useRef(false);
   const requestId = useRef<string | null>(null);
   if (loadedInitial !== initial) {
@@ -180,7 +181,7 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
 
   return <>
     <CenterPageActions context={current} />
-    <UnsavedChangesGuard dirty={dirty} guardHistory />
+    <UnsavedChangesGuard dirty={dirty} guardHistory blockDiscard={feeUncertain} />
     <section className="context-card form-stack" aria-label="ملخص الحساب المالي">
       <h2>{current.account.student_name} — رقم {current.account.student_number.toLocaleString("ar-EG")}</h2>
       {current.account.student_status === "suspended" ? <p className="muted">ملف الطالب موقوف. يمكن استلام السداد وتخصيصه للرسوم القائمة، وتبقى الحركات المالية محفوظة.</p> : null}
@@ -234,13 +235,16 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
           </Button> },
       ]} />
     {selectedFee ? <StudentFeeAdjustmentEditor key={selectedFee.id} studentId={studentId} fee={selectedFee}
-      onClose={() => { setSelectedFeeId(null); focus(`fee-${selectedFee.id}`); }} onChanged={refreshAfterAllocation} onDirtyChange={setFeeDirty} /> : null}
+      onClose={() => { setSelectedFeeId(null); setFeeDirty(false); setFeeUncertain(false); focus(`fee-${selectedFee.id}`); }} onChanged={refreshAfterAllocation}
+      onDirtyChange={setFeeDirty} onUncertainChange={setFeeUncertain} /> : null}
     <CenterHeaderActions>
       {current.pagination.fees_page > 1 ? <Link className={buttonVariants({ variant: "outline" })} href={feePage(current.pagination.fees_page - 1)}>رسوم أحدث</Link> : null}
       {current.pagination.fees_has_more ? <Link className={buttonVariants({ variant: "outline" })} href={feePage(current.pagination.fees_page + 1)}>رسوم أقدم</Link> : null}
     </CenterHeaderActions>
     <DataTable id="student-payments" title="حركات الدفعات المقدمة" rows={current.payments} rowKey={(row) => row.id} pageSize={20}
-      serverSearch={{ value: search, onSearch: (value) => router.push(`/admin/students/${studentId}/account?${new URLSearchParams({ page: "1", branches_page: String(current.pagination.branches_page), fees_page: String(current.pagination.fees_page), ...(value ? { q: value } : {}) })}`) }}
+      serverSearch={{ value: search, onSearch: (value) => {
+        if (!feeUncertain) router.push(`/admin/students/${studentId}/account?${new URLSearchParams({ page: "1", branches_page: String(current.pagination.branches_page), fees_page: String(current.pagination.fees_page), ...(value ? { q: value } : {}) })}`);
+      } }}
       searchText={(row) => `${row.branch_name ?? ""} ${paymentMethodLabels[row.method] ?? row.method} ${row.amount} ${row.actor_name}`}
       emptyMessage="لا توجد دفعات مقدمة في فروع صلاحيتك." description="آخر ٢٠ حركة في الدفعة المعروضة. الحركات المعتمدة محفوظة دون تعديل أو حذف."
       columns={[

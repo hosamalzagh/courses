@@ -22,8 +22,9 @@ type Detail = { fee: { id: string; attempt_id: string; branch_id: number; status
   account: Balance; latest_active_adjustment_id: string | null; history: Adjustment[];
   pagination: { history_page: number; history_has_more: boolean }; preview: Preview | null };
 
-export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged, onDirtyChange }: {
-  studentId: string; fee: StudentFee; onClose: () => void; onChanged: () => Promise<void>; onDirtyChange: (dirty: boolean) => void;
+export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged, onDirtyChange, onUncertainChange }: {
+  studentId: string; fee: StudentFee; onClose: () => void; onChanged: () => Promise<void>;
+  onDirtyChange: (dirty: boolean) => void; onUncertainChange: (uncertain: boolean) => void;
 }) {
   const prefix = useId();
   const formId = `${prefix}-fee-adjustment`;
@@ -59,6 +60,7 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
     return () => cancelAnimationFrame(frame);
   }, [prefix]);
   useEffect(() => { onDirtyChange(dirty || uncertain); return () => onDirtyChange(false); }, [dirty, uncertain, onDirtyChange]);
+  useEffect(() => { onUncertainChange(uncertain); return () => onUncertainChange(false); }, [uncertain, onUncertainChange]);
 
   function changeDue(value: string) { setNewDue(value); setDetail(current => current ? { ...current, preview: null } : current); }
   function changeReason(value: string) { setReason(value); setDetail(current => current ? { ...current, preview: null } : current); }
