@@ -6,6 +6,7 @@ use App\Http\Controllers\CenterAuthController;
 use App\Http\Controllers\CenterBranchController;
 use App\Http\Controllers\CenterContentEquivalenceController;
 use App\Http\Controllers\CenterCurriculumController;
+use App\Http\Controllers\CenterCurriculumCopyController;
 use App\Http\Controllers\CenterInstructorController;
 use App\Http\Controllers\CenterMemberController;
 use App\Http\Controllers\CenterSecurityController;
@@ -146,6 +147,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('curriculum/submissions/{requestId}', [CenterCurriculumController::class, 'submission']);
         Route::get('levels/{levelId}', [CenterCurriculumController::class, 'workspace']);
         Route::post('courses', [CenterCurriculumController::class, 'storeCourse']);
+        Route::get('courses/{courseId}/copy-preview', [CenterCurriculumCopyController::class, 'preview']);
+        Route::post('courses/{courseId}/copies', [CenterCurriculumCopyController::class, 'store']);
         Route::post('courses/{courseId}/stages', [CenterCurriculumController::class, 'storeStage']);
         Route::post('stages/{stageId}/levels', [CenterCurriculumController::class, 'storeLevel']);
         Route::patch('levels/{levelId}/first-plan', [CenterCurriculumController::class, 'updatePlan']);

@@ -48,6 +48,7 @@ const eventNames: Record<string, string> = {
   "instructor.created": "إنشاء ملف محاضر", "instructor.updated": "تعديل ملف محاضر",
   "center.student_search_changed": "تغيير إتاحة البحث عن طلاب المركز",
   "curriculum.course_created": "إنشاء كورس", "curriculum.stage_created": "إنشاء مرحلة دراسية",
+  "curriculum.course_copied": "نسخ منهج كورس إلى فرع",
   "curriculum.level_created": "إنشاء مستوى", "curriculum.plan_updated": "تعديل الخطة الأولى",
   "curriculum.plan_version_created": "إنشاء إصدار خطة المستوى",
   "content.equivalence_approved": "اعتماد معادلة المحتوى",

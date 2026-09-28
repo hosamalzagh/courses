@@ -491,6 +491,96 @@ class CurriculumTest extends TestCase
             ->assertJsonCount(1, 'instructors')->assertJsonPath('instructors.0.name', 'Teacher 52');
     }
 
+    public function test_course_copy_previews_all_plan_versions_and_creates_independent_branch_curriculum(): void
+    {
+        $course = $this->postJson("{$this->base}/courses", [
+            'branch_id' => $this->north, 'name' => 'منهج المصدر', 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('course');
+        $stage = $this->postJson("{$this->base}/courses/{$course['id']}/stages", [
+            'name' => 'المرحلة', 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('stage');
+        $level = $this->postJson("{$this->base}/stages/{$stage['id']}/levels", [
+            'name' => 'المستوى', 'request_id' => (string) Str::uuid(),
+            'lectures' => [['number' => 1, 'content' => 'الخطة الأولى', 'planned_hours' => 1]],
+        ])->assertCreated()->json('level');
+        $this->postJson("{$this->base}/levels/{$level['id']}/plan-versions", [
+            'base_plan_version_id' => $level['plan']['id'], 'base_revision' => 1,
+            'lectures' => [['number' => 1, 'content' => 'الخطة الثانية', 'planned_hours' => 2]],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $preview = $this->getJson("{$this->base}/courses/{$course['id']}/copy-preview?target_branch_id={$this->south}")
+            ->assertOk()->assertJsonPath('counts.stages', 1)->assertJsonPath('counts.levels', 1)
+            ->assertJsonPath('counts.plans', 2)->assertJsonPath('counts.lectures', 2)
+            ->assertJsonCount(2, 'outline');
+        $this->assertLessThanOrEqual(6, (int) $preview->headers->get('X-Courses-Query-Count'));
+        $requestId = (string) Str::uuid();
+        $payload = ['target_branch_id' => $this->south, 'snapshot_hash' => $preview->json('snapshot_hash'),
+            'request_id' => $requestId];
+        $copied = $this->postJson("{$this->base}/courses/{$course['id']}/copies", $payload)
+            ->assertCreated()->assertJsonPath('counts.plans', 2);
+        $copiedId = $copied->json('course_id');
+        $this->postJson("{$this->base}/courses/{$course['id']}/copies", $payload)
+            ->assertOk()->assertJsonPath('course_id', $copiedId)->assertJsonPath('replayed', true);
+        $this->postJson("{$this->base}/courses/{$course['id']}/copies", [...$payload, 'snapshot_hash' => str_repeat('a', 64)])
+            ->assertConflict()->assertJsonPath('code', 'curriculum_copy_request_changed');
+        $this->center->run(function () use ($course, $stage, $copiedId): void {
+            $this->assertSame($this->south, (int) DB::table('courses')->where('id', $copiedId)->value('branch_id'));
+            $copiedStage = DB::table('stages')->where('course_id', $copiedId)->first();
+            $copiedLevel = DB::table('levels')->where('stage_id', $copiedStage->id)->first();
+            $this->assertNotSame($stage['id'], $copiedStage->id);
+            $this->assertSame(2, DB::table('study_plan_versions')->where('level_id', $copiedLevel->id)->count());
+            $this->assertSame(2, DB::table('plan_lectures')->join('study_plan_versions as plans', 'plans.id', '=', 'plan_lectures.plan_version_id')
+                ->where('plans.level_id', $copiedLevel->id)->count());
+            $this->assertSame(0, DB::table('study_plan_versions')->where('level_id', $copiedLevel->id)->whereNotNull('used_at')->count());
+            $this->assertSame(0, DB::table('study_groups')->where('level_id', $copiedLevel->id)->count());
+            DB::table('courses')->where('id', $course['id'])->update(['name' => 'تغيّر المصدر', 'updated_at' => now()]);
+            $this->assertSame('منهج المصدر', DB::table('courses')->where('id', $copiedId)->value('name'));
+            $this->assertSame(1, DB::table('curriculum_course_copies')->where('copied_course_id', $copiedId)->count());
+        });
+        $this->getJson("{$this->base}/curriculum-workspace")->assertOk()
+            ->assertJsonFragment(['source_course_name' => 'منهج المصدر', 'source_branch_name' => 'North']);
+        $this->getJson("{$this->base}/audit")->assertOk()->assertJsonFragment(['event' => 'curriculum.course_copied']);
+    }
+
+    public function test_course_copy_rechecks_source_destination_and_snapshot_without_leaking_hidden_branch(): void
+    {
+        $course = $this->postJson("{$this->base}/courses", [
+            'branch_id' => $this->north, 'name' => 'خاص بالشمال', 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('course');
+        $path = "{$this->base}/courses/{$course['id']}/copy-preview?target_branch_id={$this->south}";
+        $preview = $this->getJson($path)->assertOk();
+        $payload = ['target_branch_id' => $this->south, 'snapshot_hash' => $preview->json('snapshot_hash'),
+            'request_id' => (string) Str::uuid()];
+        $this->patchJson("{$this->base}/courses/{$course['id']}/completion-threshold", [
+            'revision' => 1, 'completion_threshold' => 75,
+        ])->assertOk();
+        $this->postJson("{$this->base}/courses/{$course['id']}/copies", $payload)
+            ->assertConflict()->assertJsonPath('code', 'curriculum_source_changed');
+
+        $this->grant([$this->north => ['branch_viewer'], $this->south => ['academic_admin']]);
+        $this->asUser($this->staff);
+        $fresh = $this->getJson($path)->assertOk();
+        $saved = $this->postJson("{$this->base}/courses/{$course['id']}/copies", [
+            'target_branch_id' => $this->south, 'snapshot_hash' => $fresh->json('snapshot_hash'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $copiedId = $saved->json('course_id');
+        $this->grant([$this->south => ['branch_auditor']]);
+        $this->asUser($this->staff);
+        $this->getJson($path)->assertNotFound();
+        $this->postJson("{$this->base}/courses/{$course['id']}/copies", $payload)->assertNotFound();
+        $workspace = $this->getJson("{$this->base}/curriculum-workspace")->assertOk();
+        $copy = collect($workspace->json('courses'))->firstWhere('id', $copiedId);
+        $this->assertNotNull($copy);
+        $this->assertNull($copy['source_course_name']);
+        $audit = $this->getJson("{$this->base}/audit")->assertOk();
+        $this->assertStringNotContainsString('خاص بالشمال', $audit->getContent());
+        $this->assertStringContainsString('source_hidden', $audit->getContent());
+        $this->grant([$this->north => ['branch_viewer'], $this->south => ['branch_viewer']]);
+        $this->asUser($this->staff);
+        $this->getJson($path)->assertNotFound();
+    }
+
     private function sequence(int $branchId, string $name = 'Course'): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => $name, 'request_id' => (string) Str::uuid()])->assertCreated()->json('course');

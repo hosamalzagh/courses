@@ -59,9 +59,12 @@ class CenterCurriculumController extends Controller
         foreach (['courses', 'stages', 'levels'] as $kind) {
             $items = $rows->get($kind, collect());
             $pagination[$kind]['has_more'] = $items->count() > 50;
-            $records[$kind] = $items->take(50)->map(function ($row) use ($permissions, $levelId, $data): array {
+            $records[$kind] = $items->take(50)->map(function ($row) use ($permissions, $levelId, $data, $kind): array {
                 $record = json_decode($row->payload, true);
                 $record['can_manage'] = $permissions->can('curriculum.manage', $record['branch_id']);
+                if ($kind === 'courses') {
+                    $this->hideCopySource($record, $permissions);
+                }
                 if ($levelId !== null && isset($record['plan_history'])) {
                     $history = $record['plan_history'];
                     $record['plan_history'] = array_slice($history, 0, 20);
@@ -280,6 +283,9 @@ class CenterCurriculumController extends Controller
         ?int $selectedVersion = null, int $versionsPage = 1, bool $includeHistory = false): Builder
     {
         $query = DB::connection('tenant')->table('courses');
+        if ($kind === 'courses') {
+            $query->leftJoin('curriculum_course_copies as copies', 'copies.copied_course_id', '=', 'courses.id');
+        }
         if ($kind !== 'courses') {
             $query->join('stages', 'stages.course_id', '=', 'courses.id');
         }
@@ -297,6 +303,10 @@ class CenterCurriculumController extends Controller
             $query->whereIn('courses.branch_id', $this->scope($permissions));
         }
         $query->select([$kind.'.id', $kind.'.name', $kind.'.completion_threshold', $kind.'.completion_revision', 'courses.branch_id']);
+        if ($kind === 'courses') {
+            $query->addSelect(['copies.source_course_id', 'copies.source_course_name',
+                'copies.source_branch_id', 'copies.source_branch_name']);
+        }
         if ($kind !== 'courses') {
             $query->addSelect(['stages.course_id', 'courses.name as course_name']);
         }
@@ -343,8 +353,21 @@ SQL);
             $record['plan'] = json_decode($record['plan'], true);
         }
         $record['can_manage'] = $permissions->can('curriculum.manage', $record['branch_id']);
+        if ($kind === 'courses') {
+            $this->hideCopySource($record, $permissions);
+        }
 
         return $record;
+    }
+
+    private function hideCopySource(array &$record, CenterPermissions $permissions): void
+    {
+        if ($record['source_branch_id'] !== null && ! $permissions->can('read', (int) $record['source_branch_id'])) {
+            $record['source_course_id'] = null;
+            $record['source_course_name'] = null;
+            $record['source_branch_id'] = null;
+            $record['source_branch_name'] = null;
+        }
     }
 
     private function create(Request $request, string $kind, array $data, int $branchId, CenterPermissions $permissions): JsonResponse

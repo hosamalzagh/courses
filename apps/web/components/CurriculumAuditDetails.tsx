@@ -5,6 +5,16 @@ export function CurriculumAuditDetails({ entry }: { entry: AuditEntry }) {
   if (typeof details === 'string') { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== 'object' || Array.isArray(details)) return null;
   const data = details as Record<string, unknown>;
+  if (entry.event === 'curriculum.course_copied') {
+    const counts = data.counts && typeof data.counts === 'object' && !Array.isArray(data.counts)
+      ? data.counts as Record<string, unknown> : {};
+    return <details><summary>عرض مصدر نسخة المنهج</summary>
+      <p>الكورس الجديد: {typeof data.copied_course_name === 'string' ? data.copied_course_name : 'غير مسجل'}</p>
+      <p>المصدر: {typeof data.source_course_name === 'string' && typeof data.source_branch_name === 'string'
+        ? `${data.source_course_name} · ${data.source_branch_name}` : 'فرع غير متاح ضمن صلاحيتك'}</p>
+      <p>نُسخ {Number(counts.stages ?? 0).toLocaleString('ar-EG')} مرحلة، {Number(counts.levels ?? 0).toLocaleString('ar-EG')} مستوى، {Number(counts.plans ?? 0).toLocaleString('ar-EG')} إصدار خطة.</p>
+    </details>;
+  }
   if (entry.event.startsWith('study_group.')) {
     const group = (record: unknown) => {
       if (!record || typeof record !== 'object' || Array.isArray(record)) return 'لم تكن المجموعة موجودة';
