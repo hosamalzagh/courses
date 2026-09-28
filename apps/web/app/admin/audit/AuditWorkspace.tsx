@@ -45,13 +45,14 @@ const eventNames: Record<string, string> = {
   "study_attendance.recorded": "تسجيل حضور طالب",
   "study_attendance.undone": "التراجع عن حضور طالب",
   "study_attendance.closed": "إغلاق كشف حضور محاضرة",
+  "study_attendance.suspension_backfilled": "إضافة استثناءات إيقاف إلى كشف مغلق",
 };
 
 export function AuditWorkspace({ context, initialEntries }: { context: CenterContext; initialEntries: AuditEntry[] }) {
   const rows: AuditRow[] = initialEntries.map((entry) => ({
     id: entry.id, event: eventNames[entry.event] ?? entry.event,
     scope: entry.branch_id ? `فرع رقم ${entry.branch_id}` : "المركز",
-    actor: entry.actor_id === null ? "غير معروف" : `منفّذ رقم ${entry.actor_id}`,
+    actor: entry.event === "study_attendance.suspension_backfilled" ? "ترحيل النظام" : entry.actor_id === null ? "غير معروف" : `منفّذ رقم ${entry.actor_id}`,
     time: new Date(entry.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" }),
     createdAt: entry.created_at, branch: entry.branch_id !== null,
     search: `${eventNames[entry.event] ?? entry.event} ${entry.branch_id ?? ""} ${entry.actor_id ?? ""}`,

@@ -365,10 +365,24 @@ class StudySessionsTest extends TestCase
         $this->center->run(function () use ($migration, $sessions, $attempt): void {
             DB::table('study_attendance_entries')->where('session_id', $sessions[1]['id'])
                 ->where('attempt_id', $attempt)->delete();
+            $closureAudit = DB::table('center_audit_logs')->where('event', 'study_attendance.closed')
+                ->where('details->session_id', $sessions[1]['id']);
+            $legacyDetails = json_decode($closureAudit->value('details'), true);
+            unset($legacyDetails['suspended_count']);
+            $closureAudit->update(['details' => json_encode($legacyDetails)]);
             $migration->up();
             $this->assertSame(1, DB::table('study_attendance_entries')->where('session_id', $sessions[1]['id'])
                 ->where('attempt_id', $attempt)->whereNull('status')->count());
             $this->assertSame(2, DB::table('study_attendance_entries')->where('session_id', $sessions[1]['id'])->count());
+            $backfillAudit = DB::table('center_audit_logs')->where('event', 'study_attendance.suspension_backfilled')
+                ->where('details->session_id', $sessions[1]['id']);
+            $this->assertSame(1, $backfillAudit->count());
+            $this->assertSame(1, json_decode($backfillAudit->value('details'), true)['suspended_count']);
+            $originalDetails = DB::table('center_audit_logs')->where('event', 'study_attendance.closed')
+                ->where('details->session_id', $sessions[1]['id'])->value('details');
+            $this->assertArrayNotHasKey('suspended_count', json_decode($originalDetails, true));
+            $migration->up();
+            $this->assertSame(1, $backfillAudit->count());
         });
         $this->getJson($second)->assertOk()->assertJsonCount(2, 'students');
     }
