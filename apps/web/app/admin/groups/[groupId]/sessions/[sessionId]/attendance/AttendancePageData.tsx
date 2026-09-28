@@ -11,10 +11,11 @@ export async function AttendancePageData({ params, searchParams }: {
   const [{ groupId, sessionId }, query] = await Promise.all([params, searchParams]);
   const page = typeof query.page === "string" ? query.page : "";
   const search = typeof query.q === "string" ? query.q : "";
+  const entryId = typeof query.entry_id === "string" ? query.entry_id : undefined;
   const context = await loadGroupAttendance(groupId, sessionId,
-    new URLSearchParams({ ...(page ? { page } : {}), ...(search ? { q: search } : {}) }).toString());
+    new URLSearchParams({ ...(page ? { page } : {}), ...(search ? { q: search } : {}), ...(entryId ? { entry_id: entryId } : {}) }).toString());
   if (typeof context === "string") return <CenterAccessState state={context} />;
   return <CenterPage context={context} path={`/admin/groups/${groupId}/sessions/${sessionId}/attendance`}>
-    <AttendanceControls context={context} search={search} />
+    <AttendanceControls context={context} search={search} linkedEntryId={entryId} />
   </CenterPage>;
 }

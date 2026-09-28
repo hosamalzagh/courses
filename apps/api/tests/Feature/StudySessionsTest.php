@@ -447,6 +447,9 @@ class StudySessionsTest extends TestCase
         $attemptId = collect($rows)->firstWhere('student_id', $present['id'])['attempt_id'];
         $entry = $this->postJson($attendance, ['attempt_id' => $attemptId, 'status' => 'counted',
             'revision' => 1, 'request_id' => (string) Str::uuid()])->assertCreated()->json('entry');
+        $linked = $this->getJson("{$attendance}?entry_id={$entry['id']}")->assertOk()
+            ->assertJsonCount(1, 'students')->assertJsonPath('students.0.entry_id', $entry['id']);
+        $this->assertLessThanOrEqual(6, (int) $linked->headers->get('X-Courses-Query-Count'));
         $noteUrl = "{$attendance}/{$entry['id']}/note";
         $request = ['body' => 'حضر بعد التواصل', 'important' => false, 'revision' => 0,
             'entry_revision' => $entry['revision'],
@@ -486,11 +489,22 @@ class StudySessionsTest extends TestCase
         $this->assertSame('حضر بانتظام', collect($rows)->firstWhere('student_id', $present['id'])['note_body']);
         $absentRow = collect($rows)->firstWhere('student_id', $absent['id']);
         $this->assertSame('absent', $absentRow['status']);
+        $this->getJson("{$attendance}?entry_id={$absentRow['entry_id']}")->assertOk()
+            ->assertJsonCount(1, 'students')->assertJsonPath('students.0.student_id', $absent['id']);
         $absentNoteUrl = "{$attendance}/{$absentRow['entry_id']}/note";
         $this->putJson($absentNoteUrl, ['body' => 'غاب بعد إغلاق الكشف', 'important' => true,
             'revision' => 0, 'entry_revision' => $absentRow['entry_revision'],
             'request_id' => (string) Str::uuid()])->assertCreated();
         $this->getJson($absentNoteUrl)->assertOk()->assertJsonPath('note.important', true);
+        $presentNotesUrl = "{$this->base}/students/{$present['id']}/notes";
+        $absentNotesUrl = "{$this->base}/students/{$absent['id']}/notes";
+        $presentNotes = $this->getJson($presentNotesUrl)->assertOk()->assertJsonCount(1, 'entries')
+            ->assertJsonPath('entries.0.id', $note['id']);
+        $this->assertLessThanOrEqual(6, (int) $presentNotes->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$presentNotesUrl}/{$note['id']}")->assertOk()->assertJsonCount(3, 'versions');
+        $this->getJson($absentNotesUrl)->assertOk()->assertJsonCount(1, 'entries')
+            ->assertJsonPath('entries.0.important', true);
+        $this->getJson("{$this->base}/students/{$absent['id']}")->assertOk()->assertJsonCount(1, 'important_notes');
         $this->center->run(function (): void {
             $this->assertSame(2, DB::table('student_event_notes')->where('event_type', 'like', 'attendance:%')->count());
             $this->assertSame(4, DB::table('student_event_note_revisions')->count());
@@ -507,17 +521,21 @@ class StudySessionsTest extends TestCase
         $this->grant([$this->north => ['branch_viewer']]);
         $this->asUser($this->staff);
         $this->getJson($noteUrl)->assertOk()->assertJsonCount(3, 'versions');
+        $this->getJson($presentNotesUrl)->assertOk()->assertJsonCount(1, 'entries');
         $this->putJson($noteUrl, ['body' => 'غير مخول', 'important' => false, 'revision' => 3,
             'entry_revision' => $entry['revision'], 'request_id' => (string) Str::uuid()])->assertNotFound();
         $this->grant([$this->south => ['attendance']]);
         $this->asUser($this->staff);
         $this->getJson($noteUrl)->assertNotFound();
         $this->getJson($absentNoteUrl)->assertNotFound();
+        $this->getJson($presentNotesUrl)->assertNotFound();
+        $this->getJson("{$presentNotesUrl}/{$note['id']}")->assertNotFound();
         $this->putJson($noteUrl, ['body' => 'فرع آخر', 'important' => true, 'revision' => 3,
             'entry_revision' => $entry['revision'], 'request_id' => (string) Str::uuid()])->assertNotFound();
         $this->asUser($this->owner);
         $this->center->run(fn () => DB::table('study_attendance_entries')->where('id', $entry['id'])->update(['status' => null]));
         $this->getJson($noteUrl)->assertNotFound();
+        $this->getJson($presentNotesUrl)->assertOk()->assertJsonCount(0, 'entries');
         $hidden = collect($this->getJson($attendance)->assertOk()->json('students'))->firstWhere('student_id', $present['id']);
         $this->assertNull($hidden['note_body']);
     }

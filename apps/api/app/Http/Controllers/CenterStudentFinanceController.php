@@ -26,6 +26,7 @@ class CenterStudentFinanceController extends Controller
             'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'branches_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'q' => ['sometimes', 'string', 'max:100'],
+            'payment_id' => ['sometimes', 'uuid'],
         ]);
         $permissions = $request->attributes->get('center_permissions');
         $readable = $this->scope($permissions, 'finance.read');
@@ -67,6 +68,7 @@ class CenterStudentFinanceController extends Controller
         $payments = DB::connection('tenant')->table('student_payments')
             ->join('branches', 'branches.id', '=', 'student_payments.branch_id')
             ->where('student_payments.student_id', $studentId)
+            ->when(isset($data['payment_id']), fn (Builder $query) => $query->where('student_payments.id', $data['payment_id']))
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('student_payments.branch_id', $readable))
             ->when($search !== '', function (Builder $query) use ($search): void {
                 $pattern = '%'.addcslashes($search, '%_\\').'%';
@@ -82,7 +84,7 @@ class CenterStudentFinanceController extends Controller
                 });
             })
             ->orderByDesc('student_payments.created_at')->orderByDesc('student_payments.id')
-            ->offset(($page - 1) * 20)->limit(21)
+            ->offset((isset($data['payment_id']) ? 0 : ($page - 1) * 20))->limit(21)
             ->select(['student_payments.id', 'student_payments.branch_id', 'branches.name as branch_name',
                 'student_payments.amount', 'student_payments.currency', 'student_payments.method',
                 'student_payments.received_on', 'student_payments.actor_name', 'student_payments.created_at'])

@@ -293,9 +293,25 @@ class StudyEnrollmentTest extends TestCase
         $this->putJson($url, ['body' => 'موعد جديد بموافقة الطالب', 'important' => true,
             'revision' => 1, 'request_id' => (string) Str::uuid()])->assertOk()->assertJsonPath('note.revision', 2)
             ->assertJsonPath('note.important', true);
+        $important = $this->getJson("{$this->base}/students/{$student['id']}")->assertOk()
+            ->assertJsonCount(1, 'important_notes')->assertJsonPath('important_notes.0.id', $note['id']);
+        $this->assertLessThanOrEqual(6, (int) $important->headers->get('X-Courses-Query-Count'));
+        $linked = $this->getJson("{$workspaceUrl}?attempt_id={$attempt['id']}")->assertOk()
+            ->assertJsonCount(1, 'attempts')->assertJsonPath('attempts.0.id', $attempt['id']);
+        $this->assertLessThanOrEqual(6, (int) $linked->headers->get('X-Courses-Query-Count'));
         $this->putJson($url, ['body' => 'موعد جديد بموافقة الطالب', 'important' => false,
             'revision' => 2, 'request_id' => (string) Str::uuid()])->assertOk()->assertJsonPath('note.revision', 3)
             ->assertJsonPath('note.important', false);
+        $unifiedUrl = "{$this->base}/students/{$student['id']}/notes";
+        $unified = $this->getJson($unifiedUrl)->assertOk()->assertJsonCount(1, 'entries')
+            ->assertJsonPath('entries.0.id', $note['id'])->assertJsonPath('entries.0.important', false);
+        $this->assertLessThanOrEqual(6, (int) $unified->headers->get('X-Courses-Query-Count'));
+        $unifiedHistory = $this->getJson("{$unifiedUrl}/{$note['id']}")->assertOk()
+            ->assertJsonCount(3, 'versions')->assertJsonPath('versions.1.important', true);
+        $this->assertLessThanOrEqual(6, (int) $unifiedHistory->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=notes")->assertOk()
+            ->assertJsonCount(0, 'important_notes')->assertJsonCount(1, 'student_notes.entries');
+        $this->getJson("{$this->base}/student-workspace?tab=notes")->assertOk()->assertJsonMissingPath('student_notes');
         $history = $this->getJson($url)->assertOk()->assertJsonCount(3, 'versions')
             ->assertJsonPath('versions.0.important', false)->assertJsonPath('versions.1.important', true)
             ->assertJsonPath('versions.2.body', 'اتفقنا على مراجعة الموعد');
@@ -325,6 +341,8 @@ class StudyEnrollmentTest extends TestCase
         $this->asUser($this->staff);
         $this->getJson($url)->assertOk()->assertJsonCount(3, 'versions');
         $this->getJson($notesUrl)->assertOk()->assertJsonCount(1, 'entries');
+        $this->getJson($unifiedUrl)->assertOk()->assertJsonCount(1, 'entries');
+        $this->getJson("{$unifiedUrl}/{$note['id']}")->assertOk()->assertJsonCount(3, 'versions');
         $this->getJson("{$this->base}/students/{$student['id']}?tab=enrollment-notes")
             ->assertOk()->assertJsonCount(1, 'enrollment_notes.entries');
         $this->getJson($workspaceUrl)->assertNotFound();
@@ -334,6 +352,8 @@ class StudyEnrollmentTest extends TestCase
         $this->asUser($this->staff);
         $this->getJson($url)->assertNotFound();
         $this->getJson($notesUrl)->assertNotFound();
+        $this->getJson($unifiedUrl)->assertNotFound();
+        $this->getJson("{$unifiedUrl}/{$note['id']}")->assertNotFound();
         $this->putJson($url, ['body' => 'تعديل فرع آخر', 'important' => true, 'revision' => 3,
             'request_id' => (string) Str::uuid()])->assertNotFound();
         $this->grant([$this->north => ['branch_auditor']]);
@@ -665,6 +685,15 @@ class StudyEnrollmentTest extends TestCase
                 'request_id' => (string) Str::uuid()])->assertOk()->assertJsonPath('note.revision', 2);
             $this->getJson($url)->assertOk()->assertJsonCount(2, 'versions')->assertJsonPath('note.important', true);
         }
+        $unifiedUrl = "{$this->base}/students/{$student['id']}/notes";
+        $financialNotes = $this->getJson($unifiedUrl)->assertOk()->assertJsonCount(2, 'entries');
+        $this->assertLessThanOrEqual(6, (int) $financialNotes->headers->get('X-Courses-Query-Count'));
+        $paymentNoteId = collect($financialNotes->json('entries'))->firstWhere('event_type', 'payment')['id'];
+        $this->getJson("{$unifiedUrl}/{$paymentNoteId}")->assertOk()->assertJsonCount(2, 'versions');
+        $summary = $this->getJson("{$this->base}/students/{$student['id']}?tab=notes")->assertOk()
+            ->assertJsonCount(2, 'important_notes')->assertJsonCount(2, 'student_notes.entries');
+        $this->assertSame($payment['id'], collect($summary->json('important_notes'))->firstWhere('event_type', 'payment')['payment_id']);
+        $this->assertSame($payment['id'], collect($summary->json('important_notes'))->firstWhere('event_type', 'allocation')['payment_id']);
         $after = $this->getJson($accountUrl)->assertOk()->json('account');
         $this->assertSame($before['version'], $after['version']);
         $this->assertSame($before['available_balance'], $after['available_balance']);
@@ -681,6 +710,8 @@ class StudyEnrollmentTest extends TestCase
         $this->asUser($this->staff);
         $this->getJson("{$paymentUrl}/note")->assertNotFound();
         $this->getJson($allocationUrl)->assertNotFound();
+        $this->getJson($unifiedUrl)->assertOk()->assertJsonCount(0, 'entries');
+        $this->getJson("{$unifiedUrl}/{$paymentNoteId}")->assertNotFound();
         $this->putJson("{$paymentUrl}/note", ['body' => 'محجوب', 'important' => false, 'revision' => 2,
             'request_id' => (string) Str::uuid()])->assertNotFound();
         $this->assertStringNotContainsString('student.payment_note_created', $this->getJson("{$this->base}/audit")->getContent());
@@ -689,6 +720,7 @@ class StudyEnrollmentTest extends TestCase
         $this->assertStringNotContainsString('student.allocation_note_created', $branchAudit);
         $this->grant([$this->north => ['branch_auditor', 'accounting']]);
         $this->asUser($this->staff);
+        $this->getJson($unifiedUrl)->assertOk()->assertJsonCount(2, 'entries');
         $visibleAudit = $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent();
         $this->assertStringContainsString('student.payment_note_created', $visibleAudit);
         $this->assertStringContainsString('student.allocation_note_created', $visibleAudit);

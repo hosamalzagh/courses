@@ -18,11 +18,15 @@ class CenterStudyAttendanceController extends Controller
     public function workspace(Request $request, string $groupId, string $sessionId): JsonResponse
     {
         $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'entry_id' => ['sometimes', 'uuid'],
             'q' => ['nullable', 'string', 'max:255']]);
         $permissions = $request->attributes->get('center_permissions');
         $session = $this->session($groupId, $sessionId, $permissions, false, $request->user()->id);
         $page = (int) ($data['page'] ?? 1);
         $roster = $this->roster($session);
+        if (isset($data['entry_id'])) {
+            $roster->where('entries.id', $data['entry_id']);
+        }
         if (isset($data['q']) && trim($data['q']) !== '') {
             $search = mb_strtolower(preg_replace('/\s+/u', ' ', trim($data['q'])));
             $number = str_replace('٬', '', strtr(trim($data['q']),

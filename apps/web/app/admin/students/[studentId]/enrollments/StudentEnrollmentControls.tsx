@@ -8,6 +8,7 @@ import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { DataTable } from "@/components/DataTable";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
+import { PrefetchLink } from "@/components/PrefetchLink";
 import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -16,7 +17,7 @@ import type { StudyEnrollmentContext, StudyAttemptNote } from "@/lib/server-cont
 import { StudyAttemptNoteEditor } from "./StudyAttemptNoteEditor";
 import { StudyWithdrawalEditor } from "./StudyWithdrawalEditor";
 
-export function StudentEnrollmentControls({ initial, search }: { initial: StudyEnrollmentContext; search: string }) {
+export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: { initial: StudyEnrollmentContext; search: string; linkedAttemptId?: string }) {
   const router = useRouter();
   const prefix = useId();
   const formId = `${prefix}-enrollment`;
@@ -58,7 +59,7 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
   const registrationDirty = Boolean(groupId || joinedOn || discount !== "0.00" || reason || repeatId);
   const dirty = registrationDirty || noteDirty || withdrawalDirty;
   const path = `/admin/students/${studentId}/enrollments`;
-  const query = new URLSearchParams({ page: String(current.pagination.page), groups_page: String(current.pagination.groups_page), ...(search ? { q: search } : {}) });
+  const query = new URLSearchParams({ page: String(current.pagination.page), groups_page: String(current.pagination.groups_page), ...(search ? { q: search } : {}), ...(linkedAttemptId ? { attempt_id: linkedAttemptId } : {}) });
   const endpoint = `students/${studentId}/enrollments?${query}`;
   const focus = (field: string) => requestAnimationFrame(() => document.getElementById(`${prefix}-${field}`)?.focus());
 
@@ -226,6 +227,7 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
         { key: "branch", label: "الفرع", render: row => row.branch_name },
         { key: "price", label: "السعر المعتمد", render: row => <bdi dir="ltr">{row.approved_price} {current.student.currency ?? ""}</bdi> },
       ]} />
+    {linkedAttemptId ? <p>المحاولة المرتبطة بالملاحظة: <PrefetchLink href={path}>عرض كل المحاولات</PrefetchLink></p> : null}
     <DataTable id="student-attempts" title="محاولات الدراسة" rows={current.attempts} rowKey={row => row.id}
       serverPagination={{ page: current.pagination.page, hasMore: current.pagination.has_more, batchSize: 20,
         previousHref: page(current.pagination.page - 1),

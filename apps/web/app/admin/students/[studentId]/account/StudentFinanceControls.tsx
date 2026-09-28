@@ -33,7 +33,9 @@ function SelectField({ id, label, value, options, onChange, error }: {
   </Field>;
 }
 
-export function StudentFinanceControls({ initial, search }: { initial: StudentAccountContext; search: string }) {
+export function StudentFinanceControls({ initial, search, paymentId, allocationId }: {
+  initial: StudentAccountContext; search: string; paymentId?: string; allocationId?: string;
+}) {
   const router = useRouter();
   const formPrefix = useId();
   const [loadedInitial, setLoadedInitial] = useState(initial);
@@ -49,7 +51,8 @@ export function StudentFinanceControls({ initial, search }: { initial: StudentAc
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null);
+  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(
+    initial.payments.some(payment => payment.id === paymentId) ? paymentId! : null);
   const [allocationDirty, setAllocationDirty] = useState(false);
   const submitting = useRef(false);
   const requestId = useRef<string | null>(null);
@@ -62,7 +65,8 @@ export function StudentFinanceControls({ initial, search }: { initial: StudentAc
 
   const studentId = current.account.student_id;
   const accountPath = `students/${studentId}/account?${new URLSearchParams({
-    page: String(current.pagination.page), branches_page: String(current.pagination.branches_page), ...(search ? { q: search } : {}),
+    page: String(current.pagination.page), branches_page: String(current.pagination.branches_page),
+    ...(search ? { q: search } : {}), ...(paymentId ? { payment_id: paymentId } : {}),
   })}`;
   const currencyForm = `${formPrefix}-currency`;
   const paymentForm = `${formPrefix}-payment`;
@@ -223,6 +227,7 @@ export function StudentFinanceControls({ initial, search }: { initial: StudentAc
         { key: "allocations", label: "التخصيصات", actions: true, render: (row) => <Button id={`${formPrefix}-payment-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedPaymentId(row.id); requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-payment-allocation-title]")?.focus()); }}>عرض وتخصيص</Button> },
       ]} />
     {selectedPayment ? <StudentPaymentAllocations studentId={studentId} payment={selectedPayment}
+      focusNote={selectedPayment.id === paymentId ? allocationId ?? "payment" : undefined}
       onClose={() => { setSelectedPaymentId(null); focus(`payment-${selectedPayment.id}`); }} onChanged={refreshAfterAllocation} onDirtyChange={setAllocationDirty} /> : null}
     <CenterHeaderActions>
       {current.pagination.page > 1 ? <Link className={buttonVariants({ variant: "outline" })} href={paymentPage(current.pagination.page - 1)}>الحركات السابقة</Link> : null}

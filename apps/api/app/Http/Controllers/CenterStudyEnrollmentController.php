@@ -24,6 +24,7 @@ class CenterStudyEnrollmentController extends Controller
             'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'groups_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'q' => ['sometimes', 'string', 'max:100'],
+            'attempt_id' => ['sometimes', 'uuid'],
         ]);
         $permissions = $request->attributes->get('center_permissions');
         $scope = $this->scope($permissions);
@@ -72,6 +73,7 @@ class CenterStudyEnrollmentController extends Controller
         $choices = collect(json_decode($student->group_choices ?? '[]', true));
         $page = (int) ($data['page'] ?? 1);
         $attempts = $this->attempts($studentId, $permissions)
+            ->when(isset($data['attempt_id']), fn (Builder $query) => $query->where('study_attempts.id', $data['attempt_id']))
             ->orderByDesc('study_attempts.created_at')->orderByDesc('study_attempts.id')
             ->offset(($page - 1) * 20)->limit(21)->get();
 

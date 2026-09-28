@@ -8,6 +8,7 @@ use App\Support\StudentAttachments;
 use App\Support\StudentBarcode;
 use App\Support\StudentContacts;
 use App\Support\StudentCustomFields;
+use App\Support\StudentEventNotes;
 use App\Support\StudentIdentity;
 use App\Support\StudentManualCodes;
 use App\Support\StudentPhotos;
@@ -34,7 +35,7 @@ class CenterStudentController extends Controller
             'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'status_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'branches_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
-            'tab' => ['sometimes', 'in:custom-history,attachments,enrollment-notes'],
+            'tab' => ['sometimes', 'in:custom-history,attachments,enrollment-notes,notes'],
             'custom_history_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'attachments_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'notes_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
@@ -91,6 +92,16 @@ class CenterStudentController extends Controller
                 ->orderByDesc('suspended_at')->orderByDesc('id')->offset(($statusPage - 1) * 20)->limit(21)
                 ->select(['id', 'suspended_by', 'suspended_by_name', 'suspended_reason', 'suspended_at', 'lifted_by', 'lifted_by_name', 'lifted_reason', 'lifted_at']);
             $query->selectSub(DB::connection('tenant')->query()->fromSub($history, 'periods')->selectRaw('json_agg(periods)'), 'suspensions');
+            $important = StudentEventNotes::visible($permissions)
+                ->whereColumn('notes.student_id', 'students.id')->where('notes.important', true)
+                ->orderByDesc('notes.updated_at')->orderByDesc('notes.id')->limit(3);
+            $important->select(['notes.id', 'notes.event_type', 'notes.event_id', 'notes.branch_id',
+                'notes.important', 'notes.revision', 'notes.updated_by_name', 'notes.updated_at',
+                'attendance.session_id', 'attendance_group.id as group_id'])
+                ->selectRaw('left(notes.body, 120) as body')
+                ->selectRaw('COALESCE(payment.id, allocation.payment_id) as payment_id');
+            $query->selectSub(DB::connection('tenant')->query()->fromSub($important, 'important_rows')
+                ->selectRaw('json_agg(important_rows)'), 'important_notes');
         }
         if ($studentId !== null && ($data['tab'] ?? '') === 'custom-history') {
             $historyPage = (int) ($data['custom_history_page'] ?? 1);
@@ -130,9 +141,18 @@ class CenterStudentController extends Controller
                 ->when(! $permissions->isCenterManager(), fn (Builder $rows) => $rows->whereIn('fees.branch_id', $this->branchScope($permissions, 'read')))
                 ->orderByDesc('notes.updated_at')->orderByDesc('notes.id')
                 ->offset(($notesPage - 1) * 20)->limit(21)
-                ->select(['notes.event_id as attempt_id', 'notes.body', 'notes.important', 'notes.revision',
+                ->select(['notes.event_id as attempt_id', 'notes.branch_id', 'notes.body', 'notes.important', 'notes.revision',
                     'notes.updated_by_name', 'notes.updated_at', 'groups.name as group_name']);
             $query->selectSub(DB::connection('tenant')->query()->fromSub($notes, 'note_rows')->selectRaw('json_agg(note_rows ORDER BY updated_at DESC, attempt_id DESC)'), 'enrollment_notes');
+        }
+        if ($studentId !== null && ($data['tab'] ?? '') === 'notes') {
+            $notesPage = (int) ($data['notes_page'] ?? 1);
+            $notes = StudentEventNotes::visible($permissions)
+                ->whereColumn('notes.student_id', 'students.id')
+                ->orderByDesc('notes.updated_at')->orderByDesc('notes.id')
+                ->offset(($notesPage - 1) * 20)->limit(21);
+            $query->selectSub(DB::connection('tenant')->query()->fromSub($notes, 'note_rows')
+                ->selectRaw('json_agg(note_rows)'), 'student_notes');
         }
         $students = $query->orderBy('student_number')->offset(($page - 1) * 50)->limit(51)->get();
         if ($studentId !== null) {
@@ -152,8 +172,11 @@ class CenterStudentController extends Controller
             ...($studentId !== null ? ['suspensions' => array_slice(json_decode($students->first()->suspensions ?? '[]', true) ?? [], 0, 20), 'status_pagination' => ['page' => $statusPage, 'has_more' => count(json_decode($students->first()->suspensions ?? '[]', true) ?? []) > 20]] : []),
             ...(isset($historyPage) ? ['custom_history' => ['entries' => array_slice(json_decode($students->first()->custom_history ?? '[]', true) ?? [], 0, 50), 'pagination' => ['page' => $historyPage, 'has_more' => count(json_decode($students->first()->custom_history ?? '[]', true) ?? []) > 50]]] : []),
             ...(isset($attachmentPage) ? ['attachments' => ['entries' => collect(json_decode($students->first()->attachments ?? '[]') ?? [])->take(20)->map(fn (stdClass $row): array => StudentAttachments::payload($row))->values(), 'status' => $attachmentStatus, 'pagination' => ['page' => $attachmentPage, 'has_more' => count(json_decode($students->first()->attachments ?? '[]', true) ?? []) > 20]]] : []),
-            ...(isset($notesPage) ? ['enrollment_notes' => ['entries' => array_slice(json_decode($students->first()->enrollment_notes ?? '[]', true) ?? [], 0, 20),
+            ...(($data['tab'] ?? '') === 'enrollment-notes' ? ['enrollment_notes' => ['entries' => array_slice(json_decode($students->first()->enrollment_notes ?? '[]', true) ?? [], 0, 20),
                 'pagination' => ['page' => $notesPage, 'has_more' => count(json_decode($students->first()->enrollment_notes ?? '[]', true) ?? []) > 20]]] : []),
+            ...($studentId !== null ? ['important_notes' => json_decode($students->first()->important_notes ?? '[]', true) ?? []] : []),
+            ...($studentId !== null && ($data['tab'] ?? '') === 'notes' ? ['student_notes' => ['entries' => array_slice(json_decode($students->first()->student_notes ?? '[]', true) ?? [], 0, 20),
+                'pagination' => ['page' => $notesPage, 'has_more' => count(json_decode($students->first()->student_notes ?? '[]', true) ?? []) > 20]]] : []),
             'pagination' => ['page' => $page, 'has_more' => $students->count() > 50, 'branches_page' => $branchPage, 'branches_has_more' => $branches->count() > 50],
         ])->header('Cache-Control', 'private, no-store');
     }

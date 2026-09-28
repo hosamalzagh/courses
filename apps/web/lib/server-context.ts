@@ -55,10 +55,12 @@ export type StudentPhoto = { id:string; preview:string; url:string };
 export type StudentAttachment = {id:string;title:string;classification:'general'|'identity';mime:string;size_bytes:number;current_version:number;archived_at:string|null;created_at:string;preview_url:string;download_url:string;versions_url:string};
 export type StudentAttachmentVersion = {id:string;version:number;classification:'general'|'identity';mime:string;size_bytes:number;actor_id:number;actor_name:string|null;created_at:string;preview_url:string;download_url:string};
 export type StudentAttachmentPage = {entries:StudentAttachment[];status:'active'|'archived';pagination:{page:number;has_more:boolean}};
-export type StudentEnrollmentNotePage = {entries:{attempt_id:string;group_name:string;body:string;important:boolean;revision:number;updated_by_name:string;updated_at:string}[];pagination:{page:number;has_more:boolean}};
+export type StudentEnrollmentNotePage = {entries:{attempt_id:string;branch_id:number;group_name:string;body:string;important:boolean;revision:number;updated_by_name:string;updated_at:string}[];pagination:{page:number;has_more:boolean}};
+export type StudentEventNote = {id:string;event_type:string;event_id:string;branch_id:number;body:string;important:boolean;revision:number;updated_by_name:string;updated_at:string;session_id:string|null;group_id:string|null;payment_id:string|null};
+export type StudentEventNotePage = {entries:StudentEventNote[];pagination:{page:number;has_more:boolean}};
 export type Student = { photo: StudentPhoto | null; photo_revision:number;attachment_revision:number;custom_values?:StudentCustomValues;missing_custom_fields:number; identity?: StudentIdentityData; can_read_identity: boolean; can_manage_identity: boolean } & StudentGeneralData & StudentContactsData & { legacy_phone: string | null; manual_code: string | null } & { profile_choices: Partial<Record<StudentChoiceKind, StudentProfileChoice>>; age: number | null; created_by: number; created_at: string; id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean; sharing_enabled: boolean; status: 'active' | 'suspended'; status_revision: number; can_change_status: boolean };
 export type StudentSuspension = { id: string; suspended_by: number; suspended_by_name: string; suspended_reason: string; suspended_at: string; lifted_by: number | null; lifted_by_name: string | null; lifted_reason: string | null; lifted_at: string | null };
-export type StudentContext = CenterContext & {custom_history?:StudentCustomHistory;attachments?:StudentAttachmentPage;enrollment_notes?:StudentEnrollmentNotePage;custom_fields:StudentCustomFieldList; student_code_settings: {enabled:boolean;label:string;revision:number}; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
+export type StudentContext = CenterContext & {custom_history?:StudentCustomHistory;attachments?:StudentAttachmentPage;enrollment_notes?:StudentEnrollmentNotePage;student_notes?:StudentEventNotePage;important_notes?:StudentEventNote[];custom_fields:StudentCustomFieldList; student_code_settings: {enabled:boolean;label:string;revision:number}; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type Instructor = { id: string; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
 export type InstructorContext = CenterContext & { instructors: Instructor[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type StudentSearchPolicy = { enabled: boolean; revision: number; default_sharing_enabled: boolean };
@@ -209,9 +211,9 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   const studentEdit = path.match(/^\/admin\/students\/([^/]+)\/edit$/);
   if (studentEdit) return loadStudentWorkspace("", decodeURIComponent(studentEdit[1]));
   const studentAccount = path.match(/^\/admin\/students\/([^/]+)\/account$/);
-  if (studentAccount) return loadStudentAccount(decodeURIComponent(studentAccount[1]), query(["page", "branches_page", "q"]));
+  if (studentAccount) return loadStudentAccount(decodeURIComponent(studentAccount[1]), query(["page", "branches_page", "q", "payment_id"]));
   const studentEnrollments = path.match(/^\/admin\/students\/([^/]+)\/enrollments$/);
-  if (studentEnrollments) return loadStudyEnrollments(decodeURIComponent(studentEnrollments[1]), query(["page", "groups_page", "q"]));
+  if (studentEnrollments) return loadStudyEnrollments(decodeURIComponent(studentEnrollments[1]), query(["page", "groups_page", "q", "attempt_id"]));
   if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q", "identifier"]));
   if (path === "/admin/curriculum") return loadCurriculumWorkspace(query(["courses_page", "stages_page", "levels_page", "branches_page"]));
   if (path === "/admin/groups") return loadGroupWorkspace(query(["page", "levels_page", "instructors_page"]));
@@ -219,7 +221,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   if (groupCoverage) return loadGroupCoverage(decodeURIComponent(groupCoverage[1]), query(["page", "q"]));
   if (path === "/admin/absence-review") return loadAbsenceReview(query(["branch_id", "course_id", "stage_id", "level_id", "group_id", "view", "page", "q"]));
   const groupAttendance = path.match(/^\/admin\/groups\/([^/]+)\/sessions\/([^/]+)\/attendance$/);
-  if (groupAttendance) return loadGroupAttendance(decodeURIComponent(groupAttendance[1]), decodeURIComponent(groupAttendance[2]), query(["page", "q"]));
+  if (groupAttendance) return loadGroupAttendance(decodeURIComponent(groupAttendance[1]), decodeURIComponent(groupAttendance[2]), query(["page", "q", "entry_id"]));
   const groupSessions = path.match(/^\/admin\/groups\/([^/]+)\/sessions$/);
   if (groupSessions) return loadGroupSessions(decodeURIComponent(groupSessions[1]), query(["page"]));
   if (path === "/admin/student-search") {
