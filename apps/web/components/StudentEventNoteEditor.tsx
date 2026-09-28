@@ -121,7 +121,12 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
     <p className="muted">{description}</p>
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-    {loading ? <p role="status">جارٍ تحميل الملاحظة…</p> : detail ? <>
+    {loading ? <><p role="status">جارٍ تحميل الملاحظة…</p><CenterHeaderActions>
+      <Button onClick={onClose}>إلغاء</Button>
+    </CenterHeaderActions></> : !detail ? <CenterHeaderActions>
+      <Button disabled={busy} onClick={reload}>إعادة المحاولة</Button>
+      <Button disabled={busy} onClick={onClose}>إلغاء</Button>
+    </CenterHeaderActions> : <>
       {canEdit ? <form id={formId} onSubmit={save} noValidate className="form-stack">
         <Field data-invalid={Boolean(error && !conflict)}>
           <FieldLabel htmlFor={`${prefix}-body`}>نص الملاحظة</FieldLabel>
@@ -145,6 +150,6 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
         </li>)}</ol>
         {detail.pagination.has_more ? <Button disabled={busy} onClick={loadMore}>عرض نسخ أقدم</Button> : null}
       </section> : null}
-    </> : null}
+    </>}
   </section>;
 }

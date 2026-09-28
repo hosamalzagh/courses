@@ -28,6 +28,8 @@ const eventNames: Record<string, string> = {
   "student.enrolled": "تسجيل طالب ورسوم محاولة الدراسة",
   "student.study_attempt_note_created": "إضافة ملاحظة على تسجيل الطالب",
   "student.study_attempt_note_updated": "تعديل ملاحظة تسجيل الطالب",
+  "student.attendance_note_created": "إضافة ملاحظة على حضور أو غياب الطالب",
+  "student.attendance_note_updated": "تعديل ملاحظة حضور أو غياب الطالب",
   "student.sharing_changed": "تغيير مشاركة الطالب", "center.student_sharing_default_changed": "تغيير افتراضي مشاركة الملفات الجديدة",
   "student.photo_changed": "تغيير صورة الطالب", "student.created": "إنشاء ملف طالب", "student.updated": "تعديل ملف طالب", "student.suspended": "إيقاف ملف طالب", "student.reactivated": "فك إيقاف ملف طالب",
   "student.attachments_added": "إضافة مرفقات للطالب", "student.attachment_replace": "استبدال وثيقة الطالب",

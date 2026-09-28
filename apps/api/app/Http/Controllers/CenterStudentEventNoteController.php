@@ -136,7 +136,7 @@ class CenterStudentEventNoteController extends Controller
                 && ($permissions->can('attendance.record', (int) $entry->branch_id)
                     || $permissions->can('attendance.correct', (int) $entry->branch_id)), 404);
 
-            return $this->persist($request, $db, 'attendance', $entryId, $entry->student_id,
+            return $this->persist($request, $db, 'attendance:'.$entry->revision, $entryId, $entry->student_id,
                 (int) $entry->branch_id, $data, $hash, ['entry_id' => $entryId, 'session_id' => $sessionId]);
         });
     }
@@ -186,7 +186,8 @@ class CenterStudentEventNoteController extends Controller
         ]);
         $db->table('center_audit_logs')->insert([
             'actor_id' => $actor->id, 'branch_id' => $branchId,
-            'event' => "student.{$eventType}_note_".($note === null ? 'created' : 'updated'),
+            'event' => 'student.'.(str_starts_with($eventType, 'attendance:') ? 'attendance' : $eventType)
+                .'_note_'.($note === null ? 'created' : 'updated'),
             'details' => json_encode(['student_id' => $studentId, ...$auditContext,
                 'note_id' => $noteId, 'revision' => $nextRevision, 'important' => $data['important']]),
             'created_at' => $now,
@@ -206,20 +207,20 @@ class CenterStudentEventNoteController extends Controller
             ->join('stages', 'stages.id', '=', 'levels.stage_id')
             ->join('courses', 'courses.id', '=', 'stages.course_id')
             ->where('entries.id', $entryId)->where('entries.session_id', $sessionId)->where('groups.id', $groupId)
-            ->select(['entries.status', 'attempts.student_id', 'courses.branch_id']);
+            ->select(['entries.status', 'entries.revision', 'attempts.student_id', 'courses.branch_id']);
         if ($withNote) {
             $query->leftJoin('student_event_notes as notes', function ($join): void {
                 $join->on('notes.event_id', '=', 'entries.id')
                     ->on('notes.student_id', '=', 'attempts.student_id')
                     ->on('notes.branch_id', '=', 'courses.branch_id')
-                    ->where('notes.event_type', 'attendance');
+                    ->whereRaw("notes.event_type = 'attendance:' || entries.revision::text");
             })->addSelect(['notes.id as note_id', 'notes.body as note_body', 'notes.important as note_important',
                 'notes.revision as note_revision', 'notes.created_by_name as note_created_by_name',
                 'notes.updated_by_name as note_updated_by_name', 'notes.created_at as note_created_at',
                 'notes.updated_at as note_updated_at']);
         }
         if ($lock) {
-            $query->lockForUpdate();
+            $query->lock('FOR UPDATE OF entries');
         }
 
         return $query->first();

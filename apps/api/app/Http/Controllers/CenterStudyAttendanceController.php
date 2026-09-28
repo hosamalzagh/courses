@@ -246,7 +246,8 @@ class CenterStudyAttendanceController extends Controller
                 $join->on('attendance_notes.event_id', '=', 'entries.id')
                     ->on('attendance_notes.student_id', '=', 'students.id')
                     ->where('attendance_notes.branch_id', $session->branch_id)
-                    ->whereNotNull('entries.status')->where('attendance_notes.event_type', 'attendance');
+                    ->whereNotNull('entries.status')
+                    ->whereRaw("attendance_notes.event_type = 'attendance:' || entries.revision::text");
             })
             ->select(['attempts.id as attempt_id', 'students.id as student_id', 'students.name', 'students.student_number',
                 'students.status as student_status', 'entries.id as entry_id', 'entries.status',

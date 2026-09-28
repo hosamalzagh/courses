@@ -92,9 +92,11 @@ test("attendance and closed absence notes keep versions, importance and event pe
     await expect(owner.getByRole("row", { name: new RegExp(students[0].name) })).toBeVisible();
     const reads = readFileSync(process.env.COURSES_NOTES_QUERY_LOG!, "utf8").trim().split("\n").slice(beforeLog)
       .map(line => JSON.parse(line) as { path: string; count: number | null })
-      .filter(read => read.path.startsWith(`/api/v1/center/${path}`));
+      .filter(read => read.path.startsWith("/api/v1/center/"));
     expect(reads.length).toBeGreaterThan(0);
-    expect(reads.every(read => Number.isInteger(read.count) && read.count! <= 6)).toBe(true);
+    expect(reads.some(read => read.path.startsWith(`/api/v1/center/${path}`))).toBe(true);
+    expect(reads.every(read => Number.isInteger(read.count) && read.count! >= 0)).toBe(true);
+    expect(reads.reduce((total, read) => total + read.count!, 0)).toBeLessThanOrEqual(6);
     const presentRow = owner.getByRole("row", { name: new RegExp(students[0].name) });
     await presentRow.getByRole("button", { name: "تسجيل الحضور" }).click();
     await owner.getByRole("button", { name: "حاضر محتسب" }).click();
@@ -125,6 +127,25 @@ test("attendance and closed absence notes keep versions, importance and event pe
       .toBe(recordedBeforeNote.students.find((row: { entry_id: string }) => row.entry_id === entryId).entry_revision);
     await owner.getByRole("button", { name: "إلغاء", exact: true }).click();
     await expect(presentRow.getByRole("button", { name: "عرض الملاحظة" })).toBeFocused();
+    let failInitialNoteRead = true;
+    await owner.route(new RegExp(`/api/v1/center/${path}/[^/?]+/note$`), async route => {
+      if (failInitialNoteRead && route.request().method() === "GET") {
+        failInitialNoteRead = false;
+        await route.abort();
+      } else await route.continue();
+    });
+    await presentRow.getByRole("button", { name: "عرض الملاحظة" }).click();
+    await expect(owner.getByText("تعذر تحميل الملاحظة ونسخها.")).toBeVisible();
+    await owner.getByRole("button", { name: "إعادة المحاولة" }).click();
+    await expect(owner.getByRole("textbox", { name: "نص الملاحظة" })).toHaveValue("حضر مع مراجعة الواجب");
+    await owner.getByRole("button", { name: "إلغاء", exact: true }).click();
+    await presentRow.getByRole("button", { name: "عرض الملاحظة" }).click();
+    await owner.getByRole("searchbox", { name: "بحث في كشف الطلاب المستحقين" }).fill(students[1].name);
+    await owner.getByRole("button", { name: "بحث في جميع كشف الطلاب المستحقين" }).click();
+    await expect(owner).toHaveURL(/\?q=/);
+    await expect(owner.getByRole("heading", { name: new RegExp(`ملاحظة حضور ${students[0].name}`) })).toHaveCount(0);
+    await owner.getByRole("button", { name: "مسح البحث في كشف الطلاب المستحقين" }).click();
+    await expect(owner).toHaveURL(url);
     await owner.getByRole("button", { name: "إغلاق كشف المحاضرة" }).click();
     await owner.getByRole("button", { name: "تأكيد الإغلاق" }).click();
     const absentRow = owner.getByRole("row", { name: new RegExp(students[1].name) });

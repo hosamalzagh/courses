@@ -39,6 +39,9 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
       setCurrent(context);
       setConflict(false);
       if (!sameRevision || (selected && !context.students.some(row => row.attempt_id === selected.attemptId))) setSelected(null);
+      if (selectedNote && !context.students.some(row => row.entry_id === selectedNote)) {
+        setSelectedNote(null); setNoteDirty(false); setDiscardNote(false);
+      }
     }
   }
 
