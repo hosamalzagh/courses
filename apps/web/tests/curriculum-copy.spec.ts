@@ -110,6 +110,7 @@ test("copy curriculum with preview, independent target, source history, isolatio
     }, { times: 1 });
     await owner.getByRole("button", { name: "تأكيد النسخ" }).click();
     await expect(owner.getByText("تعذر تأكيد نتيجة النسخ", { exact: false })).toBeVisible();
+    await expect(owner.getByRole("alert").locator("..")).toBeFocused();
     await owner.reload();
     await owner.getByRole("searchbox", { name: "بحث في الكورسات" }).fill(name);
     await row.getByRole("button", { name: "نسخ المنهج إلى فرع" }).click();

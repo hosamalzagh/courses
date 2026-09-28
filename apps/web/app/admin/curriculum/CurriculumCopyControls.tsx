@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useId, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions } from "@/components/CenterShell";
@@ -25,7 +25,7 @@ export function CurriculumCopyControls({ course, context, onClose }: {
   const router = useRouter();
   const formId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
-  const errorRef = useRef<HTMLDivElement>(null);
+  const focusError = useCallback((node: HTMLDivElement | null) => { node?.focus(); }, []);
   const branches = context.branches.filter(branch => branch.id !== course.branch_id &&
     (context.permissions.can_manage_center || context.permissions.branch_actions?.[String(branch.id)]?.includes("curriculum.manage")));
   const [targetBranchId, setTargetBranchId] = useState(branches[0]?.id ?? 0);
@@ -56,7 +56,6 @@ export function CurriculumCopyControls({ course, context, onClose }: {
           }
           if (replay.status !== 409) {
             setError("تعذر التحقق من نتيجة النسخ السابقة. حاول مرة أخرى بنفس الفرع.");
-            errorRef.current?.focus();
             return;
           }
           localStorage.removeItem(pendingKey(targetBranchId));
@@ -64,12 +63,12 @@ export function CurriculumCopyControls({ course, context, onClose }: {
       }
       const response = await centerRequest(
         `courses/${course.id}/copy-preview?target_branch_id=${targetBranchId}&page=${page}`, "GET");
-      if (!response.ok) { setError(await responseMessage(response)); errorRef.current?.focus(); return; }
+      if (!response.ok) { setError(await responseMessage(response)); return; }
       const data = await response.json() as CopyPreview;
       if (preview?.snapshot_hash !== data.snapshot_hash) setRequestId(newSubmissionId());
       setPreview(data);
       requestAnimationFrame(() => heading.current?.focus());
-    } catch { setError("تعذر تحميل معاينة النسخ. حاول مرة أخرى."); errorRef.current?.focus(); }
+    } catch { setError("تعذر تحميل معاينة النسخ. حاول مرة أخرى."); }
     finally { setBusy(null); }
   }
 
@@ -88,7 +87,6 @@ export function CurriculumCopyControls({ course, context, onClose }: {
         setError(response.status === 409 && data.code === "curriculum_source_changed"
           ? "تغير منهج المصدر بعد المعاينة. حدّث المعاينة قبل النسخ."
           : await responseMessage(response));
-        errorRef.current?.focus();
         return;
       }
       localStorage.removeItem(pendingKey(targetBranchId));
@@ -98,7 +96,6 @@ export function CurriculumCopyControls({ course, context, onClose }: {
       requestAnimationFrame(() => heading.current?.focus());
     } catch {
       setError("تعذر تأكيد نتيجة النسخ. أعد المحاولة بنفس الطلب، أو افتح المعاينة لنفس الفرع بعد العودة للتحقق من النتيجة.");
-      errorRef.current?.focus();
     } finally { setBusy(null); }
   }
 
@@ -123,7 +120,7 @@ export function CurriculumCopyControls({ course, context, onClose }: {
       {preview && !copied ? <Button variant="primary" busy={busy === "copy"} disabled={Boolean(busy)} onClick={() => void copy()}>تأكيد النسخ</Button> : null}
       <Button onClick={onClose} disabled={Boolean(busy)}>العودة إلى الكورسات</Button>
     </CenterHeaderActions>
-    {error ? <div ref={errorRef} tabIndex={-1}><InlineNotice tone="error">{error}</InlineNotice></div> : null}
+    {error ? <div ref={focusError} tabIndex={-1}><InlineNotice tone="error">{error}</InlineNotice></div> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     {preview ? <div className="form-stack" aria-live="polite">
       <p>المصدر: {preview.source.name} · {preview.source.branch_name} ← الوجهة: {preview.target.name}</p>
