@@ -65,10 +65,8 @@ test("enrolls through the employee page and preserves SSR, credit, RTL, and the 
   await page.goto(`${origin}/admin/students/${studentId}`);
   await page.getByRole("link", { name: "التسجيل ومحاولات الدراسة" }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/students/${studentId}/enrollments$`));
+  await page.waitForLoadState("networkidle");
   await expect(page.getByText("500.00 EGP")).toBeVisible();
-  await page.getByRole("searchbox", { name: "بحث في المجموعات المتاحة للتسجيل" }).fill(createdGroup.name);
-  await page.getByRole("button", { name: "بحث في جميع المجموعات المتاحة للتسجيل" }).click();
-  await expect(page).toHaveURL(/q=Group/);
   await page.getByRole("combobox", { name: "المجموعة الأساسية" }).selectOption(createdGroup.id);
   await page.getByRole("button", { name: "تسجيل الطالب والرسوم" }).click();
   await expect(page.getByLabel("تاريخ الانضمام الفعلي")).toBeFocused();
@@ -78,6 +76,9 @@ test("enrolls through the employee page and preserves SSR, credit, RTL, and the 
   await page.getByRole("button", { name: "تسجيل الطالب والرسوم" }).click();
   await expect(page.getByText("سُجلت المحاولة ورسومها معًا", { exact: false })).toBeVisible();
   await expect(page.getByText("1300.00 EGP").first()).toBeVisible();
+  await page.getByRole("searchbox", { name: "بحث في المجموعات المتاحة للتسجيل" }).fill(createdGroup.name);
+  await page.getByRole("button", { name: "بحث في جميع المجموعات المتاحة للتسجيل" }).click();
+  await expect(page).toHaveURL(/q=Group/);
   const response = await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`);
   expect(Number(response.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
   const body = await response.json();
@@ -142,7 +143,7 @@ test("simultaneous submissions keep one fee per request and reject stale distinc
   const enrollment = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
   await page.evaluate(() => fetch("/sanctum/csrf-cookie", { credentials: "same-origin" }));
   const xsrf = (await page.context().cookies(origin)).find(cookie => cookie.name === "XSRF-TOKEN")?.value ?? "";
-  const payload = { group_id: first.id, joined_on: "2026-09-28", discount: "0.00", discount_reason: null,
+  const payload = { group_id: first.id, group_revision: first.revision, joined_on: "2026-09-28", discount: "0.00", discount_reason: null,
     version: enrollment.student.version, request_id: crypto.randomUUID() };
   const post = async (port: number, data: object) => {
     const response = await page.request.post(`http://alpha.courses.test:${port}/api/v1/center/students/${studentId}/enrollments`, {
@@ -157,7 +158,7 @@ test("simultaneous submissions keep one fee per request and reject stale distinc
   expect(after.attempts).toHaveLength(1);
   expect(after.balance.debt).toBe("80.00");
   const distinct = await Promise.all([0, 1].map(index => post(index ? 8158 : 8157, {
-    ...payload, group_id: second.id, version: after.student.version, request_id: crypto.randomUUID(),
+    ...payload, group_id: second.id, group_revision: second.revision, version: after.student.version, request_id: crypto.randomUUID(),
   })));
   expect(distinct.map(item => item.status).sort()).toEqual([201, 409]);
   const final = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();

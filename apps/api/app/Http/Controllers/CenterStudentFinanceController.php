@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use App\Support\StudentAccountVersion;
 use App\Support\StudentPhotos;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -85,7 +86,7 @@ class CenterStudentFinanceController extends Controller
             'permissions' => $permissions->toArray(),
             'account' => [
                 'student_id' => $student->id, 'student_name' => $student->name, 'student_number' => (int) $student->student_number,
-                'version' => $this->accountVersion($student->id, $student->financial_account_revision, $request->user()->id),
+                'version' => StudentAccountVersion::forActor($student->id, $student->financial_account_revision, $request->user()->id),
                 'currency' => $student->currency, 'currency_revision' => (int) $student->currency_revision,
                 'currency_locked' => $student->currency_locked_at !== null,
                 'available_balance' => $student->available_balance,
@@ -171,7 +172,7 @@ class CenterStudentFinanceController extends Controller
 
                 return response()->json(['payment' => $this->payment($existing)]);
             }
-            if (! hash_equals($this->accountVersion($studentId, $student->financial_account_revision, $request->user()->id), $data['version'])) {
+            if (! hash_equals(StudentAccountVersion::forActor($studentId, $student->financial_account_revision, $request->user()->id), $data['version'])) {
                 $this->conflict('student_account_changed');
             }
             $payment = [
@@ -206,11 +207,6 @@ class CenterStudentFinanceController extends Controller
     {
         return array_keys(array_filter($permissions->branchRoles,
             fn (array $roles): bool => in_array($action, CenterPermissions::actions($roles), true)));
-    }
-
-    private function accountVersion(string $studentId, int $revision, int $actorId): string
-    {
-        return hash_hmac('sha256', $studentId.':'.$revision.':'.$actorId, config('app.key'));
     }
 
     private function amount(string|int|float $value): string

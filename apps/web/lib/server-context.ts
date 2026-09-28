@@ -73,7 +73,7 @@ export type StudentAccountContext = CenterContext & {
 export type StudyEnrollmentContext = CenterContext & {
   student: { id: string; name: string; student_number: number; status: "active" | "suspended"; currency: string | null; version: string };
   balance: { available_credit: string; debt: string };
-  groups: { id: string; name: string; status: string; approved_price: string; level_id: string; plan_version_id: string; branch_id: number; branch_name: string; level_name: string }[];
+  groups: { id: string; name: string; status: string; approved_price: string; revision: number; level_id: string; plan_version_id: string; branch_id: number; branch_name: string; level_name: string }[];
   attempts: { id: string; level_id: string; plan_version_id: string; current_group_id: string; branch_id: number; joined_on: string; status: string; created_at: string; group_name: string; level_name: string; requirements_count: number; fee: { id: string; original_price: string; discount: string; net_amount: string; currency: string; discount_reason: string | null; actor_name: string } }[];
   pagination: { page: number; has_more: boolean; groups_page: number; groups_has_more: boolean };
 };

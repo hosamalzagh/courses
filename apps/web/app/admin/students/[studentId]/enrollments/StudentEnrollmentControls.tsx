@@ -7,11 +7,9 @@ import { CenterHeaderActions, CenterPageActions } from "@/components/CenterShell
 import { DataTable } from "@/components/DataTable";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
-import { PrefetchLink as Link } from "@/components/PrefetchLink";
 import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { buttonVariants } from "@/components/ui/button";
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from "@/lib/client-api";
 import type { StudyEnrollmentContext } from "@/lib/server-context";
 
@@ -85,7 +83,7 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
     try {
       requestId.current ??= newSubmissionId();
       const response = await centerRequest(`students/${studentId}/enrollments`, "POST", {
-        group_id: groupId, joined_on: joinedOn, discount,
+        group_id: groupId, group_revision: selected!.revision, joined_on: joinedOn, discount,
         discount_reason: Number(discount) > 0 ? reason.trim() : null,
         version: current.student.version, request_id: requestId.current,
       });
@@ -149,12 +147,9 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
         <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || !current.student.currency || current.student.status !== "active"}>{uncertain ? "التحقق من التسجيل" : "تسجيل الطالب والرسوم"}</Button>
         <Button disabled={busy || uncertain || !dirty} onClick={reset}>إلغاء البيانات</Button>
       </CenterHeaderActions>
-      {current.pagination.groups_page > 1 || current.pagination.groups_has_more ? <CenterHeaderActions>
-        {current.pagination.groups_page > 1 ? <Link className={buttonVariants({ variant: "outline" })} href={groupsPage(current.pagination.groups_page - 1)}>المجموعات السابقة</Link> : null}
-        {current.pagination.groups_has_more ? <Link className={buttonVariants({ variant: "outline" })} href={groupsPage(current.pagination.groups_page + 1)}>المجموعات التالية</Link> : null}
-      </CenterHeaderActions> : null}
     </section>
-    <DataTable id="enrollment-group-choices" title="المجموعات المتاحة للتسجيل" rows={current.groups} rowKey={row => row.id} pageSize={50}
+    <DataTable id="enrollment-group-choices" title="المجموعات المتاحة للتسجيل" rows={current.groups} rowKey={row => row.id}
+      serverPagination={{ page: current.pagination.groups_page, hasMore: current.pagination.groups_has_more, batchSize: 50, onPageChange: number => router.push(groupsPage(number)) }}
       serverSearch={{ value: search, onSearch: value => router.push(`${path}?${new URLSearchParams({ page: String(current.pagination.page), groups_page: "1", ...(value ? { q: value } : {}) })}`) }}
       searchText={row => `${row.name} ${row.level_name} ${row.branch_name}`}
       emptyMessage="لا توجد مجموعات في فروع تسجيل الطالب ضمن هذه الدفعة." description="ابحث باسم المجموعة، ثم اخترها في نموذج التسجيل. تظهر حتى ٥٠ مجموعة في الدفعة."
@@ -164,7 +159,8 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
         { key: "branch", label: "الفرع", render: row => row.branch_name },
         { key: "price", label: "السعر المعتمد", render: row => <bdi dir="ltr">{row.approved_price} {current.student.currency ?? ""}</bdi> },
       ]} />
-    <DataTable id="student-attempts" title="محاولات الدراسة" rows={current.attempts} rowKey={row => row.id} pageSize={20}
+    <DataTable id="student-attempts" title="محاولات الدراسة" rows={current.attempts} rowKey={row => row.id}
+      serverPagination={{ page: current.pagination.page, hasMore: current.pagination.has_more, batchSize: 20, onPageChange: number => router.push(page(number)) }}
       searchText={row => `${row.group_name} ${row.level_name} ${row.fee.net_amount}`}
       emptyMessage="لا توجد محاولات دراسة في فروع صلاحيتك." description="آخر ٢٠ محاولة في الدفعة الحالية. الرسوم المعتمدة محفوظة مع سبب الخصم والموظف."
       columns={[
@@ -174,9 +170,5 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
         { key: "fee", label: "الرسوم بعد الخصم", render: row => <bdi dir="ltr">{row.fee.net_amount} {row.fee.currency}</bdi> },
         { key: "actor", label: "سجلها", render: row => row.fee.actor_name },
       ]} />
-    <CenterHeaderActions>
-      {current.pagination.page > 1 ? <Link className={buttonVariants({ variant: "outline" })} href={page(current.pagination.page - 1)}>المحاولات السابقة</Link> : null}
-      {current.pagination.has_more ? <Link className={buttonVariants({ variant: "outline" })} href={page(current.pagination.page + 1)}>المحاولات التالية</Link> : null}
-    </CenterHeaderActions>
   </>;
 }

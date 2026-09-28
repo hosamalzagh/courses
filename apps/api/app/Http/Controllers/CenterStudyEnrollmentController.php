@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use App\Support\StudentAccountVersion;
 use App\Support\StudentPhotos;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -39,9 +40,10 @@ class CenterStudyEnrollmentController extends Controller
             ->when($search !== '', fn (Builder $query) => $query->where('study_groups.name', 'ILIKE', '%'.addcslashes($search, '%_\\').'%'))
             ->orderBy('study_groups.created_at')->orderBy('study_groups.id')
             ->offset(($groupsPage - 1) * 50)->limit(51)
-            ->select(['study_groups.id', 'study_groups.name', 'study_groups.status', 'study_groups.approved_price',
+            ->select(['study_groups.id', 'study_groups.name', 'study_groups.status', 'study_groups.revision',
                 'study_groups.level_id', 'study_groups.plan_version_id', 'courses.branch_id',
-                'branches.name as branch_name', 'levels.name as level_name']);
+                'branches.name as branch_name', 'levels.name as level_name'])
+            ->selectRaw('study_groups.approved_price::text as approved_price');
         $payments = DB::connection('tenant')->table('student_payments')
             ->whereColumn('student_payments.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('student_payments.branch_id', $scope))
@@ -70,7 +72,7 @@ class CenterStudyEnrollmentController extends Controller
             'permissions' => $permissions->toArray(),
             'student' => ['id' => $student->id, 'name' => $student->name, 'student_number' => (int) $student->student_number,
                 'status' => $student->status, 'currency' => $student->currency,
-                'version' => $this->version($student->id, $student->financial_account_revision, $request->user()->id)],
+                'version' => StudentAccountVersion::forActor($student->id, $student->financial_account_revision, $request->user()->id)],
             'balance' => ['available_credit' => $student->available_credit, 'debt' => $student->debt],
             'groups' => $choices->take(50)->values(), 'attempts' => $attempts->take(20)->map(fn (object $row) => $this->present($row))->values(),
             'pagination' => ['page' => $page, 'has_more' => $attempts->count() > 20,
@@ -82,7 +84,8 @@ class CenterStudyEnrollmentController extends Controller
     {
         abort_unless(Str::isUuid($studentId), 404);
         $data = $request->validate([
-            'group_id' => ['required', 'uuid'], 'joined_on' => ['required', 'date_format:Y-m-d'],
+            'group_id' => ['required', 'uuid'], 'group_revision' => ['required', 'integer', 'min:1'],
+            'joined_on' => ['required', 'date_format:Y-m-d'],
             'discount' => ['required', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999.99'],
             'discount_reason' => ['present', 'nullable', 'string', 'max:2000'],
             'version' => ['required', 'regex:/^[a-f0-9]{64}$/'], 'request_id' => ['required', 'uuid'],
@@ -91,7 +94,8 @@ class CenterStudyEnrollmentController extends Controller
         $data['discount_reason'] = trim($data['discount_reason'] ?? '') ?: null;
         abort_if($data['discount'] !== '0.00' && $data['discount_reason'] === null, 422, 'أدخل سبب الخصم.');
         abort_if($data['discount'] === '0.00' && $data['discount_reason'] !== null, 422, 'لا تسجل سبب خصم دون خصم.');
-        $hash = hash('sha256', json_encode([$studentId, $data['group_id'], $data['joined_on'], $data['discount'], $data['discount_reason']]));
+        $hash = hash('sha256', json_encode([$studentId, $data['group_id'], (int) $data['group_revision'],
+            $data['joined_on'], $data['discount'], $data['discount_reason']]));
 
         return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $studentId, $data, $hash): JsonResponse {
             $group = DB::connection('tenant')->table('study_groups')
@@ -101,7 +105,7 @@ class CenterStudyEnrollmentController extends Controller
                 ->where('study_groups.id', $data['group_id'])
                 ->lockForUpdate()
                 ->first(['study_groups.id', 'study_groups.level_id', 'study_groups.plan_version_id',
-                    'study_groups.approved_price', 'study_groups.status', 'courses.branch_id']);
+                    'study_groups.approved_price', 'study_groups.revision', 'study_groups.status', 'courses.branch_id']);
             abort_unless($group && $permissions->can('enrollment.manage', (int) $group->branch_id), 404);
             $student = StudentPhotos::visibleStudent($studentId, $permissions, 'enrollment.manage')
                 ->whereExists(DB::connection('tenant')->table('student_branches')
@@ -119,8 +123,11 @@ class CenterStudyEnrollmentController extends Controller
                 return response()->json(['attempt' => $this->present($this->attempts($studentId, $permissions)->where('study_attempts.id', $existing->id)->firstOrFail())]);
             }
             abort_if($student->status !== 'active', 409, 'الطالب موقوف؛ راجع حالته قبل التسجيل.');
+            if ((int) $group->revision !== (int) $data['group_revision']) {
+                $this->conflict('group_changed');
+            }
             abort_if($group->status === 'completed', 409, 'اكتملت المجموعة؛ اختر مجموعة أخرى.');
-            if (! hash_equals($this->version($studentId, $student->financial_account_revision, $request->user()->id), $data['version'])) {
+            if (! hash_equals(StudentAccountVersion::forActor($studentId, $student->financial_account_revision, $request->user()->id), $data['version'])) {
                 $this->conflict('student_account_changed');
             }
             abort_if(DB::connection('tenant')->table('study_attempts')->where('student_id', $studentId)
@@ -209,11 +216,6 @@ class CenterStudyEnrollmentController extends Controller
     {
         return array_keys(array_filter($permissions->branchRoles,
             fn (array $roles): bool => in_array('enrollment.manage', CenterPermissions::actions($roles), true)));
-    }
-
-    private function version(string $studentId, int $revision, int $actorId): string
-    {
-        return hash_hmac('sha256', $studentId.':'.$revision.':'.$actorId, config('app.key'));
     }
 
     private function amount(string|int|float $value): string
