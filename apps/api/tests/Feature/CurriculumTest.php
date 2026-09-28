@@ -291,6 +291,11 @@ class CurriculumTest extends TestCase
             $transfersMigration = glob(database_path('migrations/tenant/*_create_study_attempt_transfers.php'))[0];
             (require $transfersMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($transfersMigration, PATHINFO_FILENAME))->delete();
+            foreach (['*_enforce_study_session_teaching_segments.php', '*_create_study_session_teaching.php'] as $pattern) {
+                $migration = glob(database_path('migrations/tenant/'.$pattern))[0];
+                (require $migration)->down();
+                DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
+            }
             $waitlistMigration = glob(database_path('migrations/tenant/*_create_study_attempt_waitlists.php'))[0];
             (require $waitlistMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($waitlistMigration, PATHINFO_FILENAME))->delete();
