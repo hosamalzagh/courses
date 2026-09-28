@@ -250,7 +250,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
         branch_id: filters.branch_id ?? "", course_id: filters.course_id ?? "", stage_id: filters.stage_id ?? "",
         level_id: filters.level_id ?? "", group_id: filters.group_id ?? "", view: filters.view ?? "review", q,
       }) }}
-      serverPagination={{ page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 50, previousHref: pageHref(Math.max(1, context.pagination.page - 1)), nextHref: pageHref(context.pagination.page + 1) }}
+      serverPagination={{ page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 50, previousHref: pageHref(Math.max(1, context.pagination.page - 1)), nextHref: pageHref(context.pagination.page + 1), onNavigate: href => router.push(href) }}
       columns={[
         { key: "selection", label: "اختيار", actions: true, render: row => {
           const allowed = row.student_status === "active" && (context.permissions.can_manage_center ||

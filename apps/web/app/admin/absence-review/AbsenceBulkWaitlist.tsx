@@ -50,6 +50,12 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
   const reasonRef = useRef<HTMLTextAreaElement>(null);
   const previewHeadingRef = useRef<HTMLHeadingElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
+  const previewController = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; previewController.current?.abort(); };
+  }, []);
   const canManage = (branchId: number) => context.permissions.can_manage_center ||
     context.permissions.branch_actions?.[String(branchId)]?.includes("enrollment.manage");
   const selectable = context.students.filter(row => row.student_status === "active" && canManage(row.branch_id));
@@ -87,23 +93,33 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
     if (mode === "selected" && selected.length === 0) { setError("اختر طالبًا واحدًا على الأقل من الجدول."); errorRef.current?.focus(); return; }
     if (!reason.trim()) { setError("أدخل سبب النقل إلى الانتظار."); reasonRef.current?.focus(); return; }
     setBusy("preview"); setError(""); setNotice("");
+    const controller = new AbortController();
+    previewController.current = controller;
+    const original = new URL(window.location.href);
+    const scope = new URLSearchParams(original.searchParams);
+    scope.delete("page"); scope.delete("bulk_batch");
     try {
       const response = await centerRequest("absence-review/waitlist-batches", "POST", {
         selection_mode: mode, ...(mode === "selected" ? { attempt_ids: selected } : {}),
         ...Object.fromEntries(Object.entries(filters).filter(([key, value]) =>
           ["branch_id", "course_id", "stage_id", "level_id", "group_id", "view", "q"].includes(key) && value)),
         entered_on: enteredOn, reason: reason.trim(),
-      });
+      }, controller.signal);
+      if (controller.signal.aborted || !mounted.current) return;
       if (!response.ok) { setError(await responseMessage(response)); errorRef.current?.focus(); return; }
       const next = await response.json() as BatchResult;
+      const current = new URL(window.location.href);
+      const currentScope = new URLSearchParams(current.searchParams);
+      currentScope.delete("page"); currentScope.delete("bulk_batch");
+      if (controller.signal.aborted || !mounted.current || current.pathname !== original.pathname ||
+        currentScope.toString() !== scope.toString()) return;
       setResult(next);
       setSavedDraftKey(draftKey);
-      const url = new URL(window.location.href);
-      url.searchParams.set("bulk_batch", next.batch.id);
-      window.history.replaceState(window.history.state, "", url);
+      current.searchParams.set("bulk_batch", next.batch.id);
+      window.history.replaceState(window.history.state, "", current);
       requestAnimationFrame(() => previewHeadingRef.current?.focus());
-    } catch { setError("تعذر إنشاء المعاينة. حاول مرة أخرى."); errorRef.current?.focus(); }
-    finally { setBusy(null); }
+    } catch { if (!controller.signal.aborted && mounted.current) { setError("تعذر إنشاء المعاينة. حاول مرة أخرى."); errorRef.current?.focus(); } }
+    finally { if (previewController.current === controller) previewController.current = null; if (mounted.current) setBusy(null); }
   }
 
   async function execute() {
