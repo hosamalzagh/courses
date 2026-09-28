@@ -141,7 +141,7 @@ class CenterStudentController extends Controller
                 ->when(! $permissions->isCenterManager(), fn (Builder $rows) => $rows->whereIn('fees.branch_id', $this->branchScope($permissions, 'read')))
                 ->orderByDesc('notes.updated_at')->orderByDesc('notes.id')
                 ->offset(($notesPage - 1) * 20)->limit(21)
-                ->select(['notes.event_id as attempt_id', 'notes.body', 'notes.important', 'notes.revision',
+                ->select(['notes.event_id as attempt_id', 'notes.branch_id', 'notes.body', 'notes.important', 'notes.revision',
                     'notes.updated_by_name', 'notes.updated_at', 'groups.name as group_name']);
             $query->selectSub(DB::connection('tenant')->query()->fromSub($notes, 'note_rows')->selectRaw('json_agg(note_rows ORDER BY updated_at DESC, attempt_id DESC)'), 'enrollment_notes');
         }

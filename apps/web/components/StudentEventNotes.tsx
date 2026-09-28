@@ -5,8 +5,8 @@ import { Button } from "@/components/Button";
 import { InlineNotice } from "@/components/InlineNotice";
 import { PrefetchLink } from "@/components/PrefetchLink";
 import { centerRequest, responseMessage } from "@/lib/client-api";
-import type { StudentEnrollmentNotePage, StudentEventNote, StudentEventNotePage } from "@/lib/server-context";
-import { studentEventNoteOrigin } from "@/lib/student-event-notes";
+import type { CenterContext, StudentEnrollmentNotePage, StudentEventNote, StudentEventNotePage } from "@/lib/server-context";
+import { canOpenStudentEventNote, studentEventNoteOrigin } from "@/lib/student-event-notes";
 
 type Version = { revision: number; body: string; important: boolean; actor_name: string; created_at: string };
 type History = { versions: Version[]; pagination: { has_more: boolean; next_before_revision: number | null } };
@@ -16,7 +16,7 @@ function normalize(page: StudentEventNotePage | StudentEnrollmentNotePage, enrol
   if (!enrollmentOnly) return page as StudentEventNotePage;
   const old = page as StudentEnrollmentNotePage;
   return { pagination: old.pagination, entries: old.entries.map(entry => ({
-    id: entry.attempt_id, event_type: "study_attempt", event_id: entry.attempt_id, branch_id: 0,
+    id: entry.attempt_id, event_type: "study_attempt", event_id: entry.attempt_id, branch_id: entry.branch_id,
     body: entry.body, important: entry.important, revision: entry.revision,
     updated_by_name: entry.updated_by_name, updated_at: entry.updated_at,
     session_id: null, group_id: null, payment_id: null, group_name: entry.group_name,
@@ -30,8 +30,9 @@ function kind(note: StudentEventNote): string {
   return "تخصيص دفعة";
 }
 
-export function StudentEventNotes({ studentId, initial, enrollmentOnly = false }: {
-  studentId: string; initial: StudentEventNotePage | StudentEnrollmentNotePage; enrollmentOnly?: boolean;
+export function StudentEventNotes({ studentId, initial, permissions, enrollmentOnly = false }: {
+  studentId: string; initial: StudentEventNotePage | StudentEnrollmentNotePage;
+  permissions: CenterContext["permissions"]; enrollmentOnly?: boolean;
 }) {
   const [list, setList] = useState(() => normalize(initial, enrollmentOnly));
   const [selected, setSelected] = useState<DisplayNote | null>(null);
@@ -83,7 +84,8 @@ export function StudentEventNotes({ studentId, initial, enrollmentOnly = false }
       <h3>{(note as DisplayNote).group_name ?? kind(note)}{note.important ? " ★" : ""}</h3>
       <p>{note.body}</p>
       <p className="muted">{note.updated_by_name} — <time>{note.updated_at}</time></p>
-      <div className="form-actions"><PrefetchLink href={studentEventNoteOrigin(studentId, note)}>فتح الحدث الأصلي</PrefetchLink>
+      <div className="form-actions">{canOpenStudentEventNote(note, permissions)
+        ? <PrefetchLink href={studentEventNoteOrigin(studentId, note)}>فتح الحدث الأصلي</PrefetchLink> : null}
         <Button type="button" disabled={busy} onClick={() => open(note)}>{enrollmentOnly ? "عرض تاريخ التعديل" : "عرض النسخ"}</Button></div>
     </article>)}
     {list.pagination.page > 1 || list.pagination.has_more ? <nav className="pagination" aria-label="صفحات ملاحظات الأحداث">

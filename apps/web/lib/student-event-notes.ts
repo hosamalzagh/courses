@@ -1,4 +1,10 @@
-import type { StudentEventNote } from "@/lib/server-context";
+import type { CenterContext, StudentEventNote } from "@/lib/server-context";
+
+export function canOpenStudentEventNote(note: Pick<StudentEventNote, "event_type" | "branch_id">,
+  permissions: CenterContext["permissions"]): boolean {
+  return note.event_type !== "study_attempt" || permissions.can_manage_center ||
+    Boolean(permissions.branch_actions?.[String(note.branch_id)]?.includes("enrollment.manage"));
+}
 
 export function studentEventNoteOrigin(studentId: string, note: Pick<StudentEventNote, "event_type" | "event_id" | "group_id" | "session_id" | "payment_id">): string {
   if (note.event_type === "study_attempt") return `/admin/students/${studentId}/enrollments?attempt_id=${note.event_id}`;

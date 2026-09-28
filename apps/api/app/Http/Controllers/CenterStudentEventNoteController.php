@@ -35,7 +35,7 @@ class CenterStudentEventNoteController extends Controller
             ->when(! $permissions->isCenterManager(), fn ($query) => $query->whereIn('fees.branch_id', $readableBranches))
             ->orderByDesc('notes.updated_at')->orderByDesc('notes.id')
             ->offset(((int) ($data['page'] ?? 1) - 1) * 20)->limit(21)
-            ->get(['notes.event_id as attempt_id', 'notes.body', 'notes.important', 'notes.revision',
+            ->get(['notes.event_id as attempt_id', 'notes.branch_id', 'notes.body', 'notes.important', 'notes.revision',
                 'notes.updated_by_name', 'notes.updated_at', 'groups.name as group_name']);
 
         return response()->json(['entries' => $rows->take(20)->values(), 'pagination' => [

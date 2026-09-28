@@ -152,6 +152,11 @@ test("the note tab and short summary follow event permissions after each grant c
     expect((await grant({ [north]: ["branch_viewer"] })).status).toBe(200);
     await staff.reload();
     await expect(staff.getByRole("region", { name: "ملاحظات أحداث الطالب" })).not.toContainText("مراجعة دفعة الطالب");
+    await expect(staff.getByRole("article").filter({ hasText: "متابعة التسجيل" })
+      .getByRole("link", { name: "فتح الحدث الأصلي" })).toHaveCount(0);
+    await staff.goto(`${origin}/admin/students/${studentId}`);
+    await expect(staff.getByRole("region", { name: "الملاحظات المهمة" })
+      .getByRole("link", { name: /متابعة التسجيل/ })).toHaveCount(0);
     expect((await grant({ [south]: ["registration"] })).status).toBe(200);
     await staff.reload();
     await expect(staff.getByText("ملف الطالب غير متاح")).toBeVisible();
