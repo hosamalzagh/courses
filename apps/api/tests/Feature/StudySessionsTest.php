@@ -581,6 +581,54 @@ class StudySessionsTest extends TestCase
         });
     }
 
+    public function test_attendance_note_history_cursor_stays_on_the_same_occurrence_and_avoids_shifted_pages(): void
+    {
+        $group = $this->group($this->north, 'Note history cursor');
+        $scheduled = now('Africa/Cairo')->addDays(14)->setTime(16, 0);
+        $session = $this->postJson("{$this->base}/groups/{$group['id']}/sessions", [
+            'kind' => 'single', 'revision' => 1, 'start_at' => $scheduled->format('Y-m-d\TH:i'),
+            'plan_lecture_number' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
+        $group['revision'] = 2;
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $student = $this->student();
+        $this->enroll($student['id'], $group, now('Africa/Cairo')->format('Y-m-d'));
+        $this->postJson("{$this->base}/groups/{$group['id']}/start", ['revision' => 2])->assertOk();
+        $this->travelTo($scheduled->copy()->addHour());
+        $attendance = "{$this->base}/groups/{$group['id']}/sessions/{$session['id']}/attendance";
+        $attemptId = $this->getJson($attendance)->assertOk()->json('students.0.attempt_id');
+        $entry = $this->postJson($attendance, ['attempt_id' => $attemptId, 'status' => 'counted',
+            'revision' => 1, 'request_id' => (string) Str::uuid()])->assertCreated()->json('entry');
+        $notePath = "{$attendance}/{$entry['id']}/note";
+        for ($revision = 1; $revision <= 22; $revision++) {
+            $this->putJson($notePath, ['body' => "Version {$revision}", 'important' => false,
+                'revision' => $revision - 1, 'entry_revision' => $entry['revision'],
+                'request_id' => (string) Str::uuid()])->assertSuccessful();
+        }
+        $first = $this->getJson($notePath)->assertOk()->assertJsonCount(20, 'versions')
+            ->assertJsonPath('pagination.next_before_revision', 3);
+        $this->assertLessThanOrEqual(6, (int) $first->headers->get('X-Courses-Query-Count'));
+        $oldNoteId = $first->json('note.id');
+        $this->putJson($notePath, ['body' => 'Version 23', 'important' => true,
+            'revision' => 22, 'entry_revision' => $entry['revision'],
+            'request_id' => (string) Str::uuid()])->assertOk();
+        $older = $this->getJson("{$notePath}?page=2&before_revision=3")->assertOk()
+            ->assertJsonCount(2, 'versions')->assertJsonPath('versions.0.revision', 2)
+            ->assertJsonPath('versions.1.revision', 1)->assertJsonPath('pagination.has_more', false);
+        $this->assertSame($oldNoteId, $older->json('note.id'));
+        $this->postJson("{$attendance}/{$entry['id']}/undo", ['revision' => 2,
+            'request_id' => (string) Str::uuid()])->assertOk();
+        $replacement = $this->postJson($attendance, ['attempt_id' => $attemptId, 'status' => 'not_counted',
+            'revision' => 3, 'request_id' => (string) Str::uuid()])->assertCreated()->json('entry');
+        $this->putJson($notePath, ['body' => 'Replacement occurrence', 'important' => false,
+            'revision' => 0, 'entry_revision' => $replacement['revision'],
+            'request_id' => (string) Str::uuid()])->assertCreated();
+        $changed = $this->getJson("{$notePath}?page=2&before_revision=3")->assertOk()
+            ->assertJsonPath('entry_revision', $replacement['revision'])->assertJsonCount(1, 'versions')
+            ->assertJsonPath('versions.0.body', 'Replacement occurrence');
+        $this->assertNotSame($oldNoteId, $changed->json('note.id'));
+    }
+
     public function test_attendance_permission_and_hidden_branch_are_enforced(): void
     {
         $visible = $this->group($this->north, 'Visible attendance');

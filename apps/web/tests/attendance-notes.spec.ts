@@ -206,6 +206,27 @@ test("attendance and closed absence notes keep versions, importance and event pe
     await expect(owner.getByText("إضافة ملاحظة على حضور أو غياب الطالب").first()).toBeVisible();
     await owner.getByText("تفاصيل ملاحظة الحضور").first().click();
     await expect(owner.getByText("مراجعة واقعة الحضور: 1").first()).toBeVisible();
+    await owner.goto(url);
+    const historyRoute = new RegExp(`/api/v1/center/${path}/[^/?]+/note(?:\\?.*)?$`);
+    await owner.route(historyRoute, async route => {
+      const response = await route.fetch();
+      const detail = await response.json();
+      if (route.request().url().includes("before_revision=")) {
+        detail.entry_revision += 2;
+        detail.versions = [{ revision: 1, body: "نسخة من واقعة أخرى", important: false,
+          actor_name: "اختبار", created_at: new Date().toISOString() }];
+      } else {
+        detail.pagination.has_more = true;
+        detail.pagination.next_before_revision = 1;
+      }
+      await route.fulfill({ response, json: detail });
+    });
+    await owner.getByRole("row", { name: new RegExp(students[1].name) }).getByRole("button", { name: "عرض الملاحظة" }).click();
+    await owner.getByRole("button", { name: "عرض نسخ أقدم" }).click();
+    await expect(owner.getByText("تغيرت واقعة الحضور أثناء تحميل النسخ. حمّل الواقعة الحالية قبل المتابعة.")).toBeVisible();
+    await expect(owner.getByText("نسخة من واقعة أخرى")).toHaveCount(0);
+    await owner.unroute(historyRoute);
+    await owner.getByRole("button", { name: "تحميل الواقعة الحالية" }).click();
   } finally {
     await owner.close(); await staff.close();
   }

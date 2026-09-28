@@ -13,7 +13,7 @@ import type { StudyAttemptNote } from "@/lib/server-context";
 
 type NoteVersion = { revision: number; body: string; important: boolean; actor_name: string; created_at: string };
 type Detail = { entry_revision?: number; note: (StudyAttemptNote & { created_by_name: string; created_at: string; updated_at: string }) | null;
-  versions: NoteVersion[]; pagination: { page: number; has_more: boolean } };
+  versions: NoteVersion[]; pagination: { page: number; has_more: boolean; next_before_revision: number | null } };
 export function StudentEventNoteEditor({ path, title, description, onClose, onSaved, onDirtyChange, canEdit = true, hideActions = false }: {
   path: string; title: string; description: string; onClose: () => void; canEdit?: boolean; hideActions?: boolean;
   onSaved: (note: StudyAttemptNote) => void; onDirtyChange: (dirty: boolean) => void;
@@ -67,12 +67,20 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
   }
 
   async function loadMore() {
-    if (!detail || !detail.pagination.has_more) return;
+    const cursor = detail?.pagination.next_before_revision;
+    if (!detail || !detail.pagination.has_more || cursor == null) return;
     setBusy(true);
     try {
-      const response = await centerRequest(`${path}?page=${detail.pagination.page + 1}`, "GET");
+      const response = await centerRequest(`${path}?page=${detail.pagination.page + 1}&before_revision=${cursor}`, "GET");
       if (!response.ok) { setError(await responseMessage(response)); return; }
       const next = await response.json() as Detail;
+      if (next.entry_revision !== detail.entry_revision || next.note?.id !== detail.note?.id) {
+        const occurrenceChanged = next.entry_revision !== detail.entry_revision;
+        setConflict(true); setStaleOccurrence(occurrenceChanged);
+        setError(occurrenceChanged ? "تغيرت واقعة الحضور أثناء تحميل النسخ. حمّل الواقعة الحالية قبل المتابعة."
+          : "تغيرت الملاحظة أثناء تحميل النسخ. حمّل أحدث نسخة قبل المتابعة.");
+        return;
+      }
       setDetail(previous => previous ? { ...previous, versions: [...previous.versions, ...next.versions], pagination: next.pagination } : next);
     } catch { setError("تعذر تحميل النسخ الأقدم."); }
     finally { setBusy(false); }
