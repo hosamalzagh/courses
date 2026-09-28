@@ -121,6 +121,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::post('students/{studentId}/payments/{paymentId}/allocations/preview', [CenterStudentAllocationController::class, 'preview']);
         Route::post('students/{studentId}/payments/{paymentId}/allocations', [CenterStudentAllocationController::class, 'allocate']);
         Route::post('students/{studentId}/allocations/{allocationId}/reverse', [CenterStudentAllocationController::class, 'reverse']);
+        Route::post('students/{studentId}/allocations/{allocationId}/corrections/preview', [CenterStudentAllocationController::class, 'correctionPreview']);
+        Route::post('students/{studentId}/allocations/{allocationId}/corrections', [CenterStudentAllocationController::class, 'correct']);
         Route::patch('financial-currency', [CenterStudentFinanceController::class, 'updateCurrency']);
         Route::get('student-search-workspace', [CenterStudentSearchController::class, 'workspace']);
         Route::patch('student-search-policy', [CenterStudentSearchController::class, 'updatePolicy']);

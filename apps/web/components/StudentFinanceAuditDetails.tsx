@@ -3,6 +3,7 @@ import { paymentMethodLabels } from "@/lib/student-finance";
 
 export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
   if (!['student.payment_recorded', 'student.payment_allocated', 'student.payment_allocation_reversed',
+    'student.payment_allocation_corrected',
     'student.fee_settled', 'student.fee_settlement_corrected',
     'student.payment_note_created', 'student.payment_note_updated',
     'student.allocation_note_created', 'student.allocation_note_updated',
@@ -93,6 +94,19 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
       <p>السبب: {String(data.reason ?? "")}</p>
       <p>المتاح قبل: <bdi dir="ltr">{String(data.payment_available_before ?? "")}</bdi> — بعد: <bdi dir="ltr">{String(data.payment_available_after ?? "")}</bdi></p>
       <p>المسدد قبل: <bdi dir="ltr">{String(data.fee_paid_before ?? "")}</bdi> — بعد: <bdi dir="ltr">{String(data.fee_paid_after ?? "")}</bdi></p>
+    </details>;
+  }
+  if (entry.event === "student.payment_allocation_corrected") {
+    const previous = data.old_target as Record<string, unknown> | null;
+    const next = data.new_target as Record<string, unknown> | null;
+    const before = data.account_before as Record<string, unknown> | null;
+    const after = data.account_after as Record<string, unknown> | null;
+    return <details><summary>تفاصيل تصحيح التخصيص</summary>
+      <p>الدفعة: <bdi dir="ltr">{String(data.payment_id ?? "")}</bdi> — التخصيص الأصلي: <bdi dir="ltr">{String(data.original_allocation_id ?? "")}</bdi></p>
+      <p>من {String(previous?.branch_name ?? "")} إلى {String(next?.branch_name ?? "الرصيد المتاح")}: <bdi dir="ltr">{String(data.amount ?? "")} {String(data.currency ?? "")}</bdi></p>
+      {next ? <p>التخصيص الصحيح: <bdi dir="ltr">{String(data.replacement_allocation_id ?? "")}</bdi> — رسوم: <bdi dir="ltr">{String(next.fee_id ?? "")}</bdi></p> : null}
+      <p>الرصيد: <bdi dir="ltr">{String(before?.available_balance ?? "")}</bdi> ← <bdi dir="ltr">{String(after?.available_balance ?? "")}</bdi>؛ المديونية: <bdi dir="ltr">{String(before?.debt ?? "")}</bdi> ← <bdi dir="ltr">{String(after?.debt ?? "")}</bdi></p>
+      <p>السبب: {String(data.reason ?? "")}</p>
     </details>;
   }
   return <details><summary>تفاصيل الدفعة المقدمة</summary>
