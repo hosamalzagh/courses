@@ -1711,6 +1711,26 @@ class StudyEnrollmentTest extends TestCase
         $coverage = $this->getJson("{$this->base}/groups/{$target['id']}/coverage")
             ->assertOk()->assertJsonPath('students.0.covered_count', 1)->assertJsonPath('students.0.missing_numbers', []);
         $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
+        $thresholdGroup = $this->patchJson("{$this->base}/groups/{$target['id']}/settings", [
+            'revision' => $target['revision'], 'approved_price' => '250.00',
+            'completion_threshold' => 60, 'instructor_ids' => array_column($target['instructors'], 'id'),
+        ])->assertOk()->json('group');
+        $thresholdPath = "{$this->base}/groups/{$target['id']}/completion-threshold";
+        $thresholdChange = ['attempt_ids' => [$attempt['id']], 'reason' => 'اعتماد الحد الجديد بعد تغطية منقولة'];
+        $thresholdImpact = $this->postJson("{$thresholdPath}/preview", $thresholdChange)->assertOk()
+            ->assertJsonPath('students.0.covered_count', 1)
+            ->assertJsonPath('students.0.before_threshold', 75)
+            ->assertJsonPath('students.0.after_threshold', 60)->json();
+        $this->postJson($thresholdPath, [...$thresholdChange,
+            'preview_token' => $thresholdImpact['preview_token'], 'request_id' => (string) Str::uuid()])
+            ->assertOk()->assertJsonPath('students.0.covered_count', 1);
+        $this->patchJson("{$this->base}/groups/{$target['id']}/settings", [
+            'revision' => $thresholdGroup['revision'], 'approved_price' => '250.00',
+            'completion_threshold' => 80, 'instructor_ids' => array_column($target['instructors'], 'id'),
+        ])->assertOk();
+        $staleChange = ['attempt_ids' => [$attempt['id']], 'reason' => 'رفع الحد بعد نقل التغطية'];
+        $staleImpact = $this->postJson("{$thresholdPath}/preview", $staleChange)->assertOk()
+            ->assertJsonPath('students.0.covered_count', 1)->json();
         $sourceSessionPath = "{$this->base}/groups/{$source['id']}/sessions/{$sessionId}";
         $revokePreview = $this->getJson("{$sourceSessionPath}/revoke-preview")->assertOk()
             ->assertJsonPath('attendance.potential_coverage_records', 1)->json();
@@ -1720,6 +1740,9 @@ class StudyEnrollmentTest extends TestCase
             'group_revision' => $revokePreview['group_revision'],
             'preview_token' => $revokePreview['preview_token'], 'request_id' => (string) Str::uuid(),
         ])->assertOk();
+        $this->postJson($thresholdPath, [...$staleChange,
+            'preview_token' => $staleImpact['preview_token'], 'request_id' => (string) Str::uuid()])
+            ->assertConflict()->assertJsonPath('code', 'threshold_preview_changed');
         $this->getJson("{$this->base}/groups/{$target['id']}/coverage")
             ->assertOk()->assertJsonPath('students.0.covered_count', 0);
         $this->center->run(function () use ($attempt, $target): void {
