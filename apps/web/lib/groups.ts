@@ -61,6 +61,15 @@ export type AttendanceContext = CenterContext & {
   last_own_attempt_id: string | null;
 };
 
+export type TeachingSegment = { id?: string; instructor_id: string; instructor_name?: string; start_minute: number; duration_minutes: number };
+export type TeachingContext = CenterContext & {
+  session: { id: string; group_id: string; group_name: string; branch_id: number; number: number;
+    title: string | null; status: "planned" | "held" | "cancelled"; scheduled_at: string;
+    teaching_revision: number; segments: TeachingSegment[];
+    suggested_instructors: { id: string; name: string }[] };
+  can_record: boolean;
+};
+
 export type CoverageRow = {
   attempt_id: string; student_id: string; name: string; student_number: number;
   joined_on: string; attempt_status: string; student_status: "active" | "suspended";

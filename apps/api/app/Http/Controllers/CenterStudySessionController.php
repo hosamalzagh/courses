@@ -331,6 +331,9 @@ class CenterStudySessionController extends Controller
         if (DB::connection('tenant')->table('study_attendance_entries')->where('session_id', $session->id)->exists()) {
             $this->conflict('session_has_attendance');
         }
+        if (DB::connection('tenant')->table('study_session_teaching_segments')->where('session_id', $session->id)->exists()) {
+            $this->conflict('session_has_teaching');
+        }
 
         return ['group_revision' => $group['revision'], 'session_revision' => (int) $session->revision,
             'plan_lecture_number' => (int) $session->plan_lecture_number, 'required_count' => $group['required_count'],

@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import type { CurriculumContext } from "./curriculum";
 import type { ContentEquivalenceContext } from "./content-equivalences";
-import type { AttendanceContext, CoverageContext, GroupContext, SessionContext } from "./groups";
+import type { AttendanceContext, CoverageContext, GroupContext, SessionContext, TeachingContext } from "./groups";
 
 export type Branch = { id: number; name: string; slug: string; address: string | null };
 export type CenterSettings = { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number; student_code_enabled?: boolean; student_code_label?: string; student_code_revision?: number };
@@ -193,6 +193,10 @@ export function loadGroupAttendance(groupId: string, sessionId: string, query = 
   return fetchCenterPayload<AttendanceContext>(`groups/${encodeURIComponent(groupId)}/sessions/${encodeURIComponent(sessionId)}/attendance${query ? `?${query}` : ""}`);
 }
 
+export function loadGroupTeaching(groupId: string, sessionId: string): Promise<TeachingContext | CenterAccessFailure> {
+  return fetchCenterPayload<TeachingContext>(`groups/${encodeURIComponent(groupId)}/sessions/${encodeURIComponent(sessionId)}/teaching`);
+}
+
 // Proxy supplies the actual URL so the layout shares the page's authorized payload.
 // React cache deduplicates only within this server render, never between users/centers.
 export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAccessFailure> {
@@ -230,6 +234,8 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   if (path === "/admin/absence-review") return loadAbsenceReview(query(["branch_id", "course_id", "stage_id", "level_id", "group_id", "view", "page", "q"]));
   const groupAttendance = path.match(/^\/admin\/groups\/([^/]+)\/sessions\/([^/]+)\/attendance$/);
   if (groupAttendance) return loadGroupAttendance(decodeURIComponent(groupAttendance[1]), decodeURIComponent(groupAttendance[2]), query(["page", "q", "entry_id"]));
+  const groupTeaching = path.match(/^\/admin\/groups\/([^/]+)\/sessions\/([^/]+)\/teaching$/);
+  if (groupTeaching) return loadGroupTeaching(decodeURIComponent(groupTeaching[1]), decodeURIComponent(groupTeaching[2]));
   const groupSessions = path.match(/^\/admin\/groups\/([^/]+)\/sessions$/);
   if (groupSessions) return loadGroupSessions(decodeURIComponent(groupSessions[1]), query(["page"]));
   if (path === "/admin/student-search") {

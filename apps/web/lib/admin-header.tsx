@@ -23,6 +23,7 @@ export function getAdminHeader(path: string, context: CenterContext): { title: s
   if (/^\/admin\/groups\/[^/]+\/sessions$/.test(path)) return { title: "جدول محاضرات المجموعة", description: "مواعيد المجموعة مرقمة ومرتبطة بمحاضرات إصدار الخطة المعتمد. التوقيت بتوقيت القاهرة." };
   if (/^\/admin\/groups\/[^/]+\/coverage$/.test(path)) return { title: "تغطية المحتوى وأهلية الإتمام", description: "المحاضرات المطلوبة المستوفاة منفصلة عن انتظام الطالب منذ انضمامه. بلوغ الحد يؤهل للمراجعة ولا يعتمد الإتمام تلقائيًا." };
   if (/^\/admin\/groups\/[^/]+\/sessions\/[^/]+\/attendance$/.test(path)) return { title: "كشف حضور المحاضرة", description: "الحضور غير المسجل يبقى معلقًا حتى إغلاق المحاضرة، ثم يعتمد غياب المستحقين فقط." };
+  if (/^\/admin\/groups\/[^/]+\/sessions\/[^/]+\/teaching$/.test(path)) return { title: "التدريس الفعلي للمحاضرة", description: "سجّل من درّس ومدة كل محاضر، سواء بالتتابع أو في الوقت نفسه. سجل الطالب لا يُوزن بالدقائق." };
   if (path === "/admin/students/new") return { title: 'إنشاء ملف طالب', description: 'ابدأ بالاسم وفرع مصرح به، ثم استكمل البيانات الاختيارية.' };
   if (path.endsWith('/account') && path.startsWith('/admin/students/')) return { title: 'حساب الطالب', description: 'الدفعات المقدمة غير مخصصة لمجموعة بعد. المبالغ المعروضة ضمن فروع صلاحيتك فقط.' };
   if (path.endsWith('/enrollments') && path.startsWith('/admin/students/')) return { title: 'تسجيل الطالب', description: 'محاولات الدراسة ورسومها حسب فروع صلاحيتك، دون تخصيص الدفعات تلقائيًا.' };

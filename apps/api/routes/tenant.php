@@ -31,6 +31,7 @@ use App\Http\Controllers\CenterStudyEnrollmentController;
 use App\Http\Controllers\CenterStudyTransferController;
 use App\Http\Controllers\CenterStudyGroupController;
 use App\Http\Controllers\CenterStudySessionController;
+use App\Http\Controllers\CenterStudyTeachingController;
 use App\Http\Controllers\CenterStudyWaitlistController;
 use App\Http\Middleware\MeasureCenterQueries;
 use App\Http\Middleware\RequireCenterMember;
@@ -183,6 +184,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::post('groups/{groupId}/sessions/{sessionId}/replacement-preview', [CenterStudySessionController::class, 'replacementPreview']);
         Route::post('groups/{groupId}/sessions/{sessionId}/replacement', [CenterStudySessionController::class, 'replacement']);
         Route::get('groups/{groupId}/sessions/{sessionId}/attendance', [CenterStudyAttendanceController::class, 'workspace']);
+        Route::get('groups/{groupId}/sessions/{sessionId}/teaching', [CenterStudyTeachingController::class, 'workspace']);
+        Route::put('groups/{groupId}/sessions/{sessionId}/teaching', [CenterStudyTeachingController::class, 'save']);
         Route::get('groups/{groupId}/sessions/{sessionId}/attendance/{entryId}/note', [CenterStudentEventNoteController::class, 'attendanceShow']);
         Route::put('groups/{groupId}/sessions/{sessionId}/attendance/{entryId}/note', [CenterStudentEventNoteController::class, 'attendanceSave']);
         Route::post('groups/{groupId}/sessions/{sessionId}/attendance', [CenterStudyAttendanceController::class, 'record']);
