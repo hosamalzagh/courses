@@ -66,7 +66,11 @@ test("enrolls through the employee page and preserves SSR, credit, RTL, and the 
   await page.getByRole("link", { name: "التسجيل ومحاولات الدراسة" }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/students/${studentId}/enrollments$`));
   await page.waitForLoadState("networkidle");
-  await expect(page.getByText("500.00 EGP")).toBeVisible();
+  await expect(page.getByText("500.00 EGP", { exact: true }).first()).toBeVisible();
+  await page.getByRole("searchbox", { name: "بحث في المجموعات المتاحة للتسجيل" }).fill(createdGroup.name);
+  await page.getByRole("button", { name: "بحث في جميع المجموعات المتاحة للتسجيل" }).click();
+  await expect(page).toHaveURL(/q=Group/);
+  await page.waitForLoadState("networkidle");
   await page.getByRole("combobox", { name: "المجموعة الأساسية" }).selectOption(createdGroup.id);
   await page.getByRole("button", { name: "تسجيل الطالب والرسوم" }).click();
   await expect(page.getByLabel("تاريخ الانضمام الفعلي")).toBeFocused();
@@ -76,9 +80,6 @@ test("enrolls through the employee page and preserves SSR, credit, RTL, and the 
   await page.getByRole("button", { name: "تسجيل الطالب والرسوم" }).click();
   await expect(page.getByText("سُجلت المحاولة ورسومها معًا", { exact: false })).toBeVisible();
   await expect(page.getByText("1300.00 EGP").first()).toBeVisible();
-  await page.getByRole("searchbox", { name: "بحث في المجموعات المتاحة للتسجيل" }).fill(createdGroup.name);
-  await page.getByRole("button", { name: "بحث في جميع المجموعات المتاحة للتسجيل" }).click();
-  await expect(page).toHaveURL(/q=Group/);
   const response = await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`);
   expect(Number(response.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
   const body = await response.json();
