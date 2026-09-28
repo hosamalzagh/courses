@@ -24,7 +24,7 @@ type Props<T> = {
   emptyMessage: string; action?: ReactNode; filters?: { label: string; value: string; matches: (row: T) => boolean }[];
   expanded?: (row: T) => ReactNode; rowClassName?: string;
   pageSize?: number; serverSearch?: { value: string; onSearch: (value: string) => void };
-  serverPagination?: { page: number; hasMore: boolean; batchSize: number; previousHref: string; nextHref: string };
+  serverPagination?: { page: number; hasMore: boolean; batchSize: number; previousHref: string; nextHref: string; onNavigate?: (href: string) => void };
 };
 
 
@@ -157,11 +157,15 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
     <div className="table-footer"><span aria-live="polite">{visible.length ? `${(batchOffset + start + 1).toLocaleString("ar-EG")}–${(batchOffset + Math.min(start + pageSize, visible.length)).toLocaleString("ar-EG")}${serverPagination ? " من الدفعة المحمّلة" : ` من ${visible.length.toLocaleString("ar-EG")}`}` : "٠ سجل"}</span><div className="pagination" aria-label={`صفحات ${title}`}>
       {currentPage > 1 || !serverPagination || serverPagination.page <= 1
         ? <Button disabled={!hasPreviousPage} onClick={previousPage} aria-label={`الصفحة السابقة في ${title}`}>السابق</Button>
-        : <PrefetchLink href={previousBatchHref} className={buttonVariants({ variant: "outline" })} aria-label={`الصفحة السابقة في ${title}`}>السابق</PrefetchLink>}
+        : serverPagination.onNavigate
+          ? <Button onClick={() => serverPagination.onNavigate?.(previousBatchHref)} aria-label={`الصفحة السابقة في ${title}`}>السابق</Button>
+          : <PrefetchLink href={previousBatchHref} className={buttonVariants({ variant: "outline" })} aria-label={`الصفحة السابقة في ${title}`}>السابق</PrefetchLink>}
       <span>{serverPagination ? `دفعة ${serverPagination.page.toLocaleString("ar-EG")} · ` : ""}صفحة {currentPage.toLocaleString("ar-EG")} من {pages.toLocaleString("ar-EG")}</span>
       {currentPage < pages || !serverPagination || !serverPagination.hasMore
         ? <Button disabled={!hasNextPage} onClick={nextPage} aria-label={`الصفحة التالية في ${title}`}>التالي</Button>
-        : <PrefetchLink href={serverPagination.nextHref} className={buttonVariants({ variant: "outline" })} aria-label={`الصفحة التالية في ${title}`}>التالي</PrefetchLink>}
+        : serverPagination.onNavigate
+          ? <Button onClick={() => serverPagination.onNavigate?.(serverPagination.nextHref)} aria-label={`الصفحة التالية في ${title}`}>التالي</Button>
+          : <PrefetchLink href={serverPagination.nextHref} className={buttonVariants({ variant: "outline" })} aria-label={`الصفحة التالية في ${title}`}>التالي</PrefetchLink>}
     </div></div>
   </section>;
 }

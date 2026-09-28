@@ -40,6 +40,7 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
   const [repeatId, setRepeatId] = useState<string | null>(null);
   const [openWithdrawalId, setOpenWithdrawalId] = useState<string | null>(null);
   const [withdrawalDirty, setWithdrawalDirty] = useState(false);
+  const repeatOpener = useRef<string | null>(null);
   const withdrawalOpener = useRef<string | null>(null);
   const noteOpener = useRef<string | null>(null);
   const requestId = useRef<string | null>(null);
@@ -61,10 +62,11 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
   const endpoint = `students/${studentId}/enrollments?${query}`;
   const focus = (field: string) => requestAnimationFrame(() => document.getElementById(`${prefix}-${field}`)?.focus());
 
-  function reset() {
+  function reset(restoreRepeatFocus = false) {
+    const opener = restoreRepeatFocus && repeatId ? repeatOpener.current : null;
     setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason(""); setRepeatId(null);
     setFieldErrors({}); setError(""); setConflict(false); setUncertain(false); requestId.current = null;
-    focus("group_id");
+    requestAnimationFrame(() => (opener && document.getElementById(opener) ? document.getElementById(opener) : document.getElementById(`${prefix}-group_id`))?.focus());
   }
 
   function closeNote() {
@@ -157,7 +159,7 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
   const groupsPage = (number: number) => `${path}?${new URLSearchParams({ page: String(current.pagination.page), groups_page: String(number), ...(search ? { q: search } : {}) })}`;
   function searchGroups(value: string) {
     const href = `${path}?${new URLSearchParams({ page: String(current.pagination.page), groups_page: "1", ...(value ? { q: value } : {}) })}`;
-    if (dirty) { setPendingSearch(href); return; }
+    if (dirty && !repeatId) { setPendingSearch(href); return; }
     router.push(href);
   }
 
@@ -207,13 +209,14 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
       {selected ? <p>السعر الأصلي <bdi dir="ltr">{selected.approved_price}</bdi> — الصافي بعد الخصم <strong><bdi dir="ltr">{Math.max(0, Number(selected.approved_price) - (Number(discount) || 0)).toFixed(2)} {current.student.currency ?? ""}</bdi></strong></p> : null}
       <CenterHeaderActions>
         <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || !current.student.currency || current.student.status !== "active"}>{uncertain ? "التحقق من التسجيل" : repeatId ? "إعادة الدراسة وتسجيل الرسوم" : "تسجيل الطالب والرسوم"}</Button>
-        <Button disabled={busy || uncertain || !registrationDirty} onClick={reset}>إلغاء البيانات</Button>
+        <Button disabled={busy || uncertain || !registrationDirty} onClick={() => reset(true)}>إلغاء البيانات</Button>
       </CenterHeaderActions>
     </section>
     <DataTable id="enrollment-group-choices" title="المجموعات المتاحة للتسجيل" rows={current.groups} rowKey={row => row.id}
       serverPagination={{ page: current.pagination.groups_page, hasMore: current.pagination.groups_has_more, batchSize: 50,
         previousHref: groupsPage(current.pagination.groups_page - 1),
-        nextHref: groupsPage(current.pagination.groups_page + 1) }}
+        nextHref: groupsPage(current.pagination.groups_page + 1),
+        ...(repeatId ? { onNavigate: (href: string) => router.push(href) } : {}) }}
       serverSearch={{ value: search, onSearch: searchGroups }}
       searchText={row => `${row.name} ${row.level_name} ${row.branch_name}`}
       emptyMessage="لا توجد مجموعات في فروع تسجيل الطالب ضمن هذه الدفعة." description="ابحث باسم المجموعة، ثم اخترها في نموذج التسجيل. تظهر حتى ٥٠ مجموعة في الدفعة."
@@ -242,7 +245,8 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
           ? <div className="form-actions">
             {row.status === "active" ? <Button id={`${prefix}-withdraw-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
               withdrawalOpener.current = event.currentTarget.id; setOpenWithdrawalId(row.id);
-            }}>انسحاب</Button> : <Button type="button" disabled={busy || dirty} onClick={() => {
+            }}>انسحاب</Button> : <Button id={`${prefix}-repeat-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
+              repeatOpener.current = event.currentTarget.id;
               setRepeatId(row.id); setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason("");
               focus("group_id");
             }}>إعادة الدراسة</Button>}

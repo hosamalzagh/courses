@@ -430,6 +430,13 @@ test("withdraws and repeats study with preserved fees, SSR, SQL budget, and mobi
   expect(withdrawn.balance.debt).toBe("100.00");
   await page.getByRole("button", { name: "إعادة الدراسة", exact: true }).click();
   await expect(page.getByRole("heading", { name: "إعادة الدراسة بمحاولة جديدة" })).toBeVisible();
+  await page.getByRole("searchbox", { name: "بحث في المجموعات المتاحة للتسجيل" }).fill(createdGroup.name);
+  await page.getByRole("button", { name: "بحث في جميع المجموعات المتاحة للتسجيل" }).click();
+  await expect(page).toHaveURL(/q=Group/);
+  await expect(page.getByRole("heading", { name: "إعادة الدراسة بمحاولة جديدة" })).toBeVisible();
+  await page.getByRole("button", { name: "إلغاء البيانات" }).click();
+  await expect(page.getByRole("button", { name: "إعادة الدراسة", exact: true })).toBeFocused();
+  await page.getByRole("button", { name: "إعادة الدراسة", exact: true }).click();
   await page.getByRole("combobox", { name: "المجموعة الأساسية" }).selectOption(createdGroup.id);
   await page.getByLabel("تاريخ الانضمام الفعلي").fill("2026-09-28");
   await page.getByRole("button", { name: "إعادة الدراسة وتسجيل الرسوم" }).click();
