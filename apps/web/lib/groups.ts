@@ -22,3 +22,15 @@ export type GroupContext = CenterContext & {
     levels: { page: number; has_more: boolean };
   };
 };
+export type StudySession = {
+  id: string; number: number; title: string | null; scheduled_at: string;
+  status: "planned" | "held" | "cancelled"; revision: number;
+  plan_lecture_number: number; content: string;
+};
+export type SessionContext = CenterContext & {
+  group: { id: string; name: string; status: StudyGroup["status"]; revision: number;
+    plan_version_id: string; branch_id: number; level_name: string; can_manage: boolean;
+    requirements: { number: number; title: string | null; content: string }[] };
+  sessions: StudySession[];
+  pagination: { page: number; has_more: boolean };
+};

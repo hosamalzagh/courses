@@ -7,6 +7,7 @@ import { StudentSearchAuditDetails } from "@/components/StudentSearchAuditDetail
 import { CurriculumAuditDetails } from "@/components/CurriculumAuditDetails";
 import { StudentFinanceAuditDetails } from "@/components/StudentFinanceAuditDetails";
 import { StudentEventNoteAuditDetails } from "@/components/StudentEventNoteAuditDetails";
+import { StudySessionAuditDetails } from "@/components/StudySessionAuditDetails";
 import type { AuditEntry, CenterContext } from "@/lib/server-context";
 import { AuditControls, type AuditRow } from "./AuditControls";
 
@@ -37,6 +38,8 @@ const eventNames: Record<string, string> = {
   "curriculum.completion_threshold_changed": "تغيير نسبة إتمام المنهج",
   "study_group.created": "إنشاء مجموعة", "study_group.started": "بدء مجموعة",
   "study_group.settings_updated": "تعديل إعدادات مجموعة",
+  "study_sessions.scheduled": "جدولة محاضرات مجموعة",
+  "study_session.postponed": "تأجيل محاضرة مجموعة",
 };
 
 export function AuditWorkspace({ context, initialEntries }: { context: CenterContext; initialEntries: AuditEntry[] }) {
@@ -47,7 +50,7 @@ export function AuditWorkspace({ context, initialEntries }: { context: CenterCon
     time: new Date(entry.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" }),
     createdAt: entry.created_at, branch: entry.branch_id !== null,
     search: `${eventNames[entry.event] ?? entry.event} ${entry.branch_id ?? ""} ${entry.actor_id ?? ""}`,
-    details: <><GrantAuditDetails entry={entry} /><StudentAuditDetails entry={entry} /><StudentFinanceAuditDetails entry={entry} /><StudentEventNoteAuditDetails entry={entry} /><InstructorAuditDetails entry={entry} /><StudentSearchAuditDetails entry={entry} /><StudentNumberingAuditDetails entry={entry} /><CurriculumAuditDetails entry={entry} /></>,
+    details: <><GrantAuditDetails entry={entry} /><StudentAuditDetails entry={entry} /><StudentFinanceAuditDetails entry={entry} /><StudentEventNoteAuditDetails entry={entry} /><InstructorAuditDetails entry={entry} /><StudentSearchAuditDetails entry={entry} /><StudentNumberingAuditDetails entry={entry} /><CurriculumAuditDetails entry={entry} /><StudySessionAuditDetails entry={entry} /></>,
   }));
   return <CenterPage context={context} path="/admin/audit"><AuditControls rows={rows} /></CenterPage>;
 }
