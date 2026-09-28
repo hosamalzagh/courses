@@ -28,7 +28,7 @@ type HistoryContext = { branch_id: number; branch_name: string; level_id: string
 type History = { id: string; transferred_on: string; from: HistoryContext | null;
   to: HistoryContext | null;
   reason: string | null; actor_name: string | null; credited_count: number; required_count: number;
-  credited_lectures: { id: string; number: number; final: boolean }[] | null; missing_lectures: { id: string; number: number }[] | null };
+  credited_lectures: { id: string; number: number; final?: boolean }[] | null; missing_lectures: { id: string; number: number }[] | null };
 
 function TransferHistoryView({ history, page, hasMore, loading, onPage }: {
   history: History[]; page: number; hasMore: boolean; loading: boolean; onPage: (page: number) => void;
@@ -45,7 +45,7 @@ function TransferHistoryView({ history, page, hasMore, loading, onPage }: {
           ? `${row.to.branch_name} — ${row.to.level_name} — خطة ${row.to.plan_version} — ${row.to.group_name ?? "انتظار"}` : "سياق محجوب" },
         { key: "coverage", label: "التغطية عند النقل", render: row => `${row.credited_count}/${row.required_count}` },
         { key: "lectures", label: "تفصيل المتطلبات وقت النقل", render: row => row.credited_lectures && row.missing_lectures
-          ? `المحتسب: ${row.credited_lectures.map(lecture => lecture.number).join("، ") || "لا يوجد"}؛ الناقص: ${row.missing_lectures.map(lecture => lecture.number).join("، ") || "لا يوجد"}${row.credited_lectures.some(lecture => !lecture.final) ? `؛ المبدئي: ${row.credited_lectures.filter(lecture => !lecture.final).map(lecture => lecture.number).join("، ")}` : ""}`
+          ? `المحتسب: ${row.credited_lectures.map(lecture => lecture.number).join("، ") || "لا يوجد"}؛ الناقص: ${row.missing_lectures.map(lecture => lecture.number).join("، ") || "لا يوجد"}${row.credited_lectures.some(lecture => lecture.final === false) ? `؛ المبدئي: ${row.credited_lectures.filter(lecture => lecture.final === false).map(lecture => lecture.number).join("، ")}` : ""}`
           : "تفصيل غير محفوظ" },
         { key: "reason", label: "السبب", render: row => row.reason ?? "محجوب" },
       ]} />
