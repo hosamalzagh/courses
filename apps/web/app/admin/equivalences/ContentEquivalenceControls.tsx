@@ -101,7 +101,13 @@ export function ContentEquivalenceControls({ context }: { context: ContentEquiva
     if (!sourceIds.length) errors.source_lecture_ids = 'اختر محاضرة مصدر كاملة على الأقل.';
     if (!targetIds.length) errors.target_lecture_ids = 'اختر متطلبًا مستهدفًا كاملًا على الأقل.';
     if (reason.trim().length < 5) errors.reason = 'اكتب سبب الاعتماد بخمس حروف على الأقل.';
-    if (Object.keys(errors).length) { setFieldErrors(errors); setError('راجع اختيار المصدر والمتطلبات والسبب.'); return; }
+    if (Object.keys(errors).length) {
+      setFieldErrors(errors); setError('راجع اختيار المصدر والمتطلبات والسبب.');
+      const firstInvalid = errors.target_plan_version_id ? 'target' : errors.scope ? 'source'
+        : errors.source_lecture_ids ? 'source-lecture-0' : errors.target_lecture_ids ? 'target-lecture-0' : 'reason';
+      requestAnimationFrame(() => document.getElementById(`${formId}-${firstInvalid}`)?.focus());
+      return;
+    }
     submitting.current = true; setBusy(true); setError(''); setFieldErrors({});
     try {
       const response = await centerRequest('content-equivalences', 'POST', {
@@ -166,16 +172,18 @@ export function ContentEquivalenceControls({ context }: { context: ContentEquiva
       {fieldErrors.scope ? <InlineNotice tone='error'>{fieldErrors.scope}</InlineNotice> : null}
       {source ? <FieldSet><FieldLegend>محاضرات المصدر المطلوبة كلها</FieldLegend>
         <FieldDescription>يجب احتساب حضور كل محاضرة مصدر مختارة قبل أن تستوفي المعادلة متطلبات الوجهة.</FieldDescription>
-        {source.lectures.map(lecture => <FieldLabel key={lecture.id} className='flex items-start gap-2'>
-          <Checkbox checked={sourceIds.includes(lecture.id)} disabled={busy || uncertain} onCheckedChange={value => toggle(sourceIds, setSourceIds, lecture.id, Boolean(value))} />
+        {source.lectures.map((lecture, index) => <FieldLabel key={lecture.id} className='flex items-start gap-2'>
+          <Checkbox id={`${formId}-source-lecture-${index}`} checked={sourceIds.includes(lecture.id)} disabled={busy || uncertain}
+            aria-invalid={Boolean(fieldErrors.source_lecture_ids)} onCheckedChange={value => toggle(sourceIds, setSourceIds, lecture.id, Boolean(value))} />
           <span>المحاضرة {lecture.number.toLocaleString('ar-EG')}: {lecture.content}{lecture.title ? ` · ${lecture.title}` : ''}</span>
         </FieldLabel>)}
         {fieldErrors.source_lecture_ids ? <InlineNotice tone='error'>{fieldErrors.source_lecture_ids}</InlineNotice> : null}
       </FieldSet> : null}
       {target ? <FieldSet><FieldLegend>المتطلبات المستهدفة كاملة</FieldLegend>
         <FieldDescription>كل متطلب محدد يُستوفى كاملًا، دون كسور أو احتساب مكرر.</FieldDescription>
-        {target.lectures.map(lecture => <FieldLabel key={lecture.id} className='flex items-start gap-2'>
-          <Checkbox checked={targetIds.includes(lecture.id)} disabled={busy || uncertain} onCheckedChange={value => toggle(targetIds, setTargetIds, lecture.id, Boolean(value))} />
+        {target.lectures.map((lecture, index) => <FieldLabel key={lecture.id} className='flex items-start gap-2'>
+          <Checkbox id={`${formId}-target-lecture-${index}`} checked={targetIds.includes(lecture.id)} disabled={busy || uncertain}
+            aria-invalid={Boolean(fieldErrors.target_lecture_ids)} onCheckedChange={value => toggle(targetIds, setTargetIds, lecture.id, Boolean(value))} />
           <span>المحاضرة {lecture.number.toLocaleString('ar-EG')}: {lecture.content}{lecture.title ? ` · ${lecture.title}` : ''}</span>
         </FieldLabel>)}
         {fieldErrors.target_lecture_ids ? <InlineNotice tone='error'>{fieldErrors.target_lecture_ids}</InlineNotice> : null}

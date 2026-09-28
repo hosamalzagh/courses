@@ -108,6 +108,7 @@ SQL)
         $requestHash = hash('sha256', json_encode([$mappingHash, $reason]));
 
         return DB::connection('central')->transaction(function () use ($request, $data, $sourceIds, $targetIds, $reason, $mappingHash, $requestHash): JsonResponse {
+            // Serialize approvals for this center before the idempotency and mapping lookups.
             $center = Center::query()->whereKey($request->attributes->get('center')->id)->lockForUpdate()->firstOrFail();
             abort_if($center->suspended, 423);
             abort_unless($center->provisioning_status === 'active', 503);

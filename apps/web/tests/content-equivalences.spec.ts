@@ -72,10 +72,14 @@ test('whole-lecture equivalence approval is scoped, auditable and recoverable', 
     await owner.getByLabel('إصدار المتطلبات المستهدفة').selectOption(target.plan.id);
     const sourceChoices = owner.getByRole('group', { name: 'محاضرات المصدر المطلوبة كلها' });
     const targetChoices = owner.getByRole('group', { name: 'المتطلبات المستهدفة كاملة' });
+    await owner.getByLabel('سبب الاعتماد').fill(firstReason);
+    await owner.getByRole('button', { name: 'اعتماد المعادلة' }).click();
+    await expect(sourceChoices.getByRole('checkbox').first()).toBeFocused();
     await sourceChoices.getByRole('checkbox').first().click();
+    await owner.getByRole('button', { name: 'اعتماد المعادلة' }).click();
+    await expect(targetChoices.getByRole('checkbox').first()).toBeFocused();
     await targetChoices.getByRole('checkbox').first().click();
     await targetChoices.getByRole('checkbox').nth(1).click();
-    await owner.getByLabel('سبب الاعتماد').fill(firstReason);
     const savedResponse = owner.waitForResponse(response => response.request().method() === 'POST'
       && response.url().endsWith('/content-equivalences'));
     await owner.getByRole('button', { name: 'اعتماد المعادلة' }).click();
