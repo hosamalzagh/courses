@@ -73,12 +73,18 @@ test("withdrawal fee settlement and correction preserve money, permissions, audi
     expect(Number(accountResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
     const html = await owner.request.get(`${origin}/admin/students/${studentId}/account`);
     expect(await html.text()).toContain("1000.00");
+    await owner.route(`**/api/v1/center/students/${studentId}/fees/${attempt.fee.id}/adjustments?*`, async route => {
+      const response = await route.fetch();
+      const detail = await response.json();
+      await route.fulfill({ response, json: { ...detail, pagination: { ...detail.pagination, history_has_more: true } } });
+    });
     await owner.getByRole("button", { name: "تسوية أو تصحيح" }).click();
     await expect(owner.getByRole("heading", { name: new RegExp("تسوية رسوم") })).toBeFocused();
     await owner.getByLabel("المستحق الجديد (EGP)").fill("800.00");
     await owner.getByLabel("سبب التسوية أو التصحيح").fill("تسوية بعد الانسحاب");
     await owner.getByRole("button", { name: "معاينة الأثر" }).click();
     await expect(owner.getByRole("region", { name: "معاينة أثر التسوية" })).toContainText("100.00");
+    await expect(owner.getByRole("button", { name: "قرارات أقدم" })).toBeEnabled();
     await owner.getByRole("button", { name: "اعتماد التسوية" }).click();
     await expect(owner.getByRole("alertdialog")).toContainText("800.00 EGP");
     const settlementPath = `**/api/v1/center/students/${studentId}/fees/${attempt.fee.id}/adjustments`;
@@ -91,6 +97,7 @@ test("withdrawal fee settlement and correction preserve money, permissions, audi
     await expect(owner.getByRole("button", { name: "التحقق من الاعتماد" })).toBeVisible();
     await expect(owner.getByLabel("المستحق الجديد (EGP)")).toBeDisabled();
     await expect(owner.getByLabel("سبب التسوية أو التصحيح")).toBeDisabled();
+    await expect(owner.getByRole("button", { name: "قرارات أقدم" })).toBeDisabled();
     await owner.getByRole("button", { name: "التحقق من الاعتماد" }).click();
     await owner.getByRole("button", { name: "تأكيد التسوية" }).click();
     await expect(owner.getByRole("button", { name: "تسوية أو تصحيح" })).toBeFocused();

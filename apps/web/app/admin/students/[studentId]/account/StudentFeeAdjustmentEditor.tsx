@@ -155,8 +155,8 @@ export function StudentFeeAdjustmentEditor({ studentId, fee, onClose, onChanged,
             <Button disabled={busy || conflict || uncertain} onClick={() => { setReplacesId(row.id); setNewDue(row.before_due); setDetail(current => current ? { ...current, preview: null } : current); document.getElementById(`${prefix}-new-due`)?.focus(); }}>تصحيح هذه التسوية</Button> : <span className="muted">محفوظة</span> },
         ]} />
       <CenterHeaderActions>
-        {detail.pagination.history_page > 1 ? <Button disabled={busy} onClick={() => void load(detail.pagination.history_page - 1)}>قرارات أحدث</Button> : null}
-        {detail.pagination.history_has_more ? <Button disabled={busy} onClick={() => void load(detail.pagination.history_page + 1)}>قرارات أقدم</Button> : null}
+        {detail.pagination.history_page > 1 ? <Button disabled={busy || uncertain} onClick={() => void load(detail.pagination.history_page - 1)}>قرارات أحدث</Button> : null}
+        {detail.pagination.history_has_more ? <Button disabled={busy || uncertain} onClick={() => void load(detail.pagination.history_page + 1)}>قرارات أقدم</Button> : null}
       </CenterHeaderActions>
     </> : null}
     {confirm && preview ? <ConfirmationDialog title={replacesId ? "تأكيد تصحيح التسوية" : "تأكيد تسوية الرسوم"}
