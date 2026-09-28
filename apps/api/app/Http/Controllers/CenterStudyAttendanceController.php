@@ -369,6 +369,7 @@ class CenterStudyAttendanceController extends Controller
             ->select(['sessions.id', 'sessions.group_id', 'sessions.number', 'sessions.title', 'sessions.scheduled_at',
                 'sessions.status', 'sessions.revision', 'sessions.closed_at', 'sessions.closed_by',
                 'sessions.revoked_at', 'sessions.revoked_by', 'sessions.revoke_reason', 'sessions.plan_lecture_id',
+                'sessions.group_requirement_id',
                 'groups.name as group_name', 'groups.status as group_status',
                 'groups.started_at as group_started_at', 'groups.revision as group_revision',
                 'groups.plan_version_id', 'courses.branch_id']);

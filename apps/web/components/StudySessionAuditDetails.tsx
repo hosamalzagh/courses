@@ -6,7 +6,7 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
   const attendance = entry.event.startsWith("study_attendance.");
   const teaching = entry.event === "study_session.teaching_recorded" || entry.event === "study_session.teaching_corrected";
   const makeup = entry.event.startsWith("study_makeup.");
-  if (!attendance && !teaching && !makeup && !["study_sessions.scheduled", "study_session.postponed", "study_session.revoked", "study_session.cancelled", "study_session.replacement_scheduled"].includes(entry.event)) return null;
+  if (!attendance && !teaching && !makeup && !["study_sessions.scheduled", "study_session.postponed", "study_session.revoked", "study_session.cancelled", "study_session.replacement_scheduled", "study_group.requirements_changed"].includes(entry.event)) return null;
   let details = entry.details;
   if (typeof details === "string") { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;
@@ -92,6 +92,14 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
       <p>الموعد الملغى: <bdi dir="ltr">{typeof data.cancelled_session_id === "string" ? data.cancelled_session_id : "غير مسجل"}</bdi></p>
       <p>الموعد البديل: <bdi dir="ltr">{typeof data.replacement_session_id === "string" ? data.replacement_session_id : "غير مسجل"}</bdi> · {date(data.scheduled_at)}</p>
       <p>بقي متطلب الخطة نفسه والقرار الأكاديمي محفوظًا دون إجراء مالي آلي.</p>
+    </> : null}
+    {entry.event === "study_group.requirements_changed" ? <>
+      <p>القرار: {data.kind === "add" ? "محاضرة إضافية" : "إلغاء نهائي وخفض العدد"} · السبب: {typeof data.reason === "string" ? data.reason : "غير مسجل"}</p>
+      <p>العدد المعتمد: {typeof (data.before as { required_count?: number } | null)?.required_count === "number" ? (data.before as { required_count: number }).required_count.toLocaleString("ar-EG") : "—"} ← {typeof (data.after as { required_count?: number } | null)?.required_count === "number" ? (data.after as { required_count: number }).required_count.toLocaleString("ar-EG") : "—"}</p>
+      {typeof data.group_id === "string" ? <p><Link href={`/admin/groups/${encodeURIComponent(data.group_id)}/sessions`}>فتح جدول المجموعة</Link></p> : null}
+      {typeof data.session_id === "string" ? <p>الموعد الملغى: <bdi dir="ltr">{data.session_id}</bdi></p> : null}
+      {data.previous_decision === "academic" ? <p>قرار التعويض السابق: بديل أكاديمي · القرار النهائي: {data.decision === "financial" ? "مراجعة مالية" : "دون تعويض"}.</p> : null}
+      {typeof data.affected_attempts === "number" ? <p>عدد المحاولات المتأثرة وقت الاعتماد: {data.affected_attempts.toLocaleString("ar-EG")}.</p> : null}
     </> : null}
   </details>;
 }

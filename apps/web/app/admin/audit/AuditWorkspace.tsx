@@ -80,6 +80,7 @@ const eventNames: Record<string, string> = {
   "study_session.postponed": "تأجيل محاضرة مجموعة",
   "study_session.cancelled": "إلغاء موعد محاضرة قبل انعقادها",
   "study_session.replacement_scheduled": "جدولة بديل لموعد ملغى",
+  "study_group.requirements_changed": "اعتماد تغيير عدد محاضرات المجموعة",
   "study_attendance.recorded": "تسجيل حضور طالب",
   "study_attendance.undone": "التراجع عن حضور طالب",
   "study_attendance.closed": "إغلاق كشف حضور محاضرة",

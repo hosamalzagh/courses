@@ -7,7 +7,7 @@ export type StudyGroup = {
   approved_lecture_count: number; revision: number; started_at: string | null;
   branch_id: number; branch_name: string; course_name: string; stage_name: string; level_name: string;
   instructors: { id: string; name: string }[]; can_manage: boolean;
-  approved_lectures?: { number: number; content: string; title: string | null; planned_hours: number }[];
+  approved_lectures?: { number: number; content: string; title: string | null; planned_hours: number | null }[];
 };
 export type GroupPlanChoice = {
   plan_version_id: string; plan_version: number; level_id: string; level_name: string;

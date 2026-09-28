@@ -27,7 +27,7 @@ class CenterStudyCoverageController extends Controller
             ->select(['groups.id', 'groups.name', 'groups.status', 'groups.revision', 'groups.plan_version_id',
                 'courses.id as course_id', 'courses.branch_id'])
             ->selectRaw('COALESCE(groups.completion_threshold, levels.completion_threshold, stages.completion_threshold, courses.completion_threshold) AS completion_threshold')
-            ->selectRaw("COALESCE((SELECT json_agg(json_build_object('id', id, 'number', number, 'title', title, 'content', content) ORDER BY number) FROM plan_lectures WHERE plan_version_id = groups.plan_version_id), '[]'::json) AS requirements")
+            ->selectRaw("COALESCE((SELECT json_agg(json_build_object('id', COALESCE(plan_lecture_id, id), 'number', number, 'title', title, 'content', content) ORDER BY number) FROM study_group_requirements WHERE group_id = groups.id AND retired_at IS NULL), '[]'::json) AS requirements")
             ->first();
         abort_unless($group && $permissions->can('read', (int) $group->branch_id), 404);
 
@@ -46,13 +46,13 @@ class CenterStudyCoverageController extends Controller
                 'students.id as student_id', 'students.name', 'students.student_number', 'students.status as student_status',
                 'decisions.approved_at', 'decisions.exceptional', 'decisions.reason as completion_reason'])
             ->selectRaw(<<<'SQL'
-COALESCE((SELECT json_agg(json_build_object('id', lectures.id, 'final', sessions.closed_at IS NOT NULL))
+COALESCE((SELECT json_agg(json_build_object('id', COALESCE(sessions.plan_lecture_id, sessions.group_requirement_id),
+    'final', sessions.closed_at IS NOT NULL) ORDER BY entries.id)
     FROM study_attendance_entries AS entries
     JOIN study_sessions AS sessions ON sessions.id = entries.session_id
-    JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id
     WHERE entries.attempt_id = attempts.id AND entries.status = 'counted' AND sessions.status <> 'cancelled'), '[]'::json) AS attendance_rows,
 COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
-    'source_lecture_ids', approvals.source_lecture_ids, 'target_lecture_ids', approvals.target_lecture_ids))
+    'source_lecture_ids', approvals.source_lecture_ids, 'target_lecture_ids', approvals.target_lecture_ids) ORDER BY approvals.id)
     FROM content_equivalences AS approvals
     WHERE approvals.target_plan_version_id = attempts.plan_version_id
       OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers

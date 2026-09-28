@@ -90,6 +90,29 @@ test("cancelled unheld lecture keeps the requirement and a linked replacement in
   await expect(page.getByRole("table")).toContainText("بديل للموعد ١");
   await expect(page.getByRole("table")).toContainText("البديل ٢");
   await expect(page.getByRole("table").getByRole("row")).toHaveCount(3);
+  await page.getByRole("button", { name: "محاضرة إضافية" }).click();
+  await expect(page.getByRole("textbox", { name: "محتوى المحاضرة الإضافية" })).toBeFocused();
+  await page.getByRole("textbox", { name: "محتوى المحاضرة الإضافية" }).fill("امتداد شرح عملي");
+  await page.getByRole("textbox", { name: "سبب تغيير العدد المعتمد" }).fill("الشرح يحتاج محاضرة كاملة إضافية");
+  await page.getByRole("button", { name: "معاينة الأثر" }).click();
+  await expect(page.getByRole("heading", { name: "أثر القرار قبل الاعتماد" })).toBeFocused();
+  await expect(page.getByText("المحاضرات المعتمدة: ١ ← ٢", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "تأكيد اعتماد القرار" }).click();
+  await expect(page.getByText("اعتمدت محاضرة كاملة إضافية", { exact: false })).toBeVisible();
+  await expect(page.getByText("المحاضرات المعتمدة: ٢", { exact: false })).toBeVisible();
+  await page.getByLabel("محاضرة الخطة").selectOption("2");
+  await page.getByLabel("موعد المحاضرة بتوقيت القاهرة").fill(localTime(45));
+  await page.getByRole("button", { name: "معاينة المواعيد" }).click();
+  await page.getByRole("button", { name: /تأكيد وحفظ/ }).click();
+  await expect(page.getByRole("table")).toContainText("امتداد شرح عملي");
+  await page.getByRole("row", { name: /امتداد شرح عملي/ }).getByRole("button", { name: "إلغاء نهائي وخفض العدد" }).click();
+  await expect(page.getByRole("textbox", { name: "سبب تغيير العدد المعتمد" })).toBeFocused();
+  await page.getByRole("textbox", { name: "سبب تغيير العدد المعتمد" }).fill("لن تعقد المحاضرة الإضافية نهائيًا");
+  await page.getByRole("button", { name: "معاينة الأثر" }).click();
+  await expect(page.getByText("المحاضرات المعتمدة: ٢ ← ١", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "تأكيد اعتماد القرار" }).click();
+  await expect(page.getByText("اعتمد خفض عدد المحاضرات", { exact: false })).toBeVisible();
+  await expect(page.getByText("المحاضرات المعتمدة: ١", { exact: false })).toBeVisible();
   const response = await page.request.get(`${origin}${apiPath}`);
   expect(Number(response.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
   const members = await (await page.request.get(`${origin}/api/v1/center/member-workspace`)).json();
@@ -103,12 +126,19 @@ test("cancelled unheld lecture keeps the requirement and a linked replacement in
     await expect(viewer.getByText("جدول المجموعة متاح للقراءة.")).toBeVisible();
     await expect(viewer.getByRole("button", { name: "إلغاء الموعد" })).toHaveCount(0);
     await expect(viewer.getByRole("button", { name: "جدولة البديل" })).toHaveCount(0);
+    await expect(viewer.getByRole("button", { name: "محاضرة إضافية" })).toHaveCount(0);
+    await expect(viewer.getByRole("button", { name: "إلغاء نهائي وخفض العدد" })).toHaveCount(0);
     const denied = await viewer.request.get(`${origin}${apiPath}/${(await response.json()).sessions[0].id}/cancel-preview`);
     expect(denied.status()).toBe(403);
+    const deniedRequirement = await write(viewer, `groups/${groupId}/requirements/preview`, {
+      kind: "add", content: "محتوى جديد", reason: "اختبار صلاحيات التغيير",
+    });
+    expect(deniedRequirement.status).toBe(403);
   } finally { await viewer.close(); }
   await page.goto(`${origin}/admin/audit`);
   await expect(page.getByText("جدولة بديل لموعد ملغى").first()).toBeVisible();
   await expect(page.getByText("إلغاء موعد محاضرة قبل انعقادها").first()).toBeVisible();
+  await expect(page.getByText("اعتماد تغيير عدد محاضرات المجموعة").first()).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
   await page.getByRole("button", { name: "القائمة" }).click();

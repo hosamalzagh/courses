@@ -49,7 +49,7 @@ class CenterStudySessionController extends Controller
         }
 
         return response()->json(['group_revision' => $group['revision'],
-            'sessions' => $this->prepare($groupId, $group['plan_version_id'], $data),
+            'sessions' => $this->prepare($groupId, $data),
         ])->header('Cache-Control', 'private, no-store');
     }
 
@@ -77,7 +77,7 @@ class CenterStudySessionController extends Controller
             if ($group['revision'] !== (int) $data['revision'] || $group['status'] === 'completed') {
                 $this->conflict('group_changed');
             }
-            $prepared = $this->prepare($groupId, $group['plan_version_id'], $data);
+            $prepared = $this->prepare($groupId, $data);
             $now = now();
             $actor = $request->user();
             $ids = [];
@@ -86,6 +86,7 @@ class CenterStudySessionController extends Controller
                 $ids[] = $id;
                 DB::connection('tenant')->table('study_sessions')->insert([
                     'id' => $id, 'group_id' => $groupId, 'plan_lecture_id' => $session['plan_lecture_id'],
+                    'group_requirement_id' => $session['group_requirement_id'],
                     'number' => $session['number'], 'title' => $session['title'], 'scheduled_at' => $session['scheduled_at'],
                     'status' => 'planned', 'revision' => 1, 'created_by' => $actor->id, 'created_by_name' => $actor->name,
                     'created_at' => $now, 'updated_at' => $now,
@@ -235,7 +236,8 @@ class CenterStudySessionController extends Controller
             ]);
             $this->audit($actor->id, $group['branch_id'], 'study_session.cancelled', [
                 'group_id' => $groupId, 'session_id' => $sessionId,
-                'plan_lecture_id' => $session->plan_lecture_id, 'scheduled_at' => $session->scheduled_at,
+                'plan_lecture_id' => $session->plan_lecture_id, 'group_requirement_id' => $session->group_requirement_id,
+                'scheduled_at' => $session->scheduled_at,
                 'reason' => $reason, 'decision' => $data['decision'], 'before' => 'planned', 'after' => 'cancelled',
             ]);
 
@@ -298,6 +300,7 @@ class CenterStudySessionController extends Controller
             $actor = $request->user();
             DB::connection('tenant')->table('study_sessions')->insert([
                 'id' => $id, 'group_id' => $groupId, 'plan_lecture_id' => $session->plan_lecture_id,
+                'group_requirement_id' => $session->group_requirement_id,
                 'replaces_session_id' => $sessionId, 'number' => $prepared['number'],
                 'title' => $data['title'], 'scheduled_at' => $prepared['scheduled_at'],
                 'status' => 'planned', 'revision' => 1,
@@ -314,7 +317,8 @@ class CenterStudySessionController extends Controller
             ]);
             $this->audit($actor->id, $group['branch_id'], 'study_session.replacement_scheduled', [
                 'group_id' => $groupId, 'cancelled_session_id' => $sessionId, 'replacement_session_id' => $id,
-                'plan_lecture_id' => $session->plan_lecture_id, 'number' => $prepared['number'],
+                'plan_lecture_id' => $session->plan_lecture_id,
+                'group_requirement_id' => $session->group_requirement_id, 'number' => $prepared['number'],
                 'scheduled_at' => $prepared['scheduled_at'], 'decision' => 'academic',
             ]);
 
@@ -367,8 +371,12 @@ class CenterStudySessionController extends Controller
             $this->conflict('replacement_exists');
         }
         if ($db->table('study_sessions')->where('group_id', $group['id'])
-            ->where('plan_lecture_id', $session->plan_lecture_id)->where('status', '<>', 'cancelled')->exists()) {
+            ->where('group_requirement_id', $session->group_requirement_id)->where('status', '<>', 'cancelled')->exists()) {
             $this->conflict('requirement_already_scheduled');
+        }
+        if ($db->table('study_group_requirements')->where('id', $session->group_requirement_id)
+            ->whereNotNull('retired_at')->exists()) {
+            $this->conflict('requirement_retired');
         }
         $time = $this->time($data['start_at']);
         $utc = $time->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:sP');
@@ -382,13 +390,13 @@ class CenterStudySessionController extends Controller
             'number' => $number, 'plan_lecture_number' => (int) $session->plan_lecture_number,
             'scheduled_at' => $utc, 'local_at' => $time->format('Y-m-d\\TH:i'), 'title' => $data['title'],
             'preview_token' => hash('sha256', json_encode([$session->id, $session->revision, $group['revision'],
-                $utc, $data['title'], $number, $session->plan_lecture_id]))];
+                $utc, $data['title'], $number, $session->group_requirement_id]))];
     }
 
     private function session(string $groupId, string $sessionId, bool $lock = false): object
     {
         $query = DB::connection('tenant')->table('study_sessions as sessions')
-            ->join('plan_lectures as lectures', 'lectures.id', '=', 'sessions.plan_lecture_id')
+            ->join('study_group_requirements as lectures', 'lectures.id', '=', 'sessions.group_requirement_id')
             ->where('sessions.id', $sessionId)->where('sessions.group_id', $groupId)
             ->select(['sessions.*', 'lectures.number as plan_lecture_number']);
         if ($lock) {
@@ -422,16 +430,16 @@ class CenterStudySessionController extends Controller
         return $data;
     }
 
-    private function prepare(string $groupId, string $planVersionId, array $data): array
+    private function prepare(string $groupId, array $data): array
     {
         $db = DB::connection('tenant');
-        $requirements = $db->table('plan_lectures')->where('plan_version_id', $planVersionId)
-            ->orderBy('number')->get(['id', 'number', 'title']);
+        $requirements = $db->table('study_group_requirements')->where('group_id', $groupId)
+            ->whereNull('retired_at')->orderBy('number')->get(['id', 'plan_lecture_id', 'number', 'title']);
         $existing = $db->table('study_sessions')->where('group_id', $groupId)->where('status', '!=', 'cancelled')
-            ->get(['plan_lecture_id', 'scheduled_at']);
+            ->get(['group_requirement_id', 'scheduled_at']);
         $occupied = $db->table('study_sessions')->where('group_id', $groupId)
             ->where(fn (Builder $query) => $query->where('status', '<>', 'cancelled')->orWhereNotNull('cancelled_at'))
-            ->pluck('plan_lecture_id')->all();
+            ->pluck('group_requirement_id')->all();
         $available = $requirements->reject(fn ($lecture) => in_array($lecture->id, $occupied, true))->values();
         if ($data['kind'] === 'single') {
             $selected = $available->firstWhere('number', (int) $data['plan_lecture_number']);
@@ -448,7 +456,8 @@ class CenterStudySessionController extends Controller
             $utc = $time->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:sP');
             abort_if($existing->contains(fn ($row) => (new DateTimeImmutable($row->scheduled_at))->getTimestamp() === $time->getTimestamp()),
                 422, 'يوجد موعد آخر للمجموعة في الوقت المحدد.');
-            $result[] = ['number' => ++$number, 'plan_lecture_id' => $lecture->id,
+            $result[] = ['number' => ++$number, 'plan_lecture_id' => $lecture->plan_lecture_id,
+                'group_requirement_id' => $lecture->id,
                 'plan_lecture_number' => (int) $lecture->number,
                 'title' => $data['kind'] === 'single' ? $data['title'] : $lecture->title,
                 'scheduled_at' => $utc, 'local_at' => $time->format('Y-m-d\TH:i')];
@@ -467,9 +476,9 @@ class CenterStudySessionController extends Controller
             ->where('groups.id', $groupId)
             ->select(['groups.id', 'groups.name', 'groups.status', 'groups.revision', 'groups.plan_version_id',
                 'courses.branch_id', 'levels.name as level_name'])
-            ->selectRaw("COALESCE((SELECT json_agg(json_build_object('number', number, 'title', title, 'content', content) ORDER BY number) FROM (SELECT number, title, content FROM plan_lectures WHERE plan_version_id = groups.plan_version_id ORDER BY number LIMIT 200) AS plan), '[]'::json) AS requirements");
-        $query->selectRaw("COALESCE((SELECT json_agg(lecture_number ORDER BY lecture_number) FROM (SELECT DISTINCT lectures.number AS lecture_number FROM study_sessions AS sessions JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id WHERE sessions.group_id = groups.id AND (sessions.status <> 'cancelled' OR sessions.cancelled_at IS NOT NULL) ORDER BY lecture_number LIMIT 200) AS scheduled), '[]'::json) AS scheduled_requirements");
-        $query->selectRaw('(SELECT count(*) FROM plan_lectures WHERE plan_version_id = groups.plan_version_id) AS required_count');
+            ->selectRaw("COALESCE((SELECT json_agg(json_build_object('number', number, 'title', title, 'content', content) ORDER BY number) FROM (SELECT number, title, content FROM study_group_requirements WHERE group_id = groups.id AND retired_at IS NULL ORDER BY number LIMIT 200) AS plan), '[]'::json) AS requirements");
+        $query->selectRaw("COALESCE((SELECT json_agg(lecture_number ORDER BY lecture_number) FROM (SELECT DISTINCT lectures.number AS lecture_number FROM study_sessions AS sessions JOIN study_group_requirements AS lectures ON lectures.id = sessions.group_requirement_id WHERE sessions.group_id = groups.id AND lectures.retired_at IS NULL AND (sessions.status <> 'cancelled' OR sessions.cancelled_at IS NOT NULL) ORDER BY lecture_number LIMIT 200) AS scheduled), '[]'::json) AS scheduled_requirements");
+        $query->selectRaw('(SELECT count(*) FROM study_group_requirements WHERE group_id = groups.id AND retired_at IS NULL) AS required_count');
         if ($lock) {
             $query->lockForUpdate();
         }
@@ -486,7 +495,7 @@ class CenterStudySessionController extends Controller
     private function sessions(string $groupId): Builder
     {
         return DB::connection('tenant')->table('study_sessions as sessions')
-            ->join('plan_lectures as lectures', 'lectures.id', '=', 'sessions.plan_lecture_id')
+            ->join('study_group_requirements as lectures', 'lectures.id', '=', 'sessions.group_requirement_id')
             ->leftJoin('study_sessions as replacements', 'replacements.replaces_session_id', '=', 'sessions.id')
             ->leftJoin('study_sessions as originals', 'originals.id', '=', 'sessions.replaces_session_id')
             ->where('sessions.group_id', $groupId)
