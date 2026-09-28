@@ -9,5 +9,5 @@ export type ContentEquivalence = { id: string; source_plan_version_id: string; t
   target_lectures: EquivalenceLectureSnapshot[]; reason: string; approved_by_id: number;
   approved_by_name: string; approved_at: string; source_branch_id: number; target_branch_id: number;
   source_level_name: string; target_level_name: string; source_version: number; target_version: number };
-export type ContentEquivalenceContext = CenterContext & { options: EquivalencePlan[]; options_has_more: boolean;
+export type ContentEquivalenceContext = CenterContext & { options: EquivalencePlan[]; options_has_more: boolean; options_page: number;
   approvals: ContentEquivalence[]; pagination: { page: number; has_more: boolean } };

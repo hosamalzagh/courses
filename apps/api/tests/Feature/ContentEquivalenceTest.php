@@ -166,6 +166,47 @@ class ContentEquivalenceTest extends TestCase
         $this->assertLessThanOrEqual(6, $emptyQueries);
     }
 
+    public function test_older_plan_versions_remain_selectable_and_history_search_covers_every_page(): void
+    {
+        $source = $this->plan($this->north, 'Long running level', array_map(
+            fn (int $number): string => "Source lecture {$number}", range(1, 25)));
+        $target = $this->plan($this->south, 'Target', ['Required lecture']);
+        $path = "{$this->base}/content-equivalences";
+        foreach ($source['plan']['lectures'] as $index => $lecture) {
+            $this->postJson($path, [
+                ...$this->payload($source, $target),
+                'source_lecture_ids' => [$lecture['id']],
+                'reason' => "اعتماد فريد للمحاضرة {$index} من المستوى الطويل",
+            ])->assertCreated();
+        }
+        $this->getJson($path)->assertOk()->assertJsonCount(20, 'approvals');
+        $older = $this->getJson("{$path}?page=2")->assertOk()->assertJsonCount(5, 'approvals');
+        $hiddenReason = $older->json('approvals.0.reason');
+        $this->getJson("{$path}?q=".urlencode($hiddenReason))->assertOk()
+            ->assertJsonCount(1, 'approvals')->assertJsonPath('approvals.0.reason', $hiddenReason);
+
+        $this->center->run(function () use ($source): void {
+            for ($version = 2; $version <= 32; $version++) {
+                $planId = (string) Str::uuid();
+                DB::table('study_plan_versions')->insert([
+                    'id' => $planId, 'level_id' => $source['id'], 'version' => $version,
+                    'revision' => 1, 'created_at' => now()->addSeconds($version), 'updated_at' => now(),
+                ]);
+                DB::table('plan_lectures')->insert([
+                    'id' => (string) Str::uuid(), 'plan_version_id' => $planId,
+                    'number' => 1, 'content' => "Version {$version}", 'planned_hours' => 1,
+                ]);
+                DB::table('study_plan_versions')->where('id', $planId)->update(['sealed_at' => now()]);
+            }
+        });
+        $this->getJson("{$path}?options_q=Long%20running%20level")->assertOk()
+            ->assertJsonCount(30, 'options')->assertJsonPath('options_has_more', true);
+        $more = $this->getJson("{$path}?options_q=Long%20running%20level&options_page=2")
+            ->assertOk()->assertJsonCount(2, 'options')->assertJsonPath('options_has_more', false);
+        $this->assertContains($source['plan']['id'], array_column($more->json('options'), 'id'));
+        $this->assertLessThanOrEqual(6, (int) $more->headers->get('X-Courses-Query-Count'));
+    }
+
     public function test_migration_reaches_existing_and_new_centers(): void
     {
         $this->center->run(function (): void {

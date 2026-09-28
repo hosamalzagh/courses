@@ -19,22 +19,27 @@ class CenterContentEquivalenceController extends Controller
         $data = $request->validate([
             'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'q' => ['nullable', 'string', 'max:100'],
+            'options_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'options_q' => ['nullable', 'string', 'max:100'],
         ]);
         $permissions = $request->attributes->get('center_permissions');
         $visible = $this->visibleBranches($permissions);
-        $query = trim($data['q'] ?? '');
+        $optionsPage = (int) ($data['options_page'] ?? 1);
+        $optionQuery = trim($data['options_q'] ?? '');
+        $historyQuery = trim($data['q'] ?? '');
         $options = $this->plans()->when(! $permissions->isCenterManager(), fn (Builder $builder) => $builder->whereIn('courses.branch_id', $visible));
-        if ($query !== '') {
-            $options->where(function (Builder $builder) use ($query): void {
-                $builder->where('levels.name', 'ilike', '%'.$query.'%')
-                    ->orWhere('courses.name', 'ilike', '%'.$query.'%')
-                    ->orWhere('stages.name', 'ilike', '%'.$query.'%');
-                if (ctype_digit($query) && strlen($query) <= 9) {
-                    $builder->orWhere('plans.version', (int) $query);
+        if ($optionQuery !== '') {
+            $options->where(function (Builder $builder) use ($optionQuery): void {
+                $builder->where('levels.name', 'ilike', '%'.$optionQuery.'%')
+                    ->orWhere('courses.name', 'ilike', '%'.$optionQuery.'%')
+                    ->orWhere('stages.name', 'ilike', '%'.$optionQuery.'%');
+                if (ctype_digit($optionQuery) && strlen($optionQuery) <= 9) {
+                    $builder->orWhere('plans.version', (int) $optionQuery);
                 }
             });
         }
-        $optionRows = $options->orderByDesc('plans.created_at')->orderByDesc('plans.id')->limit(31)->get();
+        $optionRows = $options->orderByDesc('plans.created_at')->orderByDesc('plans.version')->orderByDesc('plans.id')
+            ->offset(($optionsPage - 1) * 30)->limit(31)->get();
         $page = (int) ($data['page'] ?? 1);
         $approvalRows = DB::connection('tenant')->table('content_equivalences as approvals')
             ->join('study_plan_versions as source_plans', 'source_plans.id', '=', 'approvals.source_plan_version_id')
@@ -47,6 +52,12 @@ class CenterContentEquivalenceController extends Controller
             ->join('courses as target_courses', 'target_courses.id', '=', 'target_stages.course_id')
             ->when(! $permissions->isCenterManager(), fn (Builder $builder) => $builder
                 ->whereIn('source_courses.branch_id', $visible)->whereIn('target_courses.branch_id', $visible))
+            ->when($historyQuery !== '', fn (Builder $builder) => $builder->where(function (Builder $search) use ($historyQuery): void {
+                foreach (['approvals.reason', 'approvals.approved_by_name', 'source_levels.name',
+                    'target_levels.name', 'source_courses.name', 'target_courses.name'] as $column) {
+                    $search->orWhere($column, 'ilike', '%'.$historyQuery.'%');
+                }
+            }))
             ->select(['approvals.id', 'approvals.source_plan_version_id', 'approvals.target_plan_version_id',
                 'approvals.source_lecture_ids', 'approvals.target_lecture_ids', 'approvals.reason',
                 'approvals.approved_by_id', 'approvals.approved_by_name', 'approvals.approved_at',
@@ -74,6 +85,7 @@ SQL)
             'branches' => [],
             'options' => $optionRows->take(30)->map(fn (object $row): array => $this->option($row))->values(),
             'options_has_more' => $optionRows->count() > 30,
+            'options_page' => $optionsPage,
             'approvals' => $approvalRows->take(20)->map(fn (object $row): array => [
                 ...(array) $row,
                 'source_lecture_ids' => json_decode($row->source_lecture_ids, true),

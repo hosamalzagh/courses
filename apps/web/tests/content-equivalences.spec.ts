@@ -34,6 +34,20 @@ function queryRows() {
     .map(line => JSON.parse(line) as { path: string; count: number | null }) : [];
 }
 
+async function choosePlanVersion(page: Page, label: string, planId: string) {
+  const select = page.getByLabel(label);
+  const option = select.locator(`option[value="${planId}"]`);
+  for (let batch = 0; batch < 20; batch++) {
+    if (await option.count()) { await select.selectOption(planId); return; }
+    const previousCount = await select.locator('option').count();
+    const more = page.getByRole('button', { name: 'تحميل مزيد من الإصدارات' });
+    await expect(more).toBeVisible();
+    await more.click();
+    await expect.poll(() => select.locator('option').count()).toBeGreaterThan(previousCount);
+  }
+  throw new Error(`Plan ${planId} was not offered after 20 bounded batches.`);
+}
+
 test('whole-lecture equivalence approval is scoped, auditable and recoverable', async ({ browser }) => {
   const owner = await browser.newPage();
   const staff = await browser.newPage();
@@ -59,6 +73,15 @@ test('whole-lecture equivalence approval is scoped, auditable and recoverable', 
     expect(firstBranch.status).toBe(201); expect(secondBranch.status).toBe(201);
     const source = await plan(firstBranch.body.branch.id, `مصدر المعادلة ${stamp}`);
     const target = await plan(secondBranch.body.branch.id, `وجهة المعادلة ${stamp}`);
+    let latestPlanId = source.plan.id;
+    for (let version = 2; version <= 32; version++) {
+      const next = await write(owner, `levels/${source.id}/plan-versions`, {
+        base_plan_version_id: latestPlanId, base_revision: 1, request_id: crypto.randomUUID(),
+        lectures: [{ number: 1, content: `إصدار إضافي ${version}`, planned_hours: 1 }],
+      });
+      expect(next.status).toBe(201);
+      latestPlanId = next.body.plan.id;
+    }
     const start = queryRows().length;
     await owner.goto(`${origin}/admin/equivalences`);
     await expect(owner.getByRole('heading', { name: 'معادلة المحتوى', exact: true })).toBeVisible();
@@ -68,8 +91,9 @@ test('whole-lecture equivalence approval is scoped, auditable and recoverable', 
     expect(reads.reduce((sum, row) => sum + row.count!, 0)).toBeLessThanOrEqual(6);
     await owner.getByRole('button', { name: 'اعتماد معادلة محتوى' }).click();
     await expect(owner.getByLabel('إصدار المصدر')).toBeFocused();
-    await owner.getByLabel('إصدار المصدر').selectOption(source.plan.id);
-    await owner.getByLabel('إصدار المتطلبات المستهدفة').selectOption(target.plan.id);
+    await expect(owner.getByLabel('إصدار المصدر').locator(`option[value="${source.plan.id}"]`)).toHaveCount(0);
+    await choosePlanVersion(owner, 'إصدار المصدر', source.plan.id);
+    await choosePlanVersion(owner, 'إصدار المتطلبات المستهدفة', target.plan.id);
     const sourceChoices = owner.getByRole('group', { name: 'محاضرات المصدر المطلوبة كلها' });
     const targetChoices = owner.getByRole('group', { name: 'المتطلبات المستهدفة كاملة' });
     await owner.getByLabel('سبب الاعتماد').fill(firstReason);
@@ -90,6 +114,11 @@ test('whole-lecture equivalence approval is scoped, auditable and recoverable', 
     await owner.getByRole('table', { name: 'سجل اعتمادات معادلة المحتوى' })
       .getByText('عرض المحاضرات المعتمدة').first().click();
     await expect(owner.getByRole('table', { name: 'سجل اعتمادات معادلة المحتوى' }).getByText('محتوى أول').first()).toBeVisible();
+    await owner.getByRole('searchbox', { name: 'بحث في سجل اعتمادات معادلة المحتوى' }).fill(firstReason);
+    await owner.getByRole('button', { name: 'بحث في جميع سجل اعتمادات معادلة المحتوى' }).click();
+    await expect(owner).toHaveURL(/\bq=/);
+    await expect(owner.getByRole('table', { name: 'سجل اعتمادات معادلة المحتوى' }).getByText(firstReason)).toBeVisible();
+    await owner.getByRole('button', { name: 'مسح البحث في سجل اعتمادات معادلة المحتوى' }).click();
     const attemptedRewrite = await write(owner, `levels/${source.id}/first-plan`, { revision: 1,
       plan_version_id: source.plan.id, lectures: [{ number: 1, content: 'تغيير بعد الاعتماد', planned_hours: 1 }] }, 'PATCH');
     expect(attemptedRewrite.status).toBe(409);
@@ -114,8 +143,8 @@ test('whole-lecture equivalence approval is scoped, auditable and recoverable', 
     expect((await grant({ [firstBranch.body.branch.id]: ['academic_admin'], [secondBranch.body.branch.id]: ['academic_admin'] })).status).toBe(200);
     await staff.reload();
     await staff.getByRole('button', { name: 'اعتماد معادلة محتوى' }).click();
-    await staff.getByLabel('إصدار المصدر').selectOption(source.plan.id);
-    await staff.getByLabel('إصدار المتطلبات المستهدفة').selectOption(target.plan.id);
+    await choosePlanVersion(staff, 'إصدار المصدر', source.plan.id);
+    await choosePlanVersion(staff, 'إصدار المتطلبات المستهدفة', target.plan.id);
     await staff.getByRole('group', { name: 'محاضرات المصدر المطلوبة كلها' }).getByRole('checkbox').nth(1).click();
     await staff.getByRole('group', { name: 'المتطلبات المستهدفة كاملة' }).getByRole('checkbox').nth(1).click();
     await staff.getByLabel('سبب الاعتماد').fill('سبب صالح لكنه سيفقد الصلاحية');
@@ -126,8 +155,8 @@ test('whole-lecture equivalence approval is scoped, auditable and recoverable', 
     expect((await grant({ [firstBranch.body.branch.id]: ['academic_admin'], [secondBranch.body.branch.id]: ['academic_admin'] })).status).toBe(200);
     await staff.reload();
     await staff.getByRole('button', { name: 'اعتماد معادلة محتوى' }).click();
-    await staff.getByLabel('إصدار المصدر').selectOption(source.plan.id);
-    await staff.getByLabel('إصدار المتطلبات المستهدفة').selectOption(target.plan.id);
+    await choosePlanVersion(staff, 'إصدار المصدر', source.plan.id);
+    await choosePlanVersion(staff, 'إصدار المتطلبات المستهدفة', target.plan.id);
     await staff.getByRole('group', { name: 'محاضرات المصدر المطلوبة كلها' }).getByRole('checkbox').nth(0).click();
     await staff.getByRole('group', { name: 'محاضرات المصدر المطلوبة كلها' }).getByRole('checkbox').nth(1).click();
     await staff.getByRole('group', { name: 'المتطلبات المستهدفة كاملة' }).getByRole('checkbox').nth(0).click();
@@ -144,8 +173,8 @@ test('whole-lecture equivalence approval is scoped, auditable and recoverable', 
     await staff.getByRole('button', { name: 'إلغاء' }).click();
     await owner.goto(`${origin}/admin/equivalences`);
     await owner.getByRole('button', { name: 'اعتماد معادلة محتوى' }).click();
-    await owner.getByLabel('إصدار المصدر').selectOption(source.plan.id);
-    await owner.getByLabel('إصدار المتطلبات المستهدفة').selectOption(target.plan.id);
+    await choosePlanVersion(owner, 'إصدار المصدر', source.plan.id);
+    await choosePlanVersion(owner, 'إصدار المتطلبات المستهدفة', target.plan.id);
     await owner.getByRole('group', { name: 'محاضرات المصدر المطلوبة كلها' }).getByRole('checkbox').nth(1).click();
     await owner.getByRole('group', { name: 'المتطلبات المستهدفة كاملة' }).getByRole('checkbox').nth(1).click();
     await owner.getByLabel('سبب الاعتماد').fill('معادلة ثانية مع تعطل رد الحفظ');

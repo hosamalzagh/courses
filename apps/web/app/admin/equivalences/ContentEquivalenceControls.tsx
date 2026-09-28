@@ -37,6 +37,8 @@ export function ContentEquivalenceControls({ context }: { context: ContentEquiva
   const [editing, setEditing] = useState(false);
   const [options, setOptions] = useState(context.options);
   const [optionsHasMore, setOptionsHasMore] = useState(context.options_has_more);
+  const [optionPage, setOptionPage] = useState(context.options_page);
+  const [optionQuery, setOptionQuery] = useState('');
   const [search, setSearch] = useState('');
   const [source, setSource] = useState<EquivalencePlan | null>(null);
   const [target, setTarget] = useState<EquivalencePlan | null>(null);
@@ -71,19 +73,28 @@ export function ContentEquivalenceControls({ context }: { context: ContentEquiva
     setIds(checked ? [...ids, id] : ids.filter(value => value !== id));
     setFieldErrors({});
   }
-  async function findOptions() {
+  async function loadOptions(page: number, query: string) {
     searchRead.current?.abort();
     const load = new AbortController();
     searchRead.current = load;
     setSearchBusy(true); setError('');
     try {
-      const response = await centerRequest(`content-equivalences?q=${encodeURIComponent(search.trim())}`, 'GET', undefined, load.signal);
+      const response = await centerRequest(`content-equivalences?${new URLSearchParams({ options_q: query, options_page: String(page) })}`, 'GET', undefined, load.signal);
       if (!response.ok) { setError(await responseMessage(response)); return; }
       const data = await response.json() as ContentEquivalenceContext;
       if (searchRead.current !== load) return;
-      setOptions(data.options); setOptionsHasMore(data.options_has_more);
+      setOptions(previous => page === 1 ? data.options : [...previous,
+        ...data.options.filter(option => !previous.some(existing => existing.id === option.id))]);
+      setOptionsHasMore(data.options_has_more); setOptionPage(page); setOptionQuery(query);
     } catch { if (searchRead.current === load) setError('تعذر البحث عن إصدارات الخطة. حاول مرة أخرى.'); }
     finally { if (searchRead.current === load) { searchRead.current = null; setSearchBusy(false); } }
+  }
+  function findOptions() { void loadOptions(1, search.trim()); }
+  function searchHistory(query: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('page');
+    if (query) params.set('q', query); else params.delete('q');
+    router.push(`/admin/equivalences${params.size ? `?${params}` : ''}`);
   }
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -154,7 +165,9 @@ export function ContentEquivalenceControls({ context }: { context: ContentEquiva
         <FormField id={`${formId}-search`} label='بحث عن مستوى أو كورس لاختيار الإصدار' value={search} onChange={setSearch} disabled={busy || uncertain} />
         <Button type='button' onClick={findOptions} disabled={searchBusy || busy || uncertain} busy={searchBusy}>بحث عن الإصدارات</Button>
       </div>
-      {optionsHasMore ? <p className='muted'>تظهر أول ٣٠ نتيجة فقط؛ ابحث باسم الكورس أو المستوى للوصول لإصدار آخر.</p> : null}
+      {optionsHasMore ? <div className='form-actions'><p className='muted'>تظهر ٣٠ نتيجة في كل دفعة. يمكنك تحميل إصدارات أقدم أو تضييق البحث.</p>
+        <Button type='button' onClick={() => void loadOptions(optionPage + 1, optionQuery)} disabled={searchBusy || busy || uncertain} busy={searchBusy}>تحميل مزيد من الإصدارات</Button>
+      </div> : null}
       <div className='form-grid'>
         <Field><FieldLabel htmlFor={`${formId}-source`}>إصدار المصدر</FieldLabel>
           <NativeSelect id={`${formId}-source`} value={source?.id ?? ''} disabled={busy || uncertain} aria-invalid={Boolean(fieldErrors.source_plan_version_id)}
@@ -199,6 +212,7 @@ export function ContentEquivalenceControls({ context }: { context: ContentEquiva
     <DataTable id='content-equivalence-history' title='سجل اعتمادات معادلة المحتوى'
       description='كل اعتماد يحفظ إصداري المصدر والوجهة ومحاضراتهما الكاملة والسبب وصاحب الاعتماد. تطبيقه على تغطية دراسة قائمة إجراء منفصل.'
       rows={context.approvals} rowKey={row => row.id} pageSize={20}
+      serverSearch={{ value: searchParams.get('q') ?? '', onSearch: searchHistory }}
       serverPagination={{ page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 20,
         previousHref: pageHref(context.pagination.page - 1), nextHref: pageHref(context.pagination.page + 1) }}
       searchText={row => `${row.source_level_name} ${row.target_level_name} ${row.reason} ${row.approved_by_name}`}
