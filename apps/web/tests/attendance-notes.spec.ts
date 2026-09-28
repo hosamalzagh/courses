@@ -173,7 +173,25 @@ test("attendance and closed absence notes keep versions, importance and event pe
     await signIn(staff, "staff");
     await staff.goto(url);
     await expect(staff.getByText("غاب بعد إغلاق الكشف")).toBeVisible();
+    await staff.getByRole("row", { name: new RegExp(students[1].name) }).getByRole("button", { name: "عرض الملاحظة" }).click();
+    await staff.getByRole("textbox", { name: "نص الملاحظة" }).fill("مسودة قبل سحب المنحة");
+    let dropFirstSave = true;
+    await staff.route(new RegExp(`/api/v1/center/${path}/[^/?]+/note$`), async route => {
+      if (dropFirstSave && route.request().method() === "PUT") {
+        dropFirstSave = false;
+        await route.abort();
+      } else await route.continue();
+    });
+    await staff.getByRole("button", { name: "حفظ تعديل الملاحظة" }).click();
+    await expect(staff.getByText("تعذر تأكيد الحفظ. أعد المحاولة بالطلب نفسه دون تغيير النص.").first()).toBeVisible();
     expect((await write(owner, `members/${membershipId}/grants`, { center_roles: [], branch_roles: {} }, "PUT")).status).toBe(200);
+    const deniedRetry = staff.waitForResponse(response => response.request().method() === "PUT" && response.url().endsWith("/note"));
+    await staff.getByRole("button", { name: "التحقق من الحفظ" }).click();
+    expect((await deniedRetry).status()).toBe(404);
+    await expect(staff.getByRole("button", { name: "إلغاء", exact: true })).toBeEnabled();
+    await staff.getByRole("button", { name: "إلغاء", exact: true }).click();
+    await staff.getByRole("button", { name: "تجاهل التعديلات" }).click();
+    await expect(staff.getByRole("heading", { name: new RegExp(`ملاحظة غياب ${students[1].name}`) })).toHaveCount(0);
     expect((await staff.request.get(`${origin}/api/v1/center/${path}/${entryId}/note`)).status()).toBe(404);
     expect((await write(staff, `${path}/${entryId}/note`, { body: "بعد سحب المنحة", important: true,
       revision: 3, entry_revision: recordedAfterNote.students.find((row: { entry_id: string }) => row.entry_id === entryId).entry_revision,

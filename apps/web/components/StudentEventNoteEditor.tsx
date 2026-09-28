@@ -100,7 +100,12 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
           setConflict(true); setStaleOccurrence(occurrenceChanged); setUncertain(false);
           setError(occurrenceChanged ? "تغيرت واقعة الحضور منذ فتح الملاحظة. حمّل الواقعة الحالية قبل كتابة ملاحظة لها."
             : "تغيرت الملاحظة منذ فتحها. حمّل أحدث نسخة قبل الحفظ.");
-        } else setError(await responseMessage(response));
+        } else {
+          if ([401, 403, 404, 419, 422].includes(response.status)) {
+            setUncertain(false); requestId.current = null;
+          }
+          setError(await responseMessage(response));
+        }
         return;
       }
       const result = await response.json() as { note: StudyAttemptNote };
@@ -148,7 +153,7 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
       <CenterHeaderActions>
         {canEdit ? <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || (!dirty && !uncertain)}>{uncertain ? "التحقق من الحفظ" : detail.note ? "حفظ تعديل الملاحظة" : "إضافة الملاحظة"}</Button> : null}
         {conflict ? <Button disabled={busy} onClick={reload}>{staleOccurrence ? "تحميل الواقعة الحالية" : "تحميل أحدث نسخة"}</Button> : null}
-        <Button disabled={busy || uncertain} onClick={onClose}>إلغاء</Button>
+        <Button disabled={busy} onClick={onClose}>{uncertain ? "تجاهل المسودة" : "إلغاء"}</Button>
       </CenterHeaderActions>
       {detail.note ? <section aria-label="نسخ تعديل الملاحظة"><h4>تاريخ التعديل</h4>
         <ol>{detail.versions.map(version => <li key={version.revision}>
