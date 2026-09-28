@@ -11,7 +11,9 @@ async function signIn(page: Page, who: "alpha" | "staff" = "alpha") {
   await page.waitForLoadState("networkidle");
   await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(credentials[who].email);
   await page.getByRole("textbox", { name: "كلمة المرور", exact: true }).fill(credentials[who].password);
+  const loginResponse = page.waitForResponse(response => response.url().endsWith("/api/v1/center/auth/login") && response.request().method() === "POST");
   await page.getByRole("button", { name: "دخول المركز", exact: true }).click();
+  expect((await loginResponse).status()).toBe(200);
   await expect(page).toHaveURL(/\/admin$/);
 }
 
@@ -91,6 +93,89 @@ test("allocates a payment, reverses it with a reason, and updates the visible ba
   await expect(page.getByText("عكس تخصيص دفعة مقدمة").first()).toBeVisible();
   await page.getByText("تفاصيل عكس التخصيص").first().click();
   await expect(page.getByText("سجل على المجموعة خطأ").first()).toBeVisible();
+});
+
+test("suspended student with an incomplete old profile can settle existing fees through the account", async ({ page }) => {
+  await signIn(page);
+  const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+  const branchId = workspace.branches[0].id;
+  const group = await pricedGroup(page, branchId);
+  const definitions = await (await page.request.get(`${origin}/api/v1/center/student-custom-fields?manage=1`)).json();
+  const customValues = Object.fromEntries(definitions.fields
+    .filter((field: { active: boolean; required: boolean }) => field.active && field.required)
+    .map((field: { id: string; type: string; options: string[] }) => [field.id,
+      field.type === "number" ? "1" : field.type === "date" ? "2000-01-01" :
+        field.type === "select" ? field.options[0] : field.type === "boolean" ? false : "مكتمل"]));
+  const student = await write(page, "students", {
+    name: `سداد موقوف ${Date.now()}`, branch_ids: [branchId], request_id: crypto.randomUUID(),
+    custom_fields_revision: definitions.revision, custom_values: customValues,
+  });
+  expect(student.status).toBe(201);
+  const studentId = student.body.student.id;
+  const accountPath = `students/${studentId}/account`;
+  const settings = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  if (!settings.account.currency) expect((await write(page, "financial-currency", { currency: "EGP", revision: settings.account.currency_revision }, "PATCH")).status).toBe(200);
+  const enrollment = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+  expect((await write(page, `students/${studentId}/enrollments`, {
+    group_id: group.id, group_revision: group.revision, currency_revision: enrollment.student.currency_revision,
+    joined_on: "2026-09-28", discount: "0.00", discount_reason: null,
+    version: enrollment.student.version, request_id: crypto.randomUUID(),
+  })).status).toBe(201);
+  expect((await write(page, "student-custom-fields", {
+    id: crypto.randomUUID(), label: "بيان مطلوب بعد التسجيل", type: "text", required: true, position: 1, options: [],
+  })).status).toBe(201);
+  expect((await write(page, `students/${studentId}/status`, {
+    status: "suspended", reason: "توقف مؤقت", status_revision: 1, request_id: crypto.randomUUID(),
+  })).status).toBe(200);
+  await page.goto(`${origin}/admin/students/${studentId}`);
+  await expect(page.getByText("الملف ينقصه ١ من الحقول المطلوبة", { exact: false })).toBeVisible();
+  const queryLog = process.env.COURSES_FINANCE_QUERY_LOG;
+  const readQueries = () => queryLog ? readFileSync(queryLog, "utf8").trim().split("\n").filter(Boolean)
+    .map(line => JSON.parse(line) as { path: string; count: number | null }) : [];
+  const beforeNavigation = readQueries().length;
+  await page.getByRole("link", { name: "الحساب المالي" }).click();
+  await expect(page.getByText("ملف الطالب موقوف. يمكن استلام السداد", { exact: false })).toBeVisible();
+  if (queryLog) {
+    const reads = readQueries().slice(beforeNavigation).filter(entry => entry.path.startsWith(`/api/v1/center/${accountPath}`));
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every(entry => entry.count !== null && entry.count > 0)).toBe(true);
+    expect(reads.reduce((sum, entry) => sum + (entry.count ?? 0), 0)).toBeLessThanOrEqual(6);
+  }
+  await expect(page.getByText("المديونية المتبقية", { exact: false })).toContainText("100.00 EGP");
+
+  let submittedPayment: Record<string, unknown> | null = null;
+  page.on("request", request => {
+    if (request.method() === "POST" && request.url().endsWith(`/students/${studentId}/payments`)) {
+      submittedPayment = request.postDataJSON() as Record<string, unknown>;
+    }
+  });
+  await page.getByLabel("تاريخ الاستلام").fill("2026-09-28");
+  await page.getByLabel("المبلغ (EGP)").fill("60.00");
+  await page.getByRole("button", { name: "تسجيل الدفعة" }).click();
+  await expect(page.getByText("سُجلت الدفعة المقدمة", { exact: false })).toBeVisible();
+  expect(submittedPayment).not.toBeNull();
+  const account = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  const retry = await write(page, `students/${studentId}/payments`, submittedPayment!);
+  expect(retry.status).toBe(200);
+  expect(retry.body.payment.id).toBe(account.payments[0].id);
+  await page.getByRole("button", { name: "عرض وتخصيص" }).click();
+  await page.getByLabel(new RegExp(`المستحق 100.00.*المتبقي 100.00`)).fill("40.00");
+  await page.getByRole("button", { name: "تخصيص المبالغ المحددة" }).click();
+  await expect(page.getByText("حُفظ التخصيص", { exact: false })).toBeVisible();
+  const final = await page.request.get(`${origin}/api/v1/center/${accountPath}`);
+  expect(Number(final.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+  expect((await final.json()).account).toMatchObject({
+    student_status: "suspended", due_total: "100.00", received_total: "60.00",
+    allocated_total: "40.00", paid_total: "40.00", available_balance: "20.00", debt: "60.00",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "القائمة" }).click();
+  await page.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("button", { name: "إغلاق القائمة" }).click();
+  await expect(page.getByText("ملف الطالب موقوف. يمكن استلام السداد", { exact: false })).toBeVisible();
+  expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test("simultaneous allocations cannot spend one payment twice", async ({ page }) => {

@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\ActiveStudentAllocations;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
-use App\Support\ActiveStudentAllocations;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
@@ -52,7 +52,7 @@ class CenterStudentFinanceController extends Controller
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.target_branch_id', $readable))
             ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
         $student = StudentPhotos::visibleStudent($studentId, $permissions, 'finance.read')
-            ->select(['students.id', 'students.name', 'students.student_number', 'students.financial_account_revision'])
+            ->select(['students.id', 'students.name', 'students.student_number', 'students.status', 'students.financial_account_revision'])
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency'), 'currency')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency_revision'), 'currency_revision')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency_locked_at'), 'currency_locked_at')
@@ -99,12 +99,14 @@ class CenterStudentFinanceController extends Controller
             'permissions' => $permissions->toArray(),
             'account' => [
                 'student_id' => $student->id, 'student_name' => $student->name, 'student_number' => (int) $student->student_number,
+                'student_status' => $student->status,
                 'version' => StudentAccountVersion::forActor($student->id, $student->financial_account_revision, $request->user()->id),
                 'currency' => $student->currency, 'currency_revision' => (int) $student->currency_revision,
                 'currency_locked' => $student->currency_locked_at !== null,
                 'received_total' => StudentMoney::format(StudentMoney::cents($student->received_total)),
                 'due_total' => StudentMoney::format(StudentMoney::cents($student->due_total)),
                 'paid_total' => StudentMoney::format(StudentMoney::cents($student->paid_total)),
+                'allocated_total' => StudentMoney::format(StudentMoney::cents($student->used_total)),
                 'available_balance' => StudentMoney::format($unallocated),
                 'debt' => StudentMoney::format($outstanding),
             ],
