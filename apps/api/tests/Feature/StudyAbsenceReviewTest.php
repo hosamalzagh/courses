@@ -144,6 +144,77 @@ class StudyAbsenceReviewTest extends TestCase
         });
     }
 
+    public function test_bulk_waitlist_rechecks_each_previewed_student_and_keeps_individual_outcomes(): void
+    {
+        $scope = $this->group($this->north, 'Bulk');
+        $first = $this->student();
+        $second = $this->student();
+        $firstAttempt = $this->enroll($first['id'], $scope['group']);
+        $secondAttempt = $this->enroll($second['id'], $scope['group']);
+        $today = now('Africa/Cairo')->toDateString();
+        $preview = $this->postJson("{$this->base}/absence-review/waitlist-batches", [
+            'selection_mode' => 'all', 'branch_id' => $this->north, 'view' => 'all',
+            'entered_on' => $today, 'reason' => 'مراجعة الغياب والنقل الجماعي',
+        ])->assertCreated()->assertJsonPath('batch.total', 2)->assertJsonPath('batch.pending', 2);
+        $batchId = $preview->json('batch.id');
+        $this->assertCount(2, $preview->json('items'));
+
+        $revision = $this->getJson("{$this->base}/absence-review?view=all&branch_id={$this->north}")
+            ->assertOk()->json('students.0.attempt_revision');
+        $this->postJson("{$this->base}/students/{$first['id']}/enrollments/{$firstAttempt}/waitlist", [
+            'entered_on' => $today, 'reason' => 'نقل فردي سبق تنفيذ الدفعة',
+            'revision' => $revision, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+
+        $executed = $this->postJson("{$this->base}/absence-review/waitlist-batches/{$batchId}/execute")
+            ->assertOk()->assertJsonPath('batch.pending', 0)
+            ->assertJsonPath('batch.moved', 1)->assertJsonPath('batch.skipped', 1);
+        $this->assertContains('skipped', array_column($executed->json('items'), 'status'));
+        $this->assertContains('moved', array_column($executed->json('items'), 'status'));
+        $this->postJson("{$this->base}/absence-review/waitlist-batches/{$batchId}/execute")
+            ->assertOk()->assertJsonPath('batch.moved', 1)->assertJsonPath('batch.skipped', 1);
+        $this->getJson("{$this->base}/absence-review/waitlist-batches/{$batchId}")
+            ->assertOk()->assertJsonPath('batch.pending', 0);
+        $this->getJson("{$this->base}/absence-review?view=all&branch_id={$this->north}")
+            ->assertOk()->assertJsonCount(0, 'students');
+        $this->center->run(function () use ($firstAttempt, $secondAttempt): void {
+            $this->assertSame(2, DB::table('study_attempt_waitlists')->count());
+            $this->assertSame(2, DB::table('study_attempt_fees')->count());
+            $this->assertNull(DB::table('study_attempts')->where('id', $firstAttempt)->value('current_group_id'));
+            $this->assertNull(DB::table('study_attempts')->where('id', $secondAttempt)->value('current_group_id'));
+            $this->assertSame(1, DB::table('center_audit_logs')->where('event', 'student.study_bulk_waitlist_skipped')->count());
+        });
+        $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()
+            ->assertJsonFragment(['event' => 'student.study_bulk_waitlist_skipped']);
+        $this->grant([$this->north => ['branch_viewer', 'branch_auditor']]);
+        $this->asUser($this->staff);
+        $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()
+            ->assertJsonMissing(['event' => 'student.study_bulk_waitlist_skipped']);
+    }
+
+    public function test_bulk_waitlist_rejects_hidden_branch_and_revoked_permissions(): void
+    {
+        $scope = $this->group($this->north, 'Visible');
+        $student = $this->student();
+        $attemptId = $this->enroll($student['id'], $scope['group']);
+        $today = now('Africa/Cairo')->toDateString();
+        $preview = $this->postJson("{$this->base}/absence-review/waitlist-batches", [
+            'selection_mode' => 'selected', 'attempt_ids' => [$attemptId], 'branch_id' => $this->north, 'view' => 'all',
+            'entered_on' => $today, 'reason' => 'فحص الصلاحيات',
+        ])->assertCreated();
+        $batchId = $preview->json('batch.id');
+        $this->grant([$this->north => ['branch_viewer']]);
+        $this->asUser($this->staff);
+        $this->postJson("{$this->base}/absence-review/waitlist-batches", [
+            'selection_mode' => 'all', 'branch_id' => $this->south, 'view' => 'all',
+            'entered_on' => $today, 'reason' => 'فرع غير مصرح',
+        ])->assertNotFound();
+        $this->getJson("{$this->base}/absence-review/waitlist-batches/{$batchId}")->assertNotFound();
+        $this->postJson("{$this->base}/absence-review/waitlist-batches/{$batchId}/execute")->assertNotFound();
+        $this->asUser($this->owner);
+        $this->getJson("{$this->base}/absence-review/waitlist-batches/{$batchId}")->assertOk();
+    }
+
     private function group(int $branchId, string $name): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => $name, 'request_id' => (string) Str::uuid()])->assertCreated()->json('course');

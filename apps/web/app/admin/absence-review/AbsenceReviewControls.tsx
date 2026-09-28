@@ -2,6 +2,7 @@
 
 import { useId, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { AbsenceBulkWaitlist, AbsenceSelectionCell } from "./AbsenceBulkWaitlist";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions } from "@/components/CenterShell";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
@@ -59,6 +60,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   const [optionError, setOptionError] = useState("");
   const [pendingNavigation, setPendingNavigation] = useState<Record<FilterKey, string> | null>(null);
   const [pendingRule, setPendingRule] = useState<string | null>(null);
+  const [selectedAttemptIds, setSelectedAttemptIds] = useState<string[]>([]);
   const options = [...context.options, ...extraOptions.filter(option => !context.options.some(initial => initial.kind === option.kind && initial.id === option.id))];
   const pathCounts = new Map<string, number>();
   for (const option of options) {
@@ -219,6 +221,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
       </CenterHeaderActions>
     </section> : null}
 
+    <AbsenceBulkWaitlist context={context} filters={filters} selected={selectedAttemptIds} onSelectionChange={setSelectedAttemptIds} />
     <DataTable id="absence-review" title="طلاب الغياب" description="العداد التشغيلي يخص فترة الارتباط الحالية؛ الغياب السابق محفوظ للتاريخ." rows={context.students}
       rowKey={row => row.id} searchText={row => `${row.student_name} ${row.student_number}`} emptyMessage="لا توجد حالات ضمن هذا النطاق."
       serverSearch={{ value: filters.q ?? "", onSearch: q => navigate({
@@ -227,6 +230,12 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
       }) }}
       serverPagination={{ page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 50, previousHref: pageHref(Math.max(1, context.pagination.page - 1)), nextHref: pageHref(context.pagination.page + 1) }}
       columns={[
+        { key: "selection", label: "اختيار", actions: true, render: row => {
+          const allowed = row.student_status === "active" && (context.permissions.can_manage_center ||
+            context.permissions.branch_actions?.[String(row.branch_id)]?.includes("enrollment.manage"));
+          return allowed ? <AbsenceSelectionCell row={row} selected={selectedAttemptIds.includes(row.id)}
+            onToggle={(id, checked) => setSelectedAttemptIds(current => checked ? [...new Set([...current, id])] : current.filter(value => value !== id))} /> : "—";
+        } },
         { key: "student", label: "الطالب", render: row => <Link href={`/admin/students/${row.student_id}`}>{row.student_name} · {row.student_number.toLocaleString("ar-EG")}</Link> },
         { key: "scope", label: "النطاق", render: row => <>{row.branch_name} · {row.course_name} · {row.stage_name} · {row.level_name} · {row.group_name}</> },
         { key: "rule", label: "القاعدة", render: row => ruleText(row.effective_mode, row.effective_limit) },

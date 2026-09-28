@@ -5,11 +5,14 @@ namespace App\Http\Controllers;
 use App\Models\Center;
 use App\Models\CenterMembership;
 use App\Support\CenterPermissions;
+use App\Support\CenterWrites;
+use App\Support\StudyWaitlistEntry;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 class CenterAbsenceReviewController extends Controller
 {
@@ -110,6 +113,208 @@ class CenterAbsenceReviewController extends Controller
         });
     }
 
+    public function previewWaitlistBatch(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'selection_mode' => ['required', 'in:selected,all'],
+            'attempt_ids' => ['sometimes', 'array', 'min:1', 'max:200'],
+            'attempt_ids.*' => ['required', 'uuid', 'distinct'],
+            'branch_id' => ['sometimes', 'integer', 'min:1'],
+            'course_id' => ['sometimes', 'uuid'], 'stage_id' => ['sometimes', 'uuid'],
+            'level_id' => ['sometimes', 'uuid'], 'group_id' => ['sometimes', 'uuid'],
+            'view' => ['sometimes', 'in:review,all'], 'q' => ['sometimes', 'string', 'max:80'],
+            'entered_on' => ['required', 'date_format:Y-m-d', 'before_or_equal:'.now('Africa/Cairo')->toDateString()],
+            'reason' => ['required', 'string', 'max:2000'],
+        ]);
+        $reason = trim($data['reason']);
+        abort_if($reason === '', 422, 'أدخل سبب النقل إلى الانتظار.');
+        $selected = $data['selection_mode'] === 'selected' ? ($data['attempt_ids'] ?? []) : [];
+        abort_if($data['selection_mode'] === 'selected' && $selected === [], 422, 'اختر طالبًا واحدًا على الأقل.');
+        abort_if($data['selection_mode'] === 'all' && isset($data['attempt_ids']), 422);
+        $scope = array_intersect_key($data, array_flip(['branch_id', 'course_id', 'stage_id', 'level_id', 'group_id', 'view', 'q']));
+
+        return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $data, $reason, $selected, $scope): JsonResponse {
+            if (isset($scope['branch_id'])) {
+                abort_unless($permissions->can('enrollment.manage', (int) $scope['branch_id']), 404);
+            }
+            $batchId = (string) Str::uuid();
+            $now = now();
+            DB::connection('tenant')->table('study_waitlist_batches')->insert([
+                'id' => $batchId, 'actor_id' => $request->user()->id, 'actor_name' => $request->user()->name,
+                'selection_mode' => $data['selection_mode'], 'scope' => json_encode($scope),
+                'entered_on' => $data['entered_on'], 'reason' => $reason, 'item_count' => 0,
+                'created_at' => $now, 'updated_at' => $now,
+            ]);
+
+            $seen = [];
+            $count = 0;
+            for ($page = 1; ; $page++) {
+                $rows = $this->report($permissions, [...$scope, 'page' => $page], $selected ?: null);
+                $visible = array_slice($rows, 0, 50);
+                foreach ($visible as $row) {
+                    $seen[$row['id']] = true;
+                }
+                $manageable = array_values(array_filter($visible, fn (array $row) => $row['student_status'] === 'active' && $permissions->can('enrollment.manage', (int) $row['branch_id'])));
+                $eligible = $this->previewEligibleIds($manageable, $data['entered_on']);
+                $items = [];
+                foreach ($manageable as $row) {
+                    if (! isset($eligible[$row['id']])) {
+                        continue;
+                    }
+                    $items[] = [
+                        'batch_id' => $batchId, 'attempt_id' => $row['id'], 'student_id' => $row['student_id'],
+                        'branch_id' => $row['branch_id'], 'group_id' => $row['current_group_id'],
+                        'attempt_revision' => $row['attempt_revision'], 'student_name' => $row['student_name'],
+                        'student_number' => $row['student_number'], 'status' => 'pending',
+                    ];
+                }
+                if ($items !== []) {
+                    DB::connection('tenant')->table('study_waitlist_batch_items')->insert($items);
+                    $count += count($items);
+                }
+                if (count($rows) <= 50) {
+                    break;
+                }
+            }
+            abort_if($selected !== [] && count($seen) !== count($selected), 422, 'تغير نطاق التقرير أو لم تعد بعض الحالات ظاهرة. حدّث الصفحة وراجع الاختيار.');
+            abort_if($selected !== [] && $count !== count($selected), 422, 'بعض الطلاب المحددين غير مؤهلين للنقل في التاريخ المختار أو لا تملك صلاحية تسجيلهم. راجع الاختيار والتاريخ.');
+            abort_if($count === 0, 422, 'لا توجد حالات مؤهلة للنقل إلى الانتظار في النطاق المحدد.');
+            DB::connection('tenant')->table('study_waitlist_batches')->where('id', $batchId)
+                ->update(['item_count' => $count]);
+
+            return $this->batchResponse($batchId, $permissions, $request->user()->id, 1, 201);
+        })->header('Cache-Control', 'private, no-store');
+    }
+
+    public function showWaitlistBatch(Request $request, string $batchId): JsonResponse
+    {
+        abort_unless(Str::isUuid($batchId), 404);
+        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
+
+        return $this->batchResponse($batchId, $request->attributes->get('center_permissions'),
+            $request->user()->id, (int) ($data['page'] ?? 1))->header('Cache-Control', 'private, no-store');
+    }
+
+    public function executeWaitlistBatch(Request $request, string $batchId): JsonResponse
+    {
+        abort_unless(Str::isUuid($batchId), 404);
+
+        return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $batchId): JsonResponse {
+            $batch = $this->loadBatch($batchId, $permissions, $request->user()->id, true);
+            $items = DB::connection('tenant')->table('study_waitlist_batch_items')
+                ->where('batch_id', $batchId)->where('status', 'pending')->orderBy('id')
+                ->limit(25)->lockForUpdate()->get();
+            if ($items->isEmpty()) {
+                return $this->batchResponse($batchId, $permissions, $request->user()->id);
+            }
+            $scope = json_decode($batch->scope, true, flags: JSON_THROW_ON_ERROR);
+            $ids = $items->pluck('attempt_id')->all();
+            $current = collect($this->report($permissions, [...$scope, 'page' => 1], $ids))->keyBy('id');
+            foreach ($items as $item) {
+                $row = $current->get($item->attempt_id);
+                $reason = null;
+                $waitlistId = null;
+                if ($row === null || $row['student_status'] !== 'active' ||
+                    ! $permissions->can('enrollment.manage', (int) $row['branch_id']) ||
+                    (int) $row['branch_id'] !== (int) $item->branch_id ||
+                    (int) $row['attempt_revision'] !== (int) $item->attempt_revision ||
+                    $row['current_group_id'] !== $item->group_id) {
+                    $reason = 'تغيرت حالة الطالب أو مجموعته أو نطاق التقرير منذ المعاينة.';
+                } else {
+                    try {
+                        [$waitlist] = DB::connection('tenant')->transaction(fn () => StudyWaitlistEntry::enter(
+                            $item->student_id, $item->attempt_id, $batch->entered_on, $batch->reason,
+                            (int) $item->attempt_revision, (string) Str::uuid(),
+                            $request->user()->id, $request->user()->name, $permissions, $batchId,
+                        ));
+                        $waitlistId = $waitlist->id;
+                    } catch (HttpResponseException $exception) {
+                        $reason = $exception->getResponse()->status() === 409
+                            ? 'تغيرت حالة المحاولة أثناء التنفيذ.' : 'لم تعد الحالة مؤهلة للنقل.';
+                    } catch (HttpExceptionInterface $exception) {
+                        $reason = $exception->getStatusCode() === 422 && $exception->getMessage() !== ''
+                            ? $exception->getMessage() : 'لم تعد الحالة مؤهلة للنقل أو تغيرت الصلاحية.';
+                    }
+                }
+                DB::connection('tenant')->table('study_waitlist_batch_items')->where('id', $item->id)->update([
+                    'status' => $waitlistId === null ? 'skipped' : 'moved',
+                    'waitlist_id' => $waitlistId, 'result_reason' => $reason, 'processed_at' => now(),
+                ]);
+                if ($reason !== null) {
+                    DB::connection('tenant')->table('center_audit_logs')->insert([
+                        'actor_id' => $request->user()->id, 'branch_id' => $item->branch_id,
+                        'event' => 'student.study_bulk_waitlist_skipped',
+                        'details' => json_encode(['batch_id' => $batchId, 'student_id' => $item->student_id,
+                            'attempt_id' => $item->attempt_id, 'reason' => $reason]),
+                        'created_at' => now(),
+                    ]);
+                }
+            }
+
+            return $this->batchResponse($batchId, $permissions, $request->user()->id);
+        })->header('Cache-Control', 'private, no-store');
+    }
+
+    private function previewEligibleIds(array $rows, string $enteredOn): array
+    {
+        if ($rows === []) {
+            return [];
+        }
+        $ids = array_column($rows, 'id');
+        $eligible = DB::connection('tenant')->table('study_attempt_group_periods as periods')
+            ->join('study_attempts as attempts', 'attempts.id', '=', 'periods.attempt_id')
+            ->whereIn('periods.attempt_id', $ids)->whereNull('periods.left_on')
+            ->whereColumn('periods.group_id', 'attempts.current_group_id')
+            ->where('periods.joined_on', '<=', $enteredOn)
+            ->whereNotExists(function ($query) use ($enteredOn): void {
+                $query->selectRaw('1')->from('study_attendance_entries as entries')
+                    ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
+                    ->whereColumn('entries.attempt_id', 'periods.attempt_id')
+                    ->whereColumn('sessions.group_id', 'periods.group_id')
+                    ->whereNotNull('entries.status')
+                    ->whereRaw("(sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= ?::date", [$enteredOn]);
+            })
+            ->pluck('periods.attempt_id')->all();
+
+        return array_fill_keys($eligible, true);
+    }
+
+    private function loadBatch(string $batchId, CenterPermissions $permissions, int $actorId, bool $lock = false): object
+    {
+        $query = DB::connection('tenant')->table('study_waitlist_batches')
+            ->where('id', $batchId)->where('actor_id', $actorId);
+        $batch = ($lock ? $query->lockForUpdate() : $query)->first();
+        abort_unless($batch, 404);
+        $branches = DB::connection('tenant')->table('study_waitlist_batch_items')
+            ->where('batch_id', $batchId)->distinct()->pluck('branch_id');
+        foreach ($branches as $branchId) {
+            abort_unless($permissions->can('enrollment.manage', (int) $branchId), 403);
+        }
+
+        return $batch;
+    }
+
+    private function batchResponse(string $batchId, CenterPermissions $permissions, int $actorId, int $page = 1, int $status = 200): JsonResponse
+    {
+        $batch = $this->loadBatch($batchId, $permissions, $actorId);
+        $counts = DB::connection('tenant')->table('study_waitlist_batch_items')->where('batch_id', $batchId)
+            ->selectRaw("count(*) FILTER (WHERE status = 'pending') AS pending, count(*) FILTER (WHERE status = 'moved') AS moved, count(*) FILTER (WHERE status = 'skipped') AS skipped")
+            ->first();
+        $items = DB::connection('tenant')->table('study_waitlist_batch_items')
+            ->where('batch_id', $batchId)->orderBy('id')->offset(($page - 1) * 50)->limit(51)
+            ->get(['attempt_id', 'student_id', 'student_name', 'student_number', 'branch_id', 'status', 'result_reason', 'waitlist_id']);
+
+        return response()->json([
+            'batch' => ['id' => $batch->id, 'selection_mode' => $batch->selection_mode,
+                'scope' => json_decode($batch->scope, true, flags: JSON_THROW_ON_ERROR),
+                'entered_on' => $batch->entered_on, 'reason' => $batch->reason,
+                'total' => (int) $batch->item_count, 'pending' => (int) $counts->pending,
+                'moved' => (int) $counts->moved, 'skipped' => (int) $counts->skipped],
+            'items' => $items->take(50)->values(),
+            'pagination' => ['page' => $page, 'has_more' => $items->count() > 50],
+        ], $status);
+    }
+
     private function ruleRow(string $kind, string $id, bool $lock): ?object
     {
         $query = DB::connection('tenant')->table($kind);
@@ -184,13 +389,14 @@ SQL;
         ];
     }
 
-    private function report(CenterPermissions $permissions, array $data): array
+    private function report(CenterPermissions $permissions, array $data, ?array $attemptIds = null): array
     {
         $scope = $this->scopeSql($permissions, 'courses.branch_id');
         $periodScope = $this->scopeSql($permissions, 'period_courses.branch_id');
         $sql = <<<SQL
 WITH candidates AS (
  SELECT attempts.id, attempts.student_id, students.name AS student_name, students.student_number,
+   students.status AS student_status, attempts.revision AS attempt_revision, attempts.current_group_id,
    courses.branch_id, branches.name AS branch_name, courses.name AS course_name,
    stages.name AS stage_name, levels.name AS level_name, study_groups.name AS group_name,
    COALESCE(study_groups.absence_mode, levels.absence_mode, stages.absence_mode, courses.absence_mode) AS effective_mode,
@@ -205,6 +411,7 @@ WITH candidates AS (
  JOIN courses ON courses.id = stages.course_id
  JOIN branches ON branches.id = courses.branch_id
  WHERE attempts.status = 'active' AND {$scope['sql']}
+   AND (?::uuid[] IS NULL OR attempts.id = ANY(?::uuid[]))
    AND (?::bigint IS NULL OR courses.branch_id = ?::bigint)
    AND (?::uuid IS NULL OR courses.id = ?::uuid)
    AND (?::uuid IS NULL OR stages.id = ?::uuid)
@@ -246,13 +453,15 @@ WITH candidates AS (
           ELSE COALESCE(stats.consecutive_absences, 0) END >= c.effective_limit) AS needs_review
  FROM candidates c LEFT JOIN stats ON stats.attempt_id = c.id
 )
-SELECT id, student_id, student_name, student_number, branch_id, branch_name, course_name, stage_name,
+SELECT id, student_id, student_name, student_number, student_status, attempt_revision, current_group_id,
+  branch_id, branch_name, course_name, stage_name,
   level_name, group_name, effective_mode, effective_limit, total_absences, consecutive_absences,
   historical_absences, needs_review
 FROM calculated WHERE (?::text = 'all' OR needs_review)
 ORDER BY student_name, student_number, id OFFSET ? LIMIT 51
 SQL;
-        $bindings = $scope['bindings'];
+        $idArray = $attemptIds === null ? null : '{'.implode(',', $attemptIds).'}';
+        $bindings = [...$scope['bindings'], $idArray, $idArray];
         foreach (['branch_id', 'course_id', 'stage_id', 'level_id', 'group_id'] as $key) {
             $value = $data[$key] ?? null;
             $bindings[] = $value;

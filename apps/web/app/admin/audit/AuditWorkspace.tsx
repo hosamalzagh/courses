@@ -39,6 +39,7 @@ const eventNames: Record<string, string> = {
   "student.study_waitlisted": "نقل الطالب إلى انتظار المستوى",
   "student.study_reattached": "إعادة إلحاق الطالب بالمحاولة نفسها",
   "student.study_transferred": "نقل محاولة الدراسة بين المجموعات أو الفروع",
+  "student.study_bulk_waitlist_skipped": "استبعاد طالب من نقل جماعي إلى الانتظار",
   "student.study_attempt_note_created": "إضافة ملاحظة على تسجيل الطالب",
   "student.study_attempt_note_updated": "تعديل ملاحظة تسجيل الطالب",
   "student.attendance_note_created": "إضافة ملاحظة على حضور أو غياب الطالب",
