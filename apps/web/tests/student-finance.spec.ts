@@ -168,7 +168,9 @@ test("suspended student with an incomplete old profile can settle existing fees 
   await page.getByRole("button", { name: "تسجيل الدفعة" }).click();
   await expect(page.getByText("سُجلت الدفعة المقدمة", { exact: false })).toBeVisible();
   expect(submittedPayment).not.toBeNull();
-  const account = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  const accountResponse = await page.request.get(`${origin}/api/v1/center/${accountPath}`);
+  expect(Number(accountResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+  const account = await accountResponse.json();
   const retry = await write(page, `students/${studentId}/payments`, submittedPayment!);
   expect(retry.status).toBe(200);
   expect(retry.body.payment.id).toBe(account.payments[0].id);
@@ -267,7 +269,9 @@ test("edits payment and allocation notes while financial permissions hide other 
   await page.getByRole("textbox", { name: "نص الملاحظة" }).fill("تخصيص لأول رسوم");
   await page.getByRole("button", { name: "إضافة الملاحظة" }).click();
   await expect(page.getByText("تخصيص لأول رسوم")).toBeVisible();
-  const account = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  const accountResponse = await page.request.get(`${origin}/api/v1/center/${accountPath}`);
+  expect(Number(accountResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+  const account = await accountResponse.json();
   expect(account.account).toMatchObject({ received_total: "95.00", paid_total: "30.00", available_balance: "65.00" });
   expect(JSON.stringify(account)).not.toContain("تحقق من إيصال الدفعة");
   const noteResponse = await page.request.get(`${origin}/api/v1/center/students/${studentId}/payments/${northPaymentId}/note`);
