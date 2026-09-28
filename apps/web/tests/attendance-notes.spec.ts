@@ -176,7 +176,8 @@ test("attendance and closed absence notes keep versions, importance and event pe
     expect((await write(owner, `members/${membershipId}/grants`, { center_roles: [], branch_roles: {} }, "PUT")).status).toBe(200);
     expect((await staff.request.get(`${origin}/api/v1/center/${path}/${entryId}/note`)).status()).toBe(404);
     expect((await write(staff, `${path}/${entryId}/note`, { body: "بعد سحب المنحة", important: true,
-      revision: 3, request_id: crypto.randomUUID() }, "PUT")).status).toBe(404);
+      revision: 3, entry_revision: recordedAfterNote.students.find((row: { entry_id: string }) => row.entry_id === entryId).entry_revision,
+      request_id: crypto.randomUUID() }, "PUT")).status).toBe(404);
     await staff.reload();
     await expect(staff.getByText("حضر مع مراجعة الواجب")).toHaveCount(0);
   } finally {

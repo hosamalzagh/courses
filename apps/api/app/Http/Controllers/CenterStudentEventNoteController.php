@@ -108,12 +108,13 @@ class CenterStudentEventNoteController extends Controller
             ->where('note_id', $entry->note_id)->orderByDesc('revision')->offset(($page - 1) * 20)->limit(21)
             ->get(['revision', 'body', 'important', 'actor_name', 'created_at']);
 
-        return response()->json(['note' => $entry->note_id === null ? null : [
-            'id' => $entry->note_id, 'body' => $entry->note_body, 'important' => (bool) $entry->note_important,
-            'revision' => (int) $entry->note_revision, 'created_by_name' => $entry->note_created_by_name,
-            'updated_by_name' => $entry->note_updated_by_name, 'created_at' => $entry->note_created_at,
-            'updated_at' => $entry->note_updated_at,
-        ],
+        return response()->json(['entry_revision' => (int) $entry->revision,
+            'note' => $entry->note_id === null ? null : [
+                'id' => $entry->note_id, 'body' => $entry->note_body, 'important' => (bool) $entry->note_important,
+                'revision' => (int) $entry->note_revision, 'created_by_name' => $entry->note_created_by_name,
+                'updated_by_name' => $entry->note_updated_by_name, 'created_at' => $entry->note_created_at,
+                'updated_at' => $entry->note_updated_at,
+            ],
             'versions' => $versions->take(20)->values(),
             'pagination' => ['page' => $page, 'has_more' => $versions->count() > 20],
         ])->header('Cache-Control', 'private, no-store');
@@ -125,9 +126,11 @@ class CenterStudentEventNoteController extends Controller
         $request->merge(['body' => is_string($request->input('body')) ? trim($request->input('body')) : $request->input('body')]);
         $data = $request->validate(['body' => ['required', 'string', 'max:2000'],
             'important' => ['required', 'boolean'], 'revision' => ['required', 'integer', 'min:0'],
+            'entry_revision' => ['required', 'integer', 'min:1'],
             'request_id' => ['required', 'uuid']]);
         $data['important'] = (bool) $data['important'];
-        $hash = hash('sha256', json_encode([$groupId, $sessionId, $entryId, $data['body'], $data['important'], (int) $data['revision']]));
+        $hash = hash('sha256', json_encode([$groupId, $sessionId, $entryId, (int) $data['entry_revision'],
+            $data['body'], $data['important'], (int) $data['revision']]));
 
         return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $groupId, $sessionId, $entryId, $data, $hash): JsonResponse {
             $db = DB::connection('tenant');
@@ -135,6 +138,9 @@ class CenterStudentEventNoteController extends Controller
             abort_unless($entry && $entry->status !== null && $permissions->can('read', (int) $entry->branch_id)
                 && ($permissions->can('attendance.record', (int) $entry->branch_id)
                     || $permissions->can('attendance.correct', (int) $entry->branch_id)), 404);
+            if ((int) $entry->revision !== (int) $data['entry_revision']) {
+                $this->conflict('attendance_occurrence_changed');
+            }
 
             return $this->persist($request, $db, 'attendance:'.$entry->revision, $entryId, $entry->student_id,
                 (int) $entry->branch_id, $data, $hash, ['entry_id' => $entryId, 'session_id' => $sessionId]);

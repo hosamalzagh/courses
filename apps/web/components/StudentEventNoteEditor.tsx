@@ -12,7 +12,7 @@ import { centerRequest, newSubmissionId, responseMessage } from "@/lib/client-ap
 import type { StudyAttemptNote } from "@/lib/server-context";
 
 type NoteVersion = { revision: number; body: string; important: boolean; actor_name: string; created_at: string };
-type Detail = { note: (StudyAttemptNote & { created_by_name: string; created_at: string; updated_at: string }) | null;
+type Detail = { entry_revision?: number; note: (StudyAttemptNote & { created_by_name: string; created_at: string; updated_at: string }) | null;
   versions: NoteVersion[]; pagination: { page: number; has_more: boolean } };
 export function StudentEventNoteEditor({ path, title, description, onClose, onSaved, onDirtyChange, canEdit = true }: {
   path: string; title: string; description: string; onClose: () => void; canEdit?: boolean;
@@ -27,6 +27,7 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
+  const [staleOccurrence, setStaleOccurrence] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -55,11 +56,12 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
       const response = await centerRequest(path, "GET");
       if (!response.ok) { setError(await responseMessage(response)); return; }
       const fresh = await response.json() as Detail;
-      const preserveDraft = conflict && dirty;
+      const preserveDraft = conflict && dirty && !staleOccurrence;
       setDetail(fresh);
       if (!preserveDraft) { setBody(fresh.note?.body ?? ""); setImportant(fresh.note?.important ?? false); }
-      setConflict(false); setUncertain(false); requestId.current = null;
-      setNotice(preserveDraft ? "حُمّلت أحدث نسخة وبقيت مسودتك. قارنها بتاريخ التعديل قبل إعادة الحفظ." : "حُمّلت أحدث نسخة. راجعها قبل التعديل.");
+      setConflict(false); setStaleOccurrence(false); setUncertain(false); requestId.current = null;
+      setNotice(staleOccurrence ? "حُمّلت واقعة الحضور الحالية وتُركت المسودة القديمة. اكتب ملاحظة جديدة إذا كانت مناسبة لها."
+        : preserveDraft ? "حُمّلت أحدث نسخة وبقيت مسودتك. قارنها بتاريخ التعديل قبل إعادة الحفظ." : "حُمّلت أحدث نسخة. راجعها قبل التعديل.");
     } catch { setError("تعذر تحميل أحدث نسخة. تحقق من الاتصال وأعد المحاولة."); }
     finally { setBusy(false); }
   }
@@ -89,16 +91,21 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
       requestId.current ??= newSubmissionId();
       const response = await centerRequest(path, "PUT", {
         body: trimmed, important, revision: detail.note?.revision ?? 0, request_id: requestId.current,
+        ...(detail.entry_revision !== undefined ? { entry_revision: detail.entry_revision } : {}),
       });
       if (!response.ok) {
         if (response.status === 409) {
-          setConflict(true); setUncertain(false); setError("تغيرت الملاحظة منذ فتحها. حمّل أحدث نسخة قبل الحفظ.");
+          const result = await response.clone().json().catch(() => ({}));
+          const occurrenceChanged = result.code === "attendance_occurrence_changed";
+          setConflict(true); setStaleOccurrence(occurrenceChanged); setUncertain(false);
+          setError(occurrenceChanged ? "تغيرت واقعة الحضور منذ فتح الملاحظة. حمّل الواقعة الحالية قبل كتابة ملاحظة لها."
+            : "تغيرت الملاحظة منذ فتحها. حمّل أحدث نسخة قبل الحفظ.");
         } else setError(await responseMessage(response));
         return;
       }
       const result = await response.json() as { note: StudyAttemptNote };
       onSaved(result.note);
-      requestId.current = null; setUncertain(false); setConflict(false);
+      requestId.current = null; setUncertain(false); setConflict(false); setStaleOccurrence(false);
       setNotice("حُفظت الملاحظة ونسخة تعديلها دون تغيير الواقعة.");
       setDetail(previous => previous ? { ...previous, note: result.note as Detail["note"] } : previous);
       setBody(result.note.body); setImportant(result.note.important);
@@ -140,7 +147,7 @@ export function StudentEventNoteEditor({ path, title, description, onClose, onSa
       </form> : detail.note ? <p>{detail.note.body}{detail.note.important ? " · مهمة" : ""}</p> : <p>لا توجد ملاحظة لهذا الحضور.</p>}
       <CenterHeaderActions>
         {canEdit ? <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || (!dirty && !uncertain)}>{uncertain ? "التحقق من الحفظ" : detail.note ? "حفظ تعديل الملاحظة" : "إضافة الملاحظة"}</Button> : null}
-        {conflict ? <Button disabled={busy} onClick={reload}>تحميل أحدث نسخة</Button> : null}
+        {conflict ? <Button disabled={busy} onClick={reload}>{staleOccurrence ? "تحميل الواقعة الحالية" : "تحميل أحدث نسخة"}</Button> : null}
         <Button disabled={busy || uncertain} onClick={onClose}>إلغاء</Button>
       </CenterHeaderActions>
       {detail.note ? <section aria-label="نسخ تعديل الملاحظة"><h4>تاريخ التعديل</h4>
