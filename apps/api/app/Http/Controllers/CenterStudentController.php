@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use App\Support\StudentAttachments;
 use App\Support\StudentBarcode;
 use App\Support\StudentContacts;
 use App\Support\StudentCustomFields;
@@ -33,8 +34,9 @@ class CenterStudentController extends Controller
             'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'status_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'branches_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
-            'tab' => ['sometimes', 'in:custom-history'],
+            'tab' => ['sometimes', 'in:custom-history,attachments'],
             'custom_history_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'attachments_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'q' => ['nullable', 'string', 'max:255'],
             'identifier' => ['nullable', 'string', 'max:50'],
         ]);
@@ -93,6 +95,22 @@ class CenterStudentController extends Controller
             $history = StudentCustomFields::historyQuery($historyPage, $permissions)->whereColumn('history.student_id', 'students.id');
             $query->selectSub(DB::connection('tenant')->query()->fromSub($history, 'history_rows')->selectRaw('json_agg(history_rows ORDER BY id DESC)'), 'custom_history');
         }
+        if ($studentId !== null && ($data['tab'] ?? '') === 'attachments') {
+            $attachmentPage = (int) ($data['attachments_page'] ?? 1);
+            $attachments = DB::connection('tenant')->table('student_attachments')
+                ->whereColumn('student_attachments.student_id', 'students.id')
+                ->when(! $permissions->isCenterManager(), function (Builder $rows) use ($permissions): void {
+                    $rows->where(function (Builder $visible) use ($permissions): void {
+                        $visible->where('classification', 'general')->orWhereExists(DB::connection('tenant')->table('student_branches')
+                            ->whereColumn('student_branches.student_id', 'students.id')
+                            ->whereIn('student_branches.branch_id', StudentIdentity::readableBranches($permissions))->selectRaw('1'));
+                    });
+                })
+                ->orderByDesc('created_at')->orderByDesc('id')
+                ->offset(($attachmentPage - 1) * 20)->limit(21)
+                ->select(['id', 'student_id', 'title', 'classification', 'mime', 'size_bytes', 'created_at']);
+            $query->selectSub(DB::connection('tenant')->query()->fromSub($attachments, 'attachment_rows')->selectRaw('json_agg(attachment_rows ORDER BY created_at DESC, id DESC)'), 'attachments');
+        }
         $students = $query->orderBy('student_number')->offset(($page - 1) * 50)->limit(51)->get();
         if ($studentId !== null) {
             abort_if($students->isEmpty(), 404);
@@ -110,6 +128,7 @@ class CenterStudentController extends Controller
             'students' => $students->take(50)->map(fn (stdClass $student): array => $this->payload($student, $permissions))->values(),
             ...($studentId !== null ? ['suspensions' => array_slice(json_decode($students->first()->suspensions ?? '[]', true) ?? [], 0, 20), 'status_pagination' => ['page' => $statusPage, 'has_more' => count(json_decode($students->first()->suspensions ?? '[]', true) ?? []) > 20]] : []),
             ...(isset($historyPage) ? ['custom_history' => ['entries' => array_slice(json_decode($students->first()->custom_history ?? '[]', true) ?? [], 0, 50), 'pagination' => ['page' => $historyPage, 'has_more' => count(json_decode($students->first()->custom_history ?? '[]', true) ?? []) > 50]]] : []),
+            ...(isset($attachmentPage) ? ['attachments' => ['entries' => collect(json_decode($students->first()->attachments ?? '[]') ?? [])->take(20)->map(fn (stdClass $row): array => StudentAttachments::payload($row))->values(), 'pagination' => ['page' => $attachmentPage, 'has_more' => count(json_decode($students->first()->attachments ?? '[]', true) ?? []) > 20]]] : []),
             'pagination' => ['page' => $page, 'has_more' => $students->count() > 50, 'branches_page' => $branchPage, 'branches_has_more' => $branches->count() > 50],
         ])->header('Cache-Control', 'private, no-store');
     }
@@ -446,7 +465,7 @@ class CenterStudentController extends Controller
 
         return DB::connection('tenant')->table('students')
             ->when($includeProfileDetails, fn (Builder $query) => $query->selectRaw("CASE WHEN {$identityScope} THEN json_build_object('national_id', national_id, 'passport_number', passport_number) ELSE NULL END AS identity"))
-            ->addSelect(['students.id', 'student_number', 'manual_code', 'name', 'students.phone as legacy_phone', 'contacts', 'channels', 'revision', 'created_by', 'created_at', 'sharing_enabled', 'status', 'status_revision', 'photo_revision', ...self::GENERAL_FIELDS])
+            ->addSelect(['students.id', 'student_number', 'manual_code', 'name', 'students.phone as legacy_phone', 'contacts', 'channels', 'revision', 'created_by', 'created_at', 'sharing_enabled', 'status', 'status_revision', 'photo_revision', 'attachment_revision', ...self::GENERAL_FIELDS])
             ->selectRaw(StudentContacts::phoneSql().' as phone')
             ->selectSub(StudentProfileChoices::selectedQuery(), 'profile_choices')
             ->when($includeProfileDetails, fn (Builder $query) => $query->selectSub(StudentCustomFields::valuesQuery($permissions), 'custom_values')->selectSub(StudentPhotos::summaryQuery(), 'photo'))
@@ -478,6 +497,7 @@ class CenterStudentController extends Controller
             'status' => $row->status, 'status_revision' => $row->status_revision, 'can_change_status' => $permissions->isCenterManager(),
             'created_by' => $row->created_by, 'created_at' => $row->created_at,
             'photo' => isset($row->photo) ? json_decode($row->photo, true) : null, 'photo_revision' => $row->photo_revision,
+            'attachment_revision' => $row->attachment_revision,
             'manual_code' => $row->manual_code,
             'id' => $row->id, 'student_number' => $row->student_number, 'name' => $row->name, 'phone' => $row->phone,
             'revision' => $row->revision, 'branch_ids' => $branches, 'sharing_enabled' => (bool) $row->sharing_enabled,

@@ -8,6 +8,7 @@ use App\Http\Controllers\CenterInstructorController;
 use App\Http\Controllers\CenterMemberController;
 use App\Http\Controllers\CenterSecurityController;
 use App\Http\Controllers\CenterSettingsController;
+use App\Http\Controllers\CenterStudentAttachmentController;
 use App\Http\Controllers\CenterStudentController;
 use App\Http\Controllers\CenterStudentCustomFieldController;
 use App\Http\Controllers\CenterStudentNumberingController;
@@ -85,6 +86,9 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('students/{studentId}/barcode', [CenterStudentController::class, 'barcode']);
         Route::post('students/{studentId}/photo', [CenterStudentPhotoController::class, 'store']);
         Route::get('students/{studentId}/photo/{photoId}', [CenterStudentPhotoController::class, 'show']);
+        Route::post('students/{studentId}/attachments', [CenterStudentAttachmentController::class, 'store']);
+        Route::get('students/{studentId}/attachments/{attachmentId}/preview', [CenterStudentAttachmentController::class, 'preview']);
+        Route::get('students/{studentId}/attachments/{attachmentId}/download', [CenterStudentAttachmentController::class, 'download']);
         Route::get('students/{studentId}', [CenterStudentController::class, 'workspace']);
         Route::post('students/{studentId}/status', [CenterStudentStatusController::class, 'store']);
         Route::post('students', [CenterStudentController::class, 'store']);

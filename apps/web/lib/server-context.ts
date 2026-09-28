@@ -51,9 +51,11 @@ export type StudentContact = { id: string; name: string; relationship: string; p
 export type StudentContactsData = { contacts: StudentContact[]; channels: Record<StudentChannelKind, { contact_id: string; phone: string } | null> };
 export type StudentIdentityData = { national_id: string | null; passport_number: string | null };
 export type StudentPhoto = { id:string; preview:string; url:string };
-export type Student = { photo: StudentPhoto | null; photo_revision:number;custom_values?:StudentCustomValues;missing_custom_fields:number; identity?: StudentIdentityData; can_read_identity: boolean; can_manage_identity: boolean } & StudentGeneralData & StudentContactsData & { legacy_phone: string | null; manual_code: string | null } & { profile_choices: Partial<Record<StudentChoiceKind, StudentProfileChoice>>; age: number | null; created_by: number; created_at: string; id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean; sharing_enabled: boolean; status: 'active' | 'suspended'; status_revision: number; can_change_status: boolean };
+export type StudentAttachment = {id:string;title:string;classification:'general'|'identity';mime:string;size_bytes:number;created_at:string;preview_url:string;download_url:string};
+export type StudentAttachmentPage = {entries:StudentAttachment[];pagination:{page:number;has_more:boolean}};
+export type Student = { photo: StudentPhoto | null; photo_revision:number;attachment_revision:number;custom_values?:StudentCustomValues;missing_custom_fields:number; identity?: StudentIdentityData; can_read_identity: boolean; can_manage_identity: boolean } & StudentGeneralData & StudentContactsData & { legacy_phone: string | null; manual_code: string | null } & { profile_choices: Partial<Record<StudentChoiceKind, StudentProfileChoice>>; age: number | null; created_by: number; created_at: string; id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean; sharing_enabled: boolean; status: 'active' | 'suspended'; status_revision: number; can_change_status: boolean };
 export type StudentSuspension = { id: string; suspended_by: number; suspended_by_name: string; suspended_reason: string; suspended_at: string; lifted_by: number | null; lifted_by_name: string | null; lifted_reason: string | null; lifted_at: string | null };
-export type StudentContext = CenterContext & {custom_history?:StudentCustomHistory;custom_fields:StudentCustomFieldList; student_code_settings: {enabled:boolean;label:string;revision:number}; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
+export type StudentContext = CenterContext & {custom_history?:StudentCustomHistory;attachments?:StudentAttachmentPage;custom_fields:StudentCustomFieldList; student_code_settings: {enabled:boolean;label:string;revision:number}; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type Instructor = { id: string; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
 export type InstructorContext = CenterContext & { instructors: Instructor[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type StudentSearchPolicy = { enabled: boolean; revision: number; default_sharing_enabled: boolean };
@@ -166,7 +168,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   const detail = path.match(/^\/admin\/(students|instructors|curriculum)\/([^/]+)$/);
   if (detail) {
     const id = decodeURIComponent(detail[2]);
-    if (detail[1] === "students") return loadStudentWorkspace(query(["status_page", "tab", "custom_history_page"]), id);
+    if (detail[1] === "students") return loadStudentWorkspace(query(["status_page", "tab", "custom_history_page", "attachments_page"]), id);
     if (detail[1] === "instructors") return loadInstructorWorkspace("", id);
     return loadCurriculumWorkspace("", id);
   }
