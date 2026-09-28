@@ -16,10 +16,10 @@ JOIN study_attempt_group_periods AS periods
     ON periods.group_id = sessions.group_id
     AND periods.joined_on <= (sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date
     AND (periods.left_on IS NULL OR periods.left_on > (sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date)
-    AND periods.created_at <= (sessions.closed_at AT TIME ZONE 'UTC')
+    AND periods.created_at < (sessions.closed_at AT TIME ZONE 'UTC')
 JOIN study_attempts AS attempts
     ON attempts.id = periods.attempt_id
-    AND attempts.created_at <= (sessions.closed_at AT TIME ZONE 'UTC')
+    AND attempts.created_at < (sessions.closed_at AT TIME ZONE 'UTC')
 JOIN student_suspensions AS suspensions
     ON suspensions.student_id = attempts.student_id
     AND suspensions.suspended_at <= sessions.scheduled_at
