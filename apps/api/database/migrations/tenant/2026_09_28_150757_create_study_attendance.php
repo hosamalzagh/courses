@@ -62,6 +62,7 @@ SQL);
             $table->unsignedBigInteger('actor_id');
             $table->foreignUuid('entry_id')->nullable()->constrained('study_attendance_entries')->restrictOnDelete();
             $table->unsignedInteger('result_revision');
+            $table->jsonb('result_entry')->nullable();
             $table->timestampTz('created_at');
         });
     }

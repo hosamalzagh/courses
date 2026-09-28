@@ -68,7 +68,7 @@ class CenterStudyAttendanceController extends Controller
             abort_unless($permissions->can('attendance.record', (int) $session->branch_id), 403);
             $hash = hash('sha256', json_encode([$sessionId, 'record', $data['attempt_id'], $data['status']]));
             if ($previous = $this->submission($request, $sessionId, $data['request_id'], $hash)) {
-                return response()->json(['entry' => DB::connection('tenant')->table('study_attendance_entries')->where('id', $previous->entry_id)->first(), 'revision' => $previous->result_revision]);
+                return response()->json(['entry' => json_decode($previous->result_entry), 'revision' => $previous->result_revision]);
             }
             $this->open($session, (int) $data['revision']);
             $eligible = $this->roster($session)->where('attempts.id', $data['attempt_id'])->first();
@@ -90,14 +90,14 @@ class CenterStudyAttendanceController extends Controller
             }
             $this->event($sessionId, $data['attempt_id'], 'record', null, $data['status'], $request->user()->id, $session->revision + 1);
             $this->advance($sessionId, $session->revision + 1);
-            $this->saveSubmission($data['request_id'], $sessionId, 'record', $hash, $request->user()->id, $entryId, $session->revision + 1);
+            $entry = DB::connection('tenant')->table('study_attendance_entries')->where('id', $entryId)->first();
+            $this->saveSubmission($data['request_id'], $sessionId, 'record', $hash, $request->user()->id, $entryId, $session->revision + 1, $entry);
             $this->audit($request->user()->id, (int) $session->branch_id, 'study_attendance.recorded', [
                 'group_id' => $groupId, 'session_id' => $sessionId, 'attempt_id' => $data['attempt_id'],
                 'before' => null, 'after' => $data['status'],
             ]);
 
-            return response()->json(['entry' => DB::connection('tenant')->table('study_attendance_entries')->where('id', $entryId)->first(),
-                'revision' => $session->revision + 1], 201);
+            return response()->json(['entry' => $entry, 'revision' => $session->revision + 1], 201);
         });
     }
 
@@ -111,7 +111,7 @@ class CenterStudyAttendanceController extends Controller
             abort_unless($permissions->can('attendance.undo_own', (int) $session->branch_id), 403);
             $hash = hash('sha256', json_encode([$sessionId, 'undo', $entryId]));
             if ($previous = $this->submission($request, $sessionId, $data['request_id'], $hash)) {
-                return response()->json(['entry' => DB::connection('tenant')->table('study_attendance_entries')->where('id', $previous->entry_id)->first(), 'revision' => $previous->result_revision]);
+                return response()->json(['entry' => json_decode($previous->result_entry), 'revision' => $previous->result_revision]);
             }
             $this->open($session, (int) $data['revision']);
             $entry = DB::connection('tenant')->table('study_attendance_entries')->where('id', $entryId)->where('session_id', $sessionId)->lockForUpdate()->first();
@@ -127,14 +127,14 @@ class CenterStudyAttendanceController extends Controller
             ]);
             $this->event($sessionId, $entry->attempt_id, 'undo', $entry->status, null, $request->user()->id, $session->revision + 1);
             $this->advance($sessionId, $session->revision + 1);
-            $this->saveSubmission($data['request_id'], $sessionId, 'undo', $hash, $request->user()->id, $entryId, $session->revision + 1);
+            $undoneEntry = DB::connection('tenant')->table('study_attendance_entries')->where('id', $entryId)->first();
+            $this->saveSubmission($data['request_id'], $sessionId, 'undo', $hash, $request->user()->id, $entryId, $session->revision + 1, $undoneEntry);
             $this->audit($request->user()->id, (int) $session->branch_id, 'study_attendance.undone', [
                 'group_id' => $groupId, 'session_id' => $sessionId, 'attempt_id' => $entry->attempt_id,
                 'before' => $entry->status, 'after' => null,
             ]);
 
-            return response()->json(['entry' => DB::connection('tenant')->table('study_attendance_entries')->where('id', $entryId)->first(),
-                'revision' => $session->revision + 1]);
+            return response()->json(['entry' => $undoneEntry, 'revision' => $session->revision + 1]);
         });
     }
 
@@ -172,7 +172,7 @@ class CenterStudyAttendanceController extends Controller
                 'revision' => $session->revision + 1, 'updated_at' => $now,
             ]);
             $this->event($sessionId, null, 'close', null, null, $request->user()->id, $session->revision + 1);
-            $this->saveSubmission($data['request_id'], $sessionId, 'close', $hash, $request->user()->id, null, $session->revision + 1);
+            $this->saveSubmission($data['request_id'], $sessionId, 'close', $hash, $request->user()->id, null, $session->revision + 1, null);
             $this->audit($request->user()->id, (int) $session->branch_id, 'study_attendance.closed', [
                 'group_id' => $groupId, 'session_id' => $sessionId,
                 'absent_count' => $unrecorded->count(),
@@ -266,11 +266,12 @@ class CenterStudyAttendanceController extends Controller
         return $previous;
     }
 
-    private function saveSubmission(string $requestId, string $sessionId, string $kind, string $hash, int $actorId, ?string $entryId, int $resultRevision): void
+    private function saveSubmission(string $requestId, string $sessionId, string $kind, string $hash, int $actorId, ?string $entryId, int $resultRevision, ?object $resultEntry): void
     {
         DB::connection('tenant')->table('study_attendance_submissions')->insert([
             'request_id' => $requestId, 'session_id' => $sessionId, 'kind' => $kind, 'request_hash' => $hash,
-            'actor_id' => $actorId, 'entry_id' => $entryId, 'result_revision' => $resultRevision, 'created_at' => now(),
+            'actor_id' => $actorId, 'entry_id' => $entryId, 'result_revision' => $resultRevision,
+            'result_entry' => $resultEntry === null ? null : json_encode($resultEntry), 'created_at' => now(),
         ]);
     }
 

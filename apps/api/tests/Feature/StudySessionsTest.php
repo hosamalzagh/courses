@@ -198,11 +198,13 @@ class StudySessionsTest extends TestCase
         $undoRequestId = (string) Str::uuid();
         $this->postJson("{$attendance}/{$recorded['id']}/undo", ['revision' => 2, 'request_id' => $undoRequestId])
             ->assertOk()->assertJsonPath('entry.status', null)->assertJsonPath('revision', 3);
-        $this->postJson($attendance, $payload)->assertOk()->assertJsonPath('revision', 2);
+        $this->postJson($attendance, $payload)->assertOk()->assertJsonPath('revision', 2)
+            ->assertJsonPath('entry.status', 'counted')->assertJsonPath('entry.revision', 1);
         $this->postJson($attendance, [...$payload, 'revision' => 3, 'request_id' => (string) Str::uuid()])
             ->assertCreated()->assertJsonPath('revision', 4);
         $this->postJson("{$attendance}/{$recorded['id']}/undo", ['revision' => 2, 'request_id' => $undoRequestId])
-            ->assertOk()->assertJsonPath('revision', 3);
+            ->assertOk()->assertJsonPath('revision', 3)
+            ->assertJsonPath('entry.status', null)->assertJsonPath('entry.revision', 2);
         $this->postJson("{$path}/{$session['id']}/close", ['revision' => 4, 'request_id' => (string) Str::uuid()])
             ->assertOk()->assertJsonPath('absent_count', 1)->assertJsonPath('session.status', 'held');
         $after = $this->getJson($attendance)->assertOk()->assertJsonCount(2, 'students')->json('students');
