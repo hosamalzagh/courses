@@ -405,6 +405,7 @@ test("withdraws and repeats study with preserved fees, SSR, SQL budget, and mobi
   await page.goto(`${origin}/admin/students/${studentId}/enrollments`);
   await page.getByRole("button", { name: "انسحاب", exact: true }).click();
   await expect(page.getByRole("heading", { name: `انسحاب من ${createdGroup.name}` })).toBeVisible();
+  await expect(page.getByLabel("تاريخ الانسحاب")).toBeFocused();
   await page.getByRole("button", { name: "اعتماد الانسحاب" }).click();
   await expect(page.getByLabel("تاريخ الانسحاب")).toBeFocused();
   await page.getByLabel("تاريخ الانسحاب").fill("2026-09-28");

@@ -30,6 +30,10 @@ export function StudyWithdrawalEditor({ studentId, attempt, onClose, onSaved, on
   const requestId = useRef<string | null>(null);
   const submitting = useRef(false);
   const dirty = Boolean(withdrawnOn || reason);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => document.getElementById(`${prefix}-date`)?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [prefix]);
   useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
