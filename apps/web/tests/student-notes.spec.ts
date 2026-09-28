@@ -103,6 +103,10 @@ test("the note tab and short summary follow event permissions after each grant c
     await staff.getByRole("button", { name: "عرض النسخ" }).click();
     await expect(staff.getByText("نسخة ١", { exact: true })).toBeVisible();
 
+    expect((await grant({ [north]: ["attendance"] })).status).toBe(200);
+    await staff.reload();
+    await expect(staff.getByRole("region", { name: "ملاحظات أحداث الطالب" })).toContainText("متابعة التسجيل");
+    await expect(staff.getByRole("region", { name: "ملاحظات أحداث الطالب" })).not.toContainText("مراجعة دفعة الطالب");
     expect((await grant({ [north]: ["accounting"] })).status).toBe(200);
     await staff.reload();
     await expect(staff.getByRole("region", { name: "ملاحظات أحداث الطالب" })).toContainText("مراجعة دفعة الطالب");
