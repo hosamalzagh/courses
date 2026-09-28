@@ -161,6 +161,7 @@ export function StudentFinanceControls({ initial, search }: { initial: StudentAc
     <section className="context-card form-stack" aria-label="ملخص الحساب المالي">
       <h2>{current.account.student_name} — رقم {current.account.student_number.toLocaleString("ar-EG")}</h2>
       <p>الرصيد المتاح من الدفعات المقدمة ضمن فروع صلاحيتك: <strong><bdi dir="ltr">{current.account.available_balance} {current.account.currency ?? ""}</bdi></strong></p>
+      <p>مديونية محاولات الدراسة ضمن فروع صلاحيتك: <strong><bdi dir="ltr">{current.account.debt} {current.account.currency ?? ""}</bdi></strong></p>
       <p className="muted">كل دفعة في السجل أدناه غير مخصصة. قد توجد حركات في فروع أخرى لا تملك صلاحية رؤيتها.</p>
       {current.account.currency_locked ? <p>عملة المركز ثابتة بعد أول حركة: <bdi dir="ltr">{current.account.currency}</bdi></p> : null}
     </section>

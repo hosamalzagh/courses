@@ -38,12 +38,17 @@ class CenterStudentFinanceController extends Controller
             ->whereColumn('student_payments.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('student_payments.branch_id', $readable))
             ->selectRaw('COALESCE(SUM(student_payments.amount), 0)');
+        $debt = DB::connection('tenant')->table('study_attempt_fees')
+            ->whereColumn('study_attempt_fees.student_id', 'students.id')
+            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('study_attempt_fees.branch_id', $readable))
+            ->selectRaw('COALESCE(SUM(study_attempt_fees.net_amount), 0)');
         $student = StudentPhotos::visibleStudent($studentId, $permissions, 'finance.read')
             ->select(['students.id', 'students.name', 'students.student_number', 'students.financial_account_revision'])
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency'), 'currency')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency_revision'), 'currency_revision')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency_locked_at'), 'currency_locked_at')
             ->selectSub($balance, 'available_balance')
+            ->selectSub($debt, 'debt')
             ->selectSub(DB::connection('tenant')->query()->fromSub($choices, 'branch_choices')->selectRaw('json_agg(branch_choices)'), 'recordable_branches')
             ->first();
         abort_unless($student, 404);
@@ -84,6 +89,7 @@ class CenterStudentFinanceController extends Controller
                 'currency' => $student->currency, 'currency_revision' => (int) $student->currency_revision,
                 'currency_locked' => $student->currency_locked_at !== null,
                 'available_balance' => $student->available_balance,
+                'debt' => $student->debt,
             ],
             'recordable_branches' => $branches->take(50)->values(),
             'payments' => $payments->take(20)->values(),

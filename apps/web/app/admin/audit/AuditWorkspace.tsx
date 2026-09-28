@@ -21,6 +21,7 @@ const eventNames: Record<string, string> = {
   "center.settings_updated": "تعديل إعدادات المركز",
   "center.financial_currency_changed": "تغيير عملة المركز",
   "student.payment_recorded": "استلام دفعة مقدمة للطالب",
+  "student.enrolled": "تسجيل طالب ورسوم محاولة الدراسة",
   "student.sharing_changed": "تغيير مشاركة الطالب", "center.student_sharing_default_changed": "تغيير افتراضي مشاركة الملفات الجديدة",
   "student.photo_changed": "تغيير صورة الطالب", "student.created": "إنشاء ملف طالب", "student.updated": "تعديل ملف طالب", "student.suspended": "إيقاف ملف طالب", "student.reactivated": "فك إيقاف ملف طالب",
   "student.attachments_added": "إضافة مرفقات للطالب", "student.attachment_replace": "استبدال وثيقة الطالب",

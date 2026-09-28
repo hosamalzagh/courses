@@ -20,6 +20,7 @@ export function getAdminHeader(path: string, context: CenterContext): { title: s
   if (path.startsWith("/admin/curriculum/")) return { ...headers["/admin/curriculum"], title: "خطة المستوى" };
   if (path === "/admin/students/new") return { title: 'إنشاء ملف طالب', description: 'ابدأ بالاسم وفرع مصرح به، ثم استكمل البيانات الاختيارية.' };
   if (path.endsWith('/account') && path.startsWith('/admin/students/')) return { title: 'حساب الطالب', description: 'الدفعات المقدمة غير مخصصة لمجموعة بعد. المبالغ المعروضة ضمن فروع صلاحيتك فقط.' };
+  if (path.endsWith('/enrollments') && path.startsWith('/admin/students/')) return { title: 'تسجيل الطالب', description: 'محاولات الدراسة ورسومها حسب فروع صلاحيتك، دون تخصيص الدفعات تلقائيًا.' };
   if (path.startsWith("/admin/students/")) return { title: path.endsWith('/edit') ? 'تعديل بيانات الطالب' : 'ملف الطالب', description: headers["/admin/students"].description };
   if (path.startsWith("/admin/instructors/")) return headers["/admin/instructors"];
   return headers[path] ?? headers["/admin"];
