@@ -31,6 +31,8 @@ const eventNames: Record<string, string> = {
   "student.allocation_note_created": "إضافة ملاحظة على تخصيص الدفعة",
   "student.allocation_note_updated": "تعديل ملاحظة تخصيص الدفعة",
   "student.enrolled": "تسجيل طالب ورسوم محاولة الدراسة",
+  "student.study_repeated": "إعادة دراسة الطالب بمحاولة ورسوم جديدتين",
+  "student.study_withdrawn": "انسحاب الطالب من محاولة الدراسة",
   "student.study_attempt_note_created": "إضافة ملاحظة على تسجيل الطالب",
   "student.study_attempt_note_updated": "تعديل ملاحظة تسجيل الطالب",
   "student.attendance_note_created": "إضافة ملاحظة على حضور أو غياب الطالب",

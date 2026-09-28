@@ -14,6 +14,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from "@/lib/client-api";
 import type { StudyEnrollmentContext, StudyAttemptNote } from "@/lib/server-context";
 import { StudyAttemptNoteEditor } from "./StudyAttemptNoteEditor";
+import { StudyWithdrawalEditor } from "./StudyWithdrawalEditor";
 
 export function StudentEnrollmentControls({ initial, search }: { initial: StudyEnrollmentContext; search: string }) {
   const router = useRouter();
@@ -36,30 +37,36 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
   const [openNoteId, setOpenNoteId] = useState<string | null>(null);
   const [pendingNoteId, setPendingNoteId] = useState<string | null>(null);
   const [noteDirty, setNoteDirty] = useState(false);
+  const [repeatId, setRepeatId] = useState<string | null>(null);
+  const [openWithdrawalId, setOpenWithdrawalId] = useState<string | null>(null);
+  const [withdrawalDirty, setWithdrawalDirty] = useState(false);
+  const repeatOpener = useRef<string | null>(null);
+  const withdrawalOpener = useRef<string | null>(null);
   const noteOpener = useRef<string | null>(null);
   const requestId = useRef<string | null>(null);
   const submitting = useRef(false);
   if (loadedInitial !== initial) {
     setLoadedInitial(initial); setCurrent(initial);
     if (current.student.id !== initial.student.id) {
-      setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason("");
+      setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason(""); setRepeatId(null); setOpenWithdrawalId(null);
     }
   }
   const studentId = current.student.id;
   const selected = current.groups.find(group => group.id === groupId) ?? (selectedGroup?.id === groupId ? selectedGroup : undefined);
   const discountAllowed = Boolean(selected && (current.permissions.can_manage_center ||
     current.permissions.branch_actions?.[String(selected.branch_id)]?.includes("fees.discount")));
-  const registrationDirty = Boolean(groupId || joinedOn || discount !== "0.00" || reason);
-  const dirty = registrationDirty || noteDirty;
+  const registrationDirty = Boolean(groupId || joinedOn || discount !== "0.00" || reason || repeatId);
+  const dirty = registrationDirty || noteDirty || withdrawalDirty;
   const path = `/admin/students/${studentId}/enrollments`;
   const query = new URLSearchParams({ page: String(current.pagination.page), groups_page: String(current.pagination.groups_page), ...(search ? { q: search } : {}) });
   const endpoint = `students/${studentId}/enrollments?${query}`;
   const focus = (field: string) => requestAnimationFrame(() => document.getElementById(`${prefix}-${field}`)?.focus());
 
-  function reset() {
-    setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason("");
+  function reset(restoreRepeatFocus = false) {
+    const opener = restoreRepeatFocus && repeatId ? repeatOpener.current : null;
+    setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason(""); setRepeatId(null);
     setFieldErrors({}); setError(""); setConflict(false); setUncertain(false); requestId.current = null;
-    focus("group_id");
+    requestAnimationFrame(() => (opener && document.getElementById(opener) ? document.getElementById(opener) : document.getElementById(`${prefix}-group_id`))?.focus());
   }
 
   function closeNote() {
@@ -67,7 +74,12 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
     requestAnimationFrame(() => { if (noteOpener.current) document.getElementById(noteOpener.current)?.focus(); });
   }
 
-  function discard() { reset(); closeNote(); }
+  function closeWithdrawal() {
+    setOpenWithdrawalId(null); setWithdrawalDirty(false);
+    requestAnimationFrame(() => { if (withdrawalOpener.current) document.getElementById(withdrawalOpener.current)?.focus(); });
+  }
+
+  function discard() { reset(); closeNote(); closeWithdrawal(); }
 
   function openNote(attemptId: string) {
     if (openNoteId === attemptId) return;
@@ -100,6 +112,8 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
     if (submitting.current || conflict || !current.student.currency || current.student.status !== "active") return;
     const errors: Record<string, string> = {};
     if (!selected) errors.group_id = "اختر مجموعة من الفروع المصرح بها.";
+    const repeatSource = current.attempts.find(attempt => attempt.id === repeatId);
+    if (repeatId && selected && repeatSource && selected.level_id !== repeatSource.level_id) errors.group_id = "اختر مجموعة في مستوى المحاولة السابقة.";
     if (!joinedOn) errors.joined_on = "أدخل تاريخ انضمام الطالب الفعلي.";
     if (!/^\d{1,10}(?:\.\d{1,2})?$/.test(discount)) errors.discount = "أدخل خصمًا غير سالب حتى منزلتين عشريتين.";
     if (selected && Number(discount) > Number(selected.approved_price)) errors.discount = "الخصم أكبر من السعر المعتمد.";
@@ -114,6 +128,7 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
       const response = await centerRequest(`students/${studentId}/enrollments`, "POST", {
         group_id: groupId, group_revision: selected!.revision, currency_revision: current.student.currency_revision, joined_on: joinedOn, discount,
         discount_reason: Number(discount) > 0 ? reason.trim() : null,
+        repeated_from_attempt_id: repeatId,
         version: current.student.version, request_id: requestId.current,
       });
       if (!response.ok) {
@@ -129,7 +144,7 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
         }
         return;
       }
-      reset(); setNotice("سُجلت المحاولة ورسومها معًا. بقي الرصيد المقدم دون تخصيص.");
+      reset(); setNotice(repeatId ? "أُنشئت محاولة إعادة الدراسة برسومها وخطتها المستقلتين. بقيت المحاولة السابقة محفوظة." : "سُجلت المحاولة ورسومها معًا. بقي الرصيد المقدم دون تخصيص.");
       try {
         const fresh = await centerRequest(endpoint, "GET");
         if (fresh.ok) setCurrent(await fresh.json() as StudyEnrollmentContext);
@@ -144,7 +159,7 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
   const groupsPage = (number: number) => `${path}?${new URLSearchParams({ page: String(current.pagination.page), groups_page: String(number), ...(search ? { q: search } : {}) })}`;
   function searchGroups(value: string) {
     const href = `${path}?${new URLSearchParams({ page: String(current.pagination.page), groups_page: "1", ...(value ? { q: value } : {}) })}`;
-    if (dirty) { setPendingSearch(href); return; }
+    if (dirty && !repeatId) { setPendingSearch(href); return; }
     router.push(href);
   }
 
@@ -170,8 +185,9 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     {conflict ? <CenterHeaderActions><Button disabled={busy} onClick={reload}>تحميل أحدث البيانات</Button></CenterHeaderActions> : null}
     <section className="context-card form-stack" aria-labelledby={`${prefix}-title`}>
-      <h2 id={`${prefix}-title`}>تسجيل محاولة دراسة</h2>
+      <h2 id={`${prefix}-title`}>{repeatId ? "إعادة الدراسة بمحاولة جديدة" : "تسجيل محاولة دراسة"}</h2>
       <p className="muted">يثبت سعر المجموعة وخطتها عند التسجيل، حتى لو تغير السعر لاحقًا. تاريخ الانضمام لا يسقط محاضرات الخطة السابقة.</p>
+      {repeatId ? <InlineNotice>سيُنشأ تسجيل ورسوم مستقلان للمحاولة الجديدة. تظل المحاولة السابقة وحضورها ومديونيتها محفوظة. اختر مجموعة في المستوى نفسه.</InlineNotice> : null}
       <form id={formId} onSubmit={save} noValidate><FieldGroup>
         <Field data-invalid={Boolean(fieldErrors.group_id)}>
           <FieldLabel htmlFor={`${prefix}-group_id`}>المجموعة الأساسية</FieldLabel>
@@ -192,14 +208,15 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
       </FieldGroup></form>
       {selected ? <p>السعر الأصلي <bdi dir="ltr">{selected.approved_price}</bdi> — الصافي بعد الخصم <strong><bdi dir="ltr">{Math.max(0, Number(selected.approved_price) - (Number(discount) || 0)).toFixed(2)} {current.student.currency ?? ""}</bdi></strong></p> : null}
       <CenterHeaderActions>
-        <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || !current.student.currency || current.student.status !== "active"}>{uncertain ? "التحقق من التسجيل" : "تسجيل الطالب والرسوم"}</Button>
-        <Button disabled={busy || uncertain || !registrationDirty} onClick={reset}>إلغاء البيانات</Button>
+        <Button form={formId} type="submit" variant="primary" busy={busy} disabled={conflict || !current.student.currency || current.student.status !== "active"}>{uncertain ? "التحقق من التسجيل" : repeatId ? "إعادة الدراسة وتسجيل الرسوم" : "تسجيل الطالب والرسوم"}</Button>
+        <Button disabled={busy || uncertain || !registrationDirty} onClick={() => reset(true)}>إلغاء البيانات</Button>
       </CenterHeaderActions>
     </section>
     <DataTable id="enrollment-group-choices" title="المجموعات المتاحة للتسجيل" rows={current.groups} rowKey={row => row.id}
       serverPagination={{ page: current.pagination.groups_page, hasMore: current.pagination.groups_has_more, batchSize: 50,
         previousHref: groupsPage(current.pagination.groups_page - 1),
-        nextHref: groupsPage(current.pagination.groups_page + 1) }}
+        nextHref: groupsPage(current.pagination.groups_page + 1),
+        ...(repeatId ? { onNavigate: (href: string) => router.push(href) } : {}) }}
       serverSearch={{ value: search, onSearch: searchGroups }}
       searchText={row => `${row.name} ${row.level_name} ${row.branch_name}`}
       emptyMessage="لا توجد مجموعات في فروع تسجيل الطالب ضمن هذه الدفعة." description="ابحث باسم المجموعة، ثم اخترها في نموذج التسجيل. تظهر حتى ٥٠ مجموعة في الدفعة."
@@ -218,18 +235,39 @@ export function StudentEnrollmentControls({ initial, search }: { initial: StudyE
       columns={[
         { key: "group", label: "المجموعة / المستوى", render: row => `${row.group_name} — ${row.level_name}` },
         { key: "joined", label: "الانضمام", render: row => <bdi dir="ltr">{row.joined_on}</bdi> },
+        { key: "status", label: "الحالة", render: row => <span>{row.status === "active" ? "نشطة" : row.status === "withdrawn" ? `انسحب في ${row.withdrawal?.withdrawn_on ?? "—"}` : "مكتملة"}{row.repeated_from_attempt_id ? " — إعادة دراسة" : ""}{row.withdrawal ? <small className="muted"> — {row.withdrawal.reason} ({row.withdrawal.actor_name})</small> : null}</span> },
         { key: "requirements", label: "متطلبات الخطة", render: row => row.requirements_count.toLocaleString("ar-EG") },
         { key: "fee", label: "الرسوم بعد الخصم", render: row => <bdi dir="ltr">{row.fee.net_amount} {row.fee.currency}</bdi> },
         { key: "actor", label: "سجلها", render: row => row.fee.actor_name },
         { key: "note", label: "ملاحظة التسجيل", render: row => row.note ? <span>{row.note.important ? "★ " : ""}{row.note.body.slice(0, 80)}{row.note.body.length > 80 ? "…" : ""}</span> : "—" },
-        { key: "actions", label: "الملاحظة", actions: true, render: row => current.permissions.can_manage_center ||
-          current.permissions.branch_actions?.[String(row.event_branch_id)]?.includes("enrollment.manage")
-          ? <Button id={`${prefix}-note-${row.id}`} type="button" onClick={event => { noteOpener.current = event.currentTarget.id; openNote(row.id); }}>{row.note ? "عرض/تعديل الملاحظة" : "إضافة ملاحظة"}</Button>
-          : <span className="muted">غير متاح</span> },
+        { key: "actions", label: "الإجراءات", actions: true, render: row => {
+          const canManageAttempt = current.permissions.can_manage_center ||
+            current.permissions.branch_actions?.[String(row.branch_id)]?.includes("enrollment.manage");
+          const canManageNote = current.permissions.can_manage_center ||
+            current.permissions.branch_actions?.[String(row.event_branch_id)]?.includes("enrollment.manage");
+          if ((!canManageAttempt || (row.status !== "active" && row.has_repeat)) && !canManageNote) return <span className="muted">غير متاح</span>;
+          return <div className="form-actions">
+            {canManageAttempt && row.status === "active" ? <Button id={`${prefix}-withdraw-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
+              withdrawalOpener.current = event.currentTarget.id; setOpenWithdrawalId(row.id);
+            }}>انسحاب</Button> : null}
+            {canManageAttempt && row.status !== "active" && !row.has_repeat ? <Button id={`${prefix}-repeat-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
+              repeatOpener.current = event.currentTarget.id;
+              setRepeatId(row.id); setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason("");
+              focus("group_id");
+            }}>إعادة الدراسة</Button> : null}
+            {canManageNote ? <Button id={`${prefix}-note-${row.id}`} type="button" onClick={event => { noteOpener.current = event.currentTarget.id; openNote(row.id); }}>{row.note ? "عرض/تعديل الملاحظة" : "إضافة ملاحظة"}</Button> : null}
+          </div>;
+        } },
       ]} />
     {openNoteId && current.attempts.find(attempt => attempt.id === openNoteId) ? <section className="context-card" aria-label="محرر ملاحظة التسجيل">
       <StudyAttemptNoteEditor key={openNoteId} studentId={studentId} attempt={current.attempts.find(attempt => attempt.id === openNoteId)!}
         onClose={closeNote} onSaved={note => noteSaved(openNoteId, note)} onDirtyChange={setNoteDirty} />
     </section> : null}
+    {openWithdrawalId && current.attempts.find(attempt => attempt.id === openWithdrawalId) ?
+      <StudyWithdrawalEditor key={openWithdrawalId} studentId={studentId} attempt={current.attempts.find(attempt => attempt.id === openWithdrawalId)!}
+        onClose={closeWithdrawal} onDirtyChange={setWithdrawalDirty} onSaved={updated => {
+          setCurrent(previous => ({ ...previous, attempts: previous.attempts.map(attempt => attempt.id === updated.id ? updated : attempt) }));
+          setNotice("حُفظ الانسحاب. الرسوم والدفعات والمديونية لم تتغير؛ التسوية المالية إجراء مستقل.");
+        }} /> : null}
   </>;
 }

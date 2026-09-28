@@ -101,14 +101,16 @@ class CenterStudyEnrollmentController extends Controller
             'joined_on' => ['required', 'date_format:Y-m-d'],
             'discount' => ['required', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999.99'],
             'discount_reason' => ['present', 'nullable', 'string', 'max:2000'],
+            'repeated_from_attempt_id' => ['sometimes', 'nullable', 'uuid'],
             'version' => ['required', 'regex:/^[a-f0-9]{64}$/'], 'request_id' => ['required', 'uuid'],
         ]);
         $data['discount'] = $this->amount($data['discount']);
         $data['discount_reason'] = trim($data['discount_reason'] ?? '') ?: null;
+        $data['repeated_from_attempt_id'] ??= null;
         abort_if($data['discount'] !== '0.00' && $data['discount_reason'] === null, 422, 'أدخل سبب الخصم.');
         abort_if($data['discount'] === '0.00' && $data['discount_reason'] !== null, 422, 'لا تسجل سبب خصم دون خصم.');
         $hash = hash('sha256', json_encode([$studentId, $data['group_id'], (int) $data['group_revision'], (int) $data['currency_revision'],
-            $data['joined_on'], $data['discount'], $data['discount_reason']]));
+            $data['joined_on'], $data['discount'], $data['discount_reason'], $data['repeated_from_attempt_id']]));
 
         return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $studentId, $data, $hash): JsonResponse {
             $group = DB::connection('tenant')->table('study_groups')
@@ -149,6 +151,30 @@ class CenterStudyEnrollmentController extends Controller
             abort_if(DB::connection('tenant')->table('study_attempts')->where('student_id', $studentId)
                 ->where('level_id', $group->level_id)->where('status', 'active')->exists(), 409,
                 'للطالب محاولة نشطة في هذا المستوى.');
+            if ($data['repeated_from_attempt_id'] === null && DB::connection('tenant')->table('study_attempts')
+                ->where('student_id', $studentId)->where('level_id', $group->level_id)->exists()) {
+                $this->conflict('repeat_source_required');
+            }
+            if ($data['repeated_from_attempt_id'] !== null) {
+                $previous = DB::connection('tenant')->table('study_attempts')
+                    ->where('id', $data['repeated_from_attempt_id'])->where('student_id', $studentId)
+                    ->lockForUpdate()->first(['id', 'level_id', 'branch_id', 'status']);
+                abort_unless($previous && $permissions->can('enrollment.manage', (int) $previous->branch_id), 404);
+                abort_if($previous->status === 'active' || $previous->level_id !== $group->level_id, 409,
+                    'اختر محاولة منتهية في المستوى نفسه لإعادة الدراسة.');
+                $endedOn = DB::connection('tenant')->table('study_attempt_group_periods')
+                    ->where('attempt_id', $previous->id)->max('left_on');
+                abort_if($endedOn === null || $data['joined_on'] < $endedOn, 422,
+                    'تاريخ إعادة الدراسة يسبق انتهاء المحاولة السابقة.');
+                $latestEnd = DB::connection('tenant')->table('study_attempt_group_periods as periods')
+                    ->join('study_attempts as attempts', 'attempts.id', '=', 'periods.attempt_id')
+                    ->where('attempts.student_id', $studentId)->where('attempts.level_id', $group->level_id)
+                    ->max('periods.left_on');
+                abort_if($data['joined_on'] < $latestEnd, 422,
+                    'تاريخ إعادة الدراسة يتداخل مع محاولة أخرى في المستوى نفسه.');
+                abort_if(DB::connection('tenant')->table('study_attempts')->where('repeated_from_attempt_id', $previous->id)->exists(), 409,
+                    'أُنشئت محاولة إعادة دراسة لهذا التسجيل بالفعل.');
+            }
             abort_if($data['discount'] !== '0.00' && ! $permissions->can('fees.discount', (int) $group->branch_id), 403);
             $price = $this->amount($group->approved_price);
             $discountCents = $this->cents($data['discount']);
@@ -168,6 +194,7 @@ class CenterStudyEnrollmentController extends Controller
                 'plan_version_id' => $group->plan_version_id, 'current_group_id' => $group->id,
                 'branch_id' => $group->branch_id, 'joined_on' => $data['joined_on'], 'status' => 'active',
                 'completion_threshold' => $group->completion_threshold,
+                'repeated_from_attempt_id' => $data['repeated_from_attempt_id'],
                 'created_by' => $request->user()->id, 'created_by_name' => $request->user()->name,
                 'request_id' => $data['request_id'], 'request_hash' => $hash, 'created_at' => $now, 'updated_at' => $now,
             ]);
@@ -191,8 +218,10 @@ class CenterStudyEnrollmentController extends Controller
                 ]);
             }
             DB::connection('tenant')->table('center_audit_logs')->insert([
-                'actor_id' => $request->user()->id, 'branch_id' => $group->branch_id, 'event' => 'student.enrolled',
+                'actor_id' => $request->user()->id, 'branch_id' => $group->branch_id,
+                'event' => $data['repeated_from_attempt_id'] === null ? 'student.enrolled' : 'student.study_repeated',
                 'details' => json_encode(['student_id' => $studentId, 'attempt_id' => $attemptId, 'group_id' => $group->id,
+                    'repeated_from_attempt_id' => $data['repeated_from_attempt_id'],
                     'plan_version_id' => $group->plan_version_id, 'joined_on' => $data['joined_on'],
                     'fee_id' => $feeId, 'original_price' => $price, 'discount' => $data['discount'],
                     'discount_reason' => $data['discount_reason'], 'net_amount' => $this->money($priceCents - $discountCents),
@@ -203,12 +232,79 @@ class CenterStudyEnrollmentController extends Controller
         })->header('Cache-Control', 'private, no-store');
     }
 
+    public function withdraw(Request $request, string $studentId, string $attemptId): JsonResponse
+    {
+        abort_unless(Str::isUuid($studentId) && Str::isUuid($attemptId), 404);
+        $data = $request->validate([
+            'withdrawn_on' => ['required', 'date_format:Y-m-d', 'before_or_equal:'.now('Africa/Cairo')->toDateString()],
+            'reason' => ['required', 'string', 'max:2000'],
+            'revision' => ['required', 'integer', 'min:1'],
+            'request_id' => ['required', 'uuid'],
+        ]);
+        $data['reason'] = trim($data['reason']);
+        abort_if($data['reason'] === '', 422, 'أدخل سبب الانسحاب.');
+        $hash = hash('sha256', json_encode([$studentId, $attemptId, $data['withdrawn_on'], $data['reason']]));
+
+        return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $studentId, $attemptId, $data, $hash): JsonResponse {
+            $student = StudentPhotos::visibleStudent($studentId, $permissions, 'enrollment.manage')
+                ->lockForUpdate()->first(['students.id']);
+            abort_unless($student, 404);
+            $attempt = DB::connection('tenant')->table('study_attempts')
+                ->where('id', $attemptId)->where('student_id', $studentId)->lockForUpdate()->first();
+            abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
+            $existing = DB::connection('tenant')->table('study_attempt_withdrawals')->where('request_id', $data['request_id'])->first();
+            if ($existing !== null) {
+                abort_unless($existing->attempt_id === $attemptId && $existing->actor_id === $request->user()->id, 403);
+                if ($existing->request_hash !== $hash) {
+                    $this->conflict('withdrawal_request_changed');
+                }
+
+                return response()->json(['attempt' => $this->present($this->attempts($studentId, $permissions)->where('study_attempts.id', $attemptId)->firstOrFail())]);
+            }
+            if ($attempt->status !== 'active' || (int) $attempt->revision !== (int) $data['revision']) {
+                $this->conflict('attempt_changed');
+            }
+            abort_if($data['withdrawn_on'] < $attempt->joined_on, 422, 'تاريخ الانسحاب يسبق تاريخ الانضمام.');
+            $period = DB::connection('tenant')->table('study_attempt_group_periods')
+                ->where('attempt_id', $attemptId)->whereNull('left_on')->lockForUpdate()->first(['id', 'joined_on']);
+            abort_unless($period, 409, 'لا توجد مجموعة نشطة لهذه المحاولة.');
+            abort_if($data['withdrawn_on'] < $period->joined_on, 422, 'تاريخ الانسحاب يسبق الانضمام الحالي.');
+            $laterAttendance = DB::connection('tenant')->table('study_attendance_entries as entries')
+                ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
+                ->where('entries.attempt_id', $attemptId)->whereNotNull('entries.status')
+                ->whereRaw("(sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= ?::date", [$data['withdrawn_on']])
+                ->exists();
+            abort_if($laterAttendance, 422, 'تاريخ الانسحاب يسبق حضورًا مسجلًا أو يوافق يومه.');
+            $now = now();
+            DB::connection('tenant')->table('study_attempt_group_periods')->where('id', $period->id)->update(['left_on' => $data['withdrawn_on']]);
+            DB::connection('tenant')->table('study_attempts')->where('id', $attemptId)->update([
+                'status' => 'withdrawn', 'revision' => $attempt->revision + 1, 'updated_at' => $now,
+            ]);
+            DB::connection('tenant')->table('study_attempt_withdrawals')->insert([
+                'id' => (string) Str::uuid(), 'attempt_id' => $attemptId,
+                'withdrawn_on' => $data['withdrawn_on'], 'reason' => $data['reason'],
+                'actor_id' => $request->user()->id, 'actor_name' => $request->user()->name,
+                'request_id' => $data['request_id'], 'request_hash' => $hash, 'created_at' => $now,
+            ]);
+            DB::connection('tenant')->table('center_audit_logs')->insert([
+                'actor_id' => $request->user()->id, 'branch_id' => $attempt->branch_id,
+                'event' => 'student.study_withdrawn',
+                'details' => json_encode(['student_id' => $studentId, 'attempt_id' => $attemptId,
+                    'group_id' => $attempt->current_group_id, 'withdrawn_on' => $data['withdrawn_on'], 'reason' => $data['reason']]),
+                'created_at' => $now,
+            ]);
+
+            return response()->json(['attempt' => $this->present($this->attempts($studentId, $permissions)->where('study_attempts.id', $attemptId)->firstOrFail())]);
+        })->header('Cache-Control', 'private, no-store');
+    }
+
     private function attempts(string $studentId, CenterPermissions $permissions): Builder
     {
         return DB::connection('tenant')->table('study_attempts')
             ->join('study_groups', 'study_groups.id', '=', 'study_attempts.current_group_id')
             ->join('levels', 'levels.id', '=', 'study_attempts.level_id')
             ->join('study_attempt_fees as fees', 'fees.attempt_id', '=', 'study_attempts.id')
+            ->leftJoin('study_attempt_withdrawals as withdrawal', 'withdrawal.attempt_id', '=', 'study_attempts.id')
             ->leftJoin('student_event_notes as note', function ($join) use ($permissions): void {
                 $join->on('note.event_id', '=', 'study_attempts.id')->on('note.branch_id', '=', 'fees.branch_id')
                     ->where('note.event_type', 'study_attempt');
@@ -222,8 +318,11 @@ class CenterStudyEnrollmentController extends Controller
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('study_attempts.branch_id', $this->scope($permissions)))
             ->select(['study_attempts.id', 'study_attempts.level_id', 'study_attempts.plan_version_id',
                 'study_attempts.current_group_id', 'study_attempts.branch_id', 'study_attempts.joined_on',
-                'study_attempts.status', 'study_attempts.created_at', 'study_groups.name as group_name', 'levels.name as level_name'])
+                'study_attempts.status', 'study_attempts.revision', 'study_attempts.repeated_from_attempt_id',
+                'study_attempts.created_at', 'study_groups.name as group_name', 'levels.name as level_name',
+                'withdrawal.withdrawn_on', 'withdrawal.reason as withdrawal_reason', 'withdrawal.actor_name as withdrawal_actor_name'])
             ->selectRaw('(SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id) AS requirements_count')
+            ->selectRaw('CASE WHEN EXISTS (SELECT 1 FROM study_attempts AS repeated WHERE repeated.repeated_from_attempt_id = study_attempts.id) THEN 1 ELSE 0 END AS has_repeat')
             ->addSelect(['fees.id as fee_id', 'fees.original_price', 'fees.discount', 'fees.net_amount',
                 'fees.currency', 'fees.discount_reason', 'fees.actor_name', 'fees.branch_id as event_branch_id',
                 'note.id as note_id', 'note.body as note_body', 'note.important as note_important',
@@ -235,7 +334,12 @@ class CenterStudyEnrollmentController extends Controller
         return ['id' => $row->id, 'level_id' => $row->level_id, 'plan_version_id' => $row->plan_version_id,
             'current_group_id' => $row->current_group_id, 'branch_id' => (int) $row->branch_id,
             'event_branch_id' => (int) $row->event_branch_id,
-            'joined_on' => $row->joined_on, 'status' => $row->status, 'created_at' => $row->created_at,
+            'joined_on' => $row->joined_on, 'status' => $row->status, 'revision' => (int) $row->revision,
+            'repeated_from_attempt_id' => $row->repeated_from_attempt_id,
+            'has_repeat' => (bool) (int) $row->has_repeat,
+            'withdrawal' => $row->withdrawn_on === null ? null : ['withdrawn_on' => $row->withdrawn_on,
+                'reason' => $row->withdrawal_reason, 'actor_name' => $row->withdrawal_actor_name],
+            'created_at' => $row->created_at,
             'group_name' => $row->group_name, 'level_name' => $row->level_name,
             'requirements_count' => (int) $row->requirements_count,
             'fee' => ['id' => $row->fee_id, 'original_price' => $row->original_price,

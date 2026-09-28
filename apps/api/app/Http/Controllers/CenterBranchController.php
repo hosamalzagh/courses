@@ -76,9 +76,7 @@ class CenterBranchController extends Controller
             ->when(! $this->permissions($request)->can('finance.read', $branch->id),
                 fn ($query) => $query->whereNotIn('event', CenterAuditController::FINANCIAL_EVENTS))
             ->when(! $this->permissions($request)->can('enrollment.manage', $branch->id),
-                fn ($query) => $query->whereNotIn('event', [
-                    'student.enrolled', 'student.study_attempt_note_created', 'student.study_attempt_note_updated',
-                ]))
+                fn ($query) => $query->whereNotIn('event', CenterAuditController::ENROLLMENT_EVENTS))
             ->when(! ($this->permissions($request)->can('attendance.record', $branch->id)
                 || $this->permissions($request)->can('attendance.correct', $branch->id)),
                 fn ($query) => $query->whereNotIn('event', [
