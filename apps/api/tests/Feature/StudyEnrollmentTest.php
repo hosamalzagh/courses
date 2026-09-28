@@ -863,7 +863,8 @@ class StudyEnrollmentTest extends TestCase
             'request_id' => (string) Str::uuid(),
         ])->assertCreated()->json('attempt');
         $sessionId = (string) Str::uuid();
-        $this->center->run(function () use ($group, $attempt, $sessionId): void {
+        $entryId = (string) Str::uuid();
+        $this->center->run(function () use ($group, $attempt, $sessionId, $entryId): void {
             $lectureId = DB::table('plan_lectures')->where('plan_version_id', $group['plan_version_id'])->value('id');
             DB::table('study_sessions')->insert([
                 'id' => $sessionId, 'group_id' => $group['id'], 'plan_lecture_id' => $lectureId,
@@ -872,11 +873,16 @@ class StudyEnrollmentTest extends TestCase
                 'created_at' => now(), 'updated_at' => now(),
             ]);
             DB::table('study_attendance_entries')->insert([
-                'id' => (string) Str::uuid(), 'session_id' => $sessionId, 'attempt_id' => $attempt['id'],
+                'id' => $entryId, 'session_id' => $sessionId, 'attempt_id' => $attempt['id'],
                 'status' => 'counted', 'recorded_by' => $this->owner->id, 'recorded_at' => now(),
                 'created_at' => now(), 'updated_at' => now(),
             ]);
         });
+        $noteUrl = "{$this->base}/groups/{$group['id']}/sessions/{$sessionId}/attendance/{$entryId}/note";
+        $this->putJson($noteUrl, [
+            'body' => 'حضور محفوظ قبل الانسحاب', 'important' => true,
+            'revision' => 0, 'entry_revision' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->assertJsonPath('note.revision', 1);
         $this->travelTo(new \DateTimeImmutable('2026-09-29 10:00:00 UTC'));
         $withdrawUrl = "{$url}/{$attempt['id']}/withdraw";
         $payload = ['withdrawn_on' => '2026-09-27', 'reason' => 'انسحاب مؤرخ',
@@ -886,6 +892,8 @@ class StudyEnrollmentTest extends TestCase
             'request_id' => (string) Str::uuid()])->assertUnprocessable();
         $this->postJson($withdrawUrl, [...$payload, 'withdrawn_on' => '2026-09-29',
             'request_id' => (string) Str::uuid()])->assertOk()->assertJsonPath('attempt.status', 'withdrawn');
+        $this->getJson($noteUrl)->assertOk()->assertJsonPath('note.body', 'حضور محفوظ قبل الانسحاب')
+            ->assertJsonPath('note.important', true)->assertJsonPath('versions.0.revision', 1);
         $this->travelBack();
     }
 

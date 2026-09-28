@@ -38,8 +38,9 @@ if ($center->provisioning_status !== 'active') {
 if ($center->provisioning_status !== 'active') {
     throw new RuntimeException('Fixture provisioning failed.');
 }
-foreach ($credentials as $user) {
-    CenterMembership::firstOrCreate(['tenant_id' => $center->id, 'user_id' => $user['id']], ['status' => 'active']);
+foreach ($credentials as $role => $user) {
+    $membership = CenterMembership::firstOrCreate(['tenant_id' => $center->id, 'user_id' => $user['id']], ['status' => 'active']);
+    $credentials[$role]['membership_id'] = $membership->id;
 }
 $center->run(function () use ($credentials): void {
     DB::table('center_grants')->insertOrIgnore(['user_id' => $credentials['alpha']['id'], 'role' => 'center_owner']);
