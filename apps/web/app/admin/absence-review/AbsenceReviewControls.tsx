@@ -61,6 +61,16 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   const [pendingNavigation, setPendingNavigation] = useState<Record<FilterKey, string> | null>(null);
   const [pendingRule, setPendingRule] = useState<string | null>(null);
   const [selectedAttemptIds, setSelectedAttemptIds] = useState<string[]>([]);
+  const enrollmentScopeId = (["group_id", "level_id", "stage_id", "course_id"] as const)
+    .map(key => filters[key]).find(Boolean);
+  const enrollmentScope = context.options.find(option => option.id === enrollmentScopeId);
+  const enrollmentBranchId = filters.branch_id ? Number(filters.branch_id) : enrollmentScope?.branch_id;
+  const canManageEnrollment = (branchId: number) => context.permissions.can_manage_center ||
+    context.permissions.branch_actions?.[String(branchId)]?.includes("enrollment.manage");
+  const canBulkWaitlist = enrollmentBranchId !== undefined
+    ? canManageEnrollment(enrollmentBranchId)
+    : context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {})
+      .some(actions => actions.includes("enrollment.manage"));
   const options = [...context.options, ...extraOptions.filter(option => !context.options.some(initial => initial.kind === option.kind && initial.id === option.id))];
   const pathCounts = new Map<string, number>();
   for (const option of options) {
@@ -221,7 +231,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
       </CenterHeaderActions>
     </section> : null}
 
-    <AbsenceBulkWaitlist context={context} filters={filters} selected={selectedAttemptIds} onSelectionChange={setSelectedAttemptIds} />
+    {canBulkWaitlist ? <AbsenceBulkWaitlist context={context} filters={filters} selected={selectedAttemptIds} onSelectionChange={setSelectedAttemptIds} /> : null}
     <DataTable id="absence-review" title="طلاب الغياب" description="العداد التشغيلي يخص فترة الارتباط الحالية؛ الغياب السابق محفوظ للتاريخ." rows={context.students}
       rowKey={row => row.id} searchText={row => `${row.student_name} ${row.student_number}`} emptyMessage="لا توجد حالات ضمن هذا النطاق."
       serverSearch={{ value: filters.q ?? "", onSearch: q => navigate({

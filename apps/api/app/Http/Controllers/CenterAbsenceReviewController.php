@@ -272,6 +272,7 @@ class CenterAbsenceReviewController extends Controller
                     ->whereColumn('entries.attempt_id', 'periods.attempt_id')
                     ->whereColumn('sessions.group_id', 'periods.group_id')
                     ->whereNotNull('entries.status')
+                    ->where('sessions.status', '<>', 'cancelled')
                     ->whereRaw("(sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= ?::date", [$enteredOn]);
             })
             ->pluck('periods.attempt_id')->all();

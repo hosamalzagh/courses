@@ -130,11 +130,23 @@ test("bulk preview, individual outcome, forbidden branch, and SSR budget", async
     await owner.setViewportSize({ width: 390, height: 844 });
     expect(await owner.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
 
-    await signIn(staff, "staff");
-    await staff.goto(url);
-    await expect(staff.getByRole("checkbox", { name: `اختيار ${people[1].name} للنقل إلى الانتظار` })).toHaveCount(0);
-    expect((await write(staff, "absence-review/waitlist-batches", {
-      selection_mode: "all", branch_id: south, view: "all", entered_on: today, reason: "مرفوض",
-    })).status).toBe(404);
+    const members = await (await owner.request.get(`${origin}/api/v1/center/member-workspace`)).json();
+    const original = members.members.find((member: { id: number }) => member.id === credentials.staff.membership_id);
+    expect(original).toBeTruthy();
+    const grantPath = `members/${credentials.staff.membership_id}/grants`;
+    expect((await write(owner, grantPath, { center_roles: [], branch_roles: { [north]: ["branch_viewer"] } }, "PUT")).status).toBe(200);
+    try {
+      await signIn(staff, "staff");
+      await staff.goto(url);
+      await expect(staff.getByRole("button", { name: "معاينة النقل" })).toHaveCount(0);
+      await expect(staff.getByLabel("طريقة الاختيار")).toHaveCount(0);
+      expect((await write(staff, "absence-review/waitlist-batches", {
+        selection_mode: "all", branch_id: south, view: "all", entered_on: today, reason: "مرفوض",
+      })).status).toBe(404);
+    } finally {
+      expect((await write(owner, grantPath, {
+        center_roles: original.center_roles, branch_roles: original.branch_roles,
+      }, "PUT")).status).toBe(200);
+    }
   } finally { await owner.close(); await staff.close(); }
 });

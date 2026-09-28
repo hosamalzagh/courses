@@ -192,6 +192,22 @@ class StudyAbsenceReviewTest extends TestCase
             ->assertJsonMissing(['event' => 'student.study_bulk_waitlist_skipped']);
     }
 
+    public function test_bulk_waitlist_ignores_attendance_from_a_cancelled_session(): void
+    {
+        $scope = $this->group($this->north, 'Cancelled');
+        $student = $this->student();
+        $attemptId = $this->enroll($student['id'], $scope['group']);
+        $this->seedSessions($scope, $attemptId, ['cancelled']);
+        $enteredOn = now('Africa/Cairo')->subDays(13)->toDateString();
+
+        $preview = $this->postJson("{$this->base}/absence-review/waitlist-batches", [
+            'selection_mode' => 'all', 'branch_id' => $this->north, 'view' => 'all',
+            'entered_on' => $enteredOn, 'reason' => 'تجاهل حضور لقاء ملغى',
+        ])->assertCreated()->assertJsonPath('batch.total', 1)->assertJsonPath('batch.pending', 1);
+        $this->postJson("{$this->base}/absence-review/waitlist-batches/{$preview->json('batch.id')}/execute")
+            ->assertOk()->assertJsonPath('batch.moved', 1)->assertJsonPath('batch.skipped', 0);
+    }
+
     public function test_bulk_waitlist_rejects_hidden_branch_and_revoked_permissions(): void
     {
         $scope = $this->group($this->north, 'Visible');
