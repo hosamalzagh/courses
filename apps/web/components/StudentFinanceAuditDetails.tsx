@@ -7,7 +7,7 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
     'student.payment_note_created', 'student.payment_note_updated',
     'student.allocation_note_created', 'student.allocation_note_updated',
     'center.financial_currency_changed', 'student.enrolled', 'student.study_repeated', 'student.study_withdrawn',
-    'student.study_waitlisted', 'student.study_reattached', 'student.study_transferred'].includes(entry.event)) return null;
+    'student.study_waitlisted', 'student.study_reattached', 'student.study_transferred', 'student.study_bulk_waitlist_skipped'].includes(entry.event)) return null;
   let details = entry.details;
   if (typeof details === "string") { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;
@@ -21,6 +21,13 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
   }
   if (entry.event === "center.financial_currency_changed") {
     return <p>عملة المركز: <bdi dir="ltr">{String(data.before ?? "غير محددة")} ← {String(data.after ?? "غير محددة")}</bdi></p>;
+  }
+  if (entry.event === "student.study_bulk_waitlist_skipped") {
+    return <details><summary>سبب استبعاد الطالب من النقل الجماعي</summary>
+      <p>الطالب: <bdi dir="ltr">{String(data.student_id ?? "")}</bdi> — المحاولة: <bdi dir="ltr">{String(data.attempt_id ?? "")}</bdi></p>
+      <p>دفعة النقل: <bdi dir="ltr">{String(data.batch_id ?? "")}</bdi></p>
+      <p>السبب: {String(data.reason ?? "")}</p>
+    </details>;
   }
   if (entry.event === "student.study_withdrawn") {
     return <details><summary>تفاصيل انسحاب الطالب</summary>
@@ -49,6 +56,7 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
       <p>تاريخ الانتظار: <bdi dir="ltr">{String(data.entered_on ?? data.waitlisted_on ?? "")}</bdi>
         {data.joined_on ? <> — تاريخ الإلحاق: <bdi dir="ltr">{String(data.joined_on)}</bdi></> : null}</p>
       <p>السبب: {String(data.reason ?? "")}</p>
+      {data.batch_id ? <p>دفعة النقل: <bdi dir="ltr">{String(data.batch_id)}</bdi></p> : null}
     </details>;
   }
   if (entry.event === "student.fee_settled" || entry.event === "student.fee_settlement_corrected") {

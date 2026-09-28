@@ -1,7 +1,8 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
+import { AbsenceBulkWaitlist, AbsenceSelectionCell, MAX_BULK_SELECTION } from "./AbsenceBulkWaitlist";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions } from "@/components/CenterShell";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
@@ -33,7 +34,7 @@ function scopePath(option: AbsenceOption): string {
   return [option.branch_name, ...parents, option.name].filter(Boolean).join(" / ");
 }
 
-export function AbsenceReviewControls({ context, filters }: { context: AbsenceContext; filters: Record<string, string> }) {
+export function AbsenceReviewControls({ context, filters, initialBatchId }: { context: AbsenceContext; filters: Record<string, string>; initialBatchId: string | null }) {
   const router = useRouter();
   const formId = useId();
   const optionSearchFormId = useId();
@@ -59,6 +60,30 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   const [optionError, setOptionError] = useState("");
   const [pendingNavigation, setPendingNavigation] = useState<Record<FilterKey, string> | null>(null);
   const [pendingRule, setPendingRule] = useState<string | null>(null);
+  const selectionScope = JSON.stringify(([
+    "branch_id", "course_id", "stage_id", "level_id", "group_id", "view", "q",
+  ] as const).map(key => filters[key] ?? ""));
+  const [selection, setSelection] = useState({ scope: selectionScope, ids: [] as string[] });
+  const [bulkDraftDirty, setBulkDraftDirty] = useState(false);
+  const [batchId, setBatchId] = useState(initialBatchId);
+  const selectedAttemptIds = selection.scope === selectionScope ? selection.ids : [];
+  function setSelectedAttemptIds(next: SetStateAction<string[]>) {
+    setSelection(current => {
+      const ids = current.scope === selectionScope ? current.ids : [];
+      const requested = typeof next === "function" ? next(ids) : next;
+      return { scope: selectionScope, ids: requested.slice(0, MAX_BULK_SELECTION) };
+    });
+  }
+  const enrollmentScopeId = (["group_id", "level_id", "stage_id", "course_id"] as const)
+    .map(key => filters[key]).find(Boolean);
+  const enrollmentScope = context.options.find(option => option.id === enrollmentScopeId);
+  const enrollmentBranchId = filters.branch_id ? Number(filters.branch_id) : enrollmentScope?.branch_id;
+  const canManageEnrollment = (branchId: number) => context.permissions.can_manage_center ||
+    context.permissions.branch_actions?.[String(branchId)]?.includes("enrollment.manage");
+  const canBulkWaitlist = enrollmentBranchId !== undefined
+    ? canManageEnrollment(enrollmentBranchId)
+    : context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {})
+      .some(actions => actions.includes("enrollment.manage"));
   const options = [...context.options, ...extraOptions.filter(option => !context.options.some(initial => initial.kind === option.kind && initial.id === option.id))];
   const pathCounts = new Map<string, number>();
   for (const option of options) {
@@ -87,7 +112,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   for (const branch of branches) branchNameCounts.set(branch.name, (branchNameCounts.get(branch.name) ?? 0) + 1);
 
   function navigate(next: Record<FilterKey, string>) {
-    if (dirty) { setPendingNavigation(next); return; }
+    if (dirty || bulkDraftDirty) { setPendingNavigation(next); return; }
     performNavigation(next);
   }
 
@@ -169,11 +194,11 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   }
 
   const baseQuery = new URLSearchParams(Object.entries(filters).filter(([key, value]) => key !== "page" && value));
-  const pageHref = (page: number) => { const query = new URLSearchParams(baseQuery); query.set("page", String(page)); return `/admin/absence-review?${query}`; };
+  const pageHref = (page: number) => { const query = new URLSearchParams(baseQuery); query.set("page", String(page)); if (batchId) query.set("bulk_batch", batchId); return `/admin/absence-review?${query}`; };
 
   return <div className="form-stack" dir="rtl">
-    <UnsavedChangesGuard dirty={dirty} guardHistory />
-    {pendingNavigation ? <ConfirmationDialog title="مغادرة دون حفظ" description="غيّرت قاعدة الغياب ولم تحفظها. هل تريد تطبيق نطاق آخر دون حفظ التغيير؟" confirmLabel="تطبيق النطاق دون حفظ" onCancel={() => setPendingNavigation(null)} onConfirm={() => { const next = pendingNavigation; setPendingNavigation(null); performNavigation(next); }} /> : null}
+    <UnsavedChangesGuard dirty={dirty || bulkDraftDirty} guardHistory />
+    {pendingNavigation ? <ConfirmationDialog title="مغادرة دون حفظ" description="لديك تعديل في قاعدة الغياب أو مسودة نقل لم تُحفظ. هل تريد تطبيق نطاق آخر دون حفظ التغيير؟" confirmLabel="تطبيق النطاق دون حفظ" onCancel={() => setPendingNavigation(null)} onConfirm={() => { const next = pendingNavigation; setPendingNavigation(null); performNavigation(next); }} /> : null}
     {pendingRule !== null ? <ConfirmationDialog title="تغيير النطاق دون حفظ" description="غيّرت قاعدة الغياب ولم تحفظها. هل تريد فتح قاعدة أخرى دون حفظ التغيير؟" confirmLabel="فتح قاعدة أخرى" onCancel={() => { setPendingRule(null); ruleSelect.current?.focus(); }} onConfirm={() => { const next = pendingRule; setPendingRule(null); selectRuleNow(next); ruleSelect.current?.focus(); }} /> : null}
     <section className="data-panel form-stack" aria-labelledby="absence-filters-title">
       <h2 id="absence-filters-title">نطاق التقرير</h2>
@@ -219,14 +244,22 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
       </CenterHeaderActions>
     </section> : null}
 
+    {canBulkWaitlist ? <AbsenceBulkWaitlist context={context} filters={filters} selected={selectedAttemptIds} onSelectionChange={setSelectedAttemptIds} onDirtyChange={setBulkDraftDirty} onBatchIdChange={setBatchId} /> : null}
     <DataTable id="absence-review" title="طلاب الغياب" description="العداد التشغيلي يخص فترة الارتباط الحالية؛ الغياب السابق محفوظ للتاريخ." rows={context.students}
       rowKey={row => row.id} searchText={row => `${row.student_name} ${row.student_number}`} emptyMessage="لا توجد حالات ضمن هذا النطاق."
       serverSearch={{ value: filters.q ?? "", onSearch: q => navigate({
         branch_id: filters.branch_id ?? "", course_id: filters.course_id ?? "", stage_id: filters.stage_id ?? "",
         level_id: filters.level_id ?? "", group_id: filters.group_id ?? "", view: filters.view ?? "review", q,
       }) }}
-      serverPagination={{ page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 50, previousHref: pageHref(Math.max(1, context.pagination.page - 1)), nextHref: pageHref(context.pagination.page + 1) }}
+      serverPagination={{ page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 50, previousHref: pageHref(Math.max(1, context.pagination.page - 1)), nextHref: pageHref(context.pagination.page + 1), onNavigate: href => router.push(href) }}
       columns={[
+        { key: "selection", label: "اختيار", actions: true, render: row => {
+          const allowed = row.student_status === "active" && (context.permissions.can_manage_center ||
+            context.permissions.branch_actions?.[String(row.branch_id)]?.includes("enrollment.manage"));
+          return allowed ? <AbsenceSelectionCell row={row} selected={selectedAttemptIds.includes(row.id)}
+            disabled={selectedAttemptIds.length >= MAX_BULK_SELECTION && !selectedAttemptIds.includes(row.id)}
+            onToggle={(id, checked) => setSelectedAttemptIds(current => checked ? [...new Set([...current, id])] : current.filter(value => value !== id))} /> : "—";
+        } },
         { key: "student", label: "الطالب", render: row => <Link href={`/admin/students/${row.student_id}`}>{row.student_name} · {row.student_number.toLocaleString("ar-EG")}</Link> },
         { key: "scope", label: "النطاق", render: row => <>{row.branch_name} · {row.course_name} · {row.stage_name} · {row.level_name} · {row.group_name}</> },
         { key: "rule", label: "القاعدة", render: row => ruleText(row.effective_mode, row.effective_limit) },

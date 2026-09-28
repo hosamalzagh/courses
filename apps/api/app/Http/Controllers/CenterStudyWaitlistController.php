@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\StudentPhotos;
+use App\Support\StudyWaitlistEntry;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -77,67 +78,15 @@ class CenterStudyWaitlistController extends Controller
         ]);
         $data['reason'] = trim($data['reason']);
         abort_if($data['reason'] === '', 422, 'أدخل سبب الانتظار.');
-        $hash = hash('sha256', json_encode([$studentId, $attemptId, $data['entered_on'], $data['reason']]));
 
-        return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $studentId, $attemptId, $data, $hash): JsonResponse {
-            $student = StudentPhotos::visibleStudent($studentId, $permissions, 'enrollment.manage')
-                ->lockForUpdate()->first(['students.id', 'students.status']);
-            abort_unless($student, 404);
-            $attempt = $this->attempt($studentId, $attemptId, $permissions);
-            abort_unless(DB::connection('tenant')->table('student_branches')->where('student_id', $studentId)
-                ->where('branch_id', $attempt->branch_id)->exists(), 404);
-            $previous = DB::connection('tenant')->table('study_attempt_waitlists')
-                ->where('entry_request_id', $data['request_id'])->first();
-            if ($previous !== null) {
-                abort_unless($previous->attempt_id === $attemptId && (int) $previous->entered_by === $request->user()->id, 403);
-                if ($previous->entry_request_hash !== $hash) {
-                    $this->conflict('waitlist_request_changed');
-                }
+        return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $studentId, $attemptId, $data): JsonResponse {
+            [$row, $created] = StudyWaitlistEntry::enter(
+                $studentId, $attemptId, $data['entered_on'], $data['reason'],
+                (int) $data['revision'], $data['request_id'],
+                $request->user()->id, $request->user()->name, $permissions,
+            );
 
-                return response()->json(['waitlist' => $this->present($previous)]);
-            }
-            if ($student->status !== 'active' || $attempt->status !== 'active' || $attempt->current_group_id === null
-                || (int) $attempt->revision !== (int) $data['revision']) {
-                $this->conflict('attempt_changed');
-            }
-            $period = DB::connection('tenant')->table('study_attempt_group_periods')
-                ->where('attempt_id', $attemptId)->whereNull('left_on')->lockForUpdate()->first(['id', 'group_id', 'joined_on']);
-            if ($period === null || $period->group_id !== $attempt->current_group_id) {
-                $this->conflict('attempt_changed');
-            }
-            abort_if($data['entered_on'] < $period->joined_on, 422, 'تاريخ الانتظار يسبق الانضمام الحالي.');
-            $recordedAttendance = DB::connection('tenant')->table('study_attendance_entries as entries')
-                ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
-                ->where('entries.attempt_id', $attemptId)->where('sessions.group_id', $period->group_id)
-                ->whereNotNull('entries.status')
-                ->where('sessions.status', '<>', 'cancelled')
-                ->whereRaw("(sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= ?::date", [$data['entered_on']])
-                ->exists();
-            abort_if($recordedAttendance, 422, 'تاريخ الانتظار يسبق حضورًا مسجلًا أو يوافق يومه.');
-            $now = now();
-            $waitlistId = (string) Str::uuid();
-            DB::connection('tenant')->table('study_attempt_group_periods')->where('id', $period->id)
-                ->update(['left_on' => $data['entered_on']]);
-            DB::connection('tenant')->table('study_attempts')->where('id', $attemptId)->update([
-                'current_group_id' => null, 'revision' => $attempt->revision + 1, 'updated_at' => $now,
-            ]);
-            DB::connection('tenant')->table('study_attempt_waitlists')->insert([
-                'id' => $waitlistId, 'attempt_id' => $attemptId, 'from_group_id' => $period->group_id,
-                'branch_id' => $attempt->branch_id, 'entered_on' => $data['entered_on'], 'reason' => $data['reason'],
-                'entered_by' => $request->user()->id, 'entered_by_name' => $request->user()->name,
-                'entry_request_id' => $data['request_id'], 'entry_request_hash' => $hash,
-                'created_at' => $now, 'updated_at' => $now,
-            ]);
-            DB::connection('tenant')->table('center_audit_logs')->insert([
-                'actor_id' => $request->user()->id, 'branch_id' => $attempt->branch_id,
-                'event' => 'student.study_waitlisted',
-                'details' => json_encode(['student_id' => $studentId, 'attempt_id' => $attemptId,
-                    'from_group_id' => $period->group_id, 'entered_on' => $data['entered_on'], 'reason' => $data['reason']]),
-                'created_at' => $now,
-            ]);
-
-            return response()->json(['waitlist' => $this->present(DB::connection('tenant')->table('study_attempt_waitlists')
-                ->where('id', $waitlistId)->firstOrFail())], 201);
+            return response()->json(['waitlist' => $this->present($row)], $created ? 201 : 200);
         })->header('Cache-Control', 'private, no-store');
     }
 

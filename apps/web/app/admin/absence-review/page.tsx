@@ -14,5 +14,8 @@ export default async function AbsenceReviewPage({ searchParams }: { searchParams
   }
   const context = await loadAbsenceReview(query.toString());
   if (typeof context === "string") return <CenterAccessState state={context} />;
-  return <CenterPage context={context} path="/admin/absence-review"><AbsenceReviewControls key={query.toString()} context={context} filters={Object.fromEntries(query)} /></CenterPage>;
+  const selectionScope = new URLSearchParams(query);
+  selectionScope.delete("page");
+  const batchId = typeof params.bulk_batch === "string" && /^[0-9a-f-]{36}$/i.test(params.bulk_batch) ? params.bulk_batch : null;
+  return <CenterPage context={context} path="/admin/absence-review"><AbsenceReviewControls key={selectionScope.toString()} context={context} filters={Object.fromEntries(query)} initialBatchId={batchId} /></CenterPage>;
 }
