@@ -77,6 +77,8 @@ class CenterStudyTransferController extends Controller
             $prior = DB::connection('tenant')->table('study_attempt_transfers')->where('request_id', $data['request_id'])->first();
             if ($prior) {
                 abort_unless($prior->attempt_id === $attemptId && (int) $prior->actor_id === (int) $request->user()->id
+                    && $permissions->can('read', (int) $prior->from_branch_id)
+                    && $permissions->can('read', (int) $prior->to_branch_id)
                     && $permissions->can('enrollment.manage', (int) $prior->to_branch_id), 404);
                 if ($prior->request_hash !== $requestHash) {
                     $this->conflict('transfer_request_changed');

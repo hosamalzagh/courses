@@ -1633,12 +1633,17 @@ class StudyEnrollmentTest extends TestCase
         $payload['preview_hash'] = $this->getJson($previewUrl)->assertOk()
             ->assertJsonPath('preview.open_credited_numbers', [])->json('preview.hash');
         $payload['request_id'] = (string) Str::uuid();
+        $this->grant([$this->north => ['registration'], $this->south => ['registration']]);
+        $this->asUser($this->staff);
         $this->postJson($transferUrl, $payload)->assertCreated()->assertJsonPath('transfer.attempt_id', $attempt['id'])
             ->assertJsonPath('transfer.credited_lectures.0.id', $targetLecture)
             ->assertJsonPath('transfer.missing_lectures', []);
         $this->postJson($transferUrl, $payload)->assertOk()->assertJsonPath('replayed', true);
         $this->postJson($transferUrl, [...$payload, 'reason' => 'سبب مختلف'])->assertConflict()
             ->assertJsonPath('code', 'transfer_request_changed');
+        $this->grant([$this->south => ['registration']]);
+        $this->postJson($transferUrl, $payload)->assertNotFound();
+        $this->asUser($this->owner);
         $this->getJson($url)->assertOk()->assertJsonPath('attempts.0.id', $attempt['id'])
             ->assertJsonPath('attempts.0.branch_id', $this->south)
             ->assertJsonPath('attempts.0.current_group_id', $target['id'])
@@ -1858,15 +1863,18 @@ class StudyEnrollmentTest extends TestCase
     {
         $this->center->run(function (): void {
             DB::statement('DROP TABLE study_attempt_transfers');
+            DB::statement('DROP INDEX content_equivalences_target_plan_idx');
             DB::table('migrations')->whereIn('migration', [
                 '2026_09_29_000000_create_study_attempt_transfers',
                 '2026_09_29_000100_add_study_transfer_coverage_snapshot',
+                '2026_09_29_000200_index_content_equivalence_target_plan',
             ])->delete();
         });
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
         $this->center->run(function (): void {
             $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attempt_transfers'));
             $this->assertTrue(DB::getSchemaBuilder()->hasColumn('study_attempt_transfers', 'credited_lectures'));
+            $this->assertTrue(DB::table('pg_indexes')->where('indexname', 'content_equivalences_target_plan_idx')->exists());
         });
         $this->actingAs(User::factory()->platformOwner()->create(), 'platform')
             ->postJson('http://courses.test/api/v1/platform/centers', [
@@ -1876,6 +1884,7 @@ class StudyEnrollmentTest extends TestCase
             function (): void {
                 $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attempt_transfers'));
                 $this->assertTrue(DB::getSchemaBuilder()->hasColumn('study_attempt_transfers', 'missing_lectures'));
+                $this->assertTrue(DB::table('pg_indexes')->where('indexname', 'content_equivalences_target_plan_idx')->exists());
             });
     }
 
