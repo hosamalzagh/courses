@@ -3,6 +3,7 @@ import { paymentMethodLabels } from "@/lib/student-finance";
 
 export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
   if (!['student.payment_recorded', 'student.payment_allocated', 'student.payment_allocation_reversed',
+    'student.fee_settled', 'student.fee_settlement_corrected',
     'student.payment_note_created', 'student.payment_note_updated',
     'student.allocation_note_created', 'student.allocation_note_updated',
     'center.financial_currency_changed', 'student.enrolled', 'student.study_repeated', 'student.study_withdrawn',
@@ -36,6 +37,15 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
       <p>تاريخ الانتظار: <bdi dir="ltr">{String(data.entered_on ?? data.waitlisted_on ?? "")}</bdi>
         {data.joined_on ? <> — تاريخ الإلحاق: <bdi dir="ltr">{String(data.joined_on)}</bdi></> : null}</p>
       <p>السبب: {String(data.reason ?? "")}</p>
+    </details>;
+  }
+  if (entry.event === "student.fee_settled" || entry.event === "student.fee_settlement_corrected") {
+    return <details><summary>تفاصيل قرار الرسوم</summary>
+      <p>الطالب: <bdi dir="ltr">{String(data.student_id ?? "")}</bdi> — الرسوم: <bdi dir="ltr">{String(data.fee_id ?? "")}</bdi></p>
+      <p>المستحق قبل: <bdi dir="ltr">{String(data.before_due ?? "")}</bdi> — بعد: <bdi dir="ltr">{String(data.after_due ?? "")} {String(data.currency ?? "")}</bdi></p>
+      {data.replaces_adjustment_id ? <p>تصحيح قرار: <bdi dir="ltr">{String(data.replaces_adjustment_id)}</bdi></p> : null}
+      <p>السبب: {String(data.reason ?? "")}</p>
+      {Array.isArray(data.released_allocations) && data.released_allocations.length ? <p>أعيد جزء من التخصيصات إلى الرصيد المتاح بعد التسوية.</p> : null}
     </details>;
   }
   if (entry.event === "student.enrolled" || entry.event === "student.study_repeated") {

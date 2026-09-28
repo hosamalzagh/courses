@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions, CenterPageActions } from "@/components/CenterShell";
@@ -13,9 +13,11 @@ import { Field, FieldError, FieldGroup, FieldLabel, FieldSet } from "@/component
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { buttonVariants } from "@/components/ui/button";
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from "@/lib/client-api";
+import { feeAdjustmentRecoveryPrefix, listPendingFeeAdjustments } from "@/lib/fee-adjustment-recovery";
 import type { StudentAccountContext } from "@/lib/server-context";
 import { paymentMethodLabels } from "@/lib/student-finance";
 import { StudentPaymentAllocations } from "./StudentPaymentAllocations";
+import { StudentFeeAdjustmentEditor } from "./StudentFeeAdjustmentEditor";
 
 const currencies = ["EGP", "SAR", "AED", "USD", "EUR", "GBP"];
 
@@ -54,6 +56,11 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(
     initial.payments.some(payment => payment.id === paymentId) ? paymentId! : null);
   const [allocationDirty, setAllocationDirty] = useState(false);
+  const [selectedFeeId, setSelectedFeeId] = useState<string | null>(null);
+  const [selectedRecoveryKey, setSelectedRecoveryKey] = useState<string | null>(null);
+  const [pendingFees, setPendingFees] = useState<ReturnType<typeof listPendingFeeAdjustments>>([]);
+  const [feeDirty, setFeeDirty] = useState(false);
+  const [feeUncertain, setFeeUncertain] = useState(false);
   const submitting = useRef(false);
   const requestId = useRef<string | null>(null);
   if (loadedInitial !== initial) {
@@ -64,16 +71,29 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   }
 
   const studentId = current.account.student_id;
+  const feeRecoveryPrefix = feeAdjustmentRecoveryPrefix(current.center.id, current.user.id, studentId);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const pending = listPendingFeeAdjustments(feeRecoveryPrefix);
+      setPendingFees(pending);
+      if (pending[0]) { setSelectedRecoveryKey(pending[0].key); setSelectedFeeId(pending[0].pending.fee_id); }
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [feeRecoveryPrefix]);
   const accountPath = `students/${studentId}/account?${new URLSearchParams({
     page: String(current.pagination.page), branches_page: String(current.pagination.branches_page),
-    ...(search ? { q: search } : {}), ...(paymentId ? { payment_id: paymentId } : {}),
+    fees_page: String(current.pagination.fees_page), ...(search ? { q: search } : {}),
+    ...(paymentId ? { payment_id: paymentId } : {}),
   })}`;
   const currencyForm = `${formPrefix}-currency`;
   const paymentForm = `${formPrefix}-payment`;
   const paymentDirty = Boolean(amount || receivedOn || method !== "cash" ||
     (current.recordable_branches[0] && branch !== String(current.recordable_branches[0].id)));
-  const dirty = Boolean((currency && currency !== current.account.currency) || paymentDirty || allocationDirty);
+  const dirty = Boolean((currency && currency !== current.account.currency) || paymentDirty || allocationDirty || feeDirty);
   const selectedPayment = current.payments.find((item) => item.id === selectedPaymentId);
+  const selectedFee = current.fees.find((item) => item.id === selectedFeeId) ??
+    (pendingFees.some(entry => entry.key === selectedRecoveryKey && entry.pending.fee_id === selectedFeeId) && selectedFeeId
+      ? { id: selectedFeeId, group_name: null, currency: current.account.currency ?? "" } : undefined);
 
   function focus(field: string) {
     requestAnimationFrame(() => document.getElementById(`${formPrefix}-${field}`)?.focus());
@@ -162,8 +182,9 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
     finally { submitting.current = false; setBusy(false); }
   }
 
-  const paymentPage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(page), branches_page: String(current.pagination.branches_page), ...(search ? { q: search } : {}) })}`;
-  const branchPage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(current.pagination.page), branches_page: String(page), ...(search ? { q: search } : {}) })}`;
+  const paymentPage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(page), branches_page: String(current.pagination.branches_page), fees_page: String(current.pagination.fees_page), ...(search ? { q: search } : {}) })}`;
+  const branchPage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(current.pagination.page), branches_page: String(page), fees_page: String(current.pagination.fees_page), ...(search ? { q: search } : {}) })}`;
+  const feePage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(current.pagination.page), branches_page: String(current.pagination.branches_page), fees_page: String(page), ...(search ? { q: search } : {}) })}`;
   const cancelCurrency = () => { setCurrency(current.account.currency ?? ""); setFieldErrors({}); setError(""); focus("currency"); };
   const cancelPayment = () => {
     if (uncertain) return;
@@ -174,7 +195,7 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
 
   return <>
     <CenterPageActions context={current} />
-    <UnsavedChangesGuard dirty={dirty} guardHistory />
+    <UnsavedChangesGuard dirty={dirty} guardHistory blockDiscard={feeUncertain} />
     <section className="context-card form-stack" aria-label="ملخص الحساب المالي">
       <h2>{current.account.student_name} — رقم {current.account.student_number.toLocaleString("ar-EG")}</h2>
       {current.account.student_status === "suspended" ? <p className="muted">ملف الطالب موقوف. يمكن استلام السداد وتخصيصه للرسوم القائمة، وتبقى الحركات المالية محفوظة.</p> : null}
@@ -212,8 +233,43 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
         {current.pagination.branches_has_more ? <Link className={buttonVariants({ variant: "outline" })} href={branchPage(current.pagination.branches_page + 1)}>فروع الاستلام التالية</Link> : null}
       </CenterHeaderActions> : null}
     </section> : null}
+    <DataTable id="student-fees" title="رسوم محاولات الدراسة" rows={current.fees} rowKey={row => row.id} pageSize={20}
+      searchText={row => `${row.group_name ?? ""} ${row.branch_name} ${row.net_amount} ${row.current_due}`}
+      emptyMessage="لا توجد رسوم لمحاولات دراسة في فروع صلاحيتك." description="المستحق الحالي يشمل قرارات التسوية المسببة، مع حفظ رسوم التسجيل الأصلية."
+      columns={[
+        { key: "group", label: "المجموعة", render: row => row.group_name ?? "مجموعة غير متاحة" },
+        { key: "branch", label: "فرع الرسوم", render: row => row.branch_name },
+        { key: "status", label: "الدراسة", render: row => row.withdrawn_on ? `انسحب في ${row.withdrawn_on}` : row.status === "active" ? "نشطة" : "منتهية" },
+        { key: "original", label: "رسوم التسجيل", render: row => <bdi dir="ltr">{row.net_amount} {row.currency}</bdi> },
+        { key: "due", label: "المستحق الحالي", render: row => <bdi dir="ltr">{row.current_due} {row.currency}</bdi> },
+        { key: "paid", label: "المسدد", render: row => <bdi dir="ltr">{row.paid_amount} {row.currency}</bdi> },
+        { key: "actions", label: "الإجراءات", actions: true, render: row =>
+          <Button id={`${formPrefix}-fee-${row.id}`} disabled={busy || dirty} onClick={() => {
+            setSelectedRecoveryKey(pendingFees.find(entry => entry.pending.fee_id === row.id)?.key ?? null);
+            setSelectedFeeId(row.id); setSelectedPaymentId(null);
+          }}>
+            {row.can_approve ? "تسوية أو تصحيح" : "عرض سجل الرسوم"}
+          </Button> },
+      ]} />
+    {pendingFees.length && !selectedFee ? <>
+      <InlineNotice tone="warning">هناك {pendingFees.length.toLocaleString("ar-EG")} طلب رسوم لم تُعرف نتيجته بعد. بيانات التحقق محفوظة لهذا المستخدم على الجهاز.</InlineNotice>
+      <CenterHeaderActions>{pendingFees.map((entry, index) => <Button key={entry.key} onClick={() => {
+        setSelectedRecoveryKey(entry.key); setSelectedFeeId(entry.pending.fee_id);
+      }}>استئناف التحقق من الطلب {index + 1}</Button>)}</CenterHeaderActions>
+    </> : null}
+    {selectedFee ? <StudentFeeAdjustmentEditor key={`${selectedFee.id}:${selectedRecoveryKey ?? "new"}`} studentId={studentId} fee={selectedFee}
+      recoveryPrefix={feeRecoveryPrefix} restoredKey={selectedRecoveryKey}
+      onClose={() => { setSelectedFeeId(null); setSelectedRecoveryKey(null); setPendingFees(listPendingFeeAdjustments(feeRecoveryPrefix)); setFeeDirty(false); setFeeUncertain(false);
+        requestAnimationFrame(() => (document.getElementById(`${formPrefix}-fee-${selectedFee.id}`) ?? document.getElementById("center-content"))?.focus()); }} onChanged={refreshAfterAllocation}
+      onDirtyChange={setFeeDirty} onUncertainChange={setFeeUncertain} /> : null}
+    <CenterHeaderActions>
+      {current.pagination.fees_page > 1 ? <Link className={buttonVariants({ variant: "outline" })} href={feePage(current.pagination.fees_page - 1)}>رسوم أحدث</Link> : null}
+      {current.pagination.fees_has_more ? <Link className={buttonVariants({ variant: "outline" })} href={feePage(current.pagination.fees_page + 1)}>رسوم أقدم</Link> : null}
+    </CenterHeaderActions>
     <DataTable id="student-payments" title="حركات الدفعات المقدمة" rows={current.payments} rowKey={(row) => row.id} pageSize={20}
-      serverSearch={{ value: search, onSearch: (value) => router.push(`/admin/students/${studentId}/account?${new URLSearchParams({ page: "1", branches_page: String(current.pagination.branches_page), ...(value ? { q: value } : {}) })}`) }}
+      serverSearch={{ value: search, onSearch: (value) => {
+        if (!feeUncertain) router.push(`/admin/students/${studentId}/account?${new URLSearchParams({ page: "1", branches_page: String(current.pagination.branches_page), fees_page: String(current.pagination.fees_page), ...(value ? { q: value } : {}) })}`);
+      } }}
       searchText={(row) => `${row.branch_name ?? ""} ${paymentMethodLabels[row.method] ?? row.method} ${row.amount} ${row.actor_name}`}
       emptyMessage="لا توجد دفعات مقدمة في فروع صلاحيتك." description="آخر ٢٠ حركة في الدفعة المعروضة. الحركات المعتمدة محفوظة دون تعديل أو حذف."
       columns={[

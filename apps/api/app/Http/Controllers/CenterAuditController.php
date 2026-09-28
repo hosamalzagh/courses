@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 class CenterAuditController extends Controller
 {
     public const FINANCIAL_EVENTS = ['student.payment_recorded', 'student.payment_allocated', 'student.payment_allocation_reversed',
+        'student.fee_settled', 'student.fee_settlement_corrected',
         'student.payment_note_created', 'student.payment_note_updated',
         'student.allocation_note_created', 'student.allocation_note_updated'];
 

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Support\ActiveStudentAllocations;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use App\Support\EffectiveStudyFees;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
@@ -25,6 +26,7 @@ class CenterStudentFinanceController extends Controller
         $data = $request->validate([
             'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'branches_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'fees_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'q' => ['sometimes', 'string', 'max:100'],
             'payment_id' => ['sometimes', 'uuid'],
         ]);
@@ -45,13 +47,33 @@ class CenterStudentFinanceController extends Controller
         $debt = DB::connection('tenant')->table('study_attempt_fees')
             ->whereColumn('study_attempt_fees.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('study_attempt_fees.branch_id', $readable))
-            ->selectRaw('COALESCE(SUM(study_attempt_fees.net_amount), 0)');
+            ->selectRaw('COALESCE(SUM('.EffectiveStudyFees::amount('study_attempt_fees').'), 0)');
         $used = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.source_branch_id', $readable))
             ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
         $paid = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.target_branch_id', $readable))
             ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
+        $feesPage = (int) ($data['fees_page'] ?? 1);
+        $feeRows = DB::connection('tenant')->table('study_attempt_fees as fees')
+            ->join('study_attempts as attempts', 'attempts.id', '=', 'fees.attempt_id')
+            ->join('branches as fee_branches', 'fee_branches.id', '=', 'fees.branch_id')
+            ->leftJoin('study_attempt_withdrawals as withdrawals', 'withdrawals.attempt_id', '=', 'attempts.id')
+            ->whereColumn('fees.student_id', 'students.id')
+            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('fees.branch_id', $readable))
+            ->orderByDesc('fees.created_at')->orderByDesc('fees.id')
+            ->offset(($feesPage - 1) * 20)->limit(21)
+            ->select(['fees.id', 'fees.attempt_id', 'fees.branch_id', 'fees.currency',
+                'fees.created_at', 'fee_branches.name as branch_name', 'attempts.status', 'withdrawals.withdrawn_on'])
+            ->selectRaw('fees.net_amount::text AS net_amount')
+            ->selectRaw(EffectiveStudyFees::amount('fees').'::text AS current_due')
+            ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.fee_id', 'fees.id')
+                ->selectRaw('COALESCE(SUM(allocations.amount), 0)::text'), 'paid_amount')
+            ->selectSub(DB::connection('tenant')->table('study_attempt_group_periods as first_period')
+                ->join('study_groups as original_group', 'original_group.id', '=', 'first_period.group_id')
+                ->whereColumn('first_period.attempt_id', 'attempts.id')
+                ->orderBy('first_period.created_at')->orderBy('first_period.id')->limit(1)
+                ->select('original_group.name'), 'group_name');
         $student = StudentPhotos::visibleStudent($studentId, $permissions, 'finance.read')
             ->select(['students.id', 'students.name', 'students.student_number', 'students.status', 'students.financial_account_revision'])
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency'), 'currency')
@@ -60,9 +82,12 @@ class CenterStudentFinanceController extends Controller
             ->selectSub($balance, 'received_total')->selectSub($debt, 'due_total')
             ->selectSub($used, 'used_total')->selectSub($paid, 'paid_total')
             ->selectSub(DB::connection('tenant')->query()->fromSub($choices, 'branch_choices')->selectRaw('json_agg(branch_choices)'), 'recordable_branches')
+            ->selectSub(DB::connection('tenant')->query()->fromSub($feeRows, 'fee_rows')
+                ->selectRaw("COALESCE(json_agg(fee_rows), '[]'::json)"), 'fee_rows')
             ->first();
         abort_unless($student, 404);
         $branches = collect(json_decode($student->recordable_branches ?? '[]', true));
+        $fees = collect(json_decode($student->fee_rows ?? '[]', true));
         $page = (int) ($data['page'] ?? 1);
         $search = trim($data['q'] ?? '');
         $payments = DB::connection('tenant')->table('student_payments')
@@ -118,9 +143,15 @@ class CenterStudentFinanceController extends Controller
                 'allocated_amount' => StudentMoney::format(StudentMoney::cents($row->allocated_amount)),
                 'available_amount' => StudentMoney::format(StudentMoney::cents($row->amount) - StudentMoney::cents($row->allocated_amount)),
             ])->values(),
+            'fees' => $fees->take(20)->map(fn (array $row) => [
+                ...$row,
+                'can_approve' => $permissions->can('finance.approve', (int) $row['branch_id']),
+                'remaining_amount' => StudentMoney::format(StudentMoney::cents($row['current_due']) - StudentMoney::cents($row['paid_amount'])),
+            ])->values(),
             'pagination' => [
                 'page' => $page, 'has_more' => $payments->count() > 20,
                 'branches_page' => $branchPage, 'branches_has_more' => $branches->count() > 50,
+                'fees_page' => $feesPage, 'fees_has_more' => $fees->count() > 20,
             ],
         ])->header('Cache-Control', 'private, no-store');
     }

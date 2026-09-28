@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Support\ActiveStudentAllocations;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use App\Support\EffectiveStudyFees;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
@@ -54,7 +55,7 @@ class CenterStudyEnrollmentController extends Controller
         $fees = DB::connection('tenant')->table('study_attempt_fees')
             ->whereColumn('study_attempt_fees.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('study_attempt_fees.branch_id', $scope))
-            ->selectRaw('COALESCE(SUM(study_attempt_fees.net_amount), 0)');
+            ->selectRaw('COALESCE(SUM('.EffectiveStudyFees::amount('study_attempt_fees').'), 0)');
         $used = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.source_branch_id', $scope))
             ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
@@ -346,6 +347,7 @@ class CenterStudyEnrollmentController extends Controller
             ->selectRaw('(SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id) AS requirements_count')
             ->selectRaw('CASE WHEN EXISTS (SELECT 1 FROM study_attempts AS repeated WHERE repeated.repeated_from_attempt_id = study_attempts.id) THEN 1 ELSE 0 END AS has_repeat')
             ->selectRaw('(SELECT row_to_json(waitlist) FROM (SELECT id, from_group_id, to_group_id, entered_on, left_on, reason, entered_by_name, left_by_name FROM study_attempt_waitlists WHERE attempt_id = study_attempts.id ORDER BY entered_on DESC, created_at DESC LIMIT 1) AS waitlist) AS latest_waitlist')
+            ->selectRaw(EffectiveStudyFees::amount('fees').' AS current_due')
             ->addSelect(['fees.id as fee_id', 'fees.original_price', 'fees.discount', 'fees.net_amount',
                 'fees.currency', 'fees.discount_reason', 'fees.actor_name', 'fees.branch_id as event_branch_id',
                 'note.id as note_id', 'note.body as note_body', 'note.important as note_important',
@@ -368,6 +370,7 @@ class CenterStudyEnrollmentController extends Controller
             'latest_waitlist' => $row->latest_waitlist === null ? null : json_decode($row->latest_waitlist, true),
             'fee' => ['id' => $row->fee_id, 'original_price' => $row->original_price,
                 'discount' => $row->discount, 'net_amount' => $row->net_amount,
+                'current_due' => $row->current_due,
                 'currency' => $row->currency, 'discount_reason' => $row->discount_reason,
                 'actor_name' => $row->actor_name],
             'note' => $row->note_id === null ? null : ['id' => $row->note_id,

@@ -35,7 +35,9 @@ export function NavigationHistoryTracker() {
   return null;
 }
 
-export function UnsavedChangesGuard({ dirty, guardHistory = false, onDiscard }: { dirty: boolean; guardHistory?: boolean; onDiscard?: () => void }) {
+export function UnsavedChangesGuard({ dirty, guardHistory = false, blockDiscard = false, onDiscard }: {
+  dirty: boolean; guardHistory?: boolean; blockDiscard?: boolean; onDiscard?: () => void;
+}) {
   const router = useRouter();
   const [destination, setDestination] = useState<string | null>(null);
   const leaving = useRef(false);
@@ -91,6 +93,10 @@ export function UnsavedChangesGuard({ dirty, guardHistory = false, onDiscard }: 
       document.removeEventListener("click", followLink, true);
     };
   }, [dirty]);
+
+  if (destination && dirty && blockDiscard) return <ConfirmationDialog title="تحقق من اعتماد التسوية أولًا"
+    description="تعذر التأكد من اعتماد التسوية. عد إلى المحرر واستخدم التحقق من الاعتماد قبل مغادرة الصفحة."
+    cancelLabel="العودة للتحقق" onCancel={() => { historyDelta.current = null; setDestination(null); }} />;
 
   return destination && dirty ? <ConfirmationDialog title="مغادرة دون حفظ" description="لديك بيانات لم تُحفظ. يمكنك إلغاء المغادرة ومتابعة تعديلها، أو مغادرة الصفحة دون حفظها." confirmLabel="مغادرة دون حفظ" onCancel={() => { historyDelta.current = null; setDestination(null); }} onConfirm={() => {
     leaving.current = true;
