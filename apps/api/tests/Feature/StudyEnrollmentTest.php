@@ -788,6 +788,42 @@ class StudyEnrollmentTest extends TestCase
         });
     }
 
+    public function test_repeat_lineage_prevents_rollback_even_without_a_withdrawal(): void
+    {
+        $group = $this->group($this->north, '0.00');
+        $student = $this->student([$this->north]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $initial = $this->getJson($url)->json();
+        $first = $this->postJson($url, [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $initial['student']['currency_revision'], 'joined_on' => '2026-09-28',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $initial['student']['version'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $this->center->run(function () use ($first): void {
+            DB::table('study_attempts')->where('id', $first['id'])->update(['status' => 'completed']);
+            DB::table('study_attempt_group_periods')->where('attempt_id', $first['id'])->update(['left_on' => '2026-09-28']);
+        });
+        $fresh = $this->getJson($url)->json();
+        $this->postJson($url, [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $fresh['student']['currency_revision'], 'joined_on' => '2026-09-28',
+            'discount' => '0.00', 'discount_reason' => null, 'repeated_from_attempt_id' => $first['id'],
+            'version' => $fresh['student']['version'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->center->run(function (): void {
+            $this->assertSame(0, DB::table('study_attempt_withdrawals')->count());
+            try {
+                (require database_path('migrations/tenant/2026_09_28_180622_add_study_attempt_withdrawals_and_repeats.php'))->down();
+                $this->fail('A rollback must preserve approved repeat lineage.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString('withdrawals or repeats', $exception->getMessage());
+            }
+            $this->assertTrue(DB::getSchemaBuilder()->hasColumn('study_attempts', 'repeated_from_attempt_id'));
+        });
+    }
+
     public function test_withdrawal_accepts_the_current_cairo_date_after_utc_midnight_boundary(): void
     {
         $group = $this->group($this->north, '0.00');

@@ -37,8 +37,9 @@ SQL);
 
     public function down(): void
     {
-        if (DB::table('study_attempt_withdrawals')->exists()) {
-            throw new RuntimeException('Cannot roll back approved study attempt withdrawals.');
+        if (DB::table('study_attempt_withdrawals')->exists()
+            || DB::table('study_attempts')->whereNotNull('repeated_from_attempt_id')->exists()) {
+            throw new RuntimeException('Cannot roll back approved study attempt withdrawals or repeats.');
         }
         Schema::dropIfExists('study_attempt_withdrawals');
         DB::statement('DROP FUNCTION preserve_study_attempt_withdrawal()');
