@@ -115,6 +115,10 @@ test('moves an active attempt across branches with a reviewed preview and denies
     expect(Number(current.headers()['x-courses-query-count'])).toBeLessThanOrEqual(6);
     expect((await current.json()).attempts[0]).toMatchObject({ id: attemptId, branch_id: south.body.branch.id,
       current_group_id: target.group.id, fee: { net_amount: '100.00' } });
+    await owner.goto(`${origin}/admin/audit`);
+    await expect(owner.getByText('نقل محاولة الدراسة بين المجموعات أو الفروع').first()).toBeVisible();
+    await owner.getByText('تفاصيل نقل محاولة الدراسة').first().click();
+    await expect(owner.getByText(/انتقل إلى الفرع الجنوبي/).first()).toBeVisible();
     await signIn(staff, 'staff');
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).status()).toBe(404);
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/transfer/preview?group_id=${source.group.id}&transferred_on=2026-09-29`)).status()).toBe(404);
