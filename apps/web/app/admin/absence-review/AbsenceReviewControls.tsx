@@ -34,7 +34,7 @@ function scopePath(option: AbsenceOption): string {
   return [option.branch_name, ...parents, option.name].filter(Boolean).join(" / ");
 }
 
-export function AbsenceReviewControls({ context, filters }: { context: AbsenceContext; filters: Record<string, string> }) {
+export function AbsenceReviewControls({ context, filters, initialBatchId }: { context: AbsenceContext; filters: Record<string, string>; initialBatchId: string | null }) {
   const router = useRouter();
   const formId = useId();
   const optionSearchFormId = useId();
@@ -65,6 +65,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   ] as const).map(key => filters[key] ?? ""));
   const [selection, setSelection] = useState({ scope: selectionScope, ids: [] as string[] });
   const [bulkDraftDirty, setBulkDraftDirty] = useState(false);
+  const [batchId, setBatchId] = useState(initialBatchId);
   const selectedAttemptIds = selection.scope === selectionScope ? selection.ids : [];
   function setSelectedAttemptIds(next: SetStateAction<string[]>) {
     setSelection(current => {
@@ -193,7 +194,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
   }
 
   const baseQuery = new URLSearchParams(Object.entries(filters).filter(([key, value]) => key !== "page" && value));
-  const pageHref = (page: number) => { const query = new URLSearchParams(baseQuery); query.set("page", String(page)); return `/admin/absence-review?${query}`; };
+  const pageHref = (page: number) => { const query = new URLSearchParams(baseQuery); query.set("page", String(page)); if (batchId) query.set("bulk_batch", batchId); return `/admin/absence-review?${query}`; };
 
   return <div className="form-stack" dir="rtl">
     <UnsavedChangesGuard dirty={dirty || bulkDraftDirty} guardHistory />
@@ -243,7 +244,7 @@ export function AbsenceReviewControls({ context, filters }: { context: AbsenceCo
       </CenterHeaderActions>
     </section> : null}
 
-    {canBulkWaitlist ? <AbsenceBulkWaitlist context={context} filters={filters} selected={selectedAttemptIds} onSelectionChange={setSelectedAttemptIds} onDirtyChange={setBulkDraftDirty} /> : null}
+    {canBulkWaitlist ? <AbsenceBulkWaitlist context={context} filters={filters} selected={selectedAttemptIds} onSelectionChange={setSelectedAttemptIds} onDirtyChange={setBulkDraftDirty} onBatchIdChange={setBatchId} /> : null}
     <DataTable id="absence-review" title="طلاب الغياب" description="العداد التشغيلي يخص فترة الارتباط الحالية؛ الغياب السابق محفوظ للتاريخ." rows={context.students}
       rowKey={row => row.id} searchText={row => `${row.student_name} ${row.student_number}`} emptyMessage="لا توجد حالات ضمن هذا النطاق."
       serverSearch={{ value: filters.q ?? "", onSearch: q => navigate({

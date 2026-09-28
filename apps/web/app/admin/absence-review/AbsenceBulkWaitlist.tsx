@@ -31,9 +31,10 @@ function todayInCairo() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
-export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionChange, onDirtyChange }: {
+export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionChange, onDirtyChange, onBatchIdChange }: {
   context: AbsenceContext; filters: Record<string, string>; selected: string[]; onSelectionChange: (ids: string[]) => void;
   onDirtyChange: (dirty: boolean) => void;
+  onBatchIdChange: (id: string) => void;
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<"selected" | "all">("selected");
@@ -118,6 +119,7 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
       setSavedDraftKey(draftKey);
       current.searchParams.set("bulk_batch", next.batch.id);
       window.history.replaceState(window.history.state, "", current);
+      onBatchIdChange(next.batch.id);
       requestAnimationFrame(() => previewHeadingRef.current?.focus());
     } catch { if (!controller.signal.aborted && mounted.current) { setError("تعذر إنشاء المعاينة. حاول مرة أخرى."); errorRef.current?.focus(); } }
     finally { if (previewController.current === controller) previewController.current = null; if (mounted.current) setBusy(null); }
