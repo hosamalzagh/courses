@@ -328,7 +328,7 @@ class StudyCoverageTest extends TestCase
         ])->assertCreated()->json('group');
         $student = $this->student();
         $attempt = $this->enroll($student['id'], $first, now('Africa/Cairo')->format('Y-m-d'));
-        $this->center->run(function () use ($first, $attempt, $second): void {
+        $this->center->run(function () use ($first, $attempt): void {
             $lecture = DB::table('plan_lectures')->where('plan_version_id', $first['plan_version_id'])->firstOrFail();
             $sessionId = (string) Str::uuid();
             DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $first['id'],

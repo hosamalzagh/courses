@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use App\Support\StudyCoverageCredits;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -154,8 +155,9 @@ class CenterStudyCompletionController extends Controller
             $this->conflict('completion_selection_empty');
         }
         $db = DB::connection('tenant');
-        $required = $db->table('plan_lectures')->where('plan_version_id', $group->plan_version_id)
-            ->orderBy('number')->pluck('number')->map(fn ($number): int => (int) $number)->all();
+        $requirements = $db->table('plan_lectures')->where('plan_version_id', $group->plan_version_id)
+            ->orderBy('number')->get(['id', 'number']);
+        $required = $requirements->pluck('number')->map(fn ($number): int => (int) $number)->all();
         $openSessions = $db->table('study_sessions as sessions')
             ->join('plan_lectures as lectures', 'lectures.id', '=', 'sessions.plan_lecture_id')
             ->where('sessions.group_id', $group->id)->where('sessions.status', '<>', 'cancelled')
@@ -170,15 +172,18 @@ class CenterStudyCompletionController extends Controller
                 ->select(['attempts.id as attempt_id', 'attempts.student_id', 'attempts.completion_threshold',
                     'students.name', 'students.student_number'])
                 ->selectRaw(<<<'SQL'
-COALESCE((SELECT json_agg(json_build_object('number', covered.number, 'final', covered.final) ORDER BY covered.number)
-FROM (SELECT lectures.number, bool_or(sessions.closed_at IS NOT NULL) AS final
+COALESCE((SELECT json_agg(json_build_object('id', lectures.id, 'final', sessions.closed_at IS NOT NULL))
     FROM study_attendance_entries AS entries
     JOIN study_sessions AS sessions ON sessions.id = entries.session_id
     JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id
-    WHERE entries.attempt_id = attempts.id AND entries.status = 'counted'
-      AND sessions.status <> 'cancelled'
-      AND lectures.plan_version_id = attempts.plan_version_id
-    GROUP BY lectures.number) AS covered), '[]'::json) AS coverage
+    WHERE entries.attempt_id = attempts.id AND entries.status = 'counted' AND sessions.status <> 'cancelled'), '[]'::json) AS attendance_rows,
+COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
+    'source_lecture_ids', approvals.source_lecture_ids, 'target_lecture_ids', approvals.target_lecture_ids))
+    FROM content_equivalences AS approvals
+    WHERE approvals.target_plan_version_id = attempts.plan_version_id
+      OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
+          WHERE transfers.attempt_id = attempts.id
+            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json) AS approvals
 SQL)
                 ->orderBy('attempts.id');
             if ($lock) {
@@ -190,9 +195,11 @@ SQL)
             }
             $reasons = array_column($data['decisions'], 'exception_reason', 'attempt_id');
             foreach ($rows as $row) {
-                $coverage = json_decode($row->coverage, true);
-                $covered = array_map('intval', array_column($coverage, 'number'));
-                $open = array_map('intval', array_column(array_filter($coverage, fn (array $item): bool => ! $item['final']), 'number'));
+                $credits = StudyCoverageCredits::resolve(json_decode($row->attendance_rows, true), json_decode($row->approvals, true));
+                $covered = $requirements->filter(fn (object $item): bool => array_key_exists($item->id, $credits['lectures']))
+                    ->pluck('number')->map(fn ($number): int => (int) $number)->all();
+                $open = $requirements->filter(fn (object $item): bool => array_key_exists($item->id, $credits['lectures'])
+                    && ! $credits['lectures'][$item->id])->pluck('number')->map(fn ($number): int => (int) $number)->all();
                 $missing = array_values(array_diff($required, $covered));
                 $eligible = $required !== [] && count($covered) * 100 >= (int) $row->completion_threshold * count($required);
                 $reason = $reasons[$row->attempt_id];
