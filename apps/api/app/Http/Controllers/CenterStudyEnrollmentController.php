@@ -285,6 +285,7 @@ class CenterStudyEnrollmentController extends Controller
             $laterAttendance = DB::connection('tenant')->table('study_attendance_entries as entries')
                 ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
                 ->where('entries.attempt_id', $attemptId)->whereNotNull('entries.status')
+                ->where('sessions.status', '<>', 'cancelled')
                 ->whereRaw("(sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= ?::date", [$data['withdrawn_on']])
                 ->exists();
             abort_if($laterAttendance, 422, 'تاريخ الانسحاب يسبق حضورًا مسجلًا أو يوافق يومه.');

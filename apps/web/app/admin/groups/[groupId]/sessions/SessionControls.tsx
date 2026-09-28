@@ -196,7 +196,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
         { key: "requirement", label: "محاضرة الخطة", render: item => `${item.plan_lecture_number.toLocaleString("ar-EG")} · ${item.content}` },
         { key: "title", label: "العنوان", render: item => item.title || "—" },
         { key: "time", label: "الموعد بتوقيت القاهرة", render: item => formatSessionTime(item.scheduled_at) },
-        { key: "status", label: "الحالة", render: item => item.status === "planned" ? "مخطط" : item.status === "held" ? "أُقيمت" : "ملغاة" },
+        { key: "status", label: "الحالة", render: item => item.revoked_at ? "أُلغي اعتمادها" : item.status === "planned" ? "مخطط" : item.status === "held" ? "أُقيمت" : "ملغاة" },
         { key: "actions", label: "الإجراءات", actions: true, render: item => <span className="flex flex-wrap items-center gap-2">
           <Link href={`/admin/groups/${group.id}/sessions/${item.id}/attendance`}>كشف الحضور</Link>
           {group.can_manage && group.status !== "completed" && item.status === "planned" && parseSessionTime(item.scheduled_at).getTime() > Date.now()
