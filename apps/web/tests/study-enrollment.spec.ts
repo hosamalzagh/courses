@@ -95,7 +95,7 @@ test("enrolls through the employee page and preserves SSR, credit, RTL, and the 
   const html = await page.request.get(`${origin}/admin/students/${studentId}/enrollments`);
   expect(await html.text()).toContain("1300.00");
   await page.goto(`${origin}/admin/students/${studentId}/account`);
-  await expect(page.getByText("مديونية محاولات الدراسة ضمن فروع صلاحيتك", { exact: false })).toBeVisible();
+  await expect(page.getByText("المديونية المتبقية", { exact: false })).toBeVisible();
   await expect(page.getByText("1300.00 EGP").first()).toBeVisible();
   await page.goto(`${origin}/admin/students/${studentId}/enrollments`);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -162,7 +162,7 @@ test("suspension blocks a stale enrollment preview and lifting allows registrati
   expect(Number(deniedResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
   const denied = await deniedResponse.json();
   expect(denied.attempts).toHaveLength(0);
-  expect(denied.balance.debt).toBe("0");
+  expect(denied.balance.debt).toBe("0.00");
   await page.getByRole("button", { name: "تحميل أحدث البيانات" }).click();
   await expect(page.getByText("الطالب موقوف؛ لا يمكن تسجيل محاولة جديدة.")).toBeVisible();
   await expect(page.getByRole("button", { name: "تسجيل الطالب والرسوم" })).toBeDisabled();
@@ -209,7 +209,7 @@ test("parallel suspension and enrollment produce one serialized decision", async
   const after = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
   expect(after.student.status).toBe("suspended");
   expect(after.attempts).toHaveLength(enrollment.status() === 201 ? 1 : 0);
-  expect(after.balance.debt).toBe(enrollment.status() === 201 ? "80.00" : "0");
+  expect(after.balance.debt).toBe(enrollment.status() === 201 ? "80.00" : "0.00");
   if (enrollment.status() === 201) expect(after.attempts[0].fee.net_amount).toBe("80.00");
 });
 

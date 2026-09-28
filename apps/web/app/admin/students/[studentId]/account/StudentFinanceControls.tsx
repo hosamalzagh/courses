@@ -15,6 +15,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from "@/lib/client-api";
 import type { StudentAccountContext } from "@/lib/server-context";
 import { paymentMethodLabels } from "@/lib/student-finance";
+import { StudentPaymentAllocations } from "./StudentPaymentAllocations";
 
 const currencies = ["EGP", "SAR", "AED", "USD", "EUR", "GBP"];
 
@@ -48,6 +49,8 @@ export function StudentFinanceControls({ initial, search }: { initial: StudentAc
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null);
+  const [allocationDirty, setAllocationDirty] = useState(false);
   const submitting = useRef(false);
   const requestId = useRef<string | null>(null);
   if (loadedInitial !== initial) {
@@ -65,7 +68,8 @@ export function StudentFinanceControls({ initial, search }: { initial: StudentAc
   const paymentForm = `${formPrefix}-payment`;
   const paymentDirty = Boolean(amount || receivedOn || method !== "cash" ||
     (current.recordable_branches[0] && branch !== String(current.recordable_branches[0].id)));
-  const dirty = Boolean((currency && currency !== current.account.currency) || paymentDirty);
+  const dirty = Boolean((currency && currency !== current.account.currency) || paymentDirty || allocationDirty);
+  const selectedPayment = current.payments.find((item) => item.id === selectedPaymentId);
 
   function focus(field: string) {
     requestAnimationFrame(() => document.getElementById(`${formPrefix}-${field}`)?.focus());
@@ -83,6 +87,15 @@ export function StudentFinanceControls({ initial, search }: { initial: StudentAc
       router.refresh();
     } catch { setError("تعذر تحميل الحساب. تحقق من الاتصال وأعد المحاولة."); }
     finally { setBusy(false); }
+  }
+
+  async function refreshAfterAllocation() {
+    try {
+      const response = await centerRequest(accountPath, "GET");
+      if (!response.ok) { setError("حُفظت الحركة، لكن تعذر تحديث ملخص الحساب. حمّل أحدث الحساب."); return; }
+      setCurrent(await response.json() as StudentAccountContext);
+      router.refresh();
+    } catch { setError("حُفظت الحركة، لكن تعذر تحديث ملخص الحساب. حمّل أحدث الحساب."); }
   }
 
   async function saveCurrency(event: FormEvent<HTMLFormElement>) {
@@ -160,9 +173,11 @@ export function StudentFinanceControls({ initial, search }: { initial: StudentAc
     <UnsavedChangesGuard dirty={dirty} guardHistory />
     <section className="context-card form-stack" aria-label="ملخص الحساب المالي">
       <h2>{current.account.student_name} — رقم {current.account.student_number.toLocaleString("ar-EG")}</h2>
-      <p>الرصيد المتاح من الدفعات المقدمة ضمن فروع صلاحيتك: <strong><bdi dir="ltr">{current.account.available_balance} {current.account.currency ?? ""}</bdi></strong></p>
-      <p>مديونية محاولات الدراسة ضمن فروع صلاحيتك: <strong><bdi dir="ltr">{current.account.debt} {current.account.currency ?? ""}</bdi></strong></p>
-      <p className="muted">كل دفعة في السجل أدناه غير مخصصة. قد توجد حركات في فروع أخرى لا تملك صلاحية رؤيتها.</p>
+      <p>إجمالي الدفعات المستلمة ضمن فروع صلاحيتك: <strong><bdi dir="ltr">{current.account.received_total} {current.account.currency ?? ""}</bdi></strong></p>
+      <p>الرصيد غير المخصص: <strong><bdi dir="ltr">{current.account.available_balance} {current.account.currency ?? ""}</bdi></strong></p>
+      <p>إجمالي الرسوم: <strong><bdi dir="ltr">{current.account.due_total} {current.account.currency ?? ""}</bdi></strong> — المسدد بالتخصيص: <strong><bdi dir="ltr">{current.account.paid_total} {current.account.currency ?? ""}</bdi></strong></p>
+      <p>المديونية المتبقية: <strong><bdi dir="ltr">{current.account.debt} {current.account.currency ?? ""}</bdi></strong></p>
+      <p className="muted">قد توجد حركات في فروع أخرى لا تملك صلاحية رؤيتها.</p>
       {current.account.currency_locked ? <p>عملة المركز ثابتة بعد أول حركة: <bdi dir="ltr">{current.account.currency}</bdi></p> : null}
     </section>
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
@@ -199,9 +214,14 @@ export function StudentFinanceControls({ initial, search }: { initial: StudentAc
         { key: "date", label: "تاريخ الاستلام", render: (row) => <bdi dir="ltr">{row.received_on}</bdi> },
         { key: "branch", label: "فرع الاستلام", render: (row) => row.branch_name ?? `فرع ${row.branch_id}` },
         { key: "amount", label: "المبلغ", render: (row) => <bdi dir="ltr">{row.amount} {row.currency}</bdi> },
+        { key: "allocated", label: "المخصص", render: (row) => <bdi dir="ltr">{row.allocated_amount} {row.currency}</bdi> },
+        { key: "available", label: "المتاح", render: (row) => <bdi dir="ltr">{row.available_amount} {row.currency}</bdi> },
         { key: "method", label: "الطريقة", render: (row) => paymentMethodLabels[row.method] ?? row.method },
         { key: "actor", label: "الموظف", render: (row) => row.actor_name },
+        { key: "allocations", label: "التخصيصات", actions: true, render: (row) => <Button id={`${formPrefix}-payment-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedPaymentId(row.id); requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-payment-allocation-title]")?.focus()); }}>عرض وتخصيص</Button> },
       ]} />
+    {selectedPayment ? <StudentPaymentAllocations studentId={studentId} payment={selectedPayment}
+      onClose={() => { setSelectedPaymentId(null); focus(`payment-${selectedPayment.id}`); }} onChanged={refreshAfterAllocation} onDirtyChange={setAllocationDirty} /> : null}
     <CenterHeaderActions>
       {current.pagination.page > 1 ? <Link className={buttonVariants({ variant: "outline" })} href={paymentPage(current.pagination.page - 1)}>الحركات السابقة</Link> : null}
       {current.pagination.has_more ? <Link className={buttonVariants({ variant: "outline" })} href={paymentPage(current.pagination.page + 1)}>الحركات التالية</Link> : null}

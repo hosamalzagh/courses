@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use App\Support\ActiveStudentAllocations;
 use App\Support\StudentAccountVersion;
+use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -52,11 +54,18 @@ class CenterStudyEnrollmentController extends Controller
             ->whereColumn('study_attempt_fees.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('study_attempt_fees.branch_id', $scope))
             ->selectRaw('COALESCE(SUM(study_attempt_fees.net_amount), 0)');
+        $used = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'students.id')
+            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.source_branch_id', $scope))
+            ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
+        $paid = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'students.id')
+            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.target_branch_id', $scope))
+            ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
         $student = StudentPhotos::visibleStudent($studentId, $permissions, 'enrollment.manage')
             ->select(['students.id', 'students.name', 'students.student_number', 'students.status', 'students.financial_account_revision'])
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency'), 'currency')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency_revision'), 'currency_revision')
-            ->selectSub($payments, 'available_credit')->selectSub($fees, 'debt')
+            ->selectSub($payments, 'received_total')->selectSub($fees, 'due_total')
+            ->selectSub($used, 'used_total')->selectSub($paid, 'paid_total')
             ->selectSub(DB::connection('tenant')->query()->fromSub($groups, 'choices')->selectRaw('json_agg(choices)'), 'group_choices')
             ->first();
         abort_unless($student, 404);
@@ -75,7 +84,8 @@ class CenterStudyEnrollmentController extends Controller
                 'status' => $student->status, 'currency' => $student->currency,
                 'currency_revision' => (int) $student->currency_revision,
                 'version' => StudentAccountVersion::forActor($student->id, $student->financial_account_revision, $request->user()->id)],
-            'balance' => ['available_credit' => $student->available_credit, 'debt' => $student->debt],
+            'balance' => ['available_credit' => StudentMoney::format(StudentMoney::cents($student->received_total) - StudentMoney::cents($student->used_total)),
+                'debt' => StudentMoney::format(StudentMoney::cents($student->due_total) - StudentMoney::cents($student->paid_total))],
             'groups' => $choices->take(50)->values(), 'attempts' => $attempts->take(20)->map(fn (object $row) => $this->present($row))->values(),
             'pagination' => ['page' => $page, 'has_more' => $attempts->count() > 20,
                 'groups_page' => $groupsPage, 'groups_has_more' => $choices->count() > 50],

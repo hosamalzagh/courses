@@ -9,6 +9,7 @@ use App\Http\Controllers\CenterMemberController;
 use App\Http\Controllers\CenterSecurityController;
 use App\Http\Controllers\CenterSettingsController;
 use App\Http\Controllers\CenterStudentAttachmentController;
+use App\Http\Controllers\CenterStudentAllocationController;
 use App\Http\Controllers\CenterStudentController;
 use App\Http\Controllers\CenterStudentCustomFieldController;
 use App\Http\Controllers\CenterStudentEventNoteController;
@@ -90,6 +91,9 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('students/{studentId}/enrollments/{attemptId}/note', [CenterStudentEventNoteController::class, 'show']);
         Route::put('students/{studentId}/enrollments/{attemptId}/note', [CenterStudentEventNoteController::class, 'save']);
         Route::post('students/{studentId}/payments', [CenterStudentFinanceController::class, 'recordPayment']);
+        Route::get('students/{studentId}/payments/{paymentId}/allocation-options', [CenterStudentAllocationController::class, 'options']);
+        Route::post('students/{studentId}/payments/{paymentId}/allocations', [CenterStudentAllocationController::class, 'allocate']);
+        Route::post('students/{studentId}/allocations/{allocationId}/reverse', [CenterStudentAllocationController::class, 'reverse']);
         Route::patch('financial-currency', [CenterStudentFinanceController::class, 'updateCurrency']);
         Route::get('student-search-workspace', [CenterStudentSearchController::class, 'workspace']);
         Route::patch('student-search-policy', [CenterStudentSearchController::class, 'updatePolicy']);
