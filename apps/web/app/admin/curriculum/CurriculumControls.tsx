@@ -20,9 +20,25 @@ import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard';
 import { InlineNotice } from '@/components/InlineNotice';
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from '@/lib/client-api';
 import type { Course, CurriculumContext, Level, PlanLecture, Stage } from '@/lib/curriculum';
-type Editor = { kind: 'course' } | { kind: 'stage'; course: Course } | { kind: 'level'; stage: Stage } | { kind: 'plan'; level: Level } | { kind: 'threshold'; scope: 'course' | 'stage' | 'level'; record: Course | Stage | Level };
+type Editor = { kind: 'course' } | { kind: 'stage'; course: Course } | { kind: 'level'; stage: Stage }
+  | { kind: 'plan' | 'new-version'; level: Level }
+  | { kind: 'threshold'; scope: 'course' | 'stage' | 'level'; record: Course | Stage | Level };
 type LectureDraft = Omit<PlanLecture, 'planned_hours'> & { planned_hours: string };
 const blankLecture = (): LectureDraft => ({ number: 1, content: '', title: null, planned_hours: '1' });
+function planChanges(previous: PlanLecture[], current: PlanLecture[]) {
+  const before = new Map(previous.map(lecture => [lecture.number, lecture]));
+  const after = new Map(current.map(lecture => [lecture.number, lecture]));
+  return [...new Set([...before.keys(), ...after.keys()])].sort((left, right) => left - right).flatMap(number => {
+    const oldLecture = before.get(number); const newLecture = after.get(number);
+    if (oldLecture && newLecture && oldLecture.content === newLecture.content && oldLecture.title === newLecture.title
+      && oldLecture.planned_hours === newLecture.planned_hours) return [];
+    return [{ number, change: !oldLecture ? 'محاضرة مضافة' : !newLecture ? 'محاضرة أزيلت' : 'متطلبات معدّلة',
+      before: oldLecture, after: newLecture }];
+  });
+}
+function lectureSummary(lecture?: PlanLecture) {
+  return lecture ? `${lecture.content} · ${lecture.title || 'بدون عنوان'} · ${lecture.planned_hours.toLocaleString('ar-EG')} ساعة` : '—';
+}
 export function CurriculumControls({ context, detail = false, section = 'courses' }: { context: CurriculumContext; detail?: boolean; section?: 'courses' | 'stages' | 'levels' }) {
   const formPrefix = useId();
   const router = useRouter();
@@ -35,6 +51,21 @@ export function CurriculumControls({ context, detail = false, section = 'courses
     }
     return params;
   };
+  const detailLevel = detail ? context.levels[0] : undefined;
+  const versionHref = (version: number, page = detailLevel?.plan_history_pagination?.page ?? 1) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('plan_version', String(version));
+    if (page > 1) params.set('versions_page', String(page)); else params.delete('versions_page');
+    return `/admin/curriculum/${detailLevel?.id}?${params}`;
+  };
+  function showLatestPlan() {
+    if (!detailLevel) { router.refresh(); return; }
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('plan_version');
+    params.delete('versions_page');
+    const query = params.toString();
+    router.replace(`/admin/curriculum/${detailLevel.id}${query ? `?${query}` : ''}`);
+  }
   function openSection(next: 'courses' | 'stages' | 'levels') {
     const params = new URLSearchParams(searchParams.toString());
     params.set('tab', next); router.push(`/admin/curriculum?${params}`);
@@ -70,16 +101,17 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   const branchName = (id: number) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`;
   function open(next: Editor, preserveTrigger = false) {
     if (!preserveTrigger) trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const nextName = next.kind === 'plan' ? next.level.name : next.kind === 'threshold' ? next.record.name : '';
+    const nextName = next.kind === 'plan' || next.kind === 'new-version' ? next.level.name : next.kind === 'threshold' ? next.record.name : '';
     const nextBranch = manageable[0]?.id ?? 0;
-    const nextLectures = next.kind === 'plan' ? next.level.plan.lectures.map(({ number, content, title, planned_hours }) => ({ number, content, title, planned_hours: String(planned_hours) })) : [blankLecture()];
+    const nextLectures = next.kind === 'plan' || next.kind === 'new-version'
+      ? next.level.plan.lectures.map(({ number, content, title, planned_hours }) => ({ number, content, title, planned_hours: String(planned_hours) })) : [blankLecture()];
     const nextThreshold = next.kind === 'threshold' ? next.record.completion_threshold === null ? '' : String(next.record.completion_threshold) : '';
     setBaseline(JSON.stringify([nextName, nextBranch, nextLectures, nextThreshold]));
     setEditor(next); setName(nextName); setBranchId(nextBranch); setLectures(nextLectures); setThreshold(nextThreshold);
     setRequestId(newSubmissionId()); setError(''); setNotice(''); setFieldErrors({}); setConflict(false);
     if (next.kind === 'threshold') requestAnimationFrame(() => document.getElementById('curriculum-completion-threshold')?.focus());
   }
-  async function editPlan(level: Level) {
+  async function editPlan(level: Level, kind: 'plan' | 'new-version' = 'plan') {
     if (saving.current) return;
     const load = new AbortController();
     workspaceRead.current = load;
@@ -95,7 +127,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
       const data = await response.json() as CurriculumContext;
       if (workspaceRead.current !== load) return;
       trigger.current = action;
-      open({ kind: 'plan', level: data.levels[0] }, true);
+      open({ kind, level: data.levels[0] }, true);
     } catch { if (workspaceRead.current === load) setError('تعذر تحميل خطة المستوى. حاول مرة أخرى.'); }
     finally {
       if (workspaceRead.current === load) {
@@ -108,7 +140,8 @@ export function CurriculumControls({ context, detail = false, section = 'courses
     requestAnimationFrame(() => {
       if (trigger.current?.isConnected) trigger.current.focus();
       else if (editor) {
-        const id = editor.kind === 'stage' ? editor.course.id : editor.kind === 'level' ? editor.stage.id : editor.kind === 'plan' ? editor.level.id : editor.kind === 'threshold' ? editor.record.id : null;
+        const id = editor.kind === 'stage' ? editor.course.id : editor.kind === 'level' ? editor.stage.id
+          : editor.kind === 'plan' || editor.kind === 'new-version' ? editor.level.id : editor.kind === 'threshold' ? editor.record.id : null;
         if (id) document.querySelector<HTMLElement>(`[data-curriculum-edit="${id}"]`)?.focus();
       }
     });
@@ -152,18 +185,24 @@ export function CurriculumControls({ context, detail = false, section = 'courses
       return;
     }
     const errors: Record<string, string> = {};
-    if (editor.kind !== 'plan' && !name.trim()) errors.name = 'أدخل الاسم.';
+    if (editor.kind !== 'plan' && editor.kind !== 'new-version' && !name.trim()) errors.name = 'أدخل الاسم.';
     if (editor.kind === 'course' && !branchId) errors.branch_id = 'اختر فرعًا مصرحًا به.';
-    if (editor.kind === 'level' || editor.kind === 'plan') for (const [index, lecture] of lectures.entries()) {
+    if (editor.kind === 'level' || editor.kind === 'plan' || editor.kind === 'new-version') for (const [index, lecture] of lectures.entries()) {
       if (!lecture.content.trim()) errors[`lectures.${index}.content`] = 'أدخل محتوى المحاضرة.';
       if (!lecture.planned_hours.trim() || !Number.isFinite(Number(lecture.planned_hours)) || Number(lecture.planned_hours) <= 0 || Number(lecture.planned_hours) > 9999.99 || !/^\d+(?:\.\d{1,2})?$/.test(lecture.planned_hours)) errors[`lectures.${index}.planned_hours`] = 'أدخل ساعات أكبر من صفر وبحد أقصى منزلتين عشريتين.';
     }
     if (Object.keys(errors).length) { setFieldErrors(errors); focusFieldError(errors); return; }
     saving.current = true; setBusy(true);
     try {
-      const path = editor.kind === 'course' ? 'courses' : editor.kind === 'stage' ? `courses/${editor.course.id}/stages` : editor.kind === 'level' ? `stages/${editor.stage.id}/levels` : `levels/${editor.level.id}/first-plan`;
-      const payload = editor.kind === 'plan' ? { plan_version_id: editor.level.plan.id, revision: editor.level.plan.revision } : { name: name.trim(), request_id: requestId, ...(editor.kind === 'course' ? { branch_id: branchId } : {}) };
-      const response = await centerRequest(path, editor.kind === 'plan' ? 'PATCH' : 'POST', { ...payload, ...((editor.kind === 'level' || editor.kind === 'plan') ? { lectures: lectures.map((lecture, index) => ({ ...lecture, number: index + 1, content: lecture.content.trim(), title: lecture.title?.trim() || null, planned_hours: Number(lecture.planned_hours) })) } : {}) });
+      const path = editor.kind === 'course' ? 'courses' : editor.kind === 'stage' ? `courses/${editor.course.id}/stages`
+        : editor.kind === 'level' ? `stages/${editor.stage.id}/levels`
+        : editor.kind === 'plan' ? `levels/${editor.level.id}/first-plan` : `levels/${editor.level.id}/plan-versions`;
+      const payload = editor.kind === 'plan' ? { plan_version_id: editor.level.plan.id, revision: editor.level.plan.revision }
+        : editor.kind === 'new-version' ? { base_plan_version_id: editor.level.plan.id,
+          base_revision: editor.level.plan.revision, request_id: requestId }
+          : { name: name.trim(), request_id: requestId, ...(editor.kind === 'course' ? { branch_id: branchId } : {}) };
+      const response = await centerRequest(path, editor.kind === 'plan' ? 'PATCH' : 'POST', { ...payload,
+        ...((editor.kind === 'level' || editor.kind === 'plan' || editor.kind === 'new-version') ? { lectures: lectures.map((lecture, index) => ({ ...lecture, number: index + 1, content: lecture.content.trim(), title: lecture.title?.trim() || null, planned_hours: Number(lecture.planned_hours) })) } : {}) });
       if (!response.ok) {
         const data = await response.clone().json().catch(() => ({}));
         if (response.status === 409 && data.code === 'plan_used') setError('استُخدمت هذه الخطة؛ لا يمكن تغيير محتواها. التعديل الدراسي يحتاج إصدارًا لاحقًا مستقلًا.');
@@ -172,20 +211,37 @@ export function CurriculumControls({ context, detail = false, section = 'courses
         else { const validation = await responseFieldErrors(response); setFieldErrors(validation); setError(await responseMessage(response)); if (Object.keys(validation).length) focusFieldError(validation); }
         return;
       }
-      close(); setNotice('حُفظ المنهج داخل الفرع مع هوية ثابتة لإصدار الخطة.');
-      if (!detail && editor.kind !== 'plan') openSection(editor.kind === 'course' ? 'courses' : editor.kind === 'stage' ? 'stages' : 'levels');
-      router.refresh();
-    } catch { setError('تعذر تأكيد الحفظ. تحقق من الاتصال وأعد نفس الطلب؛ إعادة الإرسال لا تنشئ سجلًا مكررًا.'); }
+      close(); setNotice(editor.kind === 'new-version' ? 'حُفظ إصدار جديد من خطة المستوى. بقيت المجموعات ومحاولات الدراسة على إصدارها السابق.'
+        : 'حُفظ المنهج داخل الفرع مع هوية ثابتة لإصدار الخطة.');
+      if (!detail && editor.kind !== 'plan' && editor.kind !== 'new-version') openSection(editor.kind === 'course' ? 'courses' : editor.kind === 'stage' ? 'stages' : 'levels');
+      if (editor.kind === 'new-version' && detail) showLatestPlan();
+      else router.refresh();
+    } catch {
+      if (editor.kind === 'new-version') setConflict(true);
+      setError('تعذر تأكيد الحفظ. تحقق من الاتصال وأعد نفس الطلب؛ إعادة الإرسال لا تنشئ سجلًا مكررًا.');
+    }
     finally { saving.current = false; setBusy(false); }
   }
   async function recover() {
     if (!editor || saving.current) return;
     if (editor.kind === 'threshold') { close(); router.refresh(); setNotice('حُمّلت القائمة الحالية. افتح نسبة الإتمام مرة أخرى لمراجعتها.'); return; }
+    const draft = lectures;
     const load = new AbortController();
     workspaceRead.current = load;
     saving.current = true; setBusy(true);
     try {
       const response = await centerRequest(editor.kind === 'plan' ? `levels/${editor.level.id}` : `curriculum/submissions/${requestId}`, 'GET', undefined, load.signal);
+      if (editor.kind === 'new-version' && response.status === 404) {
+        const fresh = await centerRequest(`levels/${editor.level.id}`, 'GET', undefined, load.signal);
+        if (!fresh.ok) { if (workspaceRead.current === load) setError(await responseMessage(fresh)); return; }
+        const data = await fresh.json() as CurriculumContext;
+        if (workspaceRead.current !== load) return;
+        open({ kind: 'new-version', level: data.levels[0] }, true);
+        setLectures(draft);
+        setNotice('حُمّل أحدث إصدار وبقيت مسودتك. قارنها بالإصدار الجديد قبل إعادة الحفظ.');
+        router.refresh();
+        return;
+      }
       if (!response.ok) {
         const message = await responseMessage(response);
         if (workspaceRead.current === load) setError(message);
@@ -198,7 +254,8 @@ export function CurriculumControls({ context, detail = false, section = 'courses
         close(); setNotice('السجل حُفظ سابقًا. راجع السجل في الجدول؛ لن يُنشأ سجل آخر.');
         if (!detail) openSection(data.kind === 'stages' ? 'stages' : data.kind === 'levels' ? 'levels' : 'courses');
       }
-      router.refresh();
+      if (editor.kind === 'new-version' && detail) showLatestPlan();
+      else router.refresh();
     } catch { if (workspaceRead.current === load) setError('تعذر تحميل البيانات الحالية. حاول مرة أخرى.'); }
     finally {
       if (workspaceRead.current === load) {
@@ -213,9 +270,9 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   }
   const editorForm = editor ? <form id={`${formPrefix}-0`} className='context-card form-stack' aria-label='إدارة منهج الفرع' noValidate onSubmit={save}>
 <FieldGroup>
-        <h2>{editor.kind === 'course' ? 'كورس جديد' : editor.kind === 'stage' ? `مرحلة دراسية في ${editor.course.name}` : editor.kind === 'level' ? `مستوى في ${editor.stage.name}` : editor.kind === 'threshold' ? `نسبة الإتمام — ${editor.record.name}` : `تعديل الخطة الأولى — ${editor.level.name}`}</h2>
+        <h2>{editor.kind === 'course' ? 'كورس جديد' : editor.kind === 'stage' ? `مرحلة دراسية في ${editor.course.name}` : editor.kind === 'level' ? `مستوى في ${editor.stage.name}` : editor.kind === 'threshold' ? `نسبة الإتمام — ${editor.record.name}` : editor.kind === 'new-version' ? `إصدار جديد لخطة ${editor.level.name}` : `تعديل الخطة الأولى — ${editor.level.name}`}</h2>
         <FieldSet disabled={busy} className="form-stack" style={{ border: 0, padding: 0, margin: 0 }}>
-          {editor.kind !== 'plan' && editor.kind !== 'threshold' ? <FormField id='curriculum-name' label={editor.kind === 'course' ? 'اسم الكورس' : editor.kind === 'stage' ? 'اسم المرحلة الدراسية' : 'اسم المستوى'} value={name} onChange={(value) => { setName(value); setFieldErrors({}); }} required error={fieldErrors.name} focusOnMount /> : null}
+          {editor.kind !== 'plan' && editor.kind !== 'new-version' && editor.kind !== 'threshold' ? <FormField id='curriculum-name' label={editor.kind === 'course' ? 'اسم الكورس' : editor.kind === 'stage' ? 'اسم المرحلة الدراسية' : 'اسم المستوى'} value={name} onChange={(value) => { setName(value); setFieldErrors({}); }} required error={fieldErrors.name} focusOnMount /> : null}
           {editor.kind === 'threshold' ? <Field data-invalid={Boolean(fieldErrors.completion_threshold)}>
             <FieldLabel htmlFor='curriculum-completion-threshold'>نسبة الإتمام المطلوبة</FieldLabel>
             <NativeSelect id='curriculum-completion-threshold' value={threshold} onChange={event => { setThreshold(event.target.value); setFieldErrors({}); }}>
@@ -226,17 +283,17 @@ export function CurriculumControls({ context, detail = false, section = 'courses
             {fieldErrors.completion_threshold ? <p className='field-error' role='alert'>{fieldErrors.completion_threshold}</p> : null}
           </Field> : null}
           {editor.kind === 'course' ? <FieldSet ><FieldLegend>الفرع الذي يملك الكورس</FieldLegend><Field data-invalid={Boolean(fieldErrors.branch_id)}><RadioGroup disabled={busy} aria-invalid={Boolean(fieldErrors.branch_id)} name='curriculum-branch' value={String(branchId)} onValueChange={(value) => setBranchId(Number(value))}>{manageable.map((branch) => <FieldLabel className="flex items-center gap-2" key={branch.id}><RadioGroupItem value={String(branch.id)} />{branch.name}</FieldLabel>)}</RadioGroup></Field>{fieldErrors.branch_id ? <p className='field-error' role='alert'>{fieldErrors.branch_id}</p> : null}</FieldSet> : null}
-          {editor.kind === 'level' || editor.kind === 'plan' ? <>
-            <p className='muted'>كل بند محاضرة مطلوبة كاملة. الترقيم متتابع، والعنوان اختياري، ولا تحتاج إلى تقسيم الموضوع. حتى ٢٠٠ محاضرة في الإصدار الأول.</p>
+          {editor.kind === 'level' || editor.kind === 'plan' || editor.kind === 'new-version' ? <>
+            <p className='muted'>{editor.kind === 'new-version' ? `يبدأ الإصدار ${editor.level.plan.version + 1} من أحدث خطة. راجع تغييرات المحتوى والعناوين والساعات قبل الحفظ؛ لا تنتقل المجموعات أو محاولات الدراسة إليه تلقائيًا. ` : ''}كل بند محاضرة مطلوبة كاملة. الترقيم متتابع والعنوان اختياري، حتى ٢٠٠ محاضرة.</p>
             {lectures.map((lecture, index) => <FieldSet className="form-stack" key={index}><FieldLegend>المحاضرة المطلوبة رقم {(index + 1).toLocaleString('ar-EG')}</FieldLegend>
-              <FormField id={`lecture-content-${index}`} label={`محتوى المحاضرة ${index + 1}`} required focusOnMount={editor.kind === 'plan' && index === 0} value={lecture.content} onChange={(content) => changeLecture(index, { content })} error={fieldErrors[`lectures.${index}.content`]} />
+              <FormField id={`lecture-content-${index}`} label={`محتوى المحاضرة ${index + 1}`} required focusOnMount={(editor.kind === 'plan' || editor.kind === 'new-version') && index === 0} value={lecture.content} onChange={(content) => changeLecture(index, { content })} error={fieldErrors[`lectures.${index}.content`]} />
               <FormField id={`lecture-title-${index}`} label={`عنوان المحاضرة ${index + 1} (اختياري)`} value={lecture.title ?? ''} onChange={(title) => changeLecture(index, { title })} error={fieldErrors[`lectures.${index}.title`]} />
               <FormField id={`lecture-hours-${index}`} label={`الساعات المخططة للمحاضرة ${index + 1}`} value={lecture.planned_hours} type='text' direction='ltr' onChange={(value) => changeLecture(index, { planned_hours: value })} error={fieldErrors[`lectures.${index}.planned_hours`]} hint='ساعات موجبة حتى منزلتين عشريتين. لا تستخدم لحساب نسبة الإتمام.' />
               {lectures.length > 1 ? <Button onClick={() => setLectures((items) => items.filter((_, number) => number !== index).map((item, number) => ({ ...item, number: number + 1 })))}>إزالة المحاضرة {index + 1}</Button> : null}
             </FieldSet>)}
             <Button disabled={lectures.length >= 200} onClick={() => setLectures((items) => [...items, { ...blankLecture(), number: items.length + 1 }])}>إضافة محاضرة كاملة</Button>
           </> : null}
-<CenterHeaderActions>{conflict ? <Button onClick={recover}>تحميل البيانات الحالية للمنهج</Button> : null}<Button form={`${formPrefix}-0`} type='submit' variant='primary' busy={busy} disabled={conflict}>{editor.kind === 'threshold' ? 'حفظ نسبة الإتمام' : 'حفظ المنهج'}</Button><Button disabled={busy} onClick={close}>إلغاء</Button></CenterHeaderActions>
+<CenterHeaderActions>{conflict ? <Button onClick={recover}>تحميل البيانات الحالية للمنهج</Button> : null}<Button form={`${formPrefix}-0`} type='submit' variant='primary' busy={busy} disabled={conflict}>{editor.kind === 'threshold' ? 'حفظ نسبة الإتمام' : editor.kind === 'new-version' ? 'حفظ الإصدار الجديد' : 'حفظ المنهج'}</Button><Button disabled={busy} onClick={close}>إلغاء</Button></CenterHeaderActions>
         </FieldSet>
       </FieldGroup>
 </form> : null;
@@ -257,10 +314,10 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   const levels = <>      <DataTable id='curriculum-levels' title='المستويات وخططها' rows={context.levels} rowKey={(row) => row.id} searchText={(row) => `${row.name} ${row.stage_name} ${row.course_name}`} emptyMessage='لا توجد مستويات متاحة. أضف مستوى وخطته من المرحلة الدراسية.' columns={[
         { key: 'name', label: 'المستوى', filterText: (row) => row.name, render: (row) => <Link href={`/admin/curriculum/${row.id}?${levelListParams()}`}>{row.name}</Link> },
         { key: 'sequence', label: 'الكورس والمرحلة والفرع', filterText: (row) => `${row.course_name} ${row.stage_name} ${branchName(row.branch_id)}`, render: (row) => `${row.course_name} ← ${row.stage_name} · ${branchName(row.branch_id)}` },
-        { key: 'plan', label: 'الخطة الأولى', render: (row) => `${row.plan.lecture_count.toLocaleString('ar-EG')} محاضرة مطلوبة · ${row.plan.planned_hours.toLocaleString('ar-EG')} ساعة مخططة` },
+        { key: 'plan', label: detail ? 'الإصدار المعروض' : 'أحدث إصدار', render: (row) => `الإصدار ${row.plan.version.toLocaleString('ar-EG')} · ${row.plan.lecture_count.toLocaleString('ar-EG')} محاضرة مطلوبة · ${row.plan.planned_hours.toLocaleString('ar-EG')} ساعة مخططة` },
         { key: 'status', label: 'حالة الخطة', render: (row) => row.plan.used_at ? 'مستخدمة — محتوى ثابت' : 'لم تستخدم بعد' },
         { key: 'threshold', label: 'نسبة الإتمام', render: (row) => row.completion_threshold === null ? 'موروثة من المرحلة أو الكورس' : `${row.completion_threshold.toLocaleString('ar-EG')}٪` },
-        { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => row.can_manage ? <span className='flex flex-wrap gap-2'>{!row.plan.used_at ? <Button data-curriculum-edit={row.id} disabled={busy || editor !== null} onClick={() => editPlan(row)}>تعديل الخطة الأولى</Button> : <span className='muted'>التعديل يحتاج إصدارًا جديدًا</span>}<Button disabled={busy || editor !== null} onClick={() => open({ kind: 'threshold', scope: 'level', record: row })}>تحديد نسبة الإتمام</Button></span> : 'عرض فقط' },
+        { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => row.can_manage ? <span className='flex flex-wrap gap-2'>{row.latest_version === 1 && !row.plan.used_at ? <Button data-curriculum-edit={row.id} disabled={busy || editor !== null} onClick={() => editPlan(row)}>تعديل الخطة الأولى</Button> : null}<Button data-curriculum-edit={row.id} disabled={busy || editor !== null} onClick={() => editPlan(row, 'new-version')}>إنشاء إصدار جديد</Button><Button disabled={busy || editor !== null} onClick={() => open({ kind: 'threshold', scope: 'level', record: row })}>تحديد نسبة الإتمام</Button></span> : 'عرض فقط' },
       ]} />{!detail ? batch('levels') : null}
 </>;
   const branchChoices = <>      {!detail && (context.pagination.branches.has_more || context.pagination.branches.page > 1) ? <section className='context-card'><p>فروع إنشاء الكورس في هذه الدفعة.</p>{batch('branches')}</section> : null}
@@ -277,11 +334,37 @@ export function CurriculumControls({ context, detail = false, section = 'courses
         { value: 'stages', label: 'المراحل الدراسية', content: <>{editorForm}<div hidden={Boolean(editor)} className='workspace-register'>{stages}</div></> },
         { value: 'levels', label: 'المستويات وخططها', content: <>{editorForm}<div hidden={Boolean(editor)} className='workspace-register'>{levels}</div></> },
       ]} />}
-      {detail && context.levels[0] ? <DataTable id='curriculum-lectures' title='المحاضرات المطلوبة' description={`الإصدار الأول؛ ${context.levels[0].plan.lectures.length.toLocaleString('ar-EG')} محاضرة كاملة. هذه متطلبات الخطة وليست سجل المحاضرات الفعلية.`} rows={context.levels[0].plan.lectures} rowKey={(row) => row.number} searchText={(row) => `${row.number} ${row.content} ${row.title ?? ''}`} emptyMessage='لا توجد محاضرات مطلوبة.' columns={[
+      {detail && context.levels[0] ? <DataTable id='curriculum-lectures' title='المحاضرات المطلوبة' description={`الإصدار ${context.levels[0].plan.version.toLocaleString('ar-EG')}؛ ${context.levels[0].plan.lectures.length.toLocaleString('ar-EG')} محاضرة كاملة. هذه متطلبات الخطة وليست سجل المحاضرات الفعلية.`} rows={context.levels[0].plan.lectures} rowKey={(row) => row.number} searchText={(row) => `${row.number} ${row.content} ${row.title ?? ''}`} emptyMessage='لا توجد محاضرات مطلوبة.' columns={[
         { key: 'number', label: 'رقم المحاضرة', render: (row) => row.number.toLocaleString('ar-EG') },
         { key: 'content', label: 'المحتوى المطلوب', filterText: (row) => row.content, render: (row) => row.content },
         { key: 'title', label: 'العنوان الاختياري', filterText: (row) => row.title ?? '', render: (row) => row.title || 'بدون عنوان' },
         { key: 'hours', label: 'الساعات المخططة', render: (row) => row.planned_hours.toLocaleString('ar-EG') },
       ]} /> : null}
+      {detailLevel && detailLevel.plan.version > 1 ? <DataTable id='curriculum-plan-changes'
+        title={`الاختلاف عن الإصدار ${(detailLevel.plan.version - 1).toLocaleString('ar-EG')}`}
+        description='تظهر المحاضرات التي أضيفت أو أزيلت أو تغير محتواها أو عنوانها أو ساعاتها. لا ينقل إنشاء الإصدار المجموعات أو الطلاب إليه.'
+        rows={planChanges(detailLevel.plan.previous_lectures, detailLevel.plan.lectures)} rowKey={row => row.number}
+        searchText={row => `${row.number} ${row.change} ${lectureSummary(row.before)} ${lectureSummary(row.after)}`}
+        emptyMessage='لا توجد فروق دراسية بين الإصدارين.' columns={[
+          { key: 'number', label: 'المحاضرة', render: row => row.number.toLocaleString('ar-EG') },
+          { key: 'change', label: 'نوع التغيير', render: row => row.change },
+          { key: 'before', label: 'الإصدار السابق', render: row => lectureSummary(row.before) },
+          { key: 'after', label: 'الإصدار المعروض', render: row => lectureSummary(row.after) },
+        ]} /> : null}
+      {detailLevel?.plan_history ? <><DataTable id='curriculum-plan-history' title='إصدارات خطة المستوى'
+        description='كل إصدار يحتفظ بهويته ومتطلباته. تطبيق إصدار جديد على دراسة قائمة يتطلب معاينة واعتمادًا منفصلين.'
+        rows={detailLevel.plan_history} rowKey={row => row.id} searchText={row => `${row.version} ${row.lecture_count}`}
+        emptyMessage='لا توجد إصدارات في هذه الدفعة.' columns={[
+          { key: 'version', label: 'الإصدار', render: row => `الإصدار ${row.version.toLocaleString('ar-EG')}${row.version === detailLevel.plan.version ? ' · معروض' : ''}` },
+          { key: 'created', label: 'تاريخ الحفظ', render: row => new Date(row.created_at).toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' }) },
+          { key: 'size', label: 'المتطلبات', render: row => `${row.lecture_count.toLocaleString('ar-EG')} محاضرة · ${row.planned_hours.toLocaleString('ar-EG')} ساعة` },
+          { key: 'used', label: 'الاستخدام', render: row => row.used_at ? 'مرتبط بدراسة' : 'غير مستخدم' },
+          { key: 'actions', label: 'العرض', actions: true, render: row => <Link href={versionHref(row.version)} aria-current={row.version === detailLevel.plan.version ? 'page' : undefined}>عرض الإصدار</Link> },
+        ]} />
+        {detailLevel.plan_history_pagination ? <nav className='form-actions' aria-label='دفعات إصدارات الخطة'>
+          {detailLevel.plan_history_pagination.page > 1 ? <Link href={versionHref(detailLevel.plan.version, detailLevel.plan_history_pagination.page - 1)}>الدفعة السابقة</Link> : null}
+          <span>دفعة {detailLevel.plan_history_pagination.page.toLocaleString('ar-EG')} · حتى ٢٠ إصدارًا</span>
+          {detailLevel.plan_history_pagination.has_more ? <Link href={versionHref(detailLevel.plan.version, detailLevel.plan_history_pagination.page + 1)}>الدفعة التالية</Link> : null}
+        </nav> : null}</> : null}
   </>;
 }

@@ -137,6 +137,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::post('courses/{courseId}/stages', [CenterCurriculumController::class, 'storeStage']);
         Route::post('stages/{stageId}/levels', [CenterCurriculumController::class, 'storeLevel']);
         Route::patch('levels/{levelId}/first-plan', [CenterCurriculumController::class, 'updatePlan']);
+        Route::post('levels/{levelId}/plan-versions', [CenterCurriculumController::class, 'storePlanVersion']);
         Route::patch('courses/{courseId}/completion-threshold', [CenterCurriculumController::class, 'updateCourseThreshold']);
         Route::patch('stages/{stageId}/completion-threshold', [CenterCurriculumController::class, 'updateStageThreshold']);
         Route::patch('levels/{levelId}/completion-threshold', [CenterCurriculumController::class, 'updateLevelThreshold']);
