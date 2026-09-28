@@ -1,0 +1,303 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Support\CenterPermissions;
+use App\Support\CenterWrites;
+use App\Support\StudentPhotos;
+use App\Support\StudyCoverageCredits;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+
+class CenterStudyMakeupController extends Controller
+{
+    public function workspace(Request $request, string $studentId, string $attemptId): JsonResponse
+    {
+        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
+        $permissions = $request->attributes->get('center_permissions');
+        $attempt = $this->attempt($studentId, $attemptId, $permissions);
+        $page = (int) ($data['page'] ?? 1);
+        $branches = $this->branches($permissions, 'read');
+        $sessions = DB::connection('tenant')->table('study_sessions as sessions')
+            ->join('study_groups as groups', 'groups.id', '=', 'sessions.group_id')
+            ->join('levels', 'levels.id', '=', 'groups.level_id')
+            ->join('stages', 'stages.id', '=', 'levels.stage_id')
+            ->join('courses', 'courses.id', '=', 'stages.course_id')
+            ->leftJoin('study_makeup_bookings as bookings', function ($join) use ($attemptId): void {
+                $join->on('bookings.session_id', '=', 'sessions.id')->where('bookings.attempt_id', $attemptId);
+            })
+            ->leftJoin('study_attendance_entries as entries', function ($join) use ($attemptId): void {
+                $join->on('entries.session_id', '=', 'sessions.id')->where('entries.attempt_id', $attemptId);
+            })
+            ->leftJoin('study_sessions as source_sessions', 'source_sessions.id', '=', 'bookings.source_session_id')
+            ->leftJoin('study_groups as source_groups', 'source_groups.id', '=', 'source_sessions.group_id')
+            ->leftJoin('levels as source_levels', 'source_levels.id', '=', 'source_groups.level_id')
+            ->leftJoin('stages as source_stages', 'source_stages.id', '=', 'source_levels.stage_id')
+            ->leftJoin('courses as source_courses', 'source_courses.id', '=', 'source_stages.course_id')
+            ->where(fn ($query) => $query->where('groups.id', '<>', $attempt->current_group_id)->orWhereNotNull('bookings.id'))
+            ->where(fn ($query) => $query->whereIn('sessions.status', ['planned', 'held'])->orWhereNotNull('bookings.id'))
+            ->when(! $permissions->isCenterManager(), fn ($query) => $query->whereIn('courses.branch_id', $branches))
+            ->select(['sessions.id', 'sessions.group_id', 'sessions.number', 'sessions.title', 'sessions.scheduled_at',
+                'sessions.status', 'sessions.revision', 'sessions.plan_lecture_id', 'groups.name as group_name',
+                'groups.plan_version_id', 'courses.branch_id', 'bookings.id as booking_id',
+                'bookings.source_session_id', 'bookings.booked_at', 'bookings.proved_at',
+                'entries.status as attendance_status', 'source_courses.branch_id as source_branch_id'])
+            ->orderByRaw('CASE WHEN bookings.id IS NULL THEN 1 ELSE 0 END')
+            ->orderByDesc('sessions.scheduled_at')->orderBy('sessions.id')
+            ->offset(($page - 1) * 20)->limit(21)->get();
+
+        return response()->json(['attempt' => $attempt,
+            'sessions' => $sessions->take(20)->map(fn ($session): array => [
+                ...array_diff_key((array) $session, ['source_branch_id' => true]),
+                'source_session_id' => $session->source_branch_id !== null
+                    && $permissions->can('read', (int) $session->source_branch_id) ? $session->source_session_id : null,
+                'can_book' => $permissions->can('attendance.record', (int) $session->branch_id),
+                'can_prove' => $permissions->can('attendance.correct', (int) $session->branch_id),
+            ])->values(),
+            'pagination' => ['page' => $page, 'has_more' => $sessions->count() > 20]])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function absences(Request $request, string $studentId, string $attemptId): JsonResponse
+    {
+        $permissions = $request->attributes->get('center_permissions');
+        $this->attempt($studentId, $attemptId, $permissions);
+        $branches = $this->branches($permissions, 'read');
+        $rows = DB::connection('tenant')->table('study_attendance_entries as entries')
+            ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
+            ->join('study_groups as groups', 'groups.id', '=', 'sessions.group_id')
+            ->join('levels', 'levels.id', '=', 'groups.level_id')
+            ->join('stages', 'stages.id', '=', 'levels.stage_id')
+            ->join('courses', 'courses.id', '=', 'stages.course_id')
+            ->where('entries.attempt_id', $attemptId)->where('entries.status', 'absent')
+            ->where('sessions.status', '<>', 'cancelled')
+            ->when(! $permissions->isCenterManager(), fn ($query) => $query->whereIn('courses.branch_id', $branches))
+            ->orderByDesc('sessions.scheduled_at')->limit(20)
+            ->get(['sessions.id', 'sessions.number', 'sessions.scheduled_at', 'groups.name as group_name', 'courses.branch_id']);
+
+        return response()->json(['source_absences' => $rows])->header('Cache-Control', 'private, no-store');
+    }
+
+    public function book(Request $request, string $studentId, string $attemptId): JsonResponse
+    {
+        $data = $request->validate(['session_id' => ['required', 'uuid'], 'source_session_id' => ['nullable', 'uuid'],
+            'attempt_revision' => ['required', 'integer', 'min:1'], 'session_revision' => ['required', 'integer', 'min:1'],
+            'request_id' => ['required', 'uuid']]);
+        $hash = hash('sha256', json_encode([$attemptId, $data['session_id'], $data['source_session_id'] ?? null,
+            $data['attempt_revision'], $data['session_revision']]));
+
+        return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $studentId, $attemptId, $data, $hash): JsonResponse {
+            $attempt = $this->attempt($studentId, $attemptId, $permissions, true);
+            $session = $this->session($data['session_id'], $permissions, 'attendance.record');
+            if ($prior = DB::connection('tenant')->table('study_makeup_bookings')->where('request_id', $data['request_id'])->first()) {
+                abort_unless($prior->attempt_id === $attemptId && $prior->session_id === $session->id
+                    && (int) $prior->booked_by === (int) $request->user()->id, 404);
+                abort_unless($prior->request_hash === $hash, 409, 'طلب الحجز تغير؛ حمّل أحدث البيانات.');
+                if ($prior->source_session_id) {
+                    $this->sourceAbsence($attemptId, $prior->source_session_id, $permissions, false);
+                }
+
+                return response()->json(['booking' => $prior, 'replayed' => true]);
+            }
+            $this->validAttempt($attempt, $data['attempt_revision']);
+            abort_if($session->status !== 'planned' || $session->closed_at
+                || (int) $session->revision !== $data['session_revision'], 409, 'تغيرت المحاضرة؛ حمّل أحدث البيانات.');
+            $this->eligible($attempt, $session, $permissions, $data['source_session_id'] ?? null);
+            abort_if(DB::connection('tenant')->table('study_makeup_bookings')->where('attempt_id', $attemptId)
+                ->where('session_id', $session->id)->exists(), 409, 'حُجز هذا التعويض سابقًا.');
+            $now = now();
+            $booking = ['id' => (string) Str::uuid(), 'attempt_id' => $attemptId, 'session_id' => $session->id,
+                'source_session_id' => $data['source_session_id'] ?? null, 'booked_by' => $request->user()->id,
+                'booked_at' => $now, 'request_id' => $data['request_id'], 'request_hash' => $hash,
+                'created_at' => $now, 'updated_at' => $now];
+            DB::connection('tenant')->table('study_makeup_bookings')->insert($booking);
+            $this->audit($request->user()->id, (int) $session->branch_id, 'study_makeup.booked', [
+                'attempt_id' => $attemptId, 'student_id' => $studentId, 'group_id' => $session->group_id,
+                'session_id' => $session->id,
+                'booking_id' => $booking['id']]);
+
+            return response()->json(['booking' => $booking], 201);
+        });
+    }
+
+    public function prove(Request $request, string $studentId, string $attemptId): JsonResponse
+    {
+        $data = $request->validate(['session_id' => ['required', 'uuid'], 'source_session_id' => ['nullable', 'uuid'],
+            'attempt_revision' => ['required', 'integer', 'min:1'], 'session_revision' => ['required', 'integer', 'min:1'],
+            'reason' => ['required', 'string', 'min:3', 'max:1000'], 'request_id' => ['required', 'uuid']]);
+        $reason = trim($data['reason']);
+        abort_if(mb_strlen($reason) < 3, 422, 'سبب إثبات التعويض مطلوب.');
+        $hash = hash('sha256', json_encode([$attemptId, $data['session_id'], $data['source_session_id'] ?? null,
+            $data['attempt_revision'], $data['session_revision'], $reason]));
+
+        return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $studentId, $attemptId, $data, $reason, $hash): JsonResponse {
+            $attempt = $this->attempt($studentId, $attemptId, $permissions, true);
+            $session = $this->session($data['session_id'], $permissions, 'attendance.correct');
+            $prior = DB::connection('tenant')->table('study_makeup_bookings')->where('proof_request_id', $data['request_id'])->first();
+            if ($prior) {
+                abort_unless($prior->attempt_id === $attemptId && $prior->session_id === $session->id
+                    && (int) $prior->proved_by === (int) $request->user()->id, 404);
+                abort_unless($prior->proof_request_hash === $hash, 409, 'طلب الإثبات تغير؛ حمّل أحدث البيانات.');
+                if ($prior->source_session_id) {
+                    $this->sourceAbsence($attemptId, $prior->source_session_id, $permissions, false);
+                }
+
+                return response()->json(['booking' => $prior, 'replayed' => true]);
+            }
+            $this->validAttempt($attempt, $data['attempt_revision']);
+            abort_if($session->status !== 'held' || ! $session->closed_at
+                || (int) $session->revision !== $data['session_revision'], 409, 'تغير اعتماد المحاضرة؛ حمّل أحدث البيانات.');
+            $this->eligible($attempt, $session, $permissions, $data['source_session_id'] ?? null);
+            $booking = DB::connection('tenant')->table('study_makeup_bookings')
+                ->where('attempt_id', $attemptId)->where('session_id', $session->id)->first();
+            abort_if($booking && $booking->source_session_id !== ($data['source_session_id'] ?? null), 409,
+                'تغير مصدر التعويض؛ حمّل أحدث البيانات.');
+            abort_if(DB::connection('tenant')->table('study_attendance_entries')->where('attempt_id', $attemptId)
+                ->where('session_id', $session->id)->exists(), 409, 'سُجل حضور التعويض سابقًا.');
+            $now = now();
+            if ($booking) {
+                DB::connection('tenant')->table('study_makeup_bookings')->where('id', $booking->id)->update([
+                    'proved_by' => $request->user()->id, 'proved_at' => $now, 'proof_reason' => $reason,
+                    'proof_request_id' => $data['request_id'], 'proof_request_hash' => $hash, 'updated_at' => $now]);
+                $bookingId = $booking->id;
+            } else {
+                $bookingId = (string) Str::uuid();
+                DB::connection('tenant')->table('study_makeup_bookings')->insert([
+                    'id' => $bookingId, 'attempt_id' => $attemptId, 'session_id' => $session->id,
+                    'source_session_id' => $data['source_session_id'] ?? null,
+                    'booked_by' => $request->user()->id, 'booked_at' => $now,
+                    'proved_by' => $request->user()->id, 'proved_at' => $now, 'proof_reason' => $reason,
+                    'request_id' => $data['request_id'], 'request_hash' => $hash,
+                    'proof_request_id' => $data['request_id'], 'proof_request_hash' => $hash,
+                    'created_at' => $now, 'updated_at' => $now]);
+            }
+            $entryId = (string) Str::uuid();
+            DB::connection('tenant')->table('study_attendance_entries')->insert([
+                'id' => $entryId, 'session_id' => $session->id, 'attempt_id' => $attemptId,
+                'status' => 'counted', 'revision' => 1, 'recorded_by' => $request->user()->id,
+                'recorded_at' => $now, 'created_at' => $now, 'updated_at' => $now]);
+            DB::connection('tenant')->table('study_attendance_events')->insert([
+                'id' => (string) Str::uuid(), 'session_id' => $session->id, 'attempt_id' => $attemptId,
+                'kind' => 'makeup_prove', 'session_revision' => $session->revision + 1,
+                'before_status' => null, 'after_status' => 'counted', 'actor_id' => $request->user()->id,
+                'reason' => $reason, 'created_at' => $now]);
+            DB::connection('tenant')->table('study_sessions')->where('id', $session->id)->update([
+                'revision' => $session->revision + 1, 'updated_at' => $now]);
+            $this->audit($request->user()->id, (int) $session->branch_id, 'study_makeup.proved', [
+                'attempt_id' => $attemptId, 'student_id' => $studentId, 'group_id' => $session->group_id,
+                'session_id' => $session->id,
+                'booking_id' => $bookingId, 'entry_id' => $entryId, 'before' => null, 'after' => 'counted',
+                'reason' => $reason]);
+
+            return response()->json(['booking_id' => $bookingId, 'entry_id' => $entryId,
+                'session_revision' => $session->revision + 1], 201);
+        });
+    }
+
+    private function attempt(string $studentId, string $attemptId, CenterPermissions $permissions, bool $lock = false): object
+    {
+        abort_unless(Str::isUuid($studentId) && Str::isUuid($attemptId), 404);
+        $query = StudentPhotos::visibleStudent($studentId, $permissions, 'enrollment.manage')
+            ->join('study_attempts as attempts', 'attempts.student_id', '=', 'students.id')
+            ->where('attempts.id', $attemptId)
+            ->whereExists(DB::connection('tenant')->table('student_branches')
+                ->whereColumn('student_branches.student_id', 'students.id')
+                ->whereColumn('student_branches.branch_id', 'attempts.branch_id')->selectRaw('1'))
+            ->select(['attempts.id', 'attempts.branch_id', 'attempts.current_group_id', 'attempts.plan_version_id',
+                'attempts.status', 'attempts.revision', 'students.status as student_status', 'students.name as student_name']);
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+        $attempt = $query->first();
+        abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
+
+        return $attempt;
+    }
+
+    private function session(string $sessionId, CenterPermissions $permissions, string $action): object
+    {
+        $session = DB::connection('tenant')->table('study_sessions as sessions')
+            ->join('study_groups as groups', 'groups.id', '=', 'sessions.group_id')
+            ->join('levels', 'levels.id', '=', 'groups.level_id')
+            ->join('stages', 'stages.id', '=', 'levels.stage_id')
+            ->join('courses', 'courses.id', '=', 'stages.course_id')
+            ->where('sessions.id', $sessionId)
+            ->select(['sessions.id', 'sessions.group_id', 'sessions.plan_lecture_id', 'sessions.status',
+                'sessions.revision', 'sessions.closed_at', 'groups.plan_version_id', 'courses.branch_id'])
+            ->lockForUpdate()->first();
+        abort_unless($session && $permissions->can($action, (int) $session->branch_id), 404);
+
+        return $session;
+    }
+
+    private function validAttempt(object $attempt, int $revision): void
+    {
+        abort_if($attempt->student_status !== 'active' || $attempt->status === 'withdrawn', 409,
+            'الطالب أو المحاولة غير متاحين للتعويض.');
+        abort_if((int) $attempt->revision !== $revision, 409, 'تغيرت محاولة الدراسة؛ حمّل أحدث البيانات.');
+    }
+
+    private function eligible(object $attempt, object $session, CenterPermissions $permissions, ?string $sourceSessionId): void
+    {
+        abort_if($session->group_id === $attempt->current_group_id || ! $session->plan_lecture_id, 422,
+            'اختر محاضرة تعويض من مجموعة أخرى لها محتوى معتمد.');
+        $sourceLectureId = $sourceSessionId === null ? null
+            : $this->sourceAbsence($attempt->id, $sourceSessionId, $permissions)->plan_lecture_id;
+        $requirements = DB::connection('tenant')->table('plan_lectures')
+            ->where('plan_version_id', $attempt->plan_version_id)->pluck('id')->all();
+        $attendance = DB::connection('tenant')->table('study_attendance_entries as entries')
+            ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
+            ->where('entries.attempt_id', $attempt->id)->where('entries.status', 'counted')
+            ->where('sessions.status', '<>', 'cancelled')
+            ->get(['sessions.plan_lecture_id as id', 'sessions.closed_at'])
+            ->filter(fn ($row): bool => $row->id !== null)
+            ->map(fn ($row): array => ['id' => $row->id, 'final' => $row->closed_at !== null])->all();
+        $approvals = DB::connection('tenant')->table('content_equivalences')
+            ->get(['id', 'source_lecture_ids', 'target_lecture_ids'])
+            ->map(fn ($row): array => ['id' => $row->id,
+                'source_lecture_ids' => json_decode($row->source_lecture_ids, true),
+                'target_lecture_ids' => json_decode($row->target_lecture_ids, true)])->all();
+        $before = StudyCoverageCredits::resolve($attendance, $approvals)['lectures'];
+        $after = StudyCoverageCredits::resolve([...$attendance,
+            ['id' => $session->plan_lecture_id, 'final' => $session->closed_at !== null]], $approvals)['lectures'];
+        $new = array_diff(array_intersect($requirements, array_keys($after)), array_keys($before));
+        abort_if($new === [], 422, 'لا يغطي التعويض محتوى ناقصًا من خطة المحاولة بمعادلة معتمدة.');
+        if ($sourceLectureId !== null) {
+            $sourceCoverage = StudyCoverageCredits::resolve([...$attendance,
+                ['id' => $sourceLectureId, 'final' => true]], $approvals)['lectures'];
+            abort_if(array_intersect($new, array_keys($sourceCoverage)) === [], 422,
+                'المحاضرة المختارة لا تعوّض محتوى الغياب الأصلي المرتبط.');
+        }
+    }
+
+    private function branches(CenterPermissions $permissions, string $action): array
+    {
+        return array_keys(array_filter($permissions->branchRoles,
+            fn (array $roles): bool => in_array($action, CenterPermissions::actions($roles), true)));
+    }
+
+    private function sourceAbsence(string $attemptId, string $sessionId, CenterPermissions $permissions, bool $mustBeAbsent = true): object
+    {
+        $source = DB::connection('tenant')->table('study_attendance_entries as entries')
+            ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
+            ->join('study_groups as groups', 'groups.id', '=', 'sessions.group_id')
+            ->join('levels', 'levels.id', '=', 'groups.level_id')
+            ->join('stages', 'stages.id', '=', 'levels.stage_id')
+            ->join('courses', 'courses.id', '=', 'stages.course_id')
+            ->where('entries.attempt_id', $attemptId)->where('entries.session_id', $sessionId)
+            ->when($mustBeAbsent, fn ($query) => $query->where('entries.status', 'absent')
+                ->where('sessions.status', '<>', 'cancelled'))
+            ->first(['sessions.plan_lecture_id', 'courses.branch_id']);
+        abort_unless($source && $permissions->can('read', (int) $source->branch_id), 404);
+
+        return $source;
+    }
+
+    private function audit(int $actorId, int $branchId, string $event, array $details): void
+    {
+        DB::connection('tenant')->table('center_audit_logs')->insert(['actor_id' => $actorId, 'branch_id' => $branchId,
+            'event' => $event, 'details' => json_encode($details), 'created_at' => now()]);
+    }
+}

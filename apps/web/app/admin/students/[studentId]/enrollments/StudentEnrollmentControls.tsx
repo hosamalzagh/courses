@@ -18,6 +18,7 @@ import { StudyAttemptNoteEditor } from "./StudyAttemptNoteEditor";
 import { StudyWithdrawalEditor } from "./StudyWithdrawalEditor";
 import { StudyWaitlistEditor } from "./StudyWaitlistEditor";
 import { StudyTransferEditor, StudyTransferHistory } from "./StudyTransferEditor";
+import { StudyMakeupEditor } from "./StudyMakeupEditor";
 
 export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: { initial: StudyEnrollmentContext; search: string; linkedAttemptId?: string }) {
   const router = useRouter();
@@ -48,6 +49,9 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
   const [openTransferId, setOpenTransferId] = useState<string | null>(null);
   const [openTransferHistoryId, setOpenTransferHistoryId] = useState<string | null>(null);
   const [transferDirty, setTransferDirty] = useState(false);
+  const [openMakeupId, setOpenMakeupId] = useState<string | null>(null);
+  const [makeupDirty, setMakeupDirty] = useState(false);
+  const makeupOpener = useRef<string | null>(null);
   const transferOpener = useRef<string | null>(null);
   const transferHistoryOpener = useRef<string | null>(null);
   const transferFocusPending = useRef<string | null>(null);
@@ -60,7 +64,7 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
   if (loadedInitial !== initial) {
     setLoadedInitial(initial); setCurrent(initial);
     if (current.student.id !== initial.student.id) {
-      setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason(""); setRepeatId(null); setOpenWithdrawalId(null); setOpenWaitlistId(null); setOpenTransferId(null); setOpenTransferHistoryId(null);
+      setGroupId(""); setSelectedGroup(null); setJoinedOn(""); setDiscount("0.00"); setReason(""); setRepeatId(null); setOpenWithdrawalId(null); setOpenWaitlistId(null); setOpenTransferId(null); setOpenTransferHistoryId(null); setOpenMakeupId(null);
     }
   }
   useEffect(() => {
@@ -76,7 +80,7 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
   const discountAllowed = Boolean(selected && (current.permissions.can_manage_center ||
     current.permissions.branch_actions?.[String(selected.branch_id)]?.includes("fees.discount")));
   const registrationDirty = Boolean(groupId || joinedOn || discount !== "0.00" || reason || repeatId);
-  const dirty = registrationDirty || noteDirty || withdrawalDirty || waitlistDirty || transferDirty;
+  const dirty = registrationDirty || noteDirty || withdrawalDirty || waitlistDirty || transferDirty || makeupDirty;
   const path = `/admin/students/${studentId}/enrollments`;
   const query = new URLSearchParams({ page: String(current.pagination.page), groups_page: String(current.pagination.groups_page), ...(search ? { q: search } : {}), ...(linkedAttemptId ? { attempt_id: linkedAttemptId } : {}) });
   const endpoint = `students/${studentId}/enrollments?${query}`;
@@ -114,7 +118,12 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
     requestAnimationFrame(() => { if (transferHistoryOpener.current) document.getElementById(transferHistoryOpener.current)?.focus(); });
   }
 
-  function discard() { reset(); closeNote(); closeWithdrawal(); closeWaitlist(); closeTransfer(); closeTransferHistory(); }
+  function closeMakeup() {
+    setOpenMakeupId(null); setMakeupDirty(false);
+    requestAnimationFrame(() => { if (makeupOpener.current) document.getElementById(makeupOpener.current)?.focus(); });
+  }
+
+  function discard() { reset(); closeNote(); closeWithdrawal(); closeWaitlist(); closeTransfer(); closeTransferHistory(); closeMakeup(); }
 
   function openNote(attemptId: string) {
     if (openNoteId === attemptId) return;
@@ -287,6 +296,9 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
             {canManageAttempt ? <Button id={`${prefix}-transfer-history-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
               transferHistoryOpener.current = event.currentTarget.id; setOpenTransferId(null); setOpenTransferHistoryId(row.id);
             }}>سجل النقل</Button> : null}
+            {canManageAttempt && row.status !== "withdrawn" ? <Button id={`${prefix}-makeup-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
+              makeupOpener.current = event.currentTarget.id; setOpenTransferId(null); setOpenTransferHistoryId(null); setOpenMakeupId(row.id);
+            }}>حضور التعويض</Button> : null}
             {canManageAttempt && row.status === "active" ? <Button id={`${prefix}-waitlist-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
               waitlistOpener.current = event.currentTarget.id; setOpenWaitlistId(row.id);
             }}>{row.current_group_id ? "نقل إلى الانتظار" : "إعادة الإلحاق"}</Button> : null}
@@ -329,5 +341,8 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
     {openTransferHistoryId && current.attempts.some(attempt => attempt.id === openTransferHistoryId) ?
       <StudyTransferHistory key={openTransferHistoryId} studentId={studentId} attemptId={openTransferHistoryId}
         onClose={closeTransferHistory} /> : null}
+    {openMakeupId && current.attempts.find(attempt => attempt.id === openMakeupId) ?
+      <StudyMakeupEditor key={openMakeupId} studentId={studentId} attempt={current.attempts.find(attempt => attempt.id === openMakeupId)!}
+        onClose={closeMakeup} onDirtyChange={setMakeupDirty} /> : null}
   </>;
 }
