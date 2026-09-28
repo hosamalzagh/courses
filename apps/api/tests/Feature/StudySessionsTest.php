@@ -679,6 +679,11 @@ class StudySessionsTest extends TestCase
     public function test_closed_attendance_correction_and_revocation_recalculate_reports_and_preserve_history(): void
     {
         $group = $this->group($this->north, 'Correction');
+        $secondGroup = $this->postJson("{$this->base}/groups", [
+            'level_id' => $group['level_id'], 'plan_version_id' => $group['plan_version_id'],
+            'name' => 'Second correction group', 'approved_price' => '100.00',
+            'instructor_ids' => array_column($group['instructors'], 'id'), 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
         $scheduled = now('Africa/Cairo')->addDays(14)->setTime(16, 0);
         $session = $this->postJson("{$this->base}/groups/{$group['id']}/sessions", [
             'kind' => 'single', 'revision' => 1, 'start_at' => $scheduled->format('Y-m-d\TH:i'),
@@ -728,6 +733,22 @@ class StudySessionsTest extends TestCase
         $this->assertSame(1, collect($coverage)->firstWhere('student_id', $student['id'])['covered_count']);
         $absences = $this->getJson("{$this->base}/absence-review?view=all&group_id={$group['id']}")->assertOk()->json('students');
         $this->assertSame(0, collect($absences)->firstWhere('student_id', $student['id'])['total_absences']);
+        $this->travelTo($scheduled->copy()->addDay());
+        $enrollments = "{$this->base}/students/{$student['id']}/enrollments";
+        $waitlistPath = "{$enrollments}/{$row['attempt_id']}/waitlist";
+        $attempt = collect($this->getJson($enrollments)->assertOk()->json('attempts'))->firstWhere('id', $row['attempt_id']);
+        $this->postJson($waitlistPath, [
+            'entered_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'نقل إلى مجموعة بديلة',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $attempt = collect($this->getJson($enrollments)->assertOk()->json('attempts'))->firstWhere('id', $row['attempt_id']);
+        $this->postJson("{$enrollments}/{$row['attempt_id']}/reattach", [
+            'group_id' => $secondGroup['id'], 'group_revision' => $secondGroup['revision'],
+            'joined_on' => now('Africa/Cairo')->toDateString(), 'revision' => $attempt['revision'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $coverage = $this->getJson("{$this->base}/groups/{$secondGroup['id']}/coverage")->assertOk()->json('students');
+        $this->assertSame(1, collect($coverage)->firstWhere('student_id', $student['id'])['covered_count']);
         $preview = $this->getJson("{$path}/revoke-preview")->assertOk()
             ->assertJsonPath('attendance.total', 1)->assertJsonPath('attendance.counted', 1)
             ->assertJsonPath('attendance.current_coverage_records', 1)->json();
@@ -761,7 +782,7 @@ class StudySessionsTest extends TestCase
         $this->postJson("{$path}/revoke", $revoke)->assertOk();
         $this->postJson("{$path}/revoke", [...$revoke, 'request_id' => (string) Str::uuid()])
             ->assertConflict()->assertJsonPath('code', 'session_changed');
-        $coverage = $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk()->json('students');
+        $coverage = $this->getJson("{$this->base}/groups/{$secondGroup['id']}/coverage")->assertOk()->json('students');
         $this->assertSame(0, collect($coverage)->firstWhere('student_id', $student['id'])['covered_count']);
         $this->center->run(function () use ($session, $row): void {
             $saved = DB::table('study_sessions')->where('id', $session['id'])->first();
@@ -778,7 +799,7 @@ class StudySessionsTest extends TestCase
         $this->postJson("{$this->base}/students/{$student['id']}/enrollments/{$row['attempt_id']}/waitlist", [
             'entered_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'انتظار بعد إلغاء اعتماد المحاضرة',
             'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
-        ])->assertCreated()->assertJsonPath('waitlist.from_group_id', $group['id']);
+        ])->assertCreated()->assertJsonPath('waitlist.from_group_id', $secondGroup['id']);
         $attempts = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")->assertOk()->json('attempts');
         $attempt = collect($attempts)->firstWhere('id', $row['attempt_id']);
         $this->assertNull($attempt['current_group_id']);

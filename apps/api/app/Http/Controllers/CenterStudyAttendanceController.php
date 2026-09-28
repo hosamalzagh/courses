@@ -331,16 +331,16 @@ class CenterStudyAttendanceController extends Controller
                 COUNT(*) FILTER (WHERE entries.status = 'counted') AS counted,
                 COUNT(*) FILTER (WHERE entries.status = 'not_counted') AS not_counted,
                 COUNT(*) FILTER (WHERE entries.status = 'absent') AS absent,
-                COUNT(*) FILTER (WHERE entries.status = 'counted' AND attempts.current_group_id = ?
-                    AND attempts.plan_version_id = ? AND NOT EXISTS (
+                COUNT(*) FILTER (WHERE entries.status = 'counted' AND attempts.plan_version_id = ?
+                    AND NOT EXISTS (
                         SELECT 1 FROM study_attendance_entries AS other_entries
                         JOIN study_sessions AS other_sessions ON other_sessions.id = other_entries.session_id
                         WHERE other_entries.attempt_id = entries.attempt_id AND other_entries.status = 'counted'
-                            AND other_sessions.id <> entries.session_id AND other_sessions.group_id = ?
+                            AND other_sessions.id <> entries.session_id
                             AND other_sessions.plan_lecture_id = ? AND other_sessions.status <> 'cancelled'
                     )) AS current_coverage_records,
                 COALESCE(bit_xor(hashtextextended(entries.id::text || ':' || entries.revision::text || ':' || COALESCE(entries.status, '') || ':' || COALESCE(attempts.current_group_id::text, '') || ':' || COALESCE(attempts.plan_version_id::text, ''), 0)), 0) AS snapshot",
-                [$session->group_id, $session->plan_version_id, $session->group_id, $session->plan_lecture_id])->first();
+                [$session->plan_version_id, $session->plan_lecture_id])->first();
         $counts = ['total' => (int) $stats->total, 'counted' => (int) $stats->counted,
             'not_counted' => (int) $stats->not_counted, 'absent' => (int) $stats->absent,
             'current_coverage_records' => (int) $stats->current_coverage_records];
