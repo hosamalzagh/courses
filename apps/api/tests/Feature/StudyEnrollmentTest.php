@@ -308,6 +308,7 @@ class StudyEnrollmentTest extends TestCase
         $this->assertLessThanOrEqual(6, (int) $unifiedHistory->headers->get('X-Courses-Query-Count'));
         $this->getJson("{$this->base}/students/{$student['id']}?tab=notes")->assertOk()
             ->assertJsonCount(0, 'important_notes')->assertJsonCount(1, 'student_notes.entries');
+        $this->getJson("{$this->base}/student-workspace?tab=notes")->assertOk()->assertJsonMissingPath('student_notes');
         $history = $this->getJson($url)->assertOk()->assertJsonCount(3, 'versions')
             ->assertJsonPath('versions.0.important', false)->assertJsonPath('versions.1.important', true)
             ->assertJsonPath('versions.2.body', 'اتفقنا على مراجعة الموعد');

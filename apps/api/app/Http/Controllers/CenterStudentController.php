@@ -174,7 +174,7 @@ class CenterStudentController extends Controller
             ...(($data['tab'] ?? '') === 'enrollment-notes' ? ['enrollment_notes' => ['entries' => array_slice(json_decode($students->first()->enrollment_notes ?? '[]', true) ?? [], 0, 20),
                 'pagination' => ['page' => $notesPage, 'has_more' => count(json_decode($students->first()->enrollment_notes ?? '[]', true) ?? []) > 20]]] : []),
             ...($studentId !== null ? ['important_notes' => json_decode($students->first()->important_notes ?? '[]', true) ?? []] : []),
-            ...(($data['tab'] ?? '') === 'notes' ? ['student_notes' => ['entries' => array_slice(json_decode($students->first()->student_notes ?? '[]', true) ?? [], 0, 20),
+            ...($studentId !== null && ($data['tab'] ?? '') === 'notes' ? ['student_notes' => ['entries' => array_slice(json_decode($students->first()->student_notes ?? '[]', true) ?? [], 0, 20),
                 'pagination' => ['page' => $notesPage, 'has_more' => count(json_decode($students->first()->student_notes ?? '[]', true) ?? []) > 20]]] : []),
             'pagination' => ['page' => $page, 'has_more' => $students->count() > 50, 'branches_page' => $branchPage, 'branches_has_more' => $branches->count() > 50],
         ])->header('Cache-Control', 'private, no-store');
