@@ -17,7 +17,7 @@ type Action = { kind: "record" | "undo" | "close"; key: string; requestId: strin
 type Selection = { attemptId: string; mode: "record" | "undo" };
 type NoteSelection = { entryId: string; entryRevision: number };
 
-export function AttendanceControls({ context, search }: { context: AttendanceContext; search: string }) {
+export function AttendanceControls({ context, search, linkedEntryId }: { context: AttendanceContext; search: string; linkedEntryId?: string }) {
   const router = useRouter();
   const titleId = useId();
   const busyRef = useRef(false);
@@ -49,7 +49,7 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
   const { group, session } = current;
   const path = `groups/${group.id}/sessions/${session.id}`;
   const attendanceUrl = (page: number, q = search) => {
-    const params = new URLSearchParams({ ...(page > 1 ? { page: String(page) } : {}), ...(q ? { q } : {}) });
+    const params = new URLSearchParams({ ...(page > 1 ? { page: String(page) } : {}), ...(q ? { q } : {}), ...(linkedEntryId ? { entry_id: linkedEntryId } : {}) });
     return `/admin/${path}/attendance${params.size ? `?${params}` : ""}`;
   };
   const open = !session.closed_at && session.status !== "cancelled";
@@ -61,7 +61,7 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
   const canEditNote = current.can_record || current.can_correct;
 
   async function reload() {
-    const params = new URLSearchParams({ page: String(current.pagination.page), ...(search ? { q: search } : {}) });
+    const params = new URLSearchParams({ page: String(current.pagination.page), ...(search ? { q: search } : {}), ...(linkedEntryId ? { entry_id: linkedEntryId } : {}) });
     const response = await centerRequest(`${path}/attendance?${params}`, "GET");
     if (!response.ok) throw new Error(await responseMessage(response));
     setCurrent((await response.json()) as AttendanceContext);
@@ -174,6 +174,7 @@ export function AttendanceControls({ context, search }: { context: AttendanceCon
       }}
       onSaved={note => setCurrent(previous => ({ ...previous, students: previous.students.map(row => row.entry_id === noteRow.entry_id
         ? { ...row, note_body: note.body, note_important: note.important } : row) }))} /> : null}
+    {linkedEntryId ? <p>واقعة الحضور المرتبطة بالملاحظة: <Link href={`/admin/${path}/attendance`}>عرض كل الطلاب</Link></p> : null}
     <DataTable id={`attendance-${session.id}`} title="كشف الطلاب المستحقين" description="يعرض الطلاب المرتبطين بالمجموعة وقت المحاضرة، مع فترات الإيقاف المستبعدة من الحضور والغياب." rows={current.students}
       rowKey={row => row.attempt_id} searchText={row => `${row.name} ${row.student_number}`} emptyMessage="لا يوجد طلاب مستحقون لهذه المحاضرة."
       serverSearch={{ value: search, onSearch: value => {

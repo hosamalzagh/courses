@@ -447,6 +447,9 @@ class StudySessionsTest extends TestCase
         $attemptId = collect($rows)->firstWhere('student_id', $present['id'])['attempt_id'];
         $entry = $this->postJson($attendance, ['attempt_id' => $attemptId, 'status' => 'counted',
             'revision' => 1, 'request_id' => (string) Str::uuid()])->assertCreated()->json('entry');
+        $linked = $this->getJson("{$attendance}?entry_id={$entry['id']}")->assertOk()
+            ->assertJsonCount(1, 'students')->assertJsonPath('students.0.entry_id', $entry['id']);
+        $this->assertLessThanOrEqual(6, (int) $linked->headers->get('X-Courses-Query-Count'));
         $noteUrl = "{$attendance}/{$entry['id']}/note";
         $request = ['body' => 'حضر بعد التواصل', 'important' => false, 'revision' => 0,
             'entry_revision' => $entry['revision'],
@@ -486,6 +489,8 @@ class StudySessionsTest extends TestCase
         $this->assertSame('حضر بانتظام', collect($rows)->firstWhere('student_id', $present['id'])['note_body']);
         $absentRow = collect($rows)->firstWhere('student_id', $absent['id']);
         $this->assertSame('absent', $absentRow['status']);
+        $this->getJson("{$attendance}?entry_id={$absentRow['entry_id']}")->assertOk()
+            ->assertJsonCount(1, 'students')->assertJsonPath('students.0.student_id', $absent['id']);
         $absentNoteUrl = "{$attendance}/{$absentRow['entry_id']}/note";
         $this->putJson($absentNoteUrl, ['body' => 'غاب بعد إغلاق الكشف', 'important' => true,
             'revision' => 0, 'entry_revision' => $absentRow['entry_revision'],

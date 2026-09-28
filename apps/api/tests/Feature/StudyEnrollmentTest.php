@@ -296,6 +296,9 @@ class StudyEnrollmentTest extends TestCase
         $important = $this->getJson("{$this->base}/students/{$student['id']}")->assertOk()
             ->assertJsonCount(1, 'important_notes')->assertJsonPath('important_notes.0.id', $note['id']);
         $this->assertLessThanOrEqual(6, (int) $important->headers->get('X-Courses-Query-Count'));
+        $linked = $this->getJson("{$workspaceUrl}?attempt_id={$attempt['id']}")->assertOk()
+            ->assertJsonCount(1, 'attempts')->assertJsonPath('attempts.0.id', $attempt['id']);
+        $this->assertLessThanOrEqual(6, (int) $linked->headers->get('X-Courses-Query-Count'));
         $this->putJson($url, ['body' => 'موعد جديد بموافقة الطالب', 'important' => false,
             'revision' => 2, 'request_id' => (string) Str::uuid()])->assertOk()->assertJsonPath('note.revision', 3)
             ->assertJsonPath('note.important', false);
@@ -687,8 +690,10 @@ class StudyEnrollmentTest extends TestCase
         $this->assertLessThanOrEqual(6, (int) $financialNotes->headers->get('X-Courses-Query-Count'));
         $paymentNoteId = collect($financialNotes->json('entries'))->firstWhere('event_type', 'payment')['id'];
         $this->getJson("{$unifiedUrl}/{$paymentNoteId}")->assertOk()->assertJsonCount(2, 'versions');
-        $this->getJson("{$this->base}/students/{$student['id']}?tab=notes")->assertOk()
+        $summary = $this->getJson("{$this->base}/students/{$student['id']}?tab=notes")->assertOk()
             ->assertJsonCount(2, 'important_notes')->assertJsonCount(2, 'student_notes.entries');
+        $this->assertSame($payment['id'], collect($summary->json('important_notes'))->firstWhere('event_type', 'payment')['payment_id']);
+        $this->assertSame($payment['id'], collect($summary->json('important_notes'))->firstWhere('event_type', 'allocation')['payment_id']);
         $after = $this->getJson($accountUrl)->assertOk()->json('account');
         $this->assertSame($before['version'], $after['version']);
         $this->assertSame($before['available_balance'], $after['available_balance']);

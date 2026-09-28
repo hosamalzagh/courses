@@ -98,7 +98,8 @@ class CenterStudentController extends Controller
             $important->select(['notes.id', 'notes.event_type', 'notes.event_id', 'notes.branch_id',
                 'notes.important', 'notes.revision', 'notes.updated_by_name', 'notes.updated_at',
                 'attendance.session_id', 'attendance_group.id as group_id'])
-                ->selectRaw('left(notes.body, 120) as body');
+                ->selectRaw('left(notes.body, 120) as body')
+                ->selectRaw('COALESCE(payment.id, allocation.payment_id) as payment_id');
             $query->selectSub(DB::connection('tenant')->query()->fromSub($important, 'important_rows')
                 ->selectRaw('json_agg(important_rows)'), 'important_notes');
         }

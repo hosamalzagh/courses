@@ -92,10 +92,22 @@ test("the note tab and short summary follow event permissions after each grant c
     const summary = owner.getByRole("region", { name: "الملاحظات المهمة" });
     await expect(summary.getByRole("link")).toHaveCount(4);
     await expect(summary).not.toContainText(longNote);
+    await expect(summary.getByRole("link", { name: "مراجعة دفعة الطالب" }))
+      .toHaveAttribute("href", new RegExp(`payment_id=${payment.body.payment.id}`));
+    await expect(summary.getByRole("link", { name: "مراجعة تخصيص الطالب" }))
+      .toHaveAttribute("href", new RegExp(`allocation_id=${allocationId}`));
     await owner.getByRole("link", { name: "الملاحظات", exact: true }).click();
     await expect(owner.getByRole("region", { name: "ملاحظات أحداث الطالب" })).toContainText("مراجعة دفعة الطالب");
     await expect(owner.getByRole("region", { name: "ملاحظات أحداث الطالب" })).toContainText("مراجعة تخصيص الطالب");
     await expect(owner.getByRole("region", { name: "ملاحظات أحداث الطالب" })).toContainText("متابعة التسجيل");
+    await owner.getByRole("article").filter({ hasText: "متابعة التسجيل" })
+      .getByRole("link", { name: "فتح الحدث الأصلي" }).click();
+    await expect(owner).toHaveURL(new RegExp(`attempt_id=${attempt.body.attempt.id}`));
+    await expect(owner.getByRole("table", { name: "محاولات الدراسة" })).toContainText(`Group ${unique}`);
+    const targetAttempt = await owner.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments?attempt_id=${attempt.body.attempt.id}`);
+    expect(Number(targetAttempt.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+    expect((await targetAttempt.json()).attempts.map((item: { id: string }) => item.id)).toEqual([attempt.body.attempt.id]);
+    await owner.goto(`${origin}/admin/students/${studentId}?tab=notes`);
     await owner.getByRole("article").filter({ hasText: "مراجعة دفعة الطالب" })
       .getByRole("link", { name: "فتح الحدث الأصلي" }).click();
     await expect(owner).toHaveURL(new RegExp(`payment_id=${payment.body.payment.id}`));
