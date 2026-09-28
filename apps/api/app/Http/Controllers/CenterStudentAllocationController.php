@@ -33,6 +33,7 @@ class CenterStudentAllocationController extends Controller
             ->join('study_attempt_fees as fees', 'fees.id', '=', 'allocations.fee_id')
             ->join('branches as target_branches', 'target_branches.id', '=', 'allocations.target_branch_id')
             ->leftJoin('student_payment_allocation_reversals as reversals', 'reversals.allocation_id', '=', 'allocations.id')
+            ->leftJoin('student_allocation_submissions as reversal_submissions', 'reversal_submissions.request_id', '=', 'reversals.submission_id')
             ->leftJoin('student_payment_allocations as corrections', 'corrections.submission_id', '=', 'reversals.submission_id')
             ->whereColumn('allocations.payment_id', 'payments.id')->where('allocations.student_id', $studentId)
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.target_branch_id', $readableBranches))
@@ -45,6 +46,7 @@ class CenterStudentAllocationController extends Controller
                 'allocations.currency', 'allocations.actor_name',
                 'allocations.created_at', 'fees.attempt_id', 'fees.created_at as fee_created_at',
                 'reversals.id as reversal_id', 'reversals.reason as reversal_reason',
+                'reversal_submissions.kind as reversal_kind', 'corrections.id as corrected_allocation_id',
                 'reversals.actor_name as reversed_by_name', 'reversals.created_at as reversed_at'])
             ->selectRaw('allocations.amount::text as amount')
             ->selectSub($this->originalFeeGroupName(), 'group_name');

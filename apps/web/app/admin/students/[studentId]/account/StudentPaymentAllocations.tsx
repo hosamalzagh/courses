@@ -14,7 +14,7 @@ import type { StudentPayment } from "@/lib/server-context";
 import { FinancialEventNoteEditor } from "./FinancialEventNoteEditor";
 
 type Fee = { id: string; attempt_id: string; branch_id: number; branch_name: string; group_name: string | null; fee_created_at: string; net_amount: string; current_due: string; paid_amount: string; remaining_amount: string; currency: string };
-type Allocation = { id: string; fee_id: string; attempt_id: string; target_branch_id: number; target_branch_name: string; group_name: string | null; fee_created_at: string; amount: string; currency: string; actor_name: string; created_at: string; can_correct: boolean; reversal_id: string | null; reversal_reason: string | null; reversed_by_name: string | null; reversed_at: string | null };
+type Allocation = { id: string; fee_id: string; attempt_id: string; target_branch_id: number; target_branch_name: string; group_name: string | null; fee_created_at: string; amount: string; currency: string; actor_name: string; created_at: string; can_correct: boolean; reversal_id: string | null; reversal_reason: string | null; reversal_kind: string | null; corrected_allocation_id: string | null; reversed_by_name: string | null; reversed_at: string | null };
 type Options = { payment: { id: string; branch_id: number; branch_name: string; available_amount: string; amount: string; currency: string }; version: string; can_allocate: boolean; can_correct: boolean; fees: Fee[]; history: Allocation[]; pagination: { page: number; has_more: boolean; history_page: number; history_has_more: boolean } };
 type AllocationPreview = { version: string; cross_branch: boolean; source: { payment_id: string; branch_id: number; branch_name: string; currency: string; available_before: string; available_after: string };
   targets: { attempt_id: string; fee_id: string; branch_id: number; branch_name: string; group_name: string | null;
@@ -273,11 +273,14 @@ export function StudentPaymentAllocations({ studentId, payment, focusNote, onClo
       </CenterHeaderActions> : null}
     </> : <p className="muted">لديك صلاحية عرض الحركات دون تخصيص مبالغ.</p>}
     <DataTable id={`${prefix}-history`} title="سجل التخصيص والعكس" rows={options?.history ?? []} rowKey={(row) => row.id} pageSize={20}
-      searchText={(row) => `${row.target_branch_name} ${row.group_name ?? ""} ${row.attempt_id} ${row.amount} ${row.actor_name} ${row.reversal_reason ?? ""}`}
+      searchText={(row) => `${row.target_branch_name} ${row.group_name ?? ""} ${row.attempt_id} ${row.amount} ${row.actor_name} ${row.reversal_reason ?? ""} ${row.corrected_allocation_id ?? ""}`}
       emptyMessage="لم تُسجل تخصيصات لهذه الدفعة." columns={[
         { key: "group", label: "المحاولة", render: (row) => <>{row.target_branch_name} — {row.group_name ?? "مجموعة غير متاحة"} — <bdi dir="ltr" title={row.attempt_id}>{row.attempt_id.slice(0, 8)}</bdi></> },
         { key: "amount", label: "المبلغ", render: (row) => <bdi dir="ltr">{row.amount} {row.currency}</bdi> },
-        { key: "status", label: "الحالة", render: (row) => row.reversal_id ? `معكوس: ${row.reversal_reason}` : "معتمد" },
+        { key: "status", label: "الحالة", render: (row) => row.reversal_id
+          ? row.reversal_kind === "correct"
+            ? <>صُحح {row.corrected_allocation_id ? <>إلى تخصيص <bdi dir="ltr" title={row.corrected_allocation_id}>{row.corrected_allocation_id.slice(0, 8)}</bdi></> : "وأُعيد إلى الرصيد"} — {row.reversal_reason}</>
+            : `معكوس: ${row.reversal_reason}` : "معتمد" },
         { key: "actor", label: "الموظف", render: (row) => row.actor_name },
         { key: "action", label: "إجراءات", actions: true, render: (row) => <span className="flex flex-wrap gap-2">
           <Button id={`${prefix}-allocation-note-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => setSelectedNote({ type: "allocation", id: row.id, label: "التخصيص" })}>ملاحظة التخصيص</Button>

@@ -332,6 +332,7 @@ test("corrects an allocation to another branch while retaining the original rece
     await staff.getByRole("button", { name: "اعتماد التصحيح" }).click();
     await staff.getByRole("button", { name: "تأكيد التصحيح" }).click();
     await expect(staff.getByText("حُفظ التصحيح", { exact: false })).toBeVisible();
+    await expect(staff.getByText("صُحح إلى تخصيص", { exact: false })).toBeVisible();
     const corrected = await (await owner.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
     expect(corrected.account).toMatchObject({ received_total: "1000.00", available_balance: "600.00", debt: "400.00" });
     await owner.goto(`${origin}/admin/audit`);

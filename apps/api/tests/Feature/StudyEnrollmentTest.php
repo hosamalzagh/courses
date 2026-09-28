@@ -967,6 +967,9 @@ class StudyEnrollmentTest extends TestCase
             ->assertJsonPath('code', 'student_account_changed');
         $this->postJson($url, [...$payload, 'request_id' => (string) Str::uuid(), 'amount' => '1.00'])
             ->assertUnprocessable()->assertJsonValidationErrors('amount');
+        $history = $this->getJson("{$paymentUrl}/allocation-options")->assertOk()->json('history');
+        $this->assertSame($saved['allocation']['id'], collect($history)->firstWhere('id', $allocation['id'])['corrected_allocation_id']);
+        $this->assertSame('correct', collect($history)->firstWhere('id', $allocation['id'])['reversal_kind']);
         $this->getJson($accountUrl)->assertJsonPath('account.received_total', '1000.00')
             ->assertJsonPath('account.available_balance', '600.00')->assertJsonPath('account.debt', '400.00');
         $this->center->run(function () use ($payment, $allocation, $saved): void {
