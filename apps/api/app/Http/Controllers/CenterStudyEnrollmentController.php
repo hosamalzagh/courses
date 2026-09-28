@@ -197,6 +197,9 @@ class CenterStudyEnrollmentController extends Controller
             ->join('study_groups', 'study_groups.id', '=', 'study_attempts.current_group_id')
             ->join('levels', 'levels.id', '=', 'study_attempts.level_id')
             ->join('study_attempt_fees as fees', 'fees.attempt_id', '=', 'study_attempts.id')
+            ->leftJoin('student_event_notes as note', function ($join): void {
+                $join->on('note.event_id', '=', 'study_attempts.id')->where('note.event_type', 'study_attempt');
+            })
             ->where('study_attempts.student_id', $studentId)
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('study_attempts.branch_id', $this->scope($permissions)))
             ->select(['study_attempts.id', 'study_attempts.level_id', 'study_attempts.plan_version_id',
@@ -204,7 +207,9 @@ class CenterStudyEnrollmentController extends Controller
                 'study_attempts.status', 'study_attempts.created_at', 'study_groups.name as group_name', 'levels.name as level_name'])
             ->selectRaw("(SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id) AS requirements_count")
             ->addSelect(['fees.id as fee_id', 'fees.original_price', 'fees.discount', 'fees.net_amount',
-                'fees.currency', 'fees.discount_reason', 'fees.actor_name']);
+                'fees.currency', 'fees.discount_reason', 'fees.actor_name',
+                'note.id as note_id', 'note.body as note_body', 'note.important as note_important',
+                'note.revision as note_revision', 'note.updated_by_name as note_updated_by_name']);
     }
 
     private function present(object $row): array
@@ -217,7 +222,10 @@ class CenterStudyEnrollmentController extends Controller
             'fee' => ['id' => $row->fee_id, 'original_price' => $row->original_price,
                 'discount' => $row->discount, 'net_amount' => $row->net_amount,
                 'currency' => $row->currency, 'discount_reason' => $row->discount_reason,
-                'actor_name' => $row->actor_name]];
+                'actor_name' => $row->actor_name],
+            'note' => $row->note_id === null ? null : ['id' => $row->note_id,
+                'body' => $row->note_body, 'important' => (bool) $row->note_important,
+                'revision' => (int) $row->note_revision, 'updated_by_name' => $row->note_updated_by_name]];
     }
 
     private function scope(CenterPermissions $permissions): array
