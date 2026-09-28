@@ -684,6 +684,15 @@ class StudyEnrollmentTest extends TestCase
         $this->putJson("{$paymentUrl}/note", ['body' => 'محجوب', 'important' => false, 'revision' => 2,
             'request_id' => (string) Str::uuid()])->assertNotFound();
         $this->assertStringNotContainsString('student.payment_note_created', $this->getJson("{$this->base}/audit")->getContent());
+        $branchAudit = $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent();
+        $this->assertStringNotContainsString('student.payment_note_created', $branchAudit);
+        $this->assertStringNotContainsString('student.allocation_note_created', $branchAudit);
+        $this->grant([$this->north => ['branch_auditor', 'accounting']]);
+        $this->asUser($this->staff);
+        $visibleAudit = $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent();
+        $this->assertStringContainsString('student.payment_note_created', $visibleAudit);
+        $this->assertStringContainsString('student.allocation_note_created', $visibleAudit);
+        $this->assertStringNotContainsString('ملاحظة payment مالية', $visibleAudit);
         $this->grant([$this->south => ['branch_auditor', 'accounting']]);
         $this->asUser($this->staff);
         $this->getJson("{$paymentUrl}/note")->assertNotFound();

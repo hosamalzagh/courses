@@ -164,10 +164,10 @@ export function StudentPaymentAllocations({ studentId, payment, onClose, onChang
         { key: "amount", label: "المبلغ", render: (row) => <bdi dir="ltr">{row.amount} {row.currency}</bdi> },
         { key: "status", label: "الحالة", render: (row) => row.reversal_id ? `معكوس: ${row.reversal_reason}` : "معتمد" },
         { key: "actor", label: "الموظف", render: (row) => row.actor_name },
-        { key: "action", label: "إجراءات", actions: true, render: (row) => <CenterHeaderActions>
+        { key: "action", label: "إجراءات", actions: true, render: (row) => <span className="flex flex-wrap gap-2">
           <Button id={`${prefix}-allocation-note-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => setSelectedNote({ type: "allocation", id: row.id, label: "التخصيص" })}>ملاحظة التخصيص</Button>
           {options?.can_correct && !row.reversal_id ? <Button id={`${prefix}-reverse-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => { setReversing(row.id); setReason(""); requestId.current = null; focus(`${prefix}-reason`); }}>عكس التخصيص</Button> : null}
-        </CenterHeaderActions> },
+        </span> },
       ]} />
     {selectedNote?.type === "allocation" ? <FinancialEventNoteEditor key={selectedNote.id} studentId={studentId} type="allocation" eventId={selectedNote.id} label="التخصيص"
       onDirtyChange={setNoteDirty} onClose={() => { const trigger = selectedNote.id; setSelectedNote(null); focus(`${prefix}-allocation-note-${trigger}`); }} /> : null}

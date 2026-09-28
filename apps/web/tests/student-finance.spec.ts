@@ -240,7 +240,7 @@ test("edits payment and allocation notes while financial permissions hide other 
   await page.getByLabel(/المستحق 100.00.*المتبقي 100.00/).fill("30.00");
   await page.getByRole("button", { name: "تخصيص المبالغ المحددة" }).click();
   await expect(page.getByText("حُفظ التخصيص", { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "ملاحظة التخصيص" }).click();
+  await page.getByRole("row").filter({ hasText: "30.00 EGP" }).getByRole("button", { name: "ملاحظة التخصيص" }).click();
   await page.getByRole("textbox", { name: "نص الملاحظة" }).fill("تخصيص لأول رسوم");
   await page.getByRole("button", { name: "إضافة الملاحظة" }).click();
   await expect(page.getByText("تخصيص لأول رسوم")).toBeVisible();
@@ -249,6 +249,11 @@ test("edits payment and allocation notes while financial permissions hide other 
   expect(JSON.stringify(account)).not.toContain("تحقق من إيصال الدفعة");
   const noteResponse = await page.request.get(`${origin}/api/v1/center/students/${studentId}/payments/${northPaymentId}/note`);
   expect(Number(noteResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+  await page.goto(`${origin}/admin/audit`);
+  await expect(page.getByText("إضافة ملاحظة على دفعة الطالب").first()).toBeVisible();
+  await expect(page.getByText("إضافة ملاحظة على تخصيص الدفعة").first()).toBeVisible();
+  await page.getByText("تفاصيل ملاحظة الحركة المالية").first().click();
+  await expect(page.getByText("نص الملاحظة متاح من الحركة المالية ضمن صلاحياتها.").first()).toBeVisible();
 
   await page.context().clearCookies();
   await signIn(page, "staff");

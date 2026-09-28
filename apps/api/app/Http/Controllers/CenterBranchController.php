@@ -74,9 +74,7 @@ class CenterBranchController extends Controller
         $entries = DB::connection('tenant')->table('center_audit_logs')
             ->where('branch_id', $branch->id)
             ->when(! $this->permissions($request)->can('finance.read', $branch->id),
-                fn ($query) => $query->whereNotIn('event', [
-                    'student.payment_recorded', 'student.payment_allocated', 'student.payment_allocation_reversed',
-                ]))
+                fn ($query) => $query->whereNotIn('event', CenterAuditController::FINANCIAL_EVENTS))
             ->when(! $this->permissions($request)->can('enrollment.manage', $branch->id),
                 fn ($query) => $query->whereNotIn('event', [
                     'student.enrolled', 'student.study_attempt_note_created', 'student.study_attempt_note_updated',
