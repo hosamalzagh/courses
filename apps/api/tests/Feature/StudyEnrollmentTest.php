@@ -756,6 +756,8 @@ class StudyEnrollmentTest extends TestCase
             'version' => $fresh['student']['version'], 'request_id' => (string) Str::uuid()];
         $this->postJson($url, [...$repeatPayload, 'repeated_from_attempt_id' => null,
             'request_id' => (string) Str::uuid()])->assertConflict()->assertJsonPath('code', 'repeat_source_required');
+        $this->postJson($url, [...$repeatPayload, 'joined_on' => '2026-09-27',
+            'request_id' => (string) Str::uuid()])->assertUnprocessable();
         $repeat = $this->postJson($url, $repeatPayload)->assertCreated()
             ->assertJsonPath('attempt.fee.net_amount', '180.00')
             ->assertJsonPath('attempt.repeated_from_attempt_id', $first['id'])->json('attempt');
@@ -777,6 +779,31 @@ class StudyEnrollmentTest extends TestCase
             $this->assertSame(1, DB::table('center_audit_logs')->where('event', 'student.study_withdrawn')->count());
             $this->assertSame(1, DB::table('center_audit_logs')->where('event', 'student.study_repeated')->count());
         });
+    }
+
+    public function test_withdrawal_accepts_the_current_cairo_date_after_utc_midnight_boundary(): void
+    {
+        $group = $this->group($this->north, '0.00');
+        $student = $this->student([$this->north]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($url)->json();
+        $attempt = $this->postJson($url, [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $workspace['student']['currency_revision'], 'joined_on' => '2026-09-28',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $workspace['student']['version'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+
+        $this->travelTo(new \DateTimeImmutable('2026-09-28 22:30:00 UTC'));
+        $withdrawUrl = "{$url}/{$attempt['id']}/withdraw";
+        $payload = ['withdrawn_on' => '2026-09-29', 'reason' => 'انتهاء الدراسة اليوم',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid()];
+        $this->postJson($withdrawUrl, [...$payload, 'withdrawn_on' => '2026-09-30',
+            'request_id' => (string) Str::uuid()])->assertUnprocessable();
+        $this->postJson($withdrawUrl, $payload)->assertOk()
+            ->assertJsonPath('attempt.withdrawal.withdrawn_on', '2026-09-29');
+        $this->travelBack();
     }
 
     public function test_withdrawal_requires_current_branch_grant_and_audit_failure_rolls_back(): void

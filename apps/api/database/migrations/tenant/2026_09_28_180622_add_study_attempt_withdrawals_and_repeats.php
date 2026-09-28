@@ -16,7 +16,7 @@ return new class extends Migration
         });
         Schema::create('study_attempt_withdrawals', function (Blueprint $table): void {
             $table->uuid('id')->primary();
-            $table->uuid('attempt_id')->unique();
+            $table->foreignUuid('attempt_id')->unique()->constrained('study_attempts')->restrictOnDelete();
             $table->date('withdrawn_on');
             $table->text('reason');
             $table->unsignedBigInteger('actor_id');

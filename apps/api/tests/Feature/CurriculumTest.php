@@ -297,6 +297,9 @@ class CurriculumTest extends TestCase
             $sessionsMigration = glob(database_path('migrations/tenant/*_create_study_sessions.php'))[0];
             (require $sessionsMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($sessionsMigration, PATHINFO_FILENAME))->delete();
+            $withdrawalsMigration = glob(database_path('migrations/tenant/*_add_study_attempt_withdrawals_and_repeats.php'))[0];
+            (require $withdrawalsMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($withdrawalsMigration, PATHINFO_FILENAME))->delete();
             $attemptsMigration = glob(database_path('migrations/tenant/*_create_study_attempts.php'))[0];
             (require $attemptsMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($attemptsMigration, PATHINFO_FILENAME))->delete();

@@ -162,6 +162,10 @@ class CenterStudyEnrollmentController extends Controller
                 abort_unless($previous && $permissions->can('enrollment.manage', (int) $previous->branch_id), 404);
                 abort_if($previous->status === 'active' || $previous->level_id !== $group->level_id, 409,
                     'اختر محاولة منتهية في المستوى نفسه لإعادة الدراسة.');
+                $endedOn = DB::connection('tenant')->table('study_attempt_group_periods')
+                    ->where('attempt_id', $previous->id)->max('left_on');
+                abort_if($endedOn === null || $data['joined_on'] < $endedOn, 422,
+                    'تاريخ إعادة الدراسة يسبق انتهاء المحاولة السابقة.');
                 abort_if(DB::connection('tenant')->table('study_attempts')->where('repeated_from_attempt_id', $previous->id)->exists(), 409,
                     'أُنشئت محاولة إعادة دراسة لهذا التسجيل بالفعل.');
             }
@@ -226,7 +230,7 @@ class CenterStudyEnrollmentController extends Controller
     {
         abort_unless(Str::isUuid($studentId) && Str::isUuid($attemptId), 404);
         $data = $request->validate([
-            'withdrawn_on' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
+            'withdrawn_on' => ['required', 'date_format:Y-m-d', 'before_or_equal:'.now('Africa/Cairo')->toDateString()],
             'reason' => ['required', 'string', 'max:2000'],
             'revision' => ['required', 'integer', 'min:1'],
             'request_id' => ['required', 'uuid'],
