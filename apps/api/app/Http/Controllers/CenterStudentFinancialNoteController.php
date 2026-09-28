@@ -129,7 +129,8 @@ class CenterStudentFinancialNoteController extends Controller
                 'actor_id' => $actor->id, 'branch_id' => $event->branch_id,
                 'event' => $note === null ? "student.{$type}_note_created" : "student.{$type}_note_updated",
                 'details' => json_encode(['student_id' => $studentId, 'event_type' => $type, 'event_id' => $eventId,
-                    'note_id' => $noteId, 'revision' => $newRevision, 'important' => $data['important']]),
+                    'note_id' => $noteId, 'revision' => $newRevision, 'important' => $data['important'],
+                    ...($type === 'allocation' ? ['related_branch_ids' => [(int) $event->target_branch_id]] : [])]),
                 'created_at' => $now,
             ]);
 

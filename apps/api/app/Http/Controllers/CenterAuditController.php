@@ -50,6 +50,13 @@ class CenterAuditController extends Controller
                 ->orWhere(fn ($event) => $event->whereIn('event', $financialEvents)->whereIn('branch_id', $financialBranches))
                 ->orWhere(fn ($event) => $event->whereIn('event', $enrollmentEvents)->whereIn('branch_id', $enrollmentBranches))
                 ->orWhere(fn ($event) => $event->whereIn('event', $attendanceEvents)->whereIn('branch_id', $attendanceBranches)));
+            $query->where(fn ($scope) => $scope
+                ->whereNotIn('event', ['student.payment_allocated', 'student.payment_allocation_reversed',
+                    'student.allocation_note_created', 'student.allocation_note_updated',
+                    'student.fee_settled', 'student.fee_settlement_corrected'])
+                ->orWhereNull('details->related_branch_ids')
+                ->orWhereRaw("(details->'related_branch_ids')::jsonb <@ ?::jsonb",
+                    [json_encode(array_map('intval', $financialBranches))]));
         }
 
         return self::redactCopySources($query->orderByDesc('id')->limit(50)->get(), $permissions);

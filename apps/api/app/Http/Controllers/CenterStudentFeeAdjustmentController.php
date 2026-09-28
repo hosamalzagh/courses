@@ -133,7 +133,10 @@ class CenterStudentFeeAdjustmentController extends Controller
                     'adjustment_ids' => array_column($rows, 'id'),
                     'before_due' => $preview['fee_before'], 'after_due' => $preview['fee_after'],
                     'account_before' => $preview['account_before'], 'account_after' => $preview['account_after'],
-                    'released_allocations' => $preview['released_allocations'], 'currency' => $fee->currency]),
+                    'released_allocations' => $preview['released_allocations'],
+                    'related_branch_ids' => array_values(array_unique(array_map(
+                        fn (array $entry): int => (int) $entry['allocation']->source_branch_id, $release))),
+                    'currency' => $fee->currency]),
                 'created_at' => $now,
             ]);
 
