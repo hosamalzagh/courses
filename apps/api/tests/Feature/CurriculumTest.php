@@ -529,6 +529,8 @@ class CurriculumTest extends TestCase
             $copiedLevel = DB::table('levels')->where('stage_id', $copiedStage->id)->first();
             $this->assertNotSame($stage['id'], $copiedStage->id);
             $this->assertSame(2, DB::table('study_plan_versions')->where('level_id', $copiedLevel->id)->count());
+            $this->assertSame(1, DB::table('study_plan_versions')->where('level_id', $copiedLevel->id)
+                ->where('version', '>', 1)->whereNotNull('sealed_at')->count());
             $this->assertSame(2, DB::table('plan_lectures')->join('study_plan_versions as plans', 'plans.id', '=', 'plan_lectures.plan_version_id')
                 ->where('plans.level_id', $copiedLevel->id)->count());
             $this->assertSame(0, DB::table('study_plan_versions')->where('level_id', $copiedLevel->id)->whereNotNull('used_at')->count());

@@ -100,6 +100,10 @@ class CenterCurriculumCopyController extends Controller
                                 ], $plan['lectures']));
                             $counts['lectures'] += count($plan['lectures']);
                         }
+                        if ($plan['version'] > 1) {
+                            DB::connection('tenant')->table('study_plan_versions')->where('id', $newPlanId)
+                                ->update(['sealed_at' => $now]);
+                        }
                     }
                 }
             }
