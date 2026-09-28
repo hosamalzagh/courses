@@ -17,6 +17,8 @@ import { formatSessionTime, parseSessionTime } from "@/lib/session-time";
 
 type Draft = { kind: "single" | "weekly"; start_at: string; count: string; interval_weeks: string; plan_lecture_number: string; title: string };
 type Preview = { group_revision: number; sessions: { number: number; plan_lecture_number: number; title: string | null; local_at: string }[] };
+type CancelPreview = { group_revision: number; session_revision: number; plan_lecture_number: number; required_count: number; scheduled_at: string; preview_token: string };
+type ReplacementPreview = { group_revision: number; session_revision: number; number: number; plan_lecture_number: number; local_at: string; title: string | null; preview_token: string };
 const initialDraft: Draft = { kind: "single", start_at: "", count: "1", interval_weeks: "1", plan_lecture_number: "", title: "" };
 
 export function SessionControls({ context }: { context: SessionContext }) {
@@ -33,6 +35,16 @@ export function SessionControls({ context }: { context: SessionContext }) {
   const [postponeAt, setPostponeAt] = useState("");
   const [reason, setReason] = useState("");
   const [postponeId, setPostponeId] = useState(newSubmissionId);
+  const [cancelTarget, setCancelTarget] = useState<StudySession | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelDecision, setCancelDecision] = useState<"academic" | "financial" | "none">("academic");
+  const [cancelPreview, setCancelPreview] = useState<CancelPreview | null>(null);
+  const [cancelId, setCancelId] = useState(newSubmissionId);
+  const [replacementTarget, setReplacementTarget] = useState<StudySession | null>(null);
+  const [replacementAt, setReplacementAt] = useState("");
+  const [replacementTitle, setReplacementTitle] = useState("");
+  const [replacementPreview, setReplacementPreview] = useState<ReplacementPreview | null>(null);
+  const [replacementId, setReplacementId] = useState(newSubmissionId);
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState("");
@@ -43,10 +55,13 @@ export function SessionControls({ context }: { context: SessionContext }) {
     setGroup(context.group);
     setSessions(context.sessions);
     setSelected(previous => previous ? context.sessions.find(item => item.id === previous.id) ?? null : null);
+    setCancelTarget(previous => previous ? context.sessions.find(item => item.id === previous.id) ?? null : null);
+    setReplacementTarget(previous => previous ? context.sessions.find(item => item.id === previous.id) ?? null : null);
     setPreview(null);
+    setCancelPreview(null); setReplacementPreview(null);
     setConflict(false);
   }
-  const dirty = Boolean(preview || JSON.stringify(draft) !== JSON.stringify(initialDraft) || selected || postponeAt || reason);
+  const dirty = Boolean(preview || JSON.stringify(draft) !== JSON.stringify(initialDraft) || selected || postponeAt || reason || cancelTarget || replacementTarget);
   const prefix = `groups/${group.id}/sessions`;
   const available = group.requirements.filter(requirement => !group.scheduled_requirements.includes(requirement.number));
 
@@ -58,8 +73,11 @@ export function SessionControls({ context }: { context: SessionContext }) {
   function showValidation(errors: Record<string, string>) {
     setFieldErrors(errors);
     const key = Object.keys(errors)[0];
-    const input = ({ start_at: "start", plan_lecture_number: "requirement", count: "count", interval_weeks: "interval",
-      title: "title", scheduled_at: "postpone", reason: "reason" } as Record<string, string>)[key];
+    const input = key === "start_at" && replacementTarget ? "replacement-at"
+      : key === "title" && replacementTarget ? "replacement-title"
+        : key === "reason" && cancelTarget ? "cancel-reason"
+          : ({ start_at: "start", plan_lecture_number: "requirement", count: "count", interval_weeks: "interval",
+            title: "title", scheduled_at: "postpone", reason: "reason", decision: "cancel-decision" } as Record<string, string>)[key];
     if (input) requestAnimationFrame(() => document.getElementById(`${formId}-${input}`)?.focus());
   }
 
@@ -76,6 +94,9 @@ export function SessionControls({ context }: { context: SessionContext }) {
     setGroup(current.group); setSessions(current.sessions);
     setPreview(null);
     setSelected(previous => previous ? current.sessions.find(item => item.id === previous.id) ?? null : null);
+    setCancelTarget(previous => previous ? current.sessions.find(item => item.id === previous.id) ?? null : null);
+    setReplacementTarget(previous => previous ? current.sessions.find(item => item.id === previous.id) ?? null : null);
+    setCancelPreview(null); setReplacementPreview(null);
     setConflict(false);
     router.refresh();
   }
@@ -141,6 +162,84 @@ export function SessionControls({ context }: { context: SessionContext }) {
     finally { busyRef.current = false; setBusy(false); }
   }
 
+  async function reviewCancellation() {
+    if (busyRef.current || !cancelTarget || cancelReason.trim().length < 3) return;
+    busyRef.current = true; setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await centerRequest(`${prefix}/${cancelTarget.id}/cancel-preview`, "GET");
+      if (!response.ok) { if (response.status === 409) setConflict(true); setError(await responseMessage(response)); return; }
+      setCancelPreview((await response.json()) as CancelPreview);
+      requestAnimationFrame(() => document.getElementById(`${formId}-cancel-preview`)?.focus());
+    } catch { setError("تعذرت معاينة الإلغاء. حاول مرة أخرى."); }
+    finally { busyRef.current = false; setBusy(false); }
+  }
+
+  async function confirmCancellation() {
+    if (busyRef.current || !cancelTarget || !cancelPreview) return;
+    busyRef.current = true; setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await centerRequest(`${prefix}/${cancelTarget.id}/cancel`, "POST", {
+        reason: cancelReason.trim(), decision: cancelDecision, group_revision: cancelPreview.group_revision,
+        session_revision: cancelPreview.session_revision, preview_token: cancelPreview.preview_token, request_id: cancelId,
+      });
+      if (!response.ok) {
+        if (response.status === 409) { setConflict(true); setCancelPreview(null); }
+        if (response.status === 422) showValidation(await responseFieldErrors(response));
+        setError(await responseMessage(response)); return;
+      }
+      const result = (await response.json()) as { session: StudySession; group_revision: number };
+      setSessions(current => current.map(item => item.id === result.session.id ? result.session : item));
+      setGroup(current => ({ ...current, revision: result.group_revision }));
+      const id = cancelTarget.id;
+      setCancelTarget(null); setCancelPreview(null); setCancelReason(""); setCancelId(newSubmissionId());
+      setNotice("أُلغي الموعد وبقي متطلب الخطة في العدد المعتمد. لم يُسجل غياب أو إجراء مالي تلقائي.");
+      router.refresh(); requestAnimationFrame(() => document.getElementById(`cancel-${id}`)?.focus());
+    } catch { setError("تعذر التأكد من الإلغاء. أعد تأكيد الطلب نفسه؛ لن يتكرر الأثر."); }
+    finally { busyRef.current = false; setBusy(false); }
+  }
+
+  async function reviewReplacement() {
+    if (busyRef.current || !replacementTarget || !replacementAt) return;
+    busyRef.current = true; setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await centerRequest(`${prefix}/${replacementTarget.id}/replacement-preview`, "POST", {
+        start_at: replacementAt, title: replacementTitle.trim() || null,
+      });
+      if (!response.ok) {
+        if (response.status === 409) setConflict(true);
+        if (response.status === 422) showValidation(await responseFieldErrors(response));
+        setError(await responseMessage(response)); return;
+      }
+      setReplacementPreview((await response.json()) as ReplacementPreview);
+      requestAnimationFrame(() => document.getElementById(`${formId}-replacement-preview`)?.focus());
+    } catch { setError("تعذرت معاينة الموعد البديل. حاول مرة أخرى."); }
+    finally { busyRef.current = false; setBusy(false); }
+  }
+
+  async function confirmReplacement() {
+    if (busyRef.current || !replacementTarget || !replacementPreview) return;
+    busyRef.current = true; setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await centerRequest(`${prefix}/${replacementTarget.id}/replacement`, "POST", {
+        start_at: replacementAt, title: replacementTitle.trim() || null,
+        group_revision: replacementPreview.group_revision, session_revision: replacementPreview.session_revision,
+        preview_token: replacementPreview.preview_token, request_id: replacementId,
+      });
+      if (!response.ok) {
+        if (response.status === 409) { setConflict(true); setReplacementPreview(null); }
+        if (response.status === 422) showValidation(await responseFieldErrors(response));
+        setError(await responseMessage(response)); return;
+      }
+      const result = (await response.json()) as { session: StudySession; group_revision: number };
+      setSessions(current => [...current.map(item => item.id === replacementTarget.id ? { ...item, replacement_id: result.session.id, replacement_number: result.session.number } : item), result.session]);
+      setGroup(current => ({ ...current, revision: result.group_revision }));
+      setReplacementTarget(null); setReplacementPreview(null); setReplacementAt(""); setReplacementTitle(""); setReplacementId(newSubmissionId());
+      setNotice("حُفظ الموعد البديل وربط بمحاضرة الخطة نفسها دون زيادة العدد المعتمد.");
+      router.refresh(); requestAnimationFrame(() => document.getElementById(`${formId}-heading`)?.focus());
+    } catch { setError("تعذر التأكد من حفظ البديل. أعد تأكيد الطلب نفسه؛ لن يتكرر الموعد."); }
+    finally { busyRef.current = false; setBusy(false); }
+  }
+
   return <>
     <CenterPageActions context={context} actions={<><Link href={`/admin/groups/${group.id}/coverage`}>تقرير تغطية المحتوى وأهلية الإتمام</Link><Link href="/admin/groups">العودة للمجموعات</Link></>} />
     <UnsavedChangesGuard dirty={dirty} guardHistory />
@@ -148,8 +247,8 @@ export function SessionControls({ context }: { context: SessionContext }) {
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     {conflict ? <CenterHeaderActions><Button disabled={busy} onClick={() => void reload().then(() => setNotice("حُمّلت أحدث المواعيد؛ راجع البيانات قبل المعاينة مجددًا.")).catch(failure => setError(failure instanceof Error ? failure.message : "تعذر التحديث."))}>تحميل أحدث البيانات</Button></CenterHeaderActions> : null}
     <section className="context-card form-stack" aria-labelledby={`${formId}-heading`}>
-      <h2 id={`${formId}-heading`}>{group.name} · {group.level_name}</h2>
-      <p>محاضرات الخطة المعتمدة: {group.requirements.length.toLocaleString("ar-EG")} · غير المجدولة: {available.length.toLocaleString("ar-EG")}.</p>
+      <h2 id={`${formId}-heading`} tabIndex={-1}>{group.name} · {group.level_name}</h2>
+      <p>محاضرات الخطة المعتمدة: {group.required_count.toLocaleString("ar-EG")} · غير المجدولة: {available.length.toLocaleString("ar-EG")}.</p>
       {group.can_manage && group.status !== "completed" && available.length ? <form id={`${formId}-schedule`} noValidate className="form-stack" onSubmit={event => { event.preventDefault(); if (preview) void confirm(); else void review(); }}>
         <h3>إضافة مواعيد</h3>
         <Field>
@@ -190,17 +289,49 @@ export function SessionControls({ context }: { context: SessionContext }) {
       <FormField id={`${formId}-reason`} label="سبب التأجيل (اختياري)" value={reason} onChange={value => { setReason(value); setPostponeId(newSubmissionId()); setFieldErrors({}); }} error={fieldErrors.reason} disabled={busy || conflict} />
       <CenterHeaderActions><Button form={`${formId}-postpone-form`} type="submit" variant="primary" busy={busy} disabled={conflict || !postponeAt}>حفظ التأجيل</Button><Button disabled={busy} onClick={() => { const id = selected.id; setSelected(null); setPostponeAt(""); setReason(""); requestAnimationFrame(() => document.getElementById(`postpone-${id}`)?.focus()); }}>إلغاء</Button></CenterHeaderActions>
     </form> : null}
+    {cancelTarget ? <form id={`${formId}-cancel-form`} noValidate className="context-card form-stack" aria-label={`إلغاء الموعد ${cancelTarget.number}`} onSubmit={event => { event.preventDefault(); if (cancelPreview) void confirmCancellation(); else void reviewCancellation(); }}>
+      <h2>إلغاء الموعد {cancelTarget.number.toLocaleString("ar-EG")} قبل انعقاده</h2>
+      <p>محاضرة الخطة {cancelTarget.plan_lecture_number.toLocaleString("ar-EG")} · الوقت الأصلي {formatSessionTime(cancelTarget.scheduled_at)}.</p>
+      <FormField id={`${formId}-cancel-reason`} label="سبب الإلغاء" value={cancelReason} onChange={value => { setCancelReason(value); setCancelPreview(null); setCancelId(newSubmissionId()); setFieldErrors({}); }} error={fieldErrors.reason} disabled={busy || conflict} required focusOnMount />
+      <Field data-invalid={Boolean(fieldErrors.decision)}><FieldLabel htmlFor={`${formId}-cancel-decision`}>قرار التعويض</FieldLabel>
+        <NativeSelect id={`${formId}-cancel-decision`} value={cancelDecision} disabled={busy || conflict} onChange={event => { setCancelDecision(event.target.value as typeof cancelDecision); setCancelPreview(null); setCancelId(newSubmissionId()); }}>
+          <NativeSelectOption value="academic">بديل أكاديمي لاحقًا</NativeSelectOption>
+          <NativeSelectOption value="financial">إحالة لمراجعة مالية</NativeSelectOption>
+          <NativeSelectOption value="none">دون تعويض</NativeSelectOption>
+        </NativeSelect>
+        <FieldDescription>يُحفظ القرار للمراجعة فقط. لا يُسجل حضور أو غياب أو حركة مالية تلقائيًا، ويبقى متطلب الخطة مطلوبًا.</FieldDescription>
+        {fieldErrors.decision ? <FieldError>{fieldErrors.decision}</FieldError> : null}
+      </Field>
+      {cancelPreview ? <section aria-labelledby={`${formId}-cancel-preview`} className="form-stack">
+        <h3 id={`${formId}-cancel-preview`} tabIndex={-1}>تأكيد إلغاء الموعد</h3>
+        <p>سيُلغى الموعد {cancelTarget.number.toLocaleString("ar-EG")} بتاريخ {formatSessionTime(cancelPreview.scheduled_at)}، وتبقى {cancelPreview.required_count.toLocaleString("ar-EG")} محاضرة في الخطة المعتمدة. القرار: {cancelDecision === "academic" ? "بديل أكاديمي" : cancelDecision === "financial" ? "مراجعة مالية" : "دون تعويض"}.</p>
+      </section> : null}
+      <CenterHeaderActions><Button form={`${formId}-cancel-form`} type="submit" variant="primary" busy={busy} disabled={conflict || cancelReason.trim().length < 3}>{cancelPreview ? "تأكيد إلغاء الموعد" : "معاينة الإلغاء"}</Button><Button disabled={busy} onClick={() => { const id = cancelTarget.id; setCancelTarget(null); setCancelPreview(null); setCancelReason(""); requestAnimationFrame(() => document.getElementById(`cancel-${id}`)?.focus()); }}>رجوع</Button></CenterHeaderActions>
+    </form> : null}
+    {replacementTarget ? <form id={`${formId}-replacement-form`} noValidate className="context-card form-stack" aria-label={`بديل للموعد ${replacementTarget.number}`} onSubmit={event => { event.preventDefault(); if (replacementPreview) void confirmReplacement(); else void reviewReplacement(); }}>
+      <h2>جدولة بديل للموعد {replacementTarget.number.toLocaleString("ar-EG")}</h2>
+      <p>يبقى مرتبطًا بمحاضرة الخطة {replacementTarget.plan_lecture_number.toLocaleString("ar-EG")}؛ لن يزيد عدد المحاضرات المعتمدة.</p>
+      <FormField id={`${formId}-replacement-at`} label="موعد البديل بتوقيت القاهرة" value={replacementAt} onChange={value => { setReplacementAt(value); setReplacementPreview(null); setReplacementId(newSubmissionId()); setFieldErrors({}); }} type="datetime-local" direction="ltr" error={fieldErrors.start_at} disabled={busy || conflict} required focusOnMount />
+      <FormField id={`${formId}-replacement-title`} label="عنوان البديل (اختياري)" value={replacementTitle} onChange={value => { setReplacementTitle(value); setReplacementPreview(null); setReplacementId(newSubmissionId()); }} error={fieldErrors.title} disabled={busy || conflict} />
+      {replacementPreview ? <section aria-labelledby={`${formId}-replacement-preview`} className="form-stack">
+        <h3 id={`${formId}-replacement-preview`} tabIndex={-1}>تأكيد الموعد البديل</h3>
+        <p>الموعد {replacementPreview.number.toLocaleString("ar-EG")} · محاضرة الخطة {replacementPreview.plan_lecture_number.toLocaleString("ar-EG")} · <bdi dir="ltr">{replacementPreview.local_at.replace("T", " ")}</bdi> القاهرة.</p>
+      </section> : null}
+      <CenterHeaderActions><Button form={`${formId}-replacement-form`} type="submit" variant="primary" busy={busy} disabled={conflict || !replacementAt}>{replacementPreview ? "تأكيد حفظ البديل" : "معاينة البديل"}</Button><Button disabled={busy} onClick={() => { const id = replacementTarget.id; setReplacementTarget(null); setReplacementPreview(null); setReplacementAt(""); setReplacementTitle(""); requestAnimationFrame(() => document.getElementById(`replacement-${id}`)?.focus()); }}>رجوع</Button></CenterHeaderActions>
+    </form> : null}
     <DataTable id="study-sessions" title="مواعيد المحاضرات" description="كل موعد يحتفظ برقمه ومحاضرة خطته. الأوقات بتوقيت القاهرة." rows={sessions} rowKey={item => item.id} searchText={item => `${item.number} ${item.plan_lecture_number} ${item.title ?? ""} ${item.content}`} emptyMessage="لم تُجدول محاضرات لهذه المجموعة بعد."
       columns={[
         { key: "number", label: "الموعد", render: item => item.number.toLocaleString("ar-EG") },
         { key: "requirement", label: "محاضرة الخطة", render: item => `${item.plan_lecture_number.toLocaleString("ar-EG")} · ${item.content}` },
         { key: "title", label: "العنوان", render: item => item.title || "—" },
         { key: "time", label: "الموعد بتوقيت القاهرة", render: item => formatSessionTime(item.scheduled_at) },
-        { key: "status", label: "الحالة", render: item => item.revoked_at ? "أُلغي اعتمادها" : item.status === "planned" ? "مخطط" : item.status === "held" ? "أُقيمت" : "ملغاة" },
+        { key: "status", label: "الحالة", render: item => item.revoked_at ? "أُلغي اعتمادها" : item.status === "planned" ? item.replaces_session_number ? `بديل للموعد ${item.replaces_session_number.toLocaleString("ar-EG")}` : "مخطط" : item.status === "held" ? "أُقيمت" : <span>ملغاة {item.cancelled_at ? `في ${formatSessionTime(item.cancelled_at)}` : ""}{item.cancelled_by_name ? ` بواسطة ${item.cancelled_by_name}` : ""} · {item.compensation_decision === "academic" ? "بديل أكاديمي" : item.compensation_decision === "financial" ? "مراجعة مالية" : "دون تعويض"}{item.replacement_number ? ` · البديل ${item.replacement_number.toLocaleString("ar-EG")}` : ""}{item.cancellation_reason ? ` · السبب: ${item.cancellation_reason}` : ""}</span> },
         { key: "actions", label: "الإجراءات", actions: true, render: item => <span className="flex flex-wrap items-center gap-2">
-          <Link href={`/admin/groups/${group.id}/sessions/${item.id}/attendance`}>كشف الحضور</Link>
+          {item.status !== "cancelled" ? <Link href={`/admin/groups/${group.id}/sessions/${item.id}/attendance`}>كشف الحضور</Link> : null}
           {group.can_manage && group.status !== "completed" && item.status === "planned" && parseSessionTime(item.scheduled_at).getTime() > Date.now()
-            ? <Button id={`postpone-${item.id}`} disabled={busy} onClick={() => { setSelected(item); setPostponeAt(""); setReason(""); setPostponeId(newSubmissionId()); setError(""); }}>تأجيل</Button> : null}
+            ? <Button id={`postpone-${item.id}`} disabled={busy || Boolean(cancelTarget || replacementTarget || selected)} onClick={() => { setSelected(item); setPostponeAt(""); setReason(""); setPostponeId(newSubmissionId()); setError(""); }}>تأجيل</Button> : null}
+          {group.can_manage && group.status !== "completed" && item.status === "planned" ? <Button id={`cancel-${item.id}`} disabled={busy || Boolean(cancelTarget || replacementTarget || selected)} onClick={() => { setCancelTarget(item); setCancelReason(""); setCancelDecision("academic"); setCancelPreview(null); setCancelId(newSubmissionId()); setError(""); }}>إلغاء الموعد</Button> : null}
+          {group.can_manage && group.status !== "completed" && item.status === "cancelled" && ((Boolean(item.cancelled_at) && item.compensation_decision === "academic") || (Boolean(item.revoked_at) && Boolean(item.replaces_session_id))) && !item.replacement_id ? <Button id={`replacement-${item.id}`} disabled={busy || Boolean(cancelTarget || replacementTarget || selected)} onClick={() => { setReplacementTarget(item); setReplacementAt(""); setReplacementTitle(""); setReplacementPreview(null); setReplacementId(newSubmissionId()); setError(""); }}>جدولة البديل</Button> : null}
         </span> },
       ]}
       serverPagination={{ page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 20,
