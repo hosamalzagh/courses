@@ -720,10 +720,16 @@ class StudyEnrollmentTest extends TestCase
             'amount' => '40.00', 'version' => $account['version'], 'request_id' => (string) Str::uuid(),
         ])->assertCreated()->json('payment');
         $options = $this->getJson("{$this->base}/students/{$student['id']}/payments/{$payment['id']}/allocation-options")->json();
-        $this->postJson("{$this->base}/students/{$student['id']}/payments/{$payment['id']}/allocations", [
+        $allocation = $this->postJson("{$this->base}/students/{$student['id']}/payments/{$payment['id']}/allocations", [
             'targets' => [['attempt_id' => $first['id'], 'amount' => '30.00']],
             'version' => $options['version'], 'request_id' => (string) Str::uuid(),
-        ])->assertCreated();
+        ])->assertCreated()->json('allocations.0');
+        $paymentNoteUrl = "{$this->base}/students/{$student['id']}/payments/{$payment['id']}/note";
+        $allocationNoteUrl = "{$this->base}/students/{$student['id']}/allocations/{$allocation['id']}/note";
+        foreach ([$paymentNoteUrl => 'دفعة محفوظة قبل الانسحاب', $allocationNoteUrl => 'تخصيص محفوظ قبل الانسحاب'] as $noteUrl => $body) {
+            $this->putJson($noteUrl, ['body' => $body, 'important' => true, 'revision' => 0,
+                'request_id' => (string) Str::uuid()])->assertCreated()->assertJsonPath('note.body', $body);
+        }
         $withdrawUrl = "{$url}/{$first['id']}/withdraw";
         $withdrawal = ['withdrawn_on' => '2026-09-28', 'reason' => 'طلب الطالب إيقاف الدراسة',
             'revision' => $first['revision'], 'request_id' => (string) Str::uuid()];
@@ -734,6 +740,8 @@ class StudyEnrollmentTest extends TestCase
             ->assertJsonPath('attempt.withdrawal.reason', $withdrawal['reason'])->json('attempt');
         $this->postJson($withdrawUrl, $withdrawal)->assertOk()->assertJsonPath('attempt.id', $first['id']);
         $this->postJson($withdrawUrl, [...$withdrawal, 'request_id' => (string) Str::uuid()])->assertConflict();
+        $this->getJson($paymentNoteUrl)->assertOk()->assertJsonPath('note.body', 'دفعة محفوظة قبل الانسحاب');
+        $this->getJson($allocationNoteUrl)->assertOk()->assertJsonPath('note.body', 'تخصيص محفوظ قبل الانسحاب');
         $this->center->run(function () use ($first): void {
             $this->assertSame('2026-09-28', DB::table('study_attempt_group_periods')->where('attempt_id', $first['id'])->value('left_on'));
             $this->assertSame(1, DB::table('study_attempt_withdrawals')->where('attempt_id', $first['id'])->count());
