@@ -95,6 +95,147 @@ class CurriculumTest extends TestCase
         $this->assertSame('New content', $details['after']['plan']['lectures'][0]['content']);
     }
 
+    public function test_new_plan_version_preserves_group_and_attempt_requirements_and_can_be_reviewed(): void
+    {
+        $level = $this->sequence($this->north, 'Versioned');
+        $instructor = $this->postJson("{$this->base}/instructors", [
+            'name' => 'Teacher', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('instructor');
+        $group = $this->postJson("{$this->base}/groups", [
+            'level_id' => $level['id'], 'plan_version_id' => $level['plan']['id'], 'name' => 'Original group',
+            'approved_price' => '0.00', 'instructor_ids' => [$instructor['id']], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $student = $this->postJson("{$this->base}/students", [
+            'name' => 'Plan student', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('student');
+        $enrollmentUrl = "{$this->base}/students/{$student['id']}/enrollments";
+        $studentWorkspace = $this->getJson($enrollmentUrl)->assertOk()->json('student');
+        $attempt = $this->postJson($enrollmentUrl, [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $studentWorkspace['currency_revision'], 'joined_on' => now('Africa/Cairo')->format('Y-m-d'),
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $studentWorkspace['version'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $path = "{$this->base}/levels/{$level['id']}/plan-versions";
+        $payload = ['base_plan_version_id' => $level['plan']['id'], 'base_revision' => 1,
+            'request_id' => (string) Str::uuid(),
+            'lectures' => [['number' => 1, 'content' => 'Revised content', 'title' => 'New title', 'planned_hours' => 3],
+                ['number' => 2, 'content' => 'Additional whole lecture', 'title' => null, 'planned_hours' => 1]],
+        ];
+        $saved = $this->postJson($path, $payload)->assertCreated()->assertJsonPath('plan.version', 2)
+            ->assertJsonPath('level.latest_version', 2)->json('plan');
+        $this->postJson($path, $payload)->assertOk()->assertJsonPath('plan.id', $saved['id']);
+        $this->postJson($path, [...$payload, 'lectures' => [['number' => 1, 'content' => 'Changed retry', 'planned_hours' => 1]]])
+            ->assertConflict()->assertJsonPath('code', 'curriculum_request_changed');
+        $this->postJson($path, [...$payload, 'request_id' => (string) Str::uuid()])
+            ->assertConflict()->assertJsonPath('code', 'curriculum_changed');
+        $detail = $this->getJson("{$this->base}/levels/{$level['id']}")->assertOk()
+            ->assertJsonPath('levels.0.plan.id', $saved['id'])
+            ->assertJsonPath('levels.0.plan.previous_lectures.0.content', 'Content')
+            ->assertJsonPath('levels.0.plan_history.0.version', 2)
+            ->assertJsonPath('levels.0.plan_history.1.version', 1);
+        $this->assertNotNull($detail->headers->get('X-Courses-Query-Count'));
+        $this->assertLessThanOrEqual(6, (int) $detail->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$this->base}/levels/{$level['id']}?plan_version=1")->assertOk()
+            ->assertJsonPath('levels.0.plan.id', $level['plan']['id'])
+            ->assertJsonPath('levels.0.plan.lectures.0.content', 'Content')
+            ->assertJsonPath('levels.0.latest_version', 2);
+        $this->getJson("{$this->base}/curriculum-workspace")->assertOk()->assertJsonPath('levels.0.plan.id', $saved['id']);
+        $this->getJson("{$this->base}/levels/{$level['id']}?plan_version=3")->assertNotFound();
+        $this->getJson("{$this->base}/levels/{$level['id']}?plan_version=3000000000")->assertUnprocessable();
+        $this->getJson("{$this->base}/curriculum/submissions/{$payload['request_id']}")->assertOk()
+            ->assertJsonPath('record.plan.id', $saved['id']);
+        $this->getJson("{$this->base}/groups/{$group['id']}")->assertOk()
+            ->assertJsonPath('groups.0.plan_version_id', $level['plan']['id'])
+            ->assertJsonPath('groups.0.approved_lectures.0.content', 'Content');
+        $this->getJson($enrollmentUrl)->assertOk()->assertJsonPath('attempts.0.plan_version_id', $level['plan']['id'])
+            ->assertJsonPath('attempts.0.requirements_count', 1);
+        $this->center->run(function () use ($group, $attempt, $level, $saved): void {
+            $this->assertSame($level['plan']['id'], DB::table('study_groups')->where('id', $group['id'])->value('plan_version_id'));
+            $this->assertSame($level['plan']['id'], DB::table('study_attempts')->where('id', $attempt['id'])->value('plan_version_id'));
+            $this->assertSame(2, DB::table('study_plan_versions')->where('level_id', $level['id'])->count());
+            $this->assertSame(2, DB::table('plan_lectures')->where('plan_version_id', $saved['id'])->count());
+            try {
+                DB::table('plan_lectures')->where('plan_version_id', $level['plan']['id'])->update(['content' => 'Bypass']);
+                $this->fail('Superseded lectures must stay immutable.');
+            } catch (QueryException $exception) {
+                $this->assertStringContainsString('Used study plan is immutable', $exception->getMessage());
+            }
+        });
+        $audit = collect($this->getJson("{$this->base}/audit")->assertOk()->json('entries'))
+            ->firstWhere('event', 'curriculum.plan_version_created');
+        $this->assertNotNull($audit);
+        $auditDetails = json_decode($audit['details'], true);
+        $this->assertSame($level['plan']['id'], $auditDetails['before']['plan']['id']);
+        $this->assertSame($saved['id'], $auditDetails['after']['plan']['id']);
+    }
+
+    public function test_plan_version_creation_rechecks_scope_revision_and_superseded_immutability(): void
+    {
+        $hidden = $this->sequence($this->south, 'Hidden plan');
+        $visible = $this->sequence($this->north, 'Visible plan');
+        $payload = ['base_plan_version_id' => $visible['plan']['id'], 'base_revision' => 1,
+            'request_id' => (string) Str::uuid(),
+            'lectures' => [['number' => 1, 'content' => 'Revised', 'planned_hours' => 2]],
+        ];
+        $this->grant([$this->north => ['academic_admin']]);
+        $this->asUser($this->staff);
+        $hiddenPath = "{$this->base}/levels/{$hidden['id']}/plan-versions";
+        $this->getJson("{$this->base}/levels/{$hidden['id']}")->assertNotFound();
+        $this->postJson($hiddenPath, [...$payload, 'base_plan_version_id' => $hidden['plan']['id']])->assertNotFound();
+        $path = "{$this->base}/levels/{$visible['id']}/plan-versions";
+        $this->postJson($path, [...$payload, 'base_revision' => 2])->assertConflict()->assertJsonPath('code', 'curriculum_changed');
+        $this->postJson($path, [...$payload, 'lectures' => [['number' => 1, 'content' => 'Content', 'planned_hours' => 2]]])
+            ->assertUnprocessable();
+        $this->postJson($path, [...$payload, 'lectures' => [['number' => 2, 'content' => 'Bad numbering', 'planned_hours' => 2]]])
+            ->assertUnprocessable();
+        $saved = $this->postJson($path, $payload)->assertCreated()->json('plan');
+        $this->patchJson("{$this->base}/levels/{$visible['id']}/first-plan", [
+            'plan_version_id' => $visible['plan']['id'], 'revision' => 1,
+            'lectures' => [['number' => 1, 'content' => 'Silent rewrite', 'planned_hours' => 2]],
+        ])->assertConflict()->assertJsonPath('code', 'plan_used');
+        $this->center->run(function () use ($visible, $saved): void {
+            $this->assertNull(DB::table('study_plan_versions')->where('id', $visible['plan']['id'])->value('used_at'));
+            try {
+                DB::table('plan_lectures')->where('plan_version_id', $visible['plan']['id'])->update(['content' => 'Bypass']);
+                $this->fail('An unused but superseded version must still be immutable.');
+            } catch (QueryException $exception) {
+                $this->assertStringContainsString('Superseded study plan is immutable', $exception->getMessage());
+            }
+            $this->assertNotNull(DB::table('study_plan_versions')->where('id', $saved['id'])->value('sealed_at'));
+            try {
+                DB::table('plan_lectures')->where('plan_version_id', $saved['id'])->update(['content' => 'Silent rewrite']);
+                $this->fail('A new version must be immutable immediately after saving.');
+            } catch (QueryException $exception) {
+                $this->assertStringContainsString('Sealed study plan is immutable', $exception->getMessage());
+            }
+            try {
+                DB::table('study_plan_versions')->where('id', $saved['id'])->update(['sealed_at' => null]);
+                $this->fail('A finalized version must not be reopened.');
+            } catch (QueryException $exception) {
+                $this->assertStringContainsString('protected content are immutable', $exception->getMessage());
+            }
+            $this->assertSame('Revised', DB::table('plan_lectures')->where('plan_version_id', $saved['id'])->value('content'));
+        });
+        $instructor = $this->postJson("{$this->base}/instructors", [
+            'name' => 'Old plan teacher', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('instructor');
+        $this->postJson("{$this->base}/groups", [
+            'level_id' => $visible['id'], 'plan_version_id' => $visible['plan']['id'], 'name' => 'Old plan group',
+            'approved_price' => '0.00', 'instructor_ids' => [$instructor['id']], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->assertJsonPath('group.plan_version_id', $visible['plan']['id']);
+        $this->grant([$this->north => ['branch_viewer']]);
+        $this->asUser($this->staff);
+        $this->getJson("{$this->base}/levels/{$visible['id']}")->assertOk()->assertJsonPath('levels.0.can_manage', false);
+        $this->postJson($path, [...$payload, 'request_id' => (string) Str::uuid(),
+            'base_plan_version_id' => $saved['id']])->assertForbidden();
+        $this->grant([]);
+        $this->asUser($this->staff);
+        $this->getJson("{$this->base}/levels/{$visible['id']}")->assertNotFound();
+        $this->postJson($path, $payload)->assertNotFound();
+    }
+
     public function test_curricula_are_branch_scoped_and_current_permissions_are_checked_again_on_writes(): void
     {
         $hidden = $this->sequence($this->south, 'Hidden');
@@ -165,12 +306,14 @@ class CurriculumTest extends TestCase
             DB::statement('DROP FUNCTION protect_used_plan_lecture()');
             DB::statement('DROP FUNCTION protect_used_plan_version()');
             DB::table('migrations')->where('migration', '2026_09_26_201718_create_branch_curricula')->delete();
+            DB::table('migrations')->where('migration', '2026_09_28_192604_protect_superseded_study_plans')->delete();
             DB::table('migrations')->where('migration', '2026_09_28_010000_create_study_groups')->delete();
         });
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
         $this->center->run(function (): void {
             $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attendance_entries'));
             $this->assertTrue(DB::table('pg_indexes')->where('indexname', 'study_periods_group_date_attempt_idx')->exists());
+            $this->assertStringContainsString('Superseded study plan is immutable', DB::selectOne("SELECT pg_get_functiondef('protect_used_plan_lecture()'::regprocedure) AS definition")->definition);
         });
         $level = $this->sequence($this->north, 'Alpha curriculum');
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
@@ -182,6 +325,7 @@ class CurriculumTest extends TestCase
         $beta->run(function (): void {
             $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attendance_entries'));
             $this->assertTrue(DB::table('pg_indexes')->where('indexname', 'study_periods_group_date_attempt_idx')->exists());
+            $this->assertStringContainsString('Superseded study plan is immutable', DB::selectOne("SELECT pg_get_functiondef('protect_used_plan_lecture()'::regprocedure) AS definition")->definition);
         });
         CenterMembership::create(['tenant_id' => $beta->id, 'user_id' => $this->owner->id, 'status' => 'active']);
         $beta->run(fn () => DB::table('center_grants')->insert(['user_id' => $this->owner->id, 'role' => 'center_owner']));
