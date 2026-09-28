@@ -82,6 +82,9 @@ export type StudyEnrollmentContext = CenterContext & {
 export type StudyAttemptNote = { id: string; body: string; important: boolean; revision: number; updated_by_name: string };
 
 export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable" | "student_unavailable";
+export type AbsenceOption = { kind: "courses" | "stages" | "levels" | "study_groups"; id: string; name: string; branch_id: number; branch_name: string; course_id: string | null; stage_id: string | null; level_id: string | null; absence_mode: "consecutive" | "total" | "disabled" | null; absence_limit: number | null; absence_revision: number };
+export type AbsenceStudent = { id: string; student_id: string; student_name: string; student_number: number; branch_id: number; branch_name: string; course_name: string; stage_name: string; level_name: string; group_name: string; effective_mode: "consecutive" | "total" | "disabled"; effective_limit: number | null; total_absences: number; consecutive_absences: number; historical_absences: number; needs_review: boolean };
+export type AbsenceContext = CenterContext & { options: AbsenceOption[]; students: AbsenceStudent[]; pagination: { page: number; has_more: boolean } };
 
 const fetchCenterPayload = cache(async function fetchCenterPayload<T>(path: string): Promise<T | CenterAccessFailure> {
   const incoming = await headers();
@@ -165,6 +168,10 @@ export function loadGroupWorkspace(query = "", groupId?: string): Promise<GroupC
   return fetchCenterPayload<GroupContext>(`${groupId ? `groups/${encodeURIComponent(groupId)}` : "group-workspace"}${query ? `?${query}` : ""}`);
 }
 
+export function loadAbsenceReview(query = ""): Promise<AbsenceContext | CenterAccessFailure> {
+  return fetchCenterPayload<AbsenceContext>(`absence-review${query ? `?${query}` : ""}`);
+}
+
 export function loadGroupSessions(groupId: string, query = ""): Promise<SessionContext | CenterAccessFailure> {
   return fetchCenterPayload<SessionContext>(`groups/${encodeURIComponent(groupId)}/sessions${query ? `?${query}` : ""}`);
 }
@@ -210,6 +217,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   if (path === "/admin/groups") return loadGroupWorkspace(query(["page", "levels_page", "instructors_page"]));
   const groupCoverage = path.match(/^\/admin\/groups\/([^/]+)\/coverage$/);
   if (groupCoverage) return loadGroupCoverage(decodeURIComponent(groupCoverage[1]), query(["page", "q"]));
+  if (path === "/admin/absence-review") return loadAbsenceReview(query(["branch_id", "course_id", "stage_id", "level_id", "group_id", "view", "page", "q"]));
   const groupAttendance = path.match(/^\/admin\/groups\/([^/]+)\/sessions\/([^/]+)\/attendance$/);
   if (groupAttendance) return loadGroupAttendance(decodeURIComponent(groupAttendance[1]), decodeURIComponent(groupAttendance[2]), query(["page", "q"]));
   const groupSessions = path.match(/^\/admin\/groups\/([^/]+)\/sessions$/);

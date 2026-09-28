@@ -93,6 +93,7 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
     { href: "/admin/instructors", label: "المحاضرون", icon: "members", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
     { href: "/admin/curriculum", label: "المناهج والخطط", icon: "audit", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
     { href: "/admin/groups", label: "المجموعات الدراسية", icon: "audit", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
+    { href: "/admin/absence-review", label: "مراجعة الغياب", icon: "audit", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
     { href: "/admin/members", label: "إدارة الموظفين والدعوات", icon: "members", visible: context.permissions.can_manage_center },
     { href: "/admin/audit", label: "سجل التدقيق", icon: "audit", visible: canAudit },
     { href: "/admin/student-custom-fields", label: "الحقول الإضافية للطالب", icon: "settings", visible: context.permissions.can_manage_center },
