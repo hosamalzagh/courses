@@ -114,6 +114,91 @@ class StudyCoverageTest extends TestCase
         $this->center->run(fn () => $this->assertSame(0, DB::table('study_attempts')->where('status', 'completed')->count()));
     }
 
+    public function test_suspended_session_stays_missing_until_valid_makeup_and_completion_keeps_real_counts(): void
+    {
+        $source = $this->group($this->north, 1);
+        $instructorId = $this->center->run(fn () => DB::table('study_group_instructors')
+            ->where('group_id', $source['id'])->value('instructor_id'));
+        $target = $this->postJson("{$this->base}/groups", [
+            'level_id' => $source['level_id'], 'plan_version_id' => $source['plan_version_id'],
+            'name' => 'Makeup after suspension', 'approved_price' => '0.00',
+            'instructor_ids' => [$instructorId], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $student = $this->student();
+        $attempt = $this->enroll($student['id'], $source, now('Africa/Cairo')->toDateString());
+        $sourceAt = now('Africa/Cairo')->addDays(2)->setTime(16, 0);
+        $targetAt = $sourceAt->copy()->addDays(2);
+        $sourceSession = $this->postJson("{$this->base}/groups/{$source['id']}/sessions", [
+            'kind' => 'single', 'revision' => 1, 'start_at' => $sourceAt->format('Y-m-d\\TH:i'),
+            'plan_lecture_number' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
+        $targetSession = $this->postJson("{$this->base}/groups/{$target['id']}/sessions", [
+            'kind' => 'single', 'revision' => 1, 'start_at' => $targetAt->format('Y-m-d\\TH:i'),
+            'plan_lecture_number' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
+        $this->postJson("{$this->base}/groups/{$source['id']}/start", ['revision' => 2])->assertOk();
+        $this->postJson("{$this->base}/groups/{$target['id']}/start", ['revision' => 2])->assertOk();
+        $suspended = $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'suspended', 'reason' => 'إيقاف قبل المحاضرة',
+            'status_revision' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertOk()->json();
+        $this->travelTo($sourceAt->copy()->addHour());
+        $this->postJson("{$this->base}/groups/{$source['id']}/sessions/{$sourceSession['id']}/close", [
+            'revision' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertOk()->assertJsonPath('absent_count', 0);
+        $coveragePath = "{$this->base}/groups/{$source['id']}/coverage";
+        $suspendedCoverage = $this->getJson($coveragePath)->assertOk()
+            ->assertJsonPath('students.0.covered_count', 0)
+            ->assertJsonPath('students.0.required_count', 1)
+            ->assertJsonPath('students.0.missing_numbers', [1]);
+        $this->assertLessThanOrEqual(6, (int) $suspendedCoverage->headers->get('X-Courses-Query-Count'));
+        $selection = ['complete_group' => true, 'decisions' => [['attempt_id' => $attempt['id']]]];
+        $this->postJson("{$this->base}/groups/{$source['id']}/completion-preview", $selection)
+            ->assertConflict()->assertJsonPath('code', 'completion_exception_reason_required');
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'active', 'reason' => 'فك الإيقاف للتعويض',
+            'status_revision' => $suspended['status_revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $afterLift = $this->getJson($coveragePath)->assertOk()
+            ->assertJsonPath('students.0.covered_count', 0)->assertJsonPath('students.0.missing_numbers', [1]);
+        $this->assertLessThanOrEqual(6, (int) $afterLift->headers->get('X-Courses-Query-Count'));
+        $makeupPath = "{$this->base}/students/{$student['id']}/enrollments/{$attempt['id']}/makeup";
+        $this->postJson("{$makeupPath}/book", [
+            'session_id' => $targetSession['id'], 'source_session_id' => null,
+            'attempt_revision' => $attempt['revision'], 'session_revision' => 1,
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->getJson($coveragePath)->assertOk()
+            ->assertJsonPath('students.0.covered_count', 0)->assertJsonPath('students.0.missing_numbers', [1]);
+        $this->travelTo($targetAt->copy()->addHour());
+        $attendance = "{$this->base}/groups/{$target['id']}/sessions/{$targetSession['id']}/attendance";
+        $this->postJson($attendance, ['attempt_id' => $attempt['id'], 'status' => 'counted',
+            'revision' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->postJson("{$this->base}/groups/{$target['id']}/sessions/{$targetSession['id']}/close", [
+            'revision' => 2, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->getJson($coveragePath)->assertOk()
+            ->assertJsonPath('students.0.covered_count', 1)->assertJsonPath('students.0.missing_numbers', []);
+        $preview = $this->postJson("{$this->base}/groups/{$source['id']}/completion-preview", $selection)
+            ->assertOk()->assertJsonPath('students.0.exceptional', false)
+            ->assertJsonPath('students.0.missing_numbers', [])->json();
+        $this->postJson("{$this->base}/groups/{$source['id']}/completion", [
+            ...$selection, 'group_revision' => $preview['group']['revision'],
+            'preview_token' => $preview['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $courseId = $this->center->run(fn () => DB::table('levels')->join('stages', 'stages.id', '=', 'levels.stage_id')
+            ->where('levels.id', $source['level_id'])->value('stages.course_id'));
+        $course = $this->getJson("{$this->base}/students/{$student['id']}/courses/{$courseId}/completion")
+            ->assertOk()->assertJsonPath('course.completed', true)
+            ->assertJsonPath('levels.0.attempt.covered_count', 1)
+            ->assertJsonPath('levels.0.attempt.required_count', 1)
+            ->assertJsonPath('levels.0.attempt.missing_numbers', []);
+        $this->assertLessThanOrEqual(6, (int) $course->headers->get('X-Courses-Query-Count'));
+        $this->center->run(fn () => $this->assertNull(DB::table('study_attendance_entries')
+            ->where('session_id', $sourceSession['id'])->where('attempt_id', $attempt['id'])->value('status')));
+    }
+
     public function test_eight_of_eleven_is_below_eighty_percent_and_hidden_branch_is_not_readable(): void
     {
         $visible = $this->group($this->north, 11);
@@ -488,6 +573,7 @@ class StudyCoverageTest extends TestCase
         $secondResult = collect($completed->json('levels'))->firstWhere('id', $level['id'])['attempt'];
         $this->assertTrue($secondResult['exceptional']);
         $this->assertSame(0, $secondResult['covered_count']);
+        $this->assertSame([1], $secondResult['missing_numbers']);
         $this->assertSame($exception['decisions'][0]['exception_reason'], $secondResult['reason']);
         $this->assertLessThanOrEqual(6, (int) $completed->headers->get('X-Courses-Query-Count'));
 

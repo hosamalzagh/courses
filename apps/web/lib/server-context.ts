@@ -92,7 +92,7 @@ export type CourseCompletionContext = CenterContext & {
     id: string; status: string; current_group_id: string | null; group_name: string | null;
     approved_at: string | null; approved_by_name: string | null; exceptional: boolean | null;
     reason: string | null; covered_count: number | null; required_count: number | null;
-    completion_threshold: number | null;
+    completion_threshold: number | null; missing_numbers: number[] | null;
   } }[];
   pagination: { page: number; has_more: boolean };
 };
