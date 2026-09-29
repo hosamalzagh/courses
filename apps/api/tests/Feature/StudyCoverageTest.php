@@ -687,6 +687,14 @@ class StudyCoverageTest extends TestCase
         $this->assertLessThanOrEqual(6, (int) $second->headers->get('X-Courses-Query-Count'));
         $this->getJson("{$path}?q=Historical%20requirement%2023")->assertOk()
             ->assertJsonCount(1, 'requirements')->assertJsonPath('requirements.0.number', 23);
+        $hidden = $this->group($this->south, 1);
+        $this->putJson("{$this->base}/members/{$this->viewerMembership->id}/grants", [
+            'center_roles' => [], 'branch_roles' => [$this->north => ['branch_viewer']],
+        ])->assertOk();
+        $this->asUser($this->viewer);
+        $this->getJson($path)->assertForbidden();
+        $this->getJson("{$this->base}/groups/{$hidden['id']}/requirement-equivalences/requirements")
+            ->assertNotFound();
     }
 
     private function group(int $branchId, int $lectureCount): array
