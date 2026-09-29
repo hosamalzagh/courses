@@ -253,6 +253,7 @@ class CenterStudentController extends Controller
                 ->select(['entries.id', 'entries.status', 'entries.revision', 'entries.recorded_at',
                     'attempts.id as attempt_id', 'sessions.id as session_id', 'sessions.scheduled_at',
                     'sessions.number as session_number', 'sessions.title as session_title',
+                    'sessions.status as session_status',
                     'groups.id as group_id', 'groups.name as group_name', 'courses.branch_id',
                     'branches.name as branch_name', 'courses.name as course_name',
                     'bookings.id as booking_id'])

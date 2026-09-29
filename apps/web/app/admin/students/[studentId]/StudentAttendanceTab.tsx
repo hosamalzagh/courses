@@ -6,6 +6,9 @@ import { PrefetchLink as Link } from "@/components/PrefetchLink";
 import type { StudentAttendanceEntry, StudentContext } from "@/lib/server-context";
 
 function entryStatus(entry: StudentAttendanceEntry) {
+  if (entry.session_status === "cancelled") return entry.status === "absent"
+    ? "غياب محفوظ في محاضرة ملغاة — لا يُحتسب"
+    : "حضور محفوظ في محاضرة ملغاة — لا يُحتسب";
   if (entry.kind === "suspended") return "لم يُحتسب غيابًا أثناء الإيقاف";
   if (entry.kind === "makeup") {
     if (entry.status === "counted") return "حضور تعويض محتسب";

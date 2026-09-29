@@ -233,6 +233,9 @@ test('books makeup without granting coverage and hides the attempt from unauthor
     await expect(revokedRow.getByRole('button', { name: 'إثبات تعويض' })).toHaveCount(0);
     const excluded = await owner.request.get(`${origin}/api/v1/center/groups/${source.id}/coverage`);
     expect((await excluded.json()).students[0].covered_count).toBe(0);
+    await owner.goto(`${origin}/admin/students/${studentId}?tab=attendance`);
+    await expect(owner.getByRole('table', { name: 'سجل المحاضرات' }))
+      .toContainText('حضور محفوظ في محاضرة ملغاة — لا يُحتسب');
     await signIn(staff, 'staff');
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/makeup`)).status()).toBe(404);
   } finally { await owner.close(); await staff.close(); }

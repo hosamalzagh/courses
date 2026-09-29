@@ -209,11 +209,15 @@ class StudyEnrollmentTest extends TestCase
         $this->assertSame('makeup', $entries->firstWhere('id', $ids[1]['entry'])['kind']);
         $this->assertSame('suspended', $entries->firstWhere('id', $ids[2]['entry'])['kind']);
         $this->getJson($path.'&attendance_page=2')->assertOk()->assertJsonCount(0, 'attendance.entries');
+        $this->center->run(fn () => DB::table('study_sessions')->where('id', $ids[1]['session'])
+            ->update(['status' => 'cancelled']));
+        $this->getJson($path)->assertOk()->assertJsonPath('attendance.entries.1.session_status', 'cancelled');
 
         $this->grant([$this->south => ['branch_viewer']]);
         $this->asUser($this->staff);
         $southOnly = $this->getJson($path)->assertOk()->assertJsonCount(1, 'attendance.entries')
             ->assertJsonPath('attendance.entries.0.kind', 'makeup')
+            ->assertJsonPath('attendance.entries.0.session_status', 'cancelled')
             ->assertJsonPath('attendance.entries.0.source_session_id', null);
         $this->assertLessThanOrEqual(6, (int) $southOnly->headers->get('X-Courses-Query-Count'));
         $this->assertStringNotContainsString($ids[0]['session'], $southOnly->getContent());
