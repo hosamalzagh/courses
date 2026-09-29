@@ -23,12 +23,20 @@ function entryStatus(entry: StudentAttendanceEntry) {
   return "غياب مسجل";
 }
 
-export function StudentAttendanceTab({ context, search }: { context: StudentContext; search: string }) {
+export function StudentAttendanceTab({ context, search, query }: { context: StudentContext; search: string; query: string }) {
   const router = useRouter();
   const student = context.students[0];
   const attendance = context.attendance!;
   const page = attendance.pagination.page;
-  const href = (value: number, q = search) => `/admin/students/${student.id}?tab=attendance${value > 1 ? `&attendance_page=${value}` : ""}${q ? `&attendance_q=${encodeURIComponent(q)}` : ""}`;
+  const href = (value: number, q = search) => {
+    const params = new URLSearchParams(query);
+    params.set("tab", "attendance");
+    if (value > 1) params.set("attendance_page", String(value));
+    else params.delete("attendance_page");
+    if (q) params.set("attendance_q", q);
+    else params.delete("attendance_q");
+    return `/admin/students/${student.id}?${params}`;
+  };
   const sessionLink = (entry: StudentAttendanceEntry) =>
     `/admin/groups/${entry.group_id}/sessions/${entry.session_id}/attendance?entry_id=${entry.id}`;
 
