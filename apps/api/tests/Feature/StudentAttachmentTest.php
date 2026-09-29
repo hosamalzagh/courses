@@ -139,6 +139,87 @@ class StudentAttachmentTest extends TestCase
         $this->get('http://alpha.courses.test'.$identity['download_url'])->assertForbidden();
     }
 
+    public function test_historical_download_and_open_replacement_recheck_branch_and_center_membership(): void
+    {
+        $student = $this->student();
+        $attachment = $this->upload($student['id']);
+        $url = "{$this->base}/students/{$student['id']}/attachments/{$attachment['id']}";
+        $this->post("{$url}/replace", [
+            'request_id' => (string) Str::uuid(), 'attachment_revision' => 2,
+            'title' => 'نسخة ثانية', 'file' => $this->pdf(),
+        ], ['Accept' => 'application/json'])->assertOk();
+        $oldVersion = $this->getJson("{$url}/versions")->assertOk()->json('versions.1');
+        $this->assertSame(1, $oldVersion['version']);
+        $oldDownload = 'http://alpha.courses.test'.$oldVersion['download_url'];
+        $pendingRequest = [
+            'request_id' => (string) Str::uuid(), 'attachment_revision' => 3,
+            'title' => 'طلب مفتوح قبل سحب الصلاحية', 'file' => $this->image(),
+        ];
+
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $this->get($oldDownload)->assertOk()->assertHeader('Cache-Control', 'no-store, private');
+        $this->getJson("{$url}/versions")->assertOk()->assertJsonCount(2, 'versions');
+
+        $this->grant([$this->south => ['registration']]);
+        $this->asUser($this->staff);
+        $this->get($oldDownload)->assertNotFound();
+        $this->getJson("{$url}/versions")->assertNotFound();
+        $this->post("{$url}/replace", $pendingRequest, ['Accept' => 'application/json'])->assertNotFound();
+
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $this->get($oldDownload)->assertOk();
+        $this->membership->update(['status' => 'suspended']);
+        $this->asUser($this->staff);
+        $this->get($oldDownload)->assertForbidden();
+        $this->getJson("{$url}/versions")->assertForbidden();
+        $this->post("{$url}/replace", $pendingRequest, ['Accept' => 'application/json'])->assertForbidden();
+
+        $this->center->run(fn () => $this->assertSame(2,
+            DB::table('student_attachment_versions')->where('attachment_id', $attachment['id'])->count()));
+    }
+
+    public function test_historical_download_does_not_cross_centers_for_one_shared_employee_identity(): void
+    {
+        $student = $this->student();
+        $attachment = $this->upload($student['id']);
+        $url = "{$this->base}/students/{$student['id']}/attachments/{$attachment['id']}";
+        $this->post("{$url}/replace", [
+            'request_id' => (string) Str::uuid(), 'attachment_revision' => 2,
+            'title' => 'نسخة ألفا الثانية', 'file' => $this->pdf(),
+        ], ['Accept' => 'application/json'])->assertOk();
+        $oldVersion = $this->getJson("{$url}/versions")->assertOk()->json('versions.1');
+        $this->assertSame(1, $oldVersion['version']);
+        $this->assertMatchesRegularExpression('~/versions/[a-f0-9-]+/download$~', $oldVersion['download_url']);
+        $this->get('http://alpha.courses.test'.$oldVersion['download_url'])
+            ->assertOk()->assertHeader('Content-Type', 'image/png');
+
+        $this->actingAs(User::factory()->platformOwner()->create(), 'platform')
+            ->postJson('http://courses.test/api/v1/platform/centers', [
+                'name' => 'Beta', 'slug' => 'beta', 'subdomain' => 'beta',
+                'plan' => 'starter', 'owner_email' => 'owner@beta.test',
+            ])->assertCreated();
+        $beta = Center::where('slug', 'beta')->firstOrFail();
+        CenterMembership::create(['tenant_id' => $beta->id, 'user_id' => $this->owner->id, 'status' => 'active']);
+        $beta->run(fn () => DB::table('center_grants')->insert([
+            'user_id' => $this->owner->id, 'role' => 'center_owner', 'created_at' => now(), 'updated_at' => now(),
+        ]));
+        $this->actingAs($this->owner, 'web')->withSession(['center_id' => $beta->id]);
+        $betaBase = 'http://beta.courses.test/api/v1/center';
+        $betaBranch = $this->postJson("{$betaBase}/branches", ['name' => 'Beta', 'slug' => 'beta'])
+            ->assertCreated()->json('branch.id');
+        $this->postJson("{$betaBase}/students", [
+            'name' => 'طالب بيتا', 'branch_ids' => [$betaBranch], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+
+        $foreignDownload = $this->get('http://beta.courses.test'.$oldVersion['download_url'])
+            ->assertNotFound()->assertDontSee($student['name']);
+        $this->assertNull($foreignDownload->headers->get('Content-Disposition'));
+        $this->getJson("{$betaBase}/students/{$student['id']}/attachments/{$attachment['id']}/versions")
+            ->assertNotFound()->assertDontSee($student['name']);
+    }
+
     public function test_upload_retry_rechecks_current_identity_and_archive_visibility(): void
     {
         $student = $this->student();
