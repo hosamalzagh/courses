@@ -5,6 +5,10 @@ import { readFileSync } from "node:fs";
 test.skip(!process.env.COURSES_ATTENDANCE_CREDENTIALS || !process.env.COURSES_ATTENDANCE_DB_PORT || !process.env.COURSES_ATTENDANCE_QUERY_LOG,
   "Requires a disposable PostgreSQL center, browser credentials, and the SSR query log.");
 const origin = process.env.COURSES_ATTENDANCE_ORIGIN ?? "http://alpha.courses.test:8057";
+const concurrentApiOrigins = [
+  process.env.COURSES_ATTENDANCE_CONCURRENT_API_1 ?? "http://alpha.courses.test:8157",
+  process.env.COURSES_ATTENDANCE_CONCURRENT_API_2 ?? "http://alpha.courses.test:8158",
+];
 const credentials = process.env.COURSES_ATTENDANCE_CREDENTIALS
   ? JSON.parse(readFileSync(process.env.COURSES_ATTENDANCE_CREDENTIALS, "utf8")) : {};
 
@@ -144,9 +148,9 @@ test("records whole-session attendance, undoes the last entry, closes absences, 
     const headers = { Accept: "application/json", "X-XSRF-TOKEN": decodeURIComponent(xsrf) };
     const payload = { attempt_id: students[0].attemptId, revision: beforeParallel.session.revision };
     const [first, second] = await Promise.all([
-      owner.request.post(`http://alpha.courses.test:8157/api/v1/center/${path}`, { headers,
+      owner.request.post(`${concurrentApiOrigins[0]}/api/v1/center/${path}`, { headers,
         data: { ...payload, status: "counted", request_id: crypto.randomUUID() } }),
-      owner.request.post(`http://alpha.courses.test:8158/api/v1/center/${path}`, { headers,
+      owner.request.post(`${concurrentApiOrigins[1]}/api/v1/center/${path}`, { headers,
         data: { ...payload, status: "not_counted", request_id: crypto.randomUUID() } }),
     ]);
     expect([first.status(), second.status()].sort()).toEqual([201, 409]);
@@ -196,6 +200,12 @@ test("records whole-session attendance, undoes the last entry, closes absences, 
     await owner.getByRole("button", { name: "القائمة" }).click();
     await owner.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
     await expect(owner.locator("html")).toHaveAttribute("data-theme", "dark");
+    expect(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const studentSummary = await owner.request.get(`${origin}/api/v1/center/students/${students[1].id}`);
+    expect(Number(studentSummary.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+    expect((await studentSummary.json()).summary.current_group_absences).toBe(1);
+    await owner.goto(`${origin}/admin/students/${students[1].id}`);
+    await expect(owner.getByRole("region", { name: "ملخص الطالب" })).toContainText("غيابات مسجلة في المجموعات الحالية: ١");
     expect(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await owner.goto(`${origin}/admin/audit`);
     const auditRow = owner.getByRole("row").filter({ hasText: "إغلاق كشف حضور محاضرة" });
