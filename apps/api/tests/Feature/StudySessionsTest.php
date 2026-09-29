@@ -233,6 +233,9 @@ class StudySessionsTest extends TestCase
             ->assertJsonPath('before.required_count', 10)->assertJsonPath('after.required_count', 11)
             ->assertJsonPath('students.0.before_percentage', 80)
             ->assertJsonPath('students.0.after_percentage', 72.73)
+            ->assertJsonPath('students.0.before_open_count', 8)
+            ->assertJsonPath('students.0.before_provisional', true)
+            ->assertJsonPath('students.0.after_provisional', false)
             ->assertJsonPath('students.0.after_needed', 9)->json();
         $confirmation = [...$change, 'group_revision' => $preview['group_revision'],
             'preview_token' => $preview['preview_token'], 'request_id' => (string) Str::uuid()];
@@ -249,6 +252,8 @@ class StudySessionsTest extends TestCase
             $this->assertSame('80.00', $history->before_percentage);
             $this->assertSame('72.73', $history->after_percentage);
             $this->assertSame(9, $history->after_needed);
+            $this->assertSame(8, $history->before_open_count);
+            $this->assertTrue($history->before_provisional);
         });
         $this->postJson("{$path}/requirements", $confirmation)->assertOk()
             ->assertJsonPath('requirement.id', $saved['requirement']['id']);
@@ -271,6 +276,21 @@ class StudySessionsTest extends TestCase
         $this->getJson("{$path}/coverage")->assertOk()->assertJsonPath('students.0.covered_count', 9)
             ->assertJsonPath('students.0.required_count', 11)->assertJsonPath('students.0.percentage', 81.82)
             ->assertJsonPath('students.0.eligible', true);
+        $currentGroup = $this->getJson("{$path}/sessions")->assertOk()->json('group');
+        $this->patchJson("{$path}/settings", [
+            'revision' => $currentGroup['revision'], 'approved_price' => '100.00',
+            'completion_threshold' => 60, 'instructor_ids' => array_column($group['instructors'], 'id'),
+        ])->assertOk();
+        $thresholdPath = "{$path}/completion-threshold";
+        $thresholdChange = ['attempt_ids' => [$attempt], 'reason' => 'تطبيق الحد بعد زيادة محاضرة المجموعة'];
+        $thresholdPreview = $this->postJson("{$thresholdPath}/preview", $thresholdChange)->assertOk()
+            ->assertJsonPath('required_count', 11)
+            ->assertJsonPath('students.0.covered_count', 9)
+            ->assertJsonPath('students.0.before_needed', 9)
+            ->assertJsonPath('students.0.after_needed', 7)->json();
+        $this->postJson($thresholdPath, [...$thresholdChange,
+            'preview_token' => $thresholdPreview['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk()->assertJsonPath('required_count', 11);
         $this->getJson("{$this->base}/groups/{$other['id']}/coverage")->assertOk()
             ->assertJsonPath('group.required_count', 10);
         $this->center->run(fn () => $this->assertSame(0, DB::table('student_payments')->count()));

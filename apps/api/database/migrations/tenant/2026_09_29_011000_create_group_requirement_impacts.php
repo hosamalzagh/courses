@@ -15,6 +15,8 @@ return new class extends Migration
             $table->unsignedSmallInteger('completion_threshold');
             $table->unsignedSmallInteger('before_covered');
             $table->unsignedSmallInteger('after_covered');
+            $table->unsignedSmallInteger('before_open_count');
+            $table->unsignedSmallInteger('after_open_count');
             $table->unsignedSmallInteger('before_required');
             $table->unsignedSmallInteger('after_required');
             $table->decimal('before_percentage', 5, 2);
@@ -23,6 +25,8 @@ return new class extends Migration
             $table->unsignedSmallInteger('after_needed');
             $table->boolean('before_eligible');
             $table->boolean('after_eligible');
+            $table->boolean('before_provisional');
+            $table->boolean('after_provisional');
             $table->timestampTz('created_at');
             $table->primary(['request_id', 'attempt_id']);
             $table->index(['group_id', 'created_at']);

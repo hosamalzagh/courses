@@ -209,7 +209,10 @@ class StudyCoverageTest extends TestCase
             $lectures = DB::table('plan_lectures')->where('plan_version_id', $visible['plan_version_id'])->orderBy('number')->limit(8)->get();
             foreach ($lectures as $lecture) {
                 $sessionId = (string) Str::uuid();
+                $requirementId = DB::table('study_group_requirements')->where('group_id', $visible['id'])
+                    ->where('plan_lecture_id', $lecture->id)->value('id');
                 DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $visible['id'], 'plan_lecture_id' => $lecture->id,
+                    'group_requirement_id' => $requirementId,
                     'number' => $lecture->number, 'scheduled_at' => now()->subDays((int) $lecture->number), 'status' => 'held',
                     'revision' => 2, 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
                     'closed_at' => now(), 'closed_by' => $this->owner->id, 'created_at' => now(), 'updated_at' => now()]);
@@ -227,7 +230,10 @@ class StudyCoverageTest extends TestCase
         $this->center->run(function () use ($visible, $attempt): void {
             $lecture = DB::table('plan_lectures')->where('plan_version_id', $visible['plan_version_id'])->where('number', 9)->firstOrFail();
             $sessionId = (string) Str::uuid();
+            $requirementId = DB::table('study_group_requirements')->where('group_id', $visible['id'])
+                ->where('plan_lecture_id', $lecture->id)->value('id');
             DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $visible['id'], 'plan_lecture_id' => $lecture->id,
+                'group_requirement_id' => $requirementId,
                 'number' => 9, 'scheduled_at' => now()->subDays(9), 'status' => 'held', 'revision' => 2,
                 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
                 'closed_at' => now(), 'closed_by' => $this->owner->id, 'created_at' => now(), 'updated_at' => now()]);

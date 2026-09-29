@@ -15,7 +15,8 @@ import { formatSessionTime } from "@/lib/session-time";
 type Mode = { kind: "add" } | { kind: "reduce"; session: StudySession };
 type StudentImpact = { attempt_id: string; name: string; student_number: number; covered_count: number;
   before_percentage: number; after_percentage: number; before_needed: number; after_needed: number;
-  before_eligible: boolean; after_eligible: boolean };
+  before_eligible: boolean; after_eligible: boolean; before_provisional: boolean; after_provisional: boolean;
+  before_open_count: number; after_open_count: number };
 type Preview = { group_revision: number; before: { required_count: number }; after: { required_count: number; last_number: number };
   session: { id: string; status: string } | null; students: StudentImpact[];
   affected_total: number; pagination: { page: number; has_more: boolean; total: number }; preview_token: string };
@@ -54,6 +55,9 @@ export function GroupRequirementEditor({ group, mode, onSaved, onReload, onClose
     const first = Object.keys(errors)[0];
     if (first) requestAnimationFrame(() => document.getElementById(`${formId}-${first}`)?.focus());
   }
+  const eligibility = (eligible: boolean, provisional: boolean, openCount: number) =>
+    `${eligible ? provisional ? "مؤهل مبدئيًا" : "مؤهل" : "غير مؤهل"}${openCount > 0
+      ? ` · ${openCount.toLocaleString("ar-EG")} محاضرة مفتوحة؛ احتسابها مبدئي حتى الإغلاق` : ""}`;
   async function review(page = 1, query = search) {
     if (busyRef.current || reason.trim().length < 3 || (mode.kind === "add" && !content.trim())) return;
     busyRef.current = true; setBusy(true); setError("");
@@ -118,8 +122,8 @@ export function GroupRequirementEditor({ group, mode, onSaved, onReload, onClose
         columns={[
           { key: "name", label: "الطالب", render: row => `${row.student_number.toLocaleString("ar-EG")} · ${row.name}` },
           { key: "covered", label: "المحتسب", render: row => row.covered_count.toLocaleString("ar-EG") },
-          { key: "before", label: "قبل", render: row => `${row.before_percentage.toLocaleString("ar-EG")}% · ${row.before_needed.toLocaleString("ar-EG")} مطلوبة${row.before_eligible ? " · مؤهل" : ""}` },
-          { key: "after", label: "بعد", render: row => `${row.after_percentage.toLocaleString("ar-EG")}% · ${row.after_needed.toLocaleString("ar-EG")} مطلوبة${row.after_eligible ? " · مؤهل" : ""}` },
+          { key: "before", label: "قبل", render: row => `${row.before_percentage.toLocaleString("ar-EG")}% · ${row.before_needed.toLocaleString("ar-EG")} مطلوبة · ${eligibility(row.before_eligible, row.before_provisional, row.before_open_count)}` },
+          { key: "after", label: "بعد", render: row => `${row.after_percentage.toLocaleString("ar-EG")}% · ${row.after_needed.toLocaleString("ar-EG")} مطلوبة · ${eligibility(row.after_eligible, row.after_provisional, row.after_open_count)}` },
         ]} />
     </section> : null}
     <CenterHeaderActions>

@@ -94,8 +94,11 @@ class StudyEnrollmentTest extends TestCase
                 ->orderBy('number')->limit(6)->get(['id', 'number']);
             foreach ($lectures as $lecture) {
                 $sessionId = (string) Str::uuid();
+                $requirementId = DB::table('study_group_requirements')->where('group_id', $group['id'])
+                    ->where('plan_lecture_id', $lecture->id)->value('id');
                 DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $group['id'],
-                    'plan_lecture_id' => $lecture->id, 'number' => $lecture->number,
+                    'plan_lecture_id' => $lecture->id, 'group_requirement_id' => $requirementId,
+                    'number' => $lecture->number,
                     'scheduled_at' => now()->addHours((int) $lecture->number), 'status' => 'planned', 'created_by' => $this->owner->id,
                     'created_by_name' => $this->owner->name, 'created_at' => now(), 'updated_at' => now()]);
                 DB::table('study_attendance_entries')->insert(['id' => (string) Str::uuid(),
@@ -726,8 +729,11 @@ class StudyEnrollmentTest extends TestCase
         $this->center->run(function () use ($first, $saved): void {
             $lecture = DB::table('plan_lectures')->where('plan_version_id', $first['plan_version_id'])->firstOrFail();
             $sessionId = (string) Str::uuid();
+            $requirementId = DB::table('study_group_requirements')->where('group_id', $first['id'])
+                ->where('plan_lecture_id', $lecture->id)->value('id');
             DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $first['id'],
-                'plan_lecture_id' => $lecture->id, 'number' => $lecture->number,
+                'plan_lecture_id' => $lecture->id, 'group_requirement_id' => $requirementId,
+                'number' => $lecture->number,
                 'scheduled_at' => '2026-09-27 08:00:00+00', 'status' => 'held', 'revision' => 2,
                 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
                 'closed_at' => now(), 'closed_by' => $this->owner->id, 'created_at' => now(), 'updated_at' => now()]);
@@ -2451,8 +2457,11 @@ class StudyEnrollmentTest extends TestCase
         $entryId = (string) Str::uuid();
         $this->center->run(function () use ($group, $attempt, $sessionId, $entryId): void {
             $lectureId = DB::table('plan_lectures')->where('plan_version_id', $group['plan_version_id'])->value('id');
+            $requirementId = DB::table('study_group_requirements')->where('group_id', $group['id'])
+                ->where('plan_lecture_id', $lectureId)->value('id');
             DB::table('study_sessions')->insert([
                 'id' => $sessionId, 'group_id' => $group['id'], 'plan_lecture_id' => $lectureId,
+                'group_requirement_id' => $requirementId,
                 'number' => 1, 'scheduled_at' => '2026-09-28 10:00:00+00', 'status' => 'held',
                 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
                 'created_at' => now(), 'updated_at' => now(),
@@ -2581,8 +2590,11 @@ class StudyEnrollmentTest extends TestCase
         $targetLecture = $this->center->run(fn () => DB::table('plan_lectures')->where('plan_version_id', $target['plan_version_id'])->value('id'));
         $sessionId = (string) Str::uuid();
         $this->center->run(function () use ($source, $attempt, $sourceLecture, $sessionId): void {
+            $requirementId = DB::table('study_group_requirements')->where('group_id', $source['id'])
+                ->where('plan_lecture_id', $sourceLecture)->value('id');
             DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $source['id'],
-                'plan_lecture_id' => $sourceLecture, 'number' => 1, 'scheduled_at' => '2026-09-27 08:00:00+00',
+                'plan_lecture_id' => $sourceLecture, 'group_requirement_id' => $requirementId,
+                'number' => 1, 'scheduled_at' => '2026-09-27 08:00:00+00',
                 'status' => 'planned',
                 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
                 'created_at' => now(), 'updated_at' => now()]);
@@ -2591,7 +2603,8 @@ class StudyEnrollmentTest extends TestCase
                 'recorded_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
             $cancelledId = (string) Str::uuid();
             DB::table('study_sessions')->insert(['id' => $cancelledId, 'group_id' => $source['id'],
-                'plan_lecture_id' => $sourceLecture, 'number' => 2, 'scheduled_at' => '2026-09-28 08:00:00+00',
+                'plan_lecture_id' => $sourceLecture, 'group_requirement_id' => $requirementId,
+                'number' => 2, 'scheduled_at' => '2026-09-28 08:00:00+00',
                 'status' => 'cancelled', 'closed_at' => now(), 'closed_by' => $this->owner->id,
                 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
                 'created_at' => now(), 'updated_at' => now()]);
@@ -2686,6 +2699,13 @@ class StudyEnrollmentTest extends TestCase
         $this->postJson("{$this->base}/groups/{$target['id']}/completion-preview", $completion)
             ->assertOk()->assertJsonPath('students.0.covered_count', 1)
             ->assertJsonPath('students.0.exceptional', false);
+        $requirementPath = "{$this->base}/groups/{$target['id']}/requirements";
+        $requirementChange = ['kind' => 'add', 'content' => 'محاضرة إضافية بعد النقل',
+            'reason' => 'معاينة المتطلب مع تغطية معادلة من الخطة السابقة'];
+        $staleRequirement = $this->postJson("{$requirementPath}/preview", $requirementChange)->assertOk()
+            ->assertJsonPath('students.0.covered_count', 1)
+            ->assertJsonPath('students.0.before_percentage', 100)
+            ->assertJsonPath('students.0.after_percentage', 50)->json();
         $sourceSessionPath = "{$this->base}/groups/{$source['id']}/sessions/{$sessionId}";
         $revokePreview = $this->getJson("{$sourceSessionPath}/revoke-preview")->assertOk()
             ->assertJsonPath('attendance.potential_coverage_records', 1)->json();
@@ -2698,6 +2718,10 @@ class StudyEnrollmentTest extends TestCase
         $this->postJson($thresholdPath, [...$staleChange,
             'preview_token' => $staleImpact['preview_token'], 'request_id' => (string) Str::uuid()])
             ->assertConflict()->assertJsonPath('code', 'threshold_preview_changed');
+        $this->postJson($requirementPath, [...$requirementChange,
+            'group_revision' => $staleRequirement['group_revision'],
+            'preview_token' => $staleRequirement['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertConflict()->assertJsonPath('code', 'requirement_preview_changed');
         $this->getJson("{$this->base}/groups/{$target['id']}/coverage")
             ->assertOk()->assertJsonPath('students.0.covered_count', 0);
         $this->postJson("{$this->base}/groups/{$target['id']}/completion-preview", $completion)
@@ -2915,8 +2939,11 @@ class StudyEnrollmentTest extends TestCase
         [$sessionId, $entryId] = $this->center->run(function () use ($source, $attempt, $lectures): array {
             $sessionId = (string) Str::uuid();
             $entryId = (string) Str::uuid();
+            $requirementId = DB::table('study_group_requirements')->where('group_id', $source['id'])
+                ->where('plan_lecture_id', $lectures[$source['plan_version_id']])->value('id');
             DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $source['id'],
-                'plan_lecture_id' => $lectures[$source['plan_version_id']], 'number' => 1,
+                'plan_lecture_id' => $lectures[$source['plan_version_id']],
+                'group_requirement_id' => $requirementId, 'number' => 1,
                 'scheduled_at' => '2026-09-27 08:00:00+00', 'status' => 'held', 'closed_at' => now(),
                 'closed_by' => $this->owner->id, 'created_by' => $this->owner->id,
                 'created_by_name' => $this->owner->name, 'created_at' => now(), 'updated_at' => now()]);
