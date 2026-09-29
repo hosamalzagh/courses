@@ -365,8 +365,15 @@ class CenterStudyEnrollmentController extends Controller
                 'courses.id as course_id', 'courses.name as course_name',
                 'withdrawal.withdrawn_on', 'withdrawal.reason as withdrawal_reason', 'withdrawal.actor_name as withdrawal_actor_name'])
             ->selectRaw(<<<'SQL'
-CASE WHEN study_attempts.required_lectures IS NOT NULL
-    THEN jsonb_array_length(study_attempts.required_lectures)
+CASE WHEN study_attempts.status = 'withdrawn' AND study_attempts.current_group_id IS NOT NULL
+    THEN COALESCE((SELECT jsonb_array_length(periods.required_credit_ids)
+        FROM study_attempt_group_periods AS periods
+        WHERE periods.attempt_id = study_attempts.id
+            AND periods.group_id = study_attempts.current_group_id AND periods.left_on IS NOT NULL
+        ORDER BY periods.left_on DESC, periods.created_at DESC, periods.id DESC LIMIT 1),
+        jsonb_array_length(study_attempts.required_lectures),
+        (SELECT count(*) FROM study_group_requirements AS requirements
+            WHERE requirements.group_id = study_attempts.current_group_id AND requirements.retired_at IS NULL))
     WHEN study_attempts.current_group_id IS NULL
     THEN COALESCE((SELECT jsonb_array_length(periods.required_credit_ids)
         FROM study_attempt_waitlists AS waitlists
@@ -375,7 +382,9 @@ CASE WHEN study_attempts.required_lectures IS NOT NULL
         ORDER BY waitlists.entry_revision DESC NULLS LAST, waitlists.entered_on DESC,
             waitlists.created_at DESC, waitlists.id DESC LIMIT 1),
         (SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id))
-    WHEN study_attempts.status IN ('withdrawn', 'completed')
+    WHEN study_attempts.required_lectures IS NOT NULL
+    THEN jsonb_array_length(study_attempts.required_lectures)
+    WHEN study_attempts.status = 'completed'
     THEN COALESCE((SELECT jsonb_array_length(periods.required_credit_ids)
         FROM study_attempt_group_periods AS periods
         WHERE periods.attempt_id = study_attempts.id

@@ -939,6 +939,11 @@ class StudyCoverageTest extends TestCase
         $rows = collect($report->json('students'))->keyBy('attempt_id');
         $this->assertSame(2, $rows[$attempts[0]['id']]['required_count']);
         $this->assertSame(1, $rows[$attempts[1]['id']]['required_count']);
+        foreach ([2, 1] as $index => $expectedCount) {
+            $enrollments = $this->getJson("{$this->base}/students/{$students[$index]['id']}/enrollments")
+                ->assertOk()->assertJsonPath('attempts.0.requirements_count', $expectedCount);
+            $this->assertLessThanOrEqual(6, (int) $enrollments->headers->get('X-Courses-Query-Count'));
+        }
     }
 
     public function test_plan_application_failure_rolls_back_attempt_and_history_before_safe_retry(): void
