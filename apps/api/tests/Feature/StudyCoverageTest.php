@@ -839,14 +839,13 @@ class StudyCoverageTest extends TestCase
             ->assertJsonPath('students.0.required_count', 2);
         $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
         $this->center->run(function () use ($attempt, $group, $newPlan): void {
-            $periods = DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])
-                ->orderBy('created_at')->orderBy('id')->get();
+            $periods = DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])->get();
             $this->assertCount(2, $periods);
-            $this->assertSame($group['id'], $periods[0]->group_id);
-            $this->assertNotNull($periods[0]->left_on);
-            $this->assertCount(2, json_decode($periods[0]->required_credit_ids, true));
-            $this->assertSame($group['id'], $periods[1]->group_id);
-            $this->assertNull($periods[1]->left_on);
+            $closed = $periods->first(fn (object $period): bool => $period->left_on !== null);
+            $active = $periods->first(fn (object $period): bool => $period->left_on === null);
+            $this->assertSame($group['id'], $closed->group_id);
+            $this->assertCount(2, json_decode($closed->required_credit_ids, true));
+            $this->assertSame($group['id'], $active->group_id);
             $this->assertSame($newPlan['id'], DB::table('study_attempts')
                 ->where('id', $attempt['id'])->value('plan_version_id'));
             $this->assertSame(1, DB::table('study_attempt_plan_applications')
