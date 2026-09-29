@@ -34,7 +34,8 @@ const completionErrors: Record<string, string> = {
   group_has_open_sessions: "توجد محاضرات مفتوحة. أغلقها قبل إكمال المجموعة.",
   completion_attendance_open: "يعتمد إتمام أحد الطلاب على حضور محاضرة مفتوحة. أغلق المحاضرة ثم أعد المعاينة.",
   completion_attempt_changed: "تغيرت محاولة دراسة أحد الطلاب. حدّث التقرير ثم أعد الاختيار.",
-  completion_exception_reason_required: "أدخل سببًا من ثلاثة أحرف على الأقل للإتمام الاستثنائي.",
+  completion_exception_reason_required: "تغيرت أهلية أحد الطلاب. حُدث التقرير مع الاحتفاظ بالاختيار؛ أدخل سببًا من ثلاثة أحرف على الأقل للطالب الذي أصبح ناقصًا.",
+  completion_reason_unneeded: "تغيرت أهلية أحد الطلاب. حُدث التقرير مع الاحتفاظ بالاختيار؛ امسح السبب الذي لم يعد مطلوبًا.",
   completion_preview_changed: "تغيرت بيانات الإتمام بعد المعاينة. أعد المعاينة قبل الاعتماد.",
 };
 
@@ -94,7 +95,12 @@ export function CoverageControls({ context, search }: { context: CoverageContext
     setCompletionBusy(true); setCompletionError(""); setCompletionNotice(""); setCompletionPreview(null);
     try {
       const response = await centerRequest(`groups/${group.id}/completion-preview`, "POST", completionPayload());
-      if (!response.ok) { setCompletionError(await completionMessage(response)); return; }
+      if (!response.ok) {
+        const code = (await response.clone().json().catch(() => ({}))).code as string | undefined;
+        setCompletionError(await completionMessage(response));
+        if (code === "completion_exception_reason_required" || code === "completion_reason_unneeded") router.refresh();
+        return;
+      }
       const data = await response.json() as CompletionPreview;
       setCompletionPreview({ data, draftKey: completionDraftKey, requestId: newSubmissionId() });
       requestAnimationFrame(() => completionPreviewRef.current?.focus());

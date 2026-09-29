@@ -117,13 +117,26 @@ test("coverage is provisional until closure and hidden branch data stays denied"
       request_id: crypto.randomUUID() })).status).toBe(200);
     await owner.reload();
     await expect(owner.getByRole("row", { name: new RegExp(student.body.student.name) })).toContainText("٠/١");
-    expect((await write(owner, attendance, { attempt_id: saved.body.attempt.id, status: "counted", revision: 3,
-      request_id: crypto.randomUUID() })).status).toBe(201);
+    const finalRecorded = await write(owner, attendance, { attempt_id: saved.body.attempt.id, status: "counted", revision: 3,
+      request_id: crypto.randomUUID() });
+    expect(finalRecorded.status).toBe(201);
     expect((await write(owner, `groups/${groupId}/sessions/${sessionId}/close`, { revision: 4,
       request_id: crypto.randomUUID() })).status).toBe(200);
     await owner.reload();
     await expect(owner.getByText("بلغ الحد — يحتاج اعتمادًا صريحًا")).toBeVisible();
     await expect(owner.getByText("مؤهل مبدئيًا — حضور مفتوح")).toHaveCount(0);
+    await owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` }).check();
+    execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_COVERAGE_DB_PORT!, "-U", "postgres",
+      "-d", `courses_center_${centerId}`, "-c",
+      `UPDATE study_attendance_entries SET status = 'not_counted' WHERE id = '${finalRecorded.body.entry.id}'`], { stdio: "ignore" });
+    await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" }).click();
+    await expect(owner.getByText(/تغيرت أهلية أحد الطلاب/)).toBeVisible();
+    await expect(owner.getByLabel(`سبب إتمام ${student.body.student.name} دون الحد`)).toBeVisible();
+    await expect(owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` })).toBeChecked();
+    execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_COVERAGE_DB_PORT!, "-U", "postgres",
+      "-d", `courses_center_${centerId}`, "-c",
+      `UPDATE study_attendance_entries SET status = 'counted' WHERE id = '${finalRecorded.body.entry.id}'`], { stdio: "ignore" });
+    await owner.reload();
     await owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` }).check();
     await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" }).click();
     await expect(owner.getByRole("heading", { name: "معاينة قرار الإتمام" })).toBeFocused();
