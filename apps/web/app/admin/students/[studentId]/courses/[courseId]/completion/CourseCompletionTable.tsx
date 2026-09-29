@@ -41,7 +41,7 @@ export function CourseCompletionTable({ context, search }: { context: CourseComp
     </section>
     <DataTable id="course-completion-levels" title="المستويات المطلوبة" rows={levels} rowKey={level => level.id}
       description="جميع مستويات الكورس ضمن الفرع المصرح به. تُعرض حتى ٥٠ في الدفعة الحالية."
-      emptyMessage="لا توجد مستويات مطلوبة في هذا الكورس."
+      emptyMessage={search.trim() ? "لا توجد مستويات تطابق البحث." : "لا توجد مستويات مطلوبة في هذا الكورس."}
       searchText={level => `${level.stage_name} ${level.name}`}
       serverSearch={{ value: search, onSearch: value => router.push(href(1, value)) }}
       serverPagination={{ page: pagination.page, hasMore: pagination.has_more, batchSize: 50,
