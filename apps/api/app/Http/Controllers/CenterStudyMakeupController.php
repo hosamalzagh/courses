@@ -172,7 +172,7 @@ class CenterStudyMakeupController extends Controller
 
                 return response()->json(['booking' => $prior, 'replayed' => true]);
             }
-            $this->validAttempt($attempt, $data['attempt_revision']);
+            $this->validAttempt($attempt, $data['attempt_revision'], $session);
             abort_if($session->status !== 'held' || ! $session->closed_at
                 || (int) $session->revision !== $data['session_revision'], 409, 'تغير اعتماد المحاضرة؛ حمّل أحدث البيانات.');
             $this->eligible($attempt, $session, $permissions, $data['source_session_id'] ?? null);
@@ -227,15 +227,17 @@ class CenterStudyMakeupController extends Controller
         abort_unless(Str::isUuid($studentId) && Str::isUuid($attemptId), 404);
         $query = StudentPhotos::visibleStudent($studentId, $permissions, 'enrollment.manage')
             ->join('study_attempts as attempts', 'attempts.student_id', '=', 'students.id')
+            ->leftJoin('study_attempt_withdrawals as withdrawals', 'withdrawals.attempt_id', '=', 'attempts.id')
             ->where('attempts.id', $attemptId)
             ->whereExists(DB::connection('tenant')->table('student_branches')
                 ->whereColumn('student_branches.student_id', 'students.id')
                 ->whereColumn('student_branches.branch_id', 'attempts.branch_id')->selectRaw('1'))
             ->select(['attempts.id', 'attempts.student_id', 'attempts.branch_id', 'attempts.current_group_id', 'attempts.plan_version_id',
                 'attempts.joined_on',
-                'attempts.status', 'attempts.revision', 'students.status as student_status', 'students.name as student_name']);
+                'attempts.status', 'attempts.revision', 'withdrawals.withdrawn_on',
+                'students.status as student_status', 'students.name as student_name']);
         if ($lock) {
-            $query->lockForUpdate();
+            $query->lock('FOR UPDATE OF attempts');
         }
         $attempt = $query->first();
         abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
@@ -259,10 +261,17 @@ class CenterStudyMakeupController extends Controller
         return $session;
     }
 
-    private function validAttempt(object $attempt, int $revision): void
+    private function validAttempt(object $attempt, int $revision, ?object $historicalSession = null): void
     {
-        abort_if($attempt->student_status !== 'active' || $attempt->status === 'withdrawn', 409,
-            'الطالب أو المحاولة غير متاحين للتعويض.');
+        abort_if($attempt->student_status !== 'active', 409, 'الطالب أو المحاولة غير متاحين للتعويض.');
+        if ($historicalSession === null) {
+            abort_if($attempt->status === 'withdrawn', 409, 'الطالب أو المحاولة غير متاحين للتعويض.');
+        } elseif ($attempt->status === 'withdrawn') {
+            $sessionDate = (new DateTimeImmutable($historicalSession->scheduled_at))
+                ->setTimezone(new DateTimeZone('Africa/Cairo'))->format('Y-m-d');
+            abort_if($attempt->withdrawn_on === null || $attempt->withdrawn_on <= $sessionDate, 409,
+                'سُحبت محاولة الطالب قبل محاضرة التعويض.');
+        }
         abort_if((int) $attempt->revision !== $revision, 409, 'تغيرت محاولة الدراسة؛ حمّل أحدث البيانات.');
     }
 
