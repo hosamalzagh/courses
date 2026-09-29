@@ -312,7 +312,10 @@ COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     WHERE approvals.target_plan_version_id = attempts.plan_version_id
       OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
           WHERE transfers.attempt_id = attempts.id
-            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
+            AND transfers.to_plan_version_id = approvals.target_plan_version_id)
+      OR EXISTS (SELECT 1 FROM study_attempt_plan_applications AS applications
+          WHERE applications.attempt_id = attempts.id
+            AND applications.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
 COALESCE((SELECT json_agg(json_build_object('id', mappings.id,
     'source_lecture_ids', json_build_array(mappings.candidate_requirement_id),
     'target_lecture_ids', json_build_array(mappings.required_requirement_id)) ORDER BY mappings.id)

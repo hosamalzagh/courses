@@ -72,7 +72,7 @@ class CenterAttemptThresholdController extends Controller
                     'after_threshold' => $student['after_threshold'],
                     'covered_count' => $student['covered_count'],
                     'open_credited_count' => $student['open_credited_count'],
-                    'required_count' => $impact['required_count'],
+                    'required_count' => $student['required_count'],
                     'before_needed' => $student['before_needed'], 'after_needed' => $student['after_needed'],
                     'before_eligible' => $student['before_eligible'], 'after_eligible' => $student['after_eligible'],
                     'before_provisional' => $student['before_provisional'],
@@ -134,9 +134,9 @@ class CenterAttemptThresholdController extends Controller
             ->join('students', 'students.id', '=', 'attempts.student_id')
             ->whereIn('attempts.id', $change['attempt_ids'])
             ->where('attempts.current_group_id', $group->id)
-            ->where('attempts.plan_version_id', $group->plan_version_id)
             ->where('attempts.status', 'active')
             ->select(['attempts.id', 'attempts.revision', 'attempts.completion_threshold',
+                'attempts.plan_version_id', 'attempts.required_lectures',
                 'students.name', 'students.student_number'])
             ->selectRaw(<<<'SQL'
 COALESCE((SELECT json_agg(json_build_object('id', COALESCE(sessions.plan_lecture_id, sessions.group_requirement_id),
@@ -151,7 +151,10 @@ COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     WHERE approvals.target_plan_version_id = attempts.plan_version_id
       OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
           WHERE transfers.attempt_id = attempts.id
-            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
+            AND transfers.to_plan_version_id = approvals.target_plan_version_id)
+      OR EXISTS (SELECT 1 FROM study_attempt_plan_applications AS applications
+          WHERE applications.attempt_id = attempts.id
+            AND applications.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
 COALESCE((SELECT json_agg(json_build_object('id', mappings.id,
     'source_lecture_ids', json_build_array(mappings.candidate_requirement_id),
     'target_lecture_ids', json_build_array(mappings.required_requirement_id)) ORDER BY mappings.id)
@@ -164,13 +167,16 @@ SQL)
             ->where('group_id', $group->id)->whereNull('retired_at')
             ->orderBy('number')->get(['id', 'plan_lecture_id'])
             ->map(fn (object $row): string => $row->plan_lecture_id ?? $row->id)->all();
-        $required = count($requiredIds);
-        abort_if($required === 0, 409, 'لا توجد محاضرات معتمدة للمجموعة.');
+        $groupRequired = count($requiredIds);
+        abort_if($groupRequired === 0, 409, 'لا توجد محاضرات معتمدة للمجموعة.');
         $target = (int) $group->target_threshold;
-        $students = $rows->map(function (object $row) use ($requiredIds, $required, $target): array {
+        $students = $rows->map(function (object $row) use ($requiredIds, $target): array {
+            $studentRequiredIds = $row->required_lectures === null ? $requiredIds
+                : array_column(json_decode($row->required_lectures, true), 'id');
+            $required = count($studentRequiredIds);
             $credits = StudyCoverageCredits::resolve(
                 json_decode($row->attendance_rows, true), json_decode($row->approvals, true));
-            $coveredIds = array_intersect($requiredIds, array_keys($credits['lectures']));
+            $coveredIds = array_intersect($studentRequiredIds, array_keys($credits['lectures']));
             $covered = count($coveredIds);
             $finalCovered = count(array_filter($coveredIds,
                 fn (string $id): bool => $credits['lectures'][$id] === true));
@@ -198,11 +204,12 @@ SQL)
             $group->course_completion_revision, $group->group_threshold, $target,
             $change, $requiredIds, $rows->map(fn (object $row): array => [
                 $row->id, $row->revision, $row->completion_threshold,
+                $row->plan_version_id, $row->required_lectures,
                 $row->attendance_rows, $row->approvals,
             ])->all()]));
 
         return ['group_id' => $group->id, 'target_threshold' => $target,
-            'required_count' => $required, 'reason' => $change['reason'],
+            'required_count' => $groupRequired, 'reason' => $change['reason'],
             'students' => $students, 'preview_token' => $token];
     }
 

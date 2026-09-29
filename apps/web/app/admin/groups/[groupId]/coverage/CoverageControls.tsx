@@ -14,6 +14,7 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { centerRequest, newSubmissionId, responseMessage } from "@/lib/client-api";
 import type { CoverageContext, CoverageRow } from "@/lib/groups";
+import { PlanApplicationEditor } from "./PlanApplicationEditor";
 
 type Impact = { attempt_id: string; name: string; student_number: number; before_threshold: number;
   after_threshold: number; covered_count: number; open_credited_count: number; required_count: number;
@@ -56,6 +57,7 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   const [notice, setNotice] = useState("");
   const [conflict, setConflict] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<string | null>(null);
+  const [planOpen, setPlanOpen] = useState(false);
   const completionFormId = useId();
   const completionErrorRef = useRef<HTMLDivElement>(null);
   const completionPreviewRef = useRef<HTMLHeadingElement>(null);
@@ -187,8 +189,8 @@ export function CoverageControls({ context, search }: { context: CoverageContext
     if (q) params.set("q", q);
     return `${base}${params.size ? `?${params}` : ""}`;
   };
-  const label = (numbers: number[]) => numbers.length ? numbers.map(number => {
-    const requirement = group.requirements.find(item => item.number === number);
+  const label = (numbers: number[], row?: CoverageRow) => numbers.length ? numbers.map(number => {
+    const requirement = (row?.requirements ?? group.requirements).find(item => item.number === number);
     return `${number.toLocaleString("ar-EG")} · ${requirement?.title || requirement?.content || "محاضرة مطلوبة"}`;
   }).join("، ") : "لا يوجد";
   const eligibility = (eligible: boolean, provisional: boolean) =>
@@ -201,6 +203,12 @@ export function CoverageControls({ context, search }: { context: CoverageContext
     return row.open_numbers.length ? "ناقص — النسبة مبدئية" : "ناقص";
   };
 
+  if (planOpen) return <>
+    <UnsavedChangesGuard dirty guardHistory onDiscard={() => setPlanOpen(false)} />
+    <PlanApplicationEditor context={context} onSaved={() => { setPlanOpen(false); router.refresh(); }}
+      onClose={() => setPlanOpen(false)} />
+  </>;
+
   return <>
     <UnsavedChangesGuard dirty={dirty || anyBusy} guardHistory blockDiscard={anyBusy || completionUncertain}
       blockDiscardTitle={busy ? "انتظر نتيجة اعتماد النسبة" : "انتظر نتيجة اعتماد الإتمام"}
@@ -210,6 +218,9 @@ export function CoverageControls({ context, search }: { context: CoverageContext
       onDiscard={() => { setSelected([]); setReason(""); setPreview(null); setError(""); setCompletionSelected({}); setCompletionPreview(null); setCompletionError(""); }} />
     {pendingNavigation ? <ConfirmationDialog title="مغادرة دون تطبيق" description="لديك اختيار أو معاينة لم تُعتمد. هل تريد الانتقال والتخلي عنها؟" confirmLabel="الانتقال دون تطبيق" onCancel={() => { setPendingNavigation(null); requestAnimationFrame(() => navigationFocus.current?.focus()); }} onConfirm={() => { const next = pendingNavigation; setPendingNavigation(null); setSelected([]); setReason(""); setPreview(null); setCompletionSelected({}); setCompletionPreview(null); router.push(next); }} /> : null}
     <CenterPageActions context={context} actions={<>
+      {canManage ? <Button type="button" disabled={anyBusy || dirty} onClick={() => setPlanOpen(true)}>
+        تطبيق إصدار خطة جديد
+      </Button> : null}
       {group.can_complete && group.status !== "waiting" ? <>
         <Button ref={completionReviewRef} type="button" disabled={anyBusy || completionUncertain || (!completeGroup && !completionSelection.length)} busy={completionBusy && !completionPreview} onClick={() => void reviewCompletion()}>
           {completeGroup ? "معاينة إكمال المجموعة" : "معاينة اعتماد الطلاب"}
@@ -293,10 +304,10 @@ export function CoverageControls({ context, search }: { context: CoverageContext
             <Textarea id={`${completionFormId}-${row.attempt_id}`} value={completionSelected[row.attempt_id]} maxLength={1000}
               disabled={anyBusy} onChange={event => setCompletionSelected(current => ({ ...current, [row.attempt_id]: event.target.value }))} /></Field> : "—" },
       ]}
-      expanded={row => <div className="space-y-2"><p><strong>المستوفى:</strong> {label(row.covered_numbers)}</p><p><strong>الناقص:</strong> {label(row.missing_numbers)}</p>
+      expanded={row => <div className="space-y-2"><p><strong>المستوفى:</strong> {label(row.covered_numbers, row)}</p><p><strong>الناقص:</strong> {label(row.missing_numbers, row)}</p>
         <p>حد هذه المحاولة: {row.completion_threshold.toLocaleString("ar-EG")}% ({Math.ceil(row.required_count * row.completion_threshold / 100).toLocaleString("ar-EG")} محاضرة كاملة على الأقل).</p>
         {row.open_numbers.length ? <p role="status"><strong>حضور مبدئي في محاضرات مفتوحة:</strong> {label(row.open_numbers)}. قد تتغير النسبة عند التراجع، ولا يجوز اعتماد الإتمام حتى الإغلاق وإعادة المراجعة.</p> : null}
-        <p className="muted">تاريخ الانضمام: {row.joined_on} · حالة محاولة الدراسة: {row.attempt_status === "withdrawn" ? "منسحب" : row.attempt_status === "completed" ? "مكتملة" : "نشطة"}</p>
+        <p className="muted">إصدار متطلبات المحاولة: {row.plan_version.toLocaleString("ar-EG")} · تاريخ الانضمام: {row.joined_on} · حالة محاولة الدراسة: {row.attempt_status === "withdrawn" ? "منسحب" : row.attempt_status === "completed" ? "مكتملة" : "نشطة"}</p>
       </div>} />
   </>;
 }

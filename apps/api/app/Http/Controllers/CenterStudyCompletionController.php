@@ -166,7 +166,7 @@ class CenterStudyCompletionController extends Controller
         $db = DB::connection('tenant');
         $requirements = $db->table('study_group_requirements')->where('group_id', $group->id)
             ->whereNull('retired_at')->orderBy('number')->get(['id', 'plan_lecture_id', 'number']);
-        $required = $requirements->pluck('number')->map(fn ($number): int => (int) $number)->all();
+        $groupRequiredNumbers = $requirements->pluck('number')->map(fn ($number): int => (int) $number)->all();
         $openSessions = $db->table('study_sessions as sessions')
             ->join('study_group_requirements as lectures', 'lectures.id', '=', 'sessions.group_requirement_id')
             ->where('sessions.group_id', $group->id)->where('sessions.status', '<>', 'cancelled')
@@ -179,6 +179,7 @@ class CenterStudyCompletionController extends Controller
                 ->where('attempts.current_group_id', $group->id)->where('attempts.status', 'active')
                 ->whereIn('attempts.id', $ids)
                 ->select(['attempts.id as attempt_id', 'attempts.student_id', 'attempts.completion_threshold',
+                    'attempts.revision', 'attempts.plan_version_id', 'attempts.required_lectures',
                     'students.name', 'students.student_number'])
                 ->selectRaw(<<<'SQL'
 COALESCE((SELECT json_agg(json_build_object('id', COALESCE(sessions.plan_lecture_id, sessions.group_requirement_id),
@@ -192,7 +193,10 @@ COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     WHERE approvals.target_plan_version_id = attempts.plan_version_id
       OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
           WHERE transfers.attempt_id = attempts.id
-            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
+            AND transfers.to_plan_version_id = approvals.target_plan_version_id)
+      OR EXISTS (SELECT 1 FROM study_attempt_plan_applications AS applications
+          WHERE applications.attempt_id = attempts.id
+            AND applications.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
 COALESCE((SELECT json_agg(json_build_object('id', mappings.id,
     'source_lecture_ids', json_build_array(mappings.candidate_requirement_id),
     'target_lecture_ids', json_build_array(mappings.required_requirement_id)) ORDER BY mappings.id)
@@ -219,10 +223,13 @@ SQL)
                     $this->conflict('completion_before_join_date');
                 }
                 $credits = StudyCoverageCredits::resolve(json_decode($row->attendance_rows, true), json_decode($row->approvals, true));
-                $covered = $requirements->filter(fn (object $item): bool => array_key_exists(
+                $studentRequirements = $row->required_lectures === null ? $requirements
+                    : collect(json_decode($row->required_lectures, true))->map(fn (array $item): object => (object) $item);
+                $required = $studentRequirements->pluck('number')->map(fn ($number): int => (int) $number)->all();
+                $covered = $studentRequirements->filter(fn (object $item): bool => array_key_exists(
                     $item->plan_lecture_id ?? $item->id, $credits['lectures']))
                     ->pluck('number')->map(fn ($number): int => (int) $number)->all();
-                $open = $requirements->filter(fn (object $item): bool => array_key_exists(
+                $open = $studentRequirements->filter(fn (object $item): bool => array_key_exists(
                     $item->plan_lecture_id ?? $item->id, $credits['lectures'])
                     && ! $credits['lectures'][$item->plan_lecture_id ?? $item->id])
                     ->pluck('number')->map(fn ($number): int => (int) $number)->all();
@@ -237,6 +244,8 @@ SQL)
                 }
                 $students[] = [
                     'attempt_id' => $row->attempt_id, 'student_id' => $row->student_id,
+                    'attempt_revision' => (int) $row->revision,
+                    'plan_version_id' => $row->plan_version_id,
                     'name' => $row->name, 'student_number' => $row->student_number,
                     'covered_numbers' => $covered, 'missing_numbers' => $missing, 'open_numbers' => $open,
                     'covered_count' => count($covered), 'required_count' => count($required),
@@ -247,7 +256,7 @@ SQL)
             }
         }
         $token = hash('sha256', json_encode([$group->id, $group->revision, $group->status,
-            $data['complete_group'], $required, $openSessions, $students], JSON_THROW_ON_ERROR));
+            $data['complete_group'], $groupRequiredNumbers, $openSessions, $students], JSON_THROW_ON_ERROR));
 
         return ['group' => ['id' => $group->id, 'name' => $group->name,
             'status' => $group->status, 'revision' => $group->revision],
