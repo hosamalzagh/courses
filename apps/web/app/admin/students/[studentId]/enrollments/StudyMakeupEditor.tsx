@@ -150,9 +150,12 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
           { key: "group", label: "المجموعة", render: row => row.group_name },
           { key: "lecture", label: "المحاضرة", render: row => `${row.number}${row.title ? ` — ${row.title}` : ""}` },
           { key: "time", label: "الموعد", render: row => formatSessionTime(row.scheduled_at) },
-          { key: "state", label: "الحالة", render: row => row.attendance_status === "counted" ? "حضور محتسب"
-            : row.booking_id ? row.status === "cancelled" ? "الحجز ملغى مع المحاضرة" : "محجوزة" : row.status === "held" ? "مغلقة" : "مفتوحة" },
-          { key: "actions", label: "الإجراءات", actions: true, render: row => row.booking_id && row.attendance_status
+          { key: "state", label: "الحالة", render: row => row.status === "cancelled"
+            ? row.attendance_status === "counted" ? "ملغاة — الحضور محفوظ تاريخيًا ولا يُحتسب" : "الحجز ملغى مع المحاضرة"
+            : row.attendance_status === "counted" ? "حضور محتسب"
+              : row.booking_id ? "محجوزة" : row.status === "held" ? "مغلقة" : "مفتوحة" },
+          { key: "actions", label: "الإجراءات", actions: true, render: row => row.status === "cancelled"
+            ? <span className="muted">ملغاة</span> : row.booking_id && row.attendance_status
             ? <span className="muted">مسجل</span> : (row.status === "planned" && row.can_book && !row.booking_id)
               || (row.status === "held" && row.can_prove)
               ? <Button id={`${prefix}-select-${row.id}`} type="button" disabled={busy || conflict || uncertain}

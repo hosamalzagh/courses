@@ -146,6 +146,21 @@ test('books makeup without granting coverage and hides the attempt from unauthor
     const completed = await owner.request.get(`${origin}/api/v1/center/groups/${source.id}/coverage`);
     expect(Number(completed.headers()['x-courses-query-count'])).toBeLessThanOrEqual(6);
     expect((await completed.json()).students[0].covered_count).toBe(1);
+    const revokePath = `groups/${target.id}/sessions/${sessionId}`;
+    const previewResponse = await owner.request.get(`${origin}/api/v1/center/${revokePath}/revoke-preview`);
+    expect(previewResponse.status()).toBe(200);
+    const preview = await previewResponse.json();
+    expect((await write(owner, `${revokePath}/revoke`, {
+      session_revision: preview.session_revision, group_revision: preview.group_revision,
+      preview_token: preview.preview_token, reason: 'إلغاء اعتماد محاضرة التعويض', request_id: crypto.randomUUID(),
+    })).status).toBe(200);
+    await owner.goto(`${origin}/admin/students/${studentId}/enrollments`);
+    await owner.locator(`[id$="-makeup-${attemptId}"]`).click();
+    const revokedRow = owner.getByRole('region', { name: 'حضور التعويض' }).getByRole('row').filter({ hasText: target.name });
+    await expect(revokedRow).toContainText('ملغاة — الحضور محفوظ تاريخيًا ولا يُحتسب');
+    await expect(revokedRow.getByRole('button', { name: 'إثبات تعويض' })).toHaveCount(0);
+    const excluded = await owner.request.get(`${origin}/api/v1/center/groups/${source.id}/coverage`);
+    expect((await excluded.json()).students[0].covered_count).toBe(0);
     await signIn(staff, 'staff');
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/makeup`)).status()).toBe(404);
   } finally { await owner.close(); await staff.close(); }
