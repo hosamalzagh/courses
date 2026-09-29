@@ -6,6 +6,7 @@ use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\StudentPhotos;
 use App\Support\StudyCoverageCredits;
+use DateTimeImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -60,7 +61,8 @@ class CenterStudyMakeupController extends Controller
                 ...array_diff_key((array) $session, ['source_branch_id' => true]),
                 'source_session_id' => $session->source_branch_id !== null
                     && $permissions->can('read', (int) $session->source_branch_id) ? $session->source_session_id : null,
-                'can_book' => $permissions->can('attendance.record', (int) $session->branch_id),
+                'can_book' => $permissions->can('attendance.record', (int) $session->branch_id)
+                    && new DateTimeImmutable($session->scheduled_at) > now()->toImmutable(),
                 'can_prove' => $permissions->can('attendance.correct', (int) $session->branch_id),
             ])->values(),
             'pagination' => ['page' => $page, 'has_more' => $sessions->count() > 20]])
@@ -69,9 +71,11 @@ class CenterStudyMakeupController extends Controller
 
     public function absences(Request $request, string $studentId, string $attemptId): JsonResponse
     {
+        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
         $permissions = $request->attributes->get('center_permissions');
         $this->attempt($studentId, $attemptId, $permissions);
         $branches = $this->branches($permissions, 'read');
+        $page = (int) ($data['page'] ?? 1);
         $rows = DB::connection('tenant')->table('study_attendance_entries as entries')
             ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
             ->join('study_groups as groups', 'groups.id', '=', 'sessions.group_id')
@@ -81,10 +85,13 @@ class CenterStudyMakeupController extends Controller
             ->where('entries.attempt_id', $attemptId)->where('entries.status', 'absent')
             ->where('sessions.status', '<>', 'cancelled')
             ->when(! $permissions->isCenterManager(), fn ($query) => $query->whereIn('courses.branch_id', $branches))
-            ->orderByDesc('sessions.scheduled_at')->limit(20)
+            ->orderByDesc('sessions.scheduled_at')->orderBy('sessions.id')
+            ->offset(($page - 1) * 20)->limit(21)
             ->get(['sessions.id', 'sessions.number', 'sessions.scheduled_at', 'groups.name as group_name', 'courses.branch_id']);
 
-        return response()->json(['source_absences' => $rows])->header('Cache-Control', 'private, no-store');
+        return response()->json(['source_absences' => $rows->take(20)->values(),
+            'pagination' => ['page' => $page, 'has_more' => $rows->count() > 20]])
+            ->header('Cache-Control', 'private, no-store');
     }
 
     public function book(Request $request, string $studentId, string $attemptId): JsonResponse
@@ -110,7 +117,8 @@ class CenterStudyMakeupController extends Controller
             }
             $this->validAttempt($attempt, $data['attempt_revision']);
             abort_if($session->status !== 'planned' || $session->closed_at
-                || (int) $session->revision !== $data['session_revision'], 409, 'تغيرت المحاضرة؛ حمّل أحدث البيانات.');
+                || new DateTimeImmutable($session->scheduled_at) <= now()->toImmutable()
+                || (int) $session->revision !== $data['session_revision'], 409, 'تغيرت المحاضرة أو بدأ موعدها؛ حمّل أحدث البيانات.');
             $this->eligible($attempt, $session, $permissions, $data['source_session_id'] ?? null);
             abort_if(DB::connection('tenant')->table('study_makeup_bookings')->where('attempt_id', $attemptId)
                 ->where('session_id', $session->id)->exists(), 409, 'حُجز هذا التعويض سابقًا.');

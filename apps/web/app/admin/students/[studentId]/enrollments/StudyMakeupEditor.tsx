@@ -38,6 +38,10 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
   const [selectedId, setSelectedId] = useState("");
   const [sourceId, setSourceId] = useState("");
   const [sourceAbsences, setSourceAbsences] = useState<Absence[]>([]);
+  const [absencePage, setAbsencePage] = useState(1);
+  const [hasMoreAbsences, setHasMoreAbsences] = useState(false);
+  const [absencesFailed, setAbsencesFailed] = useState(false);
+  const [absenceRetry, setAbsenceRetry] = useState(0);
   const [absencesLoading, setAbsencesLoading] = useState(false);
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(true);
@@ -65,14 +69,19 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
   useEffect(() => {
     if (!selectedId) return;
     let cancelled = false;
-    centerRequest(`${endpoint}/absences`, "GET").then(async response => {
+    centerRequest(`${endpoint}/absences?page=${absencePage}`, "GET").then(async response => {
       if (!response.ok) throw new Error(await responseMessage(response));
-      return response.json() as Promise<{ source_absences: Absence[] }>;
-    }).then(data => { if (!cancelled) setSourceAbsences(data.source_absences); })
-      .catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : "تعذر تحميل الغيابات الأصلية."); })
+      return response.json() as Promise<{ source_absences: Absence[]; pagination: { has_more: boolean } }>;
+    }).then(data => { if (!cancelled) {
+      setSourceAbsences(previous => absencePage === 1 ? data.source_absences : [...previous, ...data.source_absences]);
+      setHasMoreAbsences(data.pagination.has_more);
+      setAbsencesFailed(false);
+    } })
+      .catch(cause => { if (!cancelled) { setAbsencesFailed(true);
+        setError(cause instanceof Error ? cause.message : "تعذر تحميل الغيابات الأصلية."); } })
       .finally(() => { if (!cancelled) setAbsencesLoading(false); });
     return () => { cancelled = true; };
-  }, [endpoint, selectedId]);
+  }, [endpoint, selectedId, absencePage, absenceRetry]);
 
   function close() {
     if (dirty || uncertain) { setDiscard(true); return; }
@@ -149,7 +158,9 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
               ? <Button id={`${prefix}-select-${row.id}`} type="button" disabled={busy || conflict || uncertain}
                 onClick={() => { if (selectedId === row.id) return;
                   setSelectedId(row.id); setSourceId(row.source_session_id ?? ""); setReason("");
-                  setSourceAbsences([]); setAbsencesLoading(true); pendingId.current = null;
+                  setSourceAbsences([]); setAbsencePage(1); setHasMoreAbsences(false);
+                  setAbsencesFailed(false);
+                  setAbsencesLoading(true); pendingId.current = null;
                   requestAnimationFrame(() => document.getElementById(`${prefix}-source`)?.focus()); }}>
                 {row.status === "held" ? "إثبات تعويض" : "حجز تعويض"}</Button> : <span className="muted">غير متاح</span> },
         ]} />
@@ -167,6 +178,12 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
                 {absence.group_name} — المحاضرة {absence.number} — {formatSessionTime(absence.scheduled_at)}
               </NativeSelectOption>)}
             </NativeSelect>{absencesLoading ? <FieldDescription>جارٍ تحميل الغيابات الأصلية…</FieldDescription> : null}</Field>
+          {hasMoreAbsences || absencesFailed ? <Button type="button" disabled={busy || uncertain || absencesLoading}
+            onClick={() => { setAbsencesLoading(true);
+              if (absencesFailed) setAbsenceRetry(previous => previous + 1);
+              else setAbsencePage(previous => previous + 1); }}>
+            {absencesFailed ? "إعادة تحميل الغيابات" : "تحميل غيابات أقدم"}
+          </Button> : null}
           {selected.status === "held" ? <Field><FieldLabel htmlFor={`${prefix}-reason`}>سبب إثبات الحضور بعد الإغلاق</FieldLabel>
             <Textarea id={`${prefix}-reason`} value={reason} maxLength={1000} required disabled={busy || uncertain}
               onChange={event => { setReason(event.target.value); pendingId.current = null; }} />

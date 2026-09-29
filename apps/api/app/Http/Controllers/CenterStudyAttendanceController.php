@@ -80,6 +80,7 @@ class CenterStudyAttendanceController extends Controller
             $this->open($session, (int) $data['revision']);
             $eligible = $this->roster($session)->where('attempts.id', $data['attempt_id'])->first();
             abort_unless($eligible, 404);
+            abort_if($eligible->attempt_status === 'withdrawn', 409, 'سُحبت محاولة الطالب قبل تسجيل الحضور.');
             if ($eligible->student_status === 'suspended' || $eligible->suspended_at !== null) {
                 $this->conflict('student_suspended_for_session');
             }
@@ -407,23 +408,28 @@ class CenterStudyAttendanceController extends Controller
                     ->whereNotNull('entries.status')
                     ->whereRaw("attendance_notes.event_type = 'attendance:' || entries.revision::text");
             })
-            ->select(['attempts.id as attempt_id', 'students.id as student_id', 'students.name', 'students.student_number',
+            ->select(['attempts.id as attempt_id', 'attempts.status as attempt_status',
+                'students.id as student_id', 'students.name', 'students.student_number',
                 'students.status as student_status', 'entries.id as entry_id', 'entries.status',
                 'entries.revision as entry_revision', 'entries.recorded_by',
                 'bookings.id as booking_id',
                 'session_suspensions.suspended_at', 'session_suspensions.lifted_at',
                 'attendance_notes.body as note_body', 'attendance_notes.important as note_important']);
         if ($session->closed_at) {
-            return $roster->where(fn (Builder $query) => $query->whereNotNull('entries.id')->orWhereNotNull('bookings.id'));
+            return $roster->where(fn (Builder $query) => $query->whereNotNull('entries.id')
+                ->orWhere(fn (Builder $booked) => $booked->whereNotNull('bookings.id')
+                    ->where('attempts.status', '<>', 'withdrawn')));
         }
 
         return $roster->where(function (Builder $query) use ($session, $date): void {
-            $query->whereNotNull('bookings.id')->orWhereExists(function ($periods) use ($session, $date): void {
+            $query->where(fn (Builder $booked) => $booked->whereNotNull('bookings.id')
+                ->where('attempts.status', '<>', 'withdrawn'))
+                ->orWhereExists(function ($periods) use ($session, $date): void {
                 $periods->selectRaw('1')->from('study_attempt_group_periods as periods')
                     ->whereColumn('periods.attempt_id', 'attempts.id')->where('periods.group_id', $session->group_id)
                     ->where('periods.joined_on', '<=', $date)
                     ->where(fn ($period) => $period->whereNull('periods.left_on')->orWhere('periods.left_on', '>', $date));
-            });
+                });
         });
     }
 
