@@ -20,6 +20,7 @@ import { StudentPaymentAllocations } from "./StudentPaymentAllocations";
 import { StudentPaymentCorrections } from "./StudentPaymentCorrections";
 import { StudentPaymentRefunds } from "./StudentPaymentRefunds";
 import { StudentFeeAdjustmentEditor } from "./StudentFeeAdjustmentEditor";
+import { StudentFinancialEvents } from "./StudentFinancialEvents";
 
 const currencies = ["EGP", "SAR", "AED", "USD", "EUR", "GBP"];
 
@@ -37,8 +38,9 @@ function SelectField({ id, label, value, options, onChange, error }: {
   </Field>;
 }
 
-export function StudentFinanceControls({ initial, search, paymentId, allocationId }: {
+export function StudentFinanceControls({ initial, search, paymentId, allocationId, financialEventType, financialEventId }: {
   initial: StudentAccountContext; search: string; paymentId?: string; allocationId?: string;
+  financialEventType?: string; financialEventId?: string;
 }) {
   const router = useRouter();
   const formPrefix = useId();
@@ -69,6 +71,7 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   const [pendingFees, setPendingFees] = useState<ReturnType<typeof listPendingFeeAdjustments>>([]);
   const [feeDirty, setFeeDirty] = useState(false);
   const [feeUncertain, setFeeUncertain] = useState(false);
+  const [eventNoteDirty, setEventNoteDirty] = useState(false);
   const submitting = useRef(false);
   const requestId = useRef<string | null>(null);
   if (loadedInitial !== initial) {
@@ -90,14 +93,16 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   }, [feeRecoveryPrefix]);
   const accountPath = `students/${studentId}/account?${new URLSearchParams({
     page: String(current.pagination.page), branches_page: String(current.pagination.branches_page),
-    fees_page: String(current.pagination.fees_page), ...(search ? { q: search } : {}),
+    fees_page: String(current.pagination.fees_page), events_page: String(current.pagination.events_page),
+    ...(search ? { q: search } : {}),
     ...(paymentId ? { payment_id: paymentId } : {}),
+    ...(financialEventType && financialEventId ? { financial_event_type: financialEventType, financial_event_id: financialEventId } : {}),
   })}`;
   const currencyForm = `${formPrefix}-currency`;
   const paymentForm = `${formPrefix}-payment`;
   const paymentDirty = Boolean(amount || receivedOn || method !== "cash" ||
     (current.recordable_branches[0] && branch !== String(current.recordable_branches[0].id)));
-  const dirty = Boolean((currency && currency !== current.account.currency) || paymentDirty || allocationDirty || refundDirty || correctionDirty || feeDirty);
+  const dirty = Boolean((currency && currency !== current.account.currency) || paymentDirty || allocationDirty || refundDirty || correctionDirty || feeDirty || eventNoteDirty);
   const selectedPayment = current.payments.find((item) => item.id === selectedPaymentId);
   const selectedRefundPayment = current.payments.find((item) => item.id === selectedRefundPaymentId);
   const selectedCorrectionPayment = current.payments.find((item) => item.id === selectedCorrectionPaymentId);
@@ -195,6 +200,7 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   const paymentPage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(page), branches_page: String(current.pagination.branches_page), fees_page: String(current.pagination.fees_page), ...(search ? { q: search } : {}) })}`;
   const branchPage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(current.pagination.page), branches_page: String(page), fees_page: String(current.pagination.fees_page), ...(search ? { q: search } : {}) })}`;
   const feePage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(current.pagination.page), branches_page: String(current.pagination.branches_page), fees_page: String(page), ...(search ? { q: search } : {}) })}`;
+  const eventsPage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(current.pagination.page), branches_page: String(current.pagination.branches_page), fees_page: String(current.pagination.fees_page), events_page: String(page), ...(search ? { q: search } : {}) })}`;
   const cancelCurrency = () => { setCurrency(current.account.currency ?? ""); setFieldErrors({}); setError(""); focus("currency"); };
   const cancelPayment = () => {
     if (uncertain) return;
@@ -315,5 +321,8 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
       {current.pagination.page > 1 ? <Link className={buttonVariants({ variant: "outline" })} href={paymentPage(current.pagination.page - 1)}>الحركات السابقة</Link> : null}
       {current.pagination.has_more ? <Link className={buttonVariants({ variant: "outline" })} href={paymentPage(current.pagination.page + 1)}>الحركات التالية</Link> : null}
     </CenterHeaderActions>
+    <StudentFinancialEvents key={`${financialEventType ?? ""}:${financialEventId ?? ""}:${current.pagination.events_page}`}
+      studentId={studentId} account={current} focusedEventId={financialEventId}
+      pageHref={eventsPage} onDirtyChange={setEventNoteDirty} />
   </>;
 }

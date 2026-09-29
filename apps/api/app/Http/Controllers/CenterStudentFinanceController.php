@@ -6,9 +6,10 @@ use App\Support\ActiveStudentAllocations;
 use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
-use App\Support\EffectiveStudyFees;
 use App\Support\EffectiveStudentPayments;
+use App\Support\EffectiveStudyFees;
 use App\Support\StudentAccountVersion;
+use App\Support\StudentFinancialEvents;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
 use Illuminate\Database\Query\Builder;
@@ -32,6 +33,9 @@ class CenterStudentFinanceController extends Controller
             'fees_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'q' => ['sometimes', 'string', 'max:100'],
             'payment_id' => ['sometimes', 'uuid'],
+            'events_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'financial_event_type' => ['required_with:financial_event_id', 'in:'.implode(',', StudentFinancialEvents::TYPES)],
+            'financial_event_id' => ['required_with:financial_event_type', 'uuid'],
         ]);
         $permissions = $request->attributes->get('center_permissions');
         $readable = $this->scope($permissions, 'finance.read');
@@ -80,6 +84,9 @@ class CenterStudentFinanceController extends Controller
                 ->whereColumn('first_period.attempt_id', 'attempts.id')
                 ->orderBy('first_period.created_at')->orderBy('first_period.id')->limit(1)
                 ->select('original_group.name'), 'group_name');
+        $eventsPage = (int) ($data['events_page'] ?? 1);
+        $eventRows = StudentFinancialEvents::page($studentId, $permissions, $eventsPage,
+            $data['financial_event_type'] ?? null, $data['financial_event_id'] ?? null);
         $student = StudentPhotos::visibleStudent($studentId, $permissions, 'finance.read')
             ->select(['students.id', 'students.name', 'students.student_number', 'students.status', 'students.financial_account_revision'])
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency'), 'currency')
@@ -90,10 +97,13 @@ class CenterStudentFinanceController extends Controller
             ->selectSub(DB::connection('tenant')->query()->fromSub($choices, 'branch_choices')->selectRaw('json_agg(branch_choices)'), 'recordable_branches')
             ->selectSub(DB::connection('tenant')->query()->fromSub($feeRows, 'fee_rows')
                 ->selectRaw("COALESCE(json_agg(fee_rows), '[]'::json)"), 'fee_rows')
+            ->selectSub(DB::connection('tenant')->query()->fromSub($eventRows, 'event_rows')
+                ->selectRaw("COALESCE(json_agg(event_rows ORDER BY event_rows.created_at DESC, event_rows.event_id DESC), '[]'::json)"), 'event_rows')
             ->first();
         abort_unless($student, 404);
         $branches = collect(json_decode($student->recordable_branches ?? '[]', true));
         $fees = collect(json_decode($student->fee_rows ?? '[]', true));
+        $events = collect(json_decode($student->event_rows ?? '[]', true));
         $page = (int) ($data['page'] ?? 1);
         $search = trim($data['q'] ?? '');
         $payments = DB::connection('tenant')->table('student_payments')
@@ -169,10 +179,12 @@ class CenterStudentFinanceController extends Controller
                 'can_approve' => $permissions->can('finance.approve', (int) $row['branch_id']),
                 'remaining_amount' => StudentMoney::format(StudentMoney::cents($row['current_due']) - StudentMoney::cents($row['paid_amount'])),
             ])->values(),
+            'events' => $events->take(20)->values(),
             'pagination' => [
                 'page' => $page, 'has_more' => $payments->count() > 20,
                 'branches_page' => $branchPage, 'branches_has_more' => $branches->count() > 50,
                 'fees_page' => $feesPage, 'fees_has_more' => $fees->count() > 20,
+                'events_page' => $eventsPage, 'events_has_more' => $events->count() > 20,
             ],
         ])->header('Cache-Control', 'private, no-store');
     }

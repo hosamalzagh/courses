@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\CenterAbsenceReviewController;
+use App\Http\Controllers\CenterAttemptThresholdController;
 use App\Http\Controllers\CenterAuditController;
 use App\Http\Controllers\CenterAuthController;
 use App\Http\Controllers\CenterBranchController;
@@ -21,8 +22,8 @@ use App\Http\Controllers\CenterStudentFeeAdjustmentController;
 use App\Http\Controllers\CenterStudentFinanceController;
 use App\Http\Controllers\CenterStudentFinancialNoteController;
 use App\Http\Controllers\CenterStudentNotesController;
-use App\Http\Controllers\CenterStudentPaymentCorrectionController;
 use App\Http\Controllers\CenterStudentNumberingController;
+use App\Http\Controllers\CenterStudentPaymentCorrectionController;
 use App\Http\Controllers\CenterStudentPhotoController;
 use App\Http\Controllers\CenterStudentProfileChoiceController;
 use App\Http\Controllers\CenterStudentRefundController;
@@ -33,7 +34,6 @@ use App\Http\Controllers\CenterStudyCompletionController;
 use App\Http\Controllers\CenterStudyCoverageController;
 use App\Http\Controllers\CenterStudyEnrollmentController;
 use App\Http\Controllers\CenterStudyGroupController;
-use App\Http\Controllers\CenterAttemptThresholdController;
 use App\Http\Controllers\CenterStudyMakeupController;
 use App\Http\Controllers\CenterStudySessionController;
 use App\Http\Controllers\CenterStudyTeachingController;
@@ -128,6 +128,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::put('students/{studentId}/payments/{eventId}/note', [CenterStudentFinancialNoteController::class, 'savePayment']);
         Route::get('students/{studentId}/allocations/{eventId}/note', [CenterStudentFinancialNoteController::class, 'allocation']);
         Route::put('students/{studentId}/allocations/{eventId}/note', [CenterStudentFinancialNoteController::class, 'saveAllocation']);
+        Route::get('students/{studentId}/financial-events/{type}/{eventId}/note', [CenterStudentFinancialNoteController::class, 'financialEvent']);
+        Route::put('students/{studentId}/financial-events/{type}/{eventId}/note', [CenterStudentFinancialNoteController::class, 'saveFinancialEvent']);
         Route::get('students/{studentId}/payments/{paymentId}/allocation-options', [CenterStudentAllocationController::class, 'options']);
         Route::post('students/{studentId}/payments/{paymentId}/allocations/preview', [CenterStudentAllocationController::class, 'preview']);
         Route::post('students/{studentId}/payments/{paymentId}/allocations', [CenterStudentAllocationController::class, 'allocate']);

@@ -27,7 +27,12 @@ function kind(note: StudentEventNote): string {
   if (note.event_type === "study_attempt") return "تسجيل دراسي";
   if (note.event_type.startsWith("attendance:")) return "حضور أو غياب";
   if (note.event_type === "payment") return "دفعة مالية";
-  return "تخصيص دفعة";
+  if (note.event_type === "allocation") return "تخصيص دفعة";
+  const financialKinds: Record<string, string> = {
+    allocation_correction: "تصحيح تخصيص دفعة", fee_adjustment: "تسوية رسوم أو تصحيحها",
+    refund: "استرداد فعلي", refund_correction: "تصحيح استرداد", payment_correction: "تصحيح دفعة",
+  };
+  return financialKinds[note.event_type] ?? "حركة مالية";
 }
 
 export function StudentEventNotes({ studentId, initial, permissions, enrollmentOnly = false }: {

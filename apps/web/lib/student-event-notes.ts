@@ -16,5 +16,9 @@ export function studentEventNoteOrigin(studentId: string, note: Pick<StudentEven
       ...(note.event_type === "allocation" ? { allocation_id: note.event_id } : {}) });
     return `/admin/students/${studentId}/account?${query}`;
   }
+  if (["allocation_correction", "fee_adjustment", "refund", "refund_correction", "payment_correction"].includes(note.event_type)) {
+    const query = new URLSearchParams({ financial_event_type: note.event_type, financial_event_id: note.event_id });
+    return `/admin/students/${studentId}/account?${query}`;
+  }
   return `/admin/students/${studentId}/account`;
 }
