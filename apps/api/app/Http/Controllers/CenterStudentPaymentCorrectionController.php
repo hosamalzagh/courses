@@ -22,9 +22,12 @@ class CenterStudentPaymentCorrectionController extends Controller
     public function index(Request $request, string $studentId, string $paymentId): JsonResponse
     {
         abort_unless(Str::isUuid($studentId) && Str::isUuid($paymentId), 404);
-        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
+        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'history_page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
         $permissions = $request->attributes->get('center_permissions');
-        $payment = $this->payment($studentId, $paymentId, $permissions, $page = (int) ($data['page'] ?? 1));
+        $page = (int) ($data['page'] ?? 1);
+        $historyPage = (int) ($data['history_page'] ?? 1);
+        $payment = $this->payment($studentId, $paymentId, $permissions, $page, $historyPage);
         $affectedBranches = array_map('intval', json_decode($payment->affected_branches, true));
         foreach ($affectedBranches as $branchId) {
             abort_unless($permissions->can('finance.read', $branchId), 404);
@@ -38,8 +41,9 @@ class CenterStudentPaymentCorrectionController extends Controller
             'can_correct' => $this->canCorrect($permissions, (int) $payment->branch_id)
                 && collect($affectedBranches)->every(fn (int $branchId): bool => $this->canCorrectAllocation(
                     $permissions, (int) $payment->branch_id, $branchId)),
-            'allocations' => $allocations->take(20), 'history' => $history,
-            'pagination' => ['page' => $page, 'has_more' => $allocations->count() > 20],
+            'allocations' => $allocations->take(20), 'history' => $history->take(20),
+            'pagination' => ['page' => $page, 'has_more' => $allocations->count() > 20,
+                'history_page' => $historyPage, 'history_has_more' => $history->count() > 20],
         ])->header('Cache-Control', 'private, no-store');
     }
 
@@ -191,7 +195,7 @@ class CenterStudentPaymentCorrectionController extends Controller
         return $data;
     }
 
-    private function payment(string $studentId, string $paymentId, CenterPermissions $permissions, ?int $page = null): object
+    private function payment(string $studentId, string $paymentId, CenterPermissions $permissions, ?int $page = null, int $historyPage = 1): object
     {
         $query = StudentPhotos::visibleStudent($studentId, $permissions, 'finance.read')
             ->join('student_payments as payments', 'payments.student_id', '=', 'students.id')
@@ -219,7 +223,8 @@ class CenterStudentPaymentCorrectionController extends Controller
             $historyRows = DB::connection('tenant')->table('student_payment_reversals as reversals')
                 ->join('student_payment_replacements as replacements', 'replacements.reversal_id', '=', 'reversals.id')
                 ->whereColumn('reversals.payment_id', 'payments.id')
-                ->orderByDesc('reversals.created_at')->orderByDesc('reversals.id')->limit(20)
+                ->orderByDesc('reversals.created_at')->orderByDesc('reversals.id')
+                ->offset(($historyPage - 1) * 20)->limit(21)
                 ->select(['reversals.id', 'reversals.reason', 'reversals.actor_name', 'reversals.created_at',
                     'replacements.amount']);
             $query->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'payments.id')

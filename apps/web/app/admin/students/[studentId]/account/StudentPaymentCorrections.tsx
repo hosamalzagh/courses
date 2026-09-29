@@ -17,7 +17,7 @@ type Balance = { id: string; branch_id: number; branch_name: string; currency: s
   received_before: string; allocated_before: string; refunded_amount: string; available_before: string };
 type Options = { payment: Balance; original_amount: string; version: string; can_correct: boolean;
   allocations: Allocation[]; history: { id: string; amount: string; reason: string; actor_name: string; created_at: string }[];
-  pagination: { page: number; has_more: boolean } };
+  pagination: { page: number; has_more: boolean; history_page: number; history_has_more: boolean } };
 type Preview = { version: string; payment: Balance & { received_after: string; allocated_after: string; available_after: string };
   allocations: { id: string; fee_id: string; target_branch_id: number; amount_before: string; amount_after: string;
     fee_debt_before: string; fee_debt_after: string }[];
@@ -45,10 +45,10 @@ export function StudentPaymentCorrections({ studentId, payment, onClose, onChang
   const path = `students/${studentId}/payments/${payment.id}/corrections`;
   const dirty = Boolean(correctAmount || reason || Object.keys(changes).length);
 
-  const load = useCallback(async (page = 1): Promise<Options | null> => {
+  const load = useCallback(async (page = 1, historyPage = 1): Promise<Options | null> => {
     setLoading(true);
     try {
-      const response = await centerRequest(`${path}?page=${page}`, "GET");
+      const response = await centerRequest(`${path}?page=${page}&history_page=${historyPage}`, "GET");
       if (!response.ok) { setError(await responseMessage(response)); return null; }
       const next = await response.json() as Options;
       setOptions(next); setConflict(false);
@@ -70,7 +70,7 @@ export function StudentPaymentCorrections({ studentId, payment, onClose, onChang
     setError(""); requestId.current = null; focus(`${prefix}-amount`);
   }
   async function refresh() {
-    const next = await load(options?.pagination.page);
+    const next = await load(options?.pagination.page, options?.pagination.history_page);
     if (next) { setPreview(null); requestId.current = null; setError(""); }
   }
 
@@ -163,8 +163,8 @@ export function StudentPaymentCorrections({ studentId, payment, onClose, onChang
             }); invalidate(); }} /> },
         ]} />
       {options.pagination.page > 1 || options.pagination.has_more ? <CenterHeaderActions>
-        {options.pagination.page > 1 ? <Button disabled={busy || uncertain || conflict} onClick={() => { void load(options.pagination.page - 1); }}>تخصيصات سابقة</Button> : null}
-        {options.pagination.has_more ? <Button disabled={busy || uncertain || conflict} onClick={() => { void load(options.pagination.page + 1); }}>تخصيصات تالية</Button> : null}
+        {options.pagination.page > 1 ? <Button disabled={busy || uncertain || conflict} onClick={() => { void load(options.pagination.page - 1, options.pagination.history_page); }}>تخصيصات سابقة</Button> : null}
+        {options.pagination.has_more ? <Button disabled={busy || uncertain || conflict} onClick={() => { void load(options.pagination.page + 1, options.pagination.history_page); }}>تخصيصات تالية</Button> : null}
       </CenterHeaderActions> : null}
       {preview ? <section className="context-card form-stack" aria-labelledby={`${prefix}-preview`}>
         <h3 id={`${prefix}-preview`} tabIndex={-1}>معاينة التصحيح</h3>
@@ -188,6 +188,10 @@ export function StudentPaymentCorrections({ studentId, payment, onClose, onChang
         { key: "actor", label: "الموظف", render: row => row.actor_name },
         { key: "date", label: "التاريخ", render: row => <bdi dir="ltr">{row.created_at}</bdi> },
       ]} /> : null}
+    {options && (options.pagination.history_page > 1 || options.pagination.history_has_more) ? <CenterHeaderActions>
+      {options.pagination.history_page > 1 ? <Button disabled={busy || uncertain || conflict} onClick={() => { void load(options.pagination.page, options.pagination.history_page - 1); }}>تصحيحات أحدث</Button> : null}
+      {options.pagination.history_has_more ? <Button disabled={busy || uncertain || conflict} onClick={() => { void load(options.pagination.page, options.pagination.history_page + 1); }}>تصحيحات أقدم</Button> : null}
+    </CenterHeaderActions> : null}
     {confirm && preview ? <ConfirmationDialog title="تأكيد تصحيح الدفعة وتخصيصاتها"
       description={`سيصبح المقبوض ${preview.payment.received_after} ${preview.payment.currency} والمخصص ${preview.payment.allocated_after}. ستُحفظ الحركات الأصلية والعكس والبدائل دون استرداد نقدي.`}
       confirmLabel="تأكيد التصحيح" onCancel={() => { setConfirm(false); focus(`${prefix}-submit`); }}
