@@ -164,6 +164,18 @@ test("coverage is provisional until closure and hidden branch data stays denied"
       `UPDATE study_attempts SET status = 'active' WHERE id = '${secondSaved.body.attempt.id}'`], { stdio: "ignore" });
     await owner.reload();
     await owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` }).check();
+    execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_COVERAGE_DB_PORT!, "-U", "postgres",
+      "-d", `courses_center_${centerId}`, "-c",
+      `UPDATE study_groups SET status = 'completed', revision = revision + 1 WHERE id = '${groupId}'`], { stdio: "ignore" });
+    await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" }).click();
+    await expect(owner.getByText("تغيرت حالة المجموعة. حدّث التقرير ثم أعد المعاينة.")).toBeVisible();
+    await expect(owner.locator("header.center-topbar").getByRole("button", { name: "معاينة اعتماد الطلاب" })).toBeVisible();
+    await expect(owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` })).toBeChecked();
+    execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_COVERAGE_DB_PORT!, "-U", "postgres",
+      "-d", `courses_center_${centerId}`, "-c",
+      `UPDATE study_groups SET status = 'started', revision = revision + 1 WHERE id = '${groupId}'`], { stdio: "ignore" });
+    await owner.reload();
+    await owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` }).check();
     await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" }).click();
     await expect(owner.getByText("ستصبح المجموعة مكتملة.")).toBeVisible();
     execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_COVERAGE_DB_PORT!, "-U", "postgres",

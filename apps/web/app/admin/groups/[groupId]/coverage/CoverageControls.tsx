@@ -104,7 +104,8 @@ export function CoverageControls({ context, search }: { context: CoverageContext
       if (!response.ok) {
         const code = (await response.clone().json().catch(() => ({}))).code as string | undefined;
         setCompletionError(await completionMessage(response));
-        if (code === "completion_exception_reason_required" || code === "completion_reason_unneeded" || code === "completion_attempt_changed") router.refresh();
+        if (code === "completion_exception_reason_required" || code === "completion_reason_unneeded"
+          || code === "completion_attempt_changed" || code === "group_changed") router.refresh();
         return;
       }
       const data = await response.json() as CompletionPreview;
@@ -125,7 +126,8 @@ export function CoverageControls({ context, search }: { context: CoverageContext
       if (!response.ok) {
         const code = (await response.clone().json().catch(() => ({}))).code as string | undefined;
         setCompletionError(await completionMessage(response));
-        if (code === "completion_exception_reason_required" || code === "completion_reason_unneeded" || code === "completion_preview_changed" || code === "completion_attempt_changed") {
+        if (code === "completion_exception_reason_required" || code === "completion_reason_unneeded"
+          || code === "completion_preview_changed" || code === "completion_attempt_changed" || code === "group_changed") {
           setCompletionPreview(null);
           router.refresh();
         }

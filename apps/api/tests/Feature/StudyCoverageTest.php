@@ -294,6 +294,12 @@ class StudyCoverageTest extends TestCase
                 ->where('attempt_id', $secondAttempt['id'])->value('left_on'));
             $this->assertSame(2, (int) DB::table('study_attempts')->where('id', $firstAttempt['id'])->value('revision'));
             try {
+                (require database_path('migrations/tenant/2026_09_29_030000_create_study_completion_decisions.php'))->down();
+                $this->fail('Rollback must preserve recorded completion decisions.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString('Cannot roll back', $exception->getMessage());
+            }
+            try {
                 DB::transaction(fn () => DB::table('study_attempt_completion_decisions')
                     ->where('attempt_id', $secondAttempt['id'])->update(['reason' => null]));
                 $this->fail('An exceptional decision must retain its reason.');

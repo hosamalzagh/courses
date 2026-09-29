@@ -46,6 +46,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (DB::table('study_attempt_completion_decisions')->exists()
+            || DB::table('study_completion_submissions')->exists()) {
+            throw new RuntimeException('Cannot roll back recorded study completion decisions.');
+        }
         Schema::dropIfExists('study_completion_submissions');
         Schema::dropIfExists('study_attempt_completion_decisions');
         Schema::table('study_groups', fn (Blueprint $table) => $table->dropColumn(['completed_at', 'completed_by', 'completed_by_name']));
