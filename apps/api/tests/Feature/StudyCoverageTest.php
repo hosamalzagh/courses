@@ -672,7 +672,17 @@ class StudyCoverageTest extends TestCase
                 $this->assertContains($id, $snapshot);
             }
             DB::table('study_group_requirements')->whereIn('id', $ids)->update(['retired_at' => now()]);
+            DB::table('study_group_requirements')->insert(array_map(fn (int $number): array => [
+                'id' => (string) Str::uuid(), 'group_id' => $group['id'], 'number' => $number,
+                'content' => "Later retired requirement {$number}", 'created_at' => now(), 'retired_at' => now(),
+            ], range(25, 225)));
         });
+
+        $coverage = $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk()
+            ->assertJsonPath('group.required_count', 1)
+            ->assertJsonPath('students.0.required_count', 24)
+            ->assertJsonPath('students.0.missing_numbers', range(1, 24));
+        $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
 
         $sessions = $this->getJson("{$this->base}/groups/{$group['id']}/sessions")->assertOk()
             ->assertJsonCount(20, 'group.historical_requirements')

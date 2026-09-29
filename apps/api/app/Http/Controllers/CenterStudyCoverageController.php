@@ -28,12 +28,10 @@ class CenterStudyCoverageController extends Controller
                 'courses.id as course_id', 'courses.branch_id'])
             ->selectRaw('COALESCE(groups.completion_threshold, levels.completion_threshold, stages.completion_threshold, courses.completion_threshold) AS completion_threshold')
             ->selectRaw("COALESCE((SELECT json_agg(json_build_object('id', COALESCE(plan_lecture_id, id), 'number', number, 'title', title, 'content', content) ORDER BY number) FROM study_group_requirements WHERE group_id = groups.id AND retired_at IS NULL), '[]'::json) AS requirements")
-            ->selectRaw("COALESCE((SELECT json_agg(json_build_object('id', COALESCE(plan_lecture_id, id), 'number', number, 'title', title, 'content', content) ORDER BY number) FROM study_group_requirements WHERE group_id = groups.id), '[]'::json) AS requirement_history")
             ->first();
         abort_unless($group && $permissions->can('read', (int) $group->branch_id), 404);
 
         $requirements = json_decode($group->requirements, true);
-        $requirementHistory = json_decode($group->requirement_history, true);
         $requiredNumbers = array_column($requirements, 'number');
         $requiredCount = count($requiredNumbers);
         $threshold = (int) $group->completion_threshold;
@@ -52,6 +50,20 @@ class CenterStudyCoverageController extends Controller
                     AND periods.left_on IS NOT NULL
                 ORDER BY periods.left_on DESC, periods.created_at DESC, periods.id DESC LIMIT 1)
                 AS closed_period_requirements')
+            ->selectRaw(<<<'SQL'
+(SELECT json_agg(json_build_object('id', COALESCE(requirements.plan_lecture_id, requirements.id),
+    'number', requirements.number, 'title', requirements.title, 'content', requirements.content)
+    ORDER BY requirements.number)
+ FROM study_group_requirements AS requirements
+ WHERE requirements.group_id = attempts.current_group_id
+   AND EXISTS (SELECT 1 FROM (
+       SELECT periods.required_credit_ids FROM study_attempt_group_periods AS periods
+       WHERE periods.attempt_id = attempts.id AND periods.group_id = attempts.current_group_id
+           AND periods.left_on IS NOT NULL
+       ORDER BY periods.left_on DESC, periods.created_at DESC, periods.id DESC LIMIT 1
+   ) AS closed WHERE closed.required_credit_ids @> jsonb_build_array(
+       COALESCE(requirements.plan_lecture_id, requirements.id)))) AS closed_period_requirement_rows
+SQL)
             ->selectRaw(<<<'SQL'
 COALESCE((SELECT json_agg(json_build_object('id', COALESCE(sessions.plan_lecture_id, sessions.group_requirement_id),
     'final', sessions.closed_at IS NOT NULL) ORDER BY entries.id)
@@ -84,11 +96,10 @@ SQL);
         }
         $rows = $students->orderBy('students.student_number')->orderBy('attempts.id')
             ->offset(($page - 1) * 20)->limit(21)->get();
-        $report = $rows->take(20)->map(function (object $row) use ($requirements, $requirementHistory): array {
+        $report = $rows->take(20)->map(function (object $row) use ($requirements): array {
             $effectiveRequirements = in_array($row->attempt_status, ['withdrawn', 'completed'], true)
                 && $row->closed_period_requirements !== null
-                ? array_values(array_filter($requirementHistory,
-                    fn (array $entry): bool => in_array($entry['id'], json_decode($row->closed_period_requirements, true), true)))
+                ? json_decode($row->closed_period_requirement_rows ?? '[]', true)
                 : $requirements;
             $effectiveNumbers = array_column($effectiveRequirements, 'number');
             $effectiveCount = count($effectiveNumbers);
