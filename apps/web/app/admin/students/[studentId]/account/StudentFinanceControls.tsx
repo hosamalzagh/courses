@@ -207,7 +207,7 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
       <p>إجمالي الدفعات المستلمة ضمن فروع صلاحيتك: <strong><bdi dir="ltr">{current.account.received_total} {current.account.currency ?? ""}</bdi></strong></p>
       <p>إجمالي المبلغ المخصص من دفعات فروع صلاحيتك: <strong><bdi dir="ltr">{current.account.allocated_total} {current.account.currency ?? ""}</bdi></strong></p>
       <p>المبلغ المعاد فعليًا ضمن فروع صلاحيتك: <strong><bdi dir="ltr">{current.account.refunded_total} {current.account.currency ?? ""}</bdi></strong></p>
-      <p>الرصيد غير المخصص: <strong><bdi dir="ltr">{current.account.available_balance} {current.account.currency ?? ""}</bdi></strong></p>
+      <p>الرصيد المتاح: <strong><bdi dir="ltr">{current.account.available_balance} {current.account.currency ?? ""}</bdi></strong></p>
       <p>إجمالي الرسوم: <strong><bdi dir="ltr">{current.account.due_total} {current.account.currency ?? ""}</bdi></strong> — المسدد بالتخصيص: <strong><bdi dir="ltr">{current.account.paid_total} {current.account.currency ?? ""}</bdi></strong></p>
       <p>المديونية المتبقية: <strong><bdi dir="ltr">{current.account.debt} {current.account.currency ?? ""}</bdi></strong></p>
       <p className="muted">قد توجد حركات في فروع أخرى لا تملك صلاحية رؤيتها.</p>

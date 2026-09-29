@@ -782,7 +782,7 @@ test("currency, payment and visible account work through the employee UI and SSR
   await page.goto(`${origin}/admin/students/${studentId}`);
   await page.getByRole("link", { name: "الحساب المالي" }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/students/${studentId}/account$`));
-  await expect(page.getByText("الرصيد غير المخصص", { exact: false })).toBeVisible();
+  await expect(page.getByText("الرصيد المتاح", { exact: false })).toBeVisible();
   if (await page.getByRole("combobox", { name: "عملة المركز" }).count()) {
     await page.getByRole("combobox", { name: "عملة المركز" }).selectOption("EGP");
     if (await page.getByRole("button", { name: "حفظ عملة المركز" }).isEnabled()) {
