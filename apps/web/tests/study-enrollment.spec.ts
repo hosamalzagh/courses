@@ -481,6 +481,12 @@ test("withdraws and repeats study with preserved fees, SSR, SQL budget, and mobi
   const withdrawn = await withdrawnResponse.json();
   expect(withdrawn.attempts.find((item: { id: string }) => item.id === firstId)).toMatchObject({ status: "withdrawn", withdrawal: { reason: "طلب الطالب إعادة الدراسة" } });
   expect(withdrawn.balance.debt).toBe("100.00");
+  await page.goto(`${origin}/admin/students/${studentId}?tab=study`);
+  const historicalRow = page.getByRole("row").filter({ hasText: createdGroup.name });
+  await expect(historicalRow).toContainText("انسحب من المحاولة");
+  await expect(historicalRow).toContainText("سجل تاريخي لهذا الفرع");
+  await expect(historicalRow.getByRole("link", { name: "إتمام الكورس" })).toHaveCount(0);
+  await page.goto(`${origin}/admin/students/${studentId}/enrollments`);
   await page.getByRole("button", { name: "إعادة الدراسة", exact: true }).click();
   await expect(page.getByRole("heading", { name: "إعادة الدراسة بمحاولة جديدة" })).toBeVisible();
   await page.getByRole("searchbox", { name: "بحث في المجموعات المتاحة للتسجيل" }).fill(createdGroup.name);

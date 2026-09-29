@@ -293,6 +293,20 @@ class StudyEnrollmentTest extends TestCase
             ->assertJsonCount(1, 'study.attempts')
             ->assertJsonPath('study.attempts.0.previous_group_name', 'Original searchable group');
         $this->assertLessThanOrEqual(6, (int) $searched->headers->get('X-Courses-Query-Count'));
+
+        $enrollmentUrl = "{$this->base}/students/{$student['id']}/enrollments";
+        $waiting = $this->getJson($enrollmentUrl)->assertOk()->json('attempts.0');
+        $this->postJson("{$enrollmentUrl}/{$attempt['id']}/withdraw", [
+            'withdrawn_on' => $today, 'reason' => 'انسحاب بعد الانتظار',
+            'revision' => $waiting['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $withdrawn = $this->getJson($path)->assertOk()
+            ->assertJsonPath('study.attempts.0.status', 'withdrawn')
+            ->assertJsonPath('study.attempts.0.withdrawn_on', $today)
+            ->assertJsonPath('study.attempts.0.current_group_name', null)
+            ->assertJsonPath('study.attempts.1.status', 'transferred')
+            ->assertJsonPath('study.attempts.1.withdrawn_on', null);
+        $this->assertLessThanOrEqual(6, (int) $withdrawn->headers->get('X-Courses-Query-Count'));
     }
 
     public function test_profile_study_history_keeps_withdrawal_on_the_waitlist_origin_period(): void

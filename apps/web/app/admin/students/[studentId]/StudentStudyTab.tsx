@@ -15,7 +15,7 @@ function attemptStatus(attempt: StudentStudyAttempt) {
 }
 
 function currentStudy(attempt: StudentStudyAttempt) {
-  return Boolean(attempt.current_group_name || (attempt.latest_waitlist && !attempt.latest_waitlist.left_on));
+  return attempt.status === "active" && Boolean(attempt.current_group_name || (attempt.latest_waitlist && !attempt.latest_waitlist.left_on));
 }
 
 export function StudentStudyTab({ context, search }: { context: StudentContext; search: string }) {

@@ -162,6 +162,7 @@ class CenterStudentController extends Controller
             $readableBranches = $permissions->isCenterManager() ? null : $this->branchScope($permissions, 'read');
             $currentPeriod = '(SELECT current_period.id FROM study_attempt_group_periods AS current_period WHERE current_period.attempt_id = attempts.id AND current_period.group_id = attempts.current_group_id ORDER BY current_period.joined_on DESC, current_period.created_at DESC LIMIT 1)';
             $waitlistOriginPeriod = '(SELECT origin.id FROM study_attempt_waitlists AS study_waitlists JOIN study_attempt_group_periods AS origin ON origin.attempt_id = study_waitlists.attempt_id AND origin.group_id = study_waitlists.from_group_id AND origin.left_on = study_waitlists.entered_on WHERE study_waitlists.attempt_id = attempts.id ORDER BY study_waitlists.entered_on DESC, study_waitlists.created_at DESC, origin.created_at DESC, origin.id DESC LIMIT 1)';
+            $terminalPeriod = "(periods.id = {$currentPeriod} OR (attempts.status = 'withdrawn' AND attempts.current_group_id IS NULL AND periods.id = {$waitlistOriginPeriod}))";
             $attempts = DB::connection('tenant')->table('study_attempt_group_periods as periods')
                 ->join('study_attempts as attempts', 'attempts.id', '=', 'periods.attempt_id')
                 ->join('study_groups as period_groups', 'period_groups.id', '=', 'periods.group_id')
@@ -189,12 +190,12 @@ class CenterStudentController extends Controller
                     'periods.joined_on', 'periods.left_on', 'periods.created_at', 'study_levels.name as level_name',
                     'study_courses.id as course_id', 'study_courses.name as course_name',
                     'study_branches.name as branch_name'])
-                ->selectRaw("CASE WHEN periods.id = {$currentPeriod} OR (attempts.status = 'withdrawn' AND attempts.current_group_id IS NULL AND periods.id = {$waitlistOriginPeriod}) THEN attempts.status ELSE 'transferred' END AS status")
-                ->selectRaw("CASE WHEN periods.id = {$currentPeriod} AND study_courses.branch_id = attempts.branch_id THEN period_groups.name END AS current_group_name")
-                ->selectRaw("CASE WHEN periods.id IS DISTINCT FROM {$currentPeriod} OR study_courses.branch_id <> attempts.branch_id THEN period_groups.name END AS previous_group_name")
-                ->selectRaw('CASE WHEN study_courses.branch_id = attempts.branch_id THEN withdrawals.withdrawn_on END AS withdrawn_on')
-                ->selectRaw('CASE WHEN study_courses.branch_id = attempts.branch_id THEN decisions.approved_at END AS approved_at')
-                ->selectRaw('CASE WHEN study_courses.branch_id = attempts.branch_id THEN decisions.exceptional END AS exceptional')
+                ->selectRaw("CASE WHEN {$terminalPeriod} THEN attempts.status ELSE 'transferred' END AS status")
+                ->selectRaw("CASE WHEN attempts.status = 'active' AND periods.id = {$currentPeriod} AND study_courses.branch_id = attempts.branch_id THEN period_groups.name END AS current_group_name")
+                ->selectRaw("CASE WHEN attempts.status <> 'active' OR periods.id IS DISTINCT FROM {$currentPeriod} OR study_courses.branch_id <> attempts.branch_id THEN period_groups.name END AS previous_group_name")
+                ->selectRaw("CASE WHEN attempts.status = 'withdrawn' AND {$terminalPeriod} AND study_courses.branch_id = attempts.branch_id THEN withdrawals.withdrawn_on END AS withdrawn_on")
+                ->selectRaw("CASE WHEN attempts.status = 'completed' AND periods.id = {$currentPeriod} AND study_courses.branch_id = attempts.branch_id THEN decisions.approved_at END AS approved_at")
+                ->selectRaw("CASE WHEN attempts.status = 'completed' AND periods.id = {$currentPeriod} AND study_courses.branch_id = attempts.branch_id THEN decisions.exceptional END AS exceptional")
                 ->selectRaw(<<<'SQL'
                     (SELECT row_to_json(waitlist) FROM (
                         SELECT entered_on, left_on, reason FROM study_attempt_waitlists
