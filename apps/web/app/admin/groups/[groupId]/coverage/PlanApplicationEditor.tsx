@@ -24,11 +24,12 @@ type StudentImpact = { attempt_id: string; name: string; student_number: number;
 type Preview = { group_revision: number; target_plan_version: number;
   target_requirements: Requirement[]; students: StudentImpact[]; preview_token: string };
 
-export function PlanApplicationEditor({ context, onSaved, onClose }: {
-  context: CoverageContext; onSaved: () => void; onClose: () => void;
+export function PlanApplicationEditor({ context, onSaved, onReload, onClose }: {
+  context: CoverageContext; onSaved: () => void; onReload: () => void; onClose: () => void;
 }) {
   const formId = useId();
   const busyRef = useRef(false);
+  const errorRef = useRef<HTMLDivElement>(null);
   const [versions, setVersions] = useState<Version[]>([]);
   const [versionPage, setVersionPage] = useState(1);
   const [versionSearch, setVersionSearch] = useState("");
@@ -47,6 +48,8 @@ export function PlanApplicationEditor({ context, onSaved, onClose }: {
   const groupId = context.group.id;
   const editable = context.students.filter(row => ["active", "completed"].includes(row.attempt_status));
   const draft = selected.length > 0 || targetId !== "" || reason !== "" || preview !== null;
+
+  useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
 
   function invalidate() { setPreview(null); setRequestId(newSubmissionId()); setError(""); setConflict(false); }
   const loadVersions = useCallback(async (page: number, q: string) => {
@@ -136,7 +139,7 @@ export function PlanApplicationEditor({ context, onSaved, onClose }: {
         { key: "current", label: "الحالي", render: row => `إصدار ${row.plan_version.toLocaleString("ar-EG")} · ${row.covered_count.toLocaleString("ar-EG")}/${row.required_count.toLocaleString("ar-EG")} · ${row.percentage.toLocaleString("ar-EG")}%` },
         { key: "decision", label: "الإتمام السابق", render: row => row.approved_at ? "قرار محفوظ" : "لا يوجد" },
       ]} />
-    {error ? <InlineNotice tone="error">{error}{conflict ? " حمّل أحدث التقرير وأعد المعاينة." : ""}</InlineNotice> : null}
+    {error ? <div ref={errorRef} tabIndex={-1}><InlineNotice tone="error">{error}{conflict ? " حمّل أحدث التقرير وأعد المعاينة." : ""}</InlineNotice></div> : null}
     {preview ? <section className="form-stack" aria-labelledby={`${formId}-preview`}>
       <h3 id={`${formId}-preview`} tabIndex={-1}>أثر الإصدار {preview.target_plan_version.toLocaleString("ar-EG")} قبل الاعتماد</h3>
       <details><summary>متطلبات الإصدار المقترح ({preview.target_requirements.length.toLocaleString("ar-EG")})</summary>
@@ -161,7 +164,10 @@ export function PlanApplicationEditor({ context, onSaved, onClose }: {
         disabled={busy || conflict || !targetId || !selected.length || reason.trim().length < 3}>
         {preview ? "تأكيد التطبيق على المختارين" : "معاينة أثر الإصدار"}
       </Button>
-      {conflict ? <Button type="button" disabled={busy} onClick={onSaved}>تحميل أحدث التقرير</Button> : null}
+      {conflict ? <Button type="button" disabled={busy} onClick={() => {
+        onReload(); setConflict(false); setPreview(null); setRequestId(newSubmissionId()); setError("");
+        requestAnimationFrame(() => document.getElementById(`${formId}-version`)?.focus());
+      }}>تحميل أحدث التقرير</Button> : null}
       <Button type="button" disabled={busy} onClick={() => draft ? setClosePrompt(true) : onClose()}>رجوع للتقرير</Button>
     </CenterHeaderActions>
     {closePrompt ? <ConfirmationDialog title="التخلي عن التطبيق" description="لديك اختيار أو معاينة لم تُعتمد. هل تريد الرجوع إلى التقرير؟"

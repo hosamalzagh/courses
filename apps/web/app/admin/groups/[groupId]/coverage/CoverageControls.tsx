@@ -63,6 +63,7 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   const completionPreviewRef = useRef<HTMLHeadingElement>(null);
   const completionReviewRef = useRef<HTMLButtonElement>(null);
   const completionFallbackRef = useRef<HTMLParagraphElement>(null);
+  const planLaunchRef = useRef<HTMLButtonElement>(null);
   const [completionSelected, setCompletionSelected] = useState<Record<string, string>>({});
   const [completionPreview, setCompletionPreview] = useState<{ data: CompletionPreview; draftKey: string; requestId: string } | null>(null);
   const [completionBusy, setCompletionBusy] = useState(false);
@@ -203,10 +204,15 @@ export function CoverageControls({ context, search }: { context: CoverageContext
     return row.open_numbers.length ? "ناقص — النسبة مبدئية" : "ناقص";
   };
 
+  function closePlanEditor() {
+    setPlanOpen(false);
+    requestAnimationFrame(() => planLaunchRef.current?.focus());
+  }
+
   if (planOpen) return <>
-    <UnsavedChangesGuard dirty guardHistory onDiscard={() => setPlanOpen(false)} />
-    <PlanApplicationEditor context={context} onSaved={() => { setPlanOpen(false); router.refresh(); }}
-      onClose={() => setPlanOpen(false)} />
+    <UnsavedChangesGuard dirty guardHistory onDiscard={closePlanEditor} />
+    <PlanApplicationEditor context={context} onSaved={() => { closePlanEditor(); router.refresh(); }}
+      onReload={() => router.refresh()} onClose={closePlanEditor} />
   </>;
 
   return <>
@@ -218,7 +224,7 @@ export function CoverageControls({ context, search }: { context: CoverageContext
       onDiscard={() => { setSelected([]); setReason(""); setPreview(null); setError(""); setCompletionSelected({}); setCompletionPreview(null); setCompletionError(""); }} />
     {pendingNavigation ? <ConfirmationDialog title="مغادرة دون تطبيق" description="لديك اختيار أو معاينة لم تُعتمد. هل تريد الانتقال والتخلي عنها؟" confirmLabel="الانتقال دون تطبيق" onCancel={() => { setPendingNavigation(null); requestAnimationFrame(() => navigationFocus.current?.focus()); }} onConfirm={() => { const next = pendingNavigation; setPendingNavigation(null); setSelected([]); setReason(""); setPreview(null); setCompletionSelected({}); setCompletionPreview(null); router.push(next); }} /> : null}
     <CenterPageActions context={context} actions={<>
-      {canManage ? <Button type="button" disabled={anyBusy || dirty} onClick={() => setPlanOpen(true)}>
+      {canManage ? <Button ref={planLaunchRef} type="button" disabled={anyBusy || dirty} onClick={() => setPlanOpen(true)}>
         تطبيق إصدار خطة جديد
       </Button> : null}
       {group.can_complete && group.status !== "waiting" ? <>

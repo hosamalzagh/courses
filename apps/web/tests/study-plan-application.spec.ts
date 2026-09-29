@@ -77,8 +77,12 @@ test("academic staff applies a newer plan to a selected attempt without changing
     expect(reads.length).toBeGreaterThan(0);
     expect(reads.every(read => Number.isInteger(read.count) && read.count! <= 6)).toBe(true);
     await owner.goto(url);
-    await owner.locator("header.center-topbar").getByRole("button", { name: "تطبيق إصدار خطة جديد" }).click();
+    const launch = owner.locator("header.center-topbar").getByRole("button", { name: "تطبيق إصدار خطة جديد" });
+    await launch.click();
     await expect(owner.getByRole("heading", { name: "تطبيق إصدار خطة جديد على محاولات مختارة" })).toBeVisible();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "رجوع للتقرير" }).click();
+    await expect(launch).toBeFocused();
+    await launch.click();
     await owner.getByLabel("الإصدار الجديد").selectOption(plan.body.plan.id);
     await owner.getByRole("checkbox", { name: `اختيار محاولة ${student.body.student.name} لتطبيق إصدار الخطة` }).check();
     await owner.getByLabel("سبب التطبيق").fill("اعتماد إصدار الخطة الجديد بعد المراجعة");
@@ -95,6 +99,39 @@ test("academic staff applies a newer plan to a selected attempt without changing
     const report = await (await owner.request.get(`${origin}/api/v1/center/${path}`)).json();
     expect(report.group.plan_version_id).toBe(level.body.level.plan.id);
     expect(report.students.find((row: { attempt_id: string }) => row.attempt_id === attempt.body.attempt.id).plan_version_id).toBe(plan.body.plan.id);
+    const nextPlan = await write(owner, `levels/${level.body.level.id}/plan-versions`, {
+      base_plan_version_id: plan.body.plan.id, base_revision: 1,
+      lectures: [{ number: 1, content: "محاضرة ثالثة", planned_hours: 1 },
+        { number: 2, content: "محاضرة إضافية", planned_hours: 1 }], request_id: crypto.randomUUID(),
+    });
+    expect(nextPlan.status).toBe(201);
+    await launch.click();
+    await owner.getByLabel("الإصدار الجديد").selectOption(nextPlan.body.plan.id);
+    await owner.getByRole("checkbox", { name: `اختيار محاولة ${student.body.student.name} لتطبيق إصدار الخطة` }).check();
+    const draftReason = "تطبيق إصدار أحدث مع المحافظة على مسودة التعارض";
+    await owner.getByLabel("سبب التطبيق").fill(draftReason);
+    await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة أثر الإصدار" }).click();
+    const directPreview = await write(owner, `${path.replace("/coverage", "")}/plan-applications/preview`, {
+      target_plan_version_id: nextPlan.body.plan.id, attempt_ids: [attempt.body.attempt.id], reason: draftReason,
+    });
+    expect(directPreview.status).toBe(200);
+    const directApply = await write(owner, `${path.replace("/coverage", "")}/plan-applications`, {
+      target_plan_version_id: nextPlan.body.plan.id, attempt_ids: [attempt.body.attempt.id], reason: draftReason,
+      group_revision: directPreview.body.group_revision, preview_token: directPreview.body.preview_token,
+      request_id: crypto.randomUUID(),
+    });
+    expect(directApply.status).toBe(201);
+    await owner.locator("header.center-topbar").getByRole("button", { name: "تأكيد التطبيق على المختارين" }).click();
+    await expect(owner.getByRole("alert").locator("..")).toBeFocused();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "تحميل أحدث التقرير" }).click();
+    await expect(owner.getByLabel("الإصدار الجديد")).toBeFocused();
+    await expect(owner.getByRole("heading", { name: "تطبيق إصدار خطة جديد على محاولات مختارة" })).toBeVisible();
+    await expect(owner.getByLabel("الإصدار الجديد")).toHaveValue(nextPlan.body.plan.id);
+    await expect(owner.getByLabel("سبب التطبيق")).toHaveValue(draftReason);
+    await expect(owner.getByRole("checkbox", { name: `اختيار محاولة ${student.body.student.name} لتطبيق إصدار الخطة` })).toBeChecked();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "رجوع للتقرير" }).click();
+    await owner.getByRole("button", { name: "الرجوع دون تطبيق" }).click();
+    await expect(launch).toBeFocused();
     await owner.setViewportSize({ width: 390, height: 844 });
     expect(await owner.locator("html").getAttribute("dir")).toBe("rtl");
     await owner.getByRole("button", { name: "القائمة" }).click();
