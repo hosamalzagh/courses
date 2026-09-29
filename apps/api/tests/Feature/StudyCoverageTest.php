@@ -474,9 +474,12 @@ class StudyCoverageTest extends TestCase
         $attempt = $this->enroll($student['id'], $first, now('Africa/Cairo')->format('Y-m-d'));
         $this->center->run(function () use ($first, $attempt): void {
             $lecture = DB::table('plan_lectures')->where('plan_version_id', $first['plan_version_id'])->firstOrFail();
+            $requirementId = DB::table('study_group_requirements')->where('group_id', $first['id'])
+                ->where('plan_lecture_id', $lecture->id)->value('id');
             $sessionId = (string) Str::uuid();
             DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $first['id'],
-                'plan_lecture_id' => $lecture->id, 'number' => 1, 'scheduled_at' => now()->subDay(),
+                'plan_lecture_id' => $lecture->id, 'group_requirement_id' => $requirementId,
+                'number' => 1, 'scheduled_at' => now()->subDay(),
                 'status' => 'held', 'revision' => 2, 'created_by' => $this->owner->id,
                 'created_by_name' => $this->owner->name, 'closed_at' => now(), 'closed_by' => $this->owner->id,
                 'created_at' => now(), 'updated_at' => now()]);
