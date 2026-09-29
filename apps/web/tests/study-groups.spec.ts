@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { existsSync, readFileSync } from "node:fs";
 
 test.skip(!process.env.COURSES_GROUPS_CREDENTIALS, "Requires the disposable PostgreSQL center fixture.");
+test.setTimeout(90_000);
 const origin = process.env.COURSES_GROUPS_ORIGIN ?? "http://alpha.courses.test:8057";
 const credentials = process.env.COURSES_GROUPS_CREDENTIALS
   ? JSON.parse(readFileSync(process.env.COURSES_GROUPS_CREDENTIALS, "utf8")) : {};
@@ -52,11 +53,18 @@ test("group settings, instructors, start and branch revocation work through the 
     expect(instructor.status).toBe(201);
     expect((await write(owner, `courses/${course.body.course.id}/completion-threshold`, "PATCH", { revision: 1, completion_threshold: 85 })).status).toBe(200);
 
+    let levelsPage = 1;
+    for (;;) {
+      const candidate = await (await owner.request.get(`${origin}/api/v1/center/group-workspace?levels_page=${levelsPage}`)).json();
+      if (candidate.level_choices.some((choice: { plan_version_id: string }) => choice.plan_version_id === level.body.level.plan.id)) break;
+      expect(candidate.pagination.levels.has_more, "New level must remain reachable through paged choices").toBe(true);
+      levelsPage += 1;
+    }
     const beforePage = reads().length;
-    await owner.goto(`${origin}/admin/groups`);
+    await owner.goto(`${origin}/admin/groups?levels_page=${levelsPage}`);
     await expect(owner.getByRole("heading", { name: "المجموعات" }).first()).toBeVisible();
     if (queryLog) {
-      const pageReads = reads().slice(beforePage).filter(row => row.path === "/api/v1/center/group-workspace");
+      const pageReads = reads().slice(beforePage).filter(row => row.path.startsWith("/api/v1/center/group-workspace"));
       expect(pageReads).toHaveLength(1);
       expect(pageReads[0].count).toBeLessThanOrEqual(6);
     }
@@ -75,6 +83,15 @@ test("group settings, instructors, start and branch revocation work through the 
     await expect(owner.getByText(`محاضر ${stamp}`)).toBeVisible();
     await owner.getByText(`محاضر ${stamp}`).click();
     await owner.getByRole("button", { name: "حفظ المجموعة" }).click();
+    let groupPage = 1;
+    for (;;) {
+      const candidate = await (await owner.request.get(`${origin}/api/v1/center/group-workspace?page=${groupPage}`)).json();
+      if (candidate.groups.some((group: { name: string }) => group.name === `صباح ${stamp}`)) break;
+      expect(candidate.pagination.groups.has_more, "New group must remain reachable through paged rows").toBe(true);
+      groupPage += 1;
+    }
+    if (groupPage > 1) await owner.goto(`${origin}/admin/groups?page=${groupPage}&levels_page=${levelsPage}`);
+    await owner.getByRole("searchbox", { name: "بحث في المجموعات" }).fill(`صباح ${stamp}`);
     await expect(owner.getByRole("button", { name: `إدارة صباح ${stamp}` })).toBeVisible();
     await owner.getByRole("button", { name: `إدارة صباح ${stamp}` }).click();
     await expect(owner.getByRole("heading", { name: `إعدادات صباح ${stamp}` })).toBeFocused();
@@ -87,7 +104,15 @@ test("group settings, instructors, start and branch revocation work through the 
     await owner.getByLabel("نسبة الإتمام للمجموعة").selectOption("");
     await owner.getByRole("button", { name: "حفظ المجموعة" }).click();
     await expect(owner.getByRole("row", { name: new RegExp(`صباح ${stamp}`) })).toContainText("٨٥٪");
-    await owner.goto(`${origin}/admin/curriculum`);
+    let coursePage = 1;
+    for (;;) {
+      const candidate = await (await owner.request.get(`${origin}/api/v1/center/curriculum-workspace?courses_page=${coursePage}`)).json();
+      if (candidate.courses.some((item: { id: string }) => item.id === course.body.course.id)) break;
+      expect(candidate.pagination.courses.has_more).toBe(true);
+      coursePage += 1;
+    }
+    await owner.goto(`${origin}/admin/curriculum?courses_page=${coursePage}`);
+    await owner.getByRole("searchbox", { name: "بحث في الكورسات" }).fill(course.body.course.name);
     const courseRow = owner.getByRole("row").filter({ hasText: course.body.course.name });
     await courseRow.getByRole("button", { name: "تحديد نسبة الإتمام" }).click();
     await expect(owner.getByLabel("نسبة الإتمام المطلوبة")).toBeFocused();
@@ -96,7 +121,8 @@ test("group settings, instructors, start and branch revocation work through the 
     await owner.getByRole("button", { name: "حفظ نسبة الإتمام" }).click();
     expect((await thresholdSaved).status()).toBe(200);
     await expect(owner.getByText("حُفظت نسبة الإتمام للطلاب الجدد ضمن هذا النطاق.")).toBeVisible();
-    await owner.goto(`${origin}/admin/groups`);
+    await owner.goto(`${origin}/admin/groups?page=${groupPage}&levels_page=${levelsPage}`);
+    await owner.getByRole("searchbox", { name: "بحث في المجموعات" }).fill(`صباح ${stamp}`);
     await expect(owner.getByRole("row", { name: new RegExp(`صباح ${stamp}`) })).toContainText("٩٠٪");
     await owner.getByRole("button", { name: `إدارة صباح ${stamp}` }).click();
     await owner.getByRole("button", { name: "بدء المجموعة" }).click();
@@ -106,7 +132,15 @@ test("group settings, instructors, start and branch revocation work through the 
     expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, "PUT", {
       center_roles: [], branch_roles: { [north.id]: ["academic_admin"] },
     })).status).toBe(200);
-    await staff.goto(`${origin}/admin/groups`);
+    let staffGroupPage = 1;
+    for (;;) {
+      const candidate = await (await staff.request.get(`${origin}/api/v1/center/group-workspace?page=${staffGroupPage}`)).json();
+      if (candidate.groups.some((group: { name: string }) => group.name === `صباح ${stamp}`)) break;
+      expect(candidate.pagination.groups.has_more).toBe(true);
+      staffGroupPage += 1;
+    }
+    await staff.goto(`${origin}/admin/groups?page=${staffGroupPage}`);
+    await staff.getByRole("searchbox", { name: "بحث في المجموعات" }).fill(`صباح ${stamp}`);
     await expect(staff.getByRole("button", { name: `إدارة صباح ${stamp}` })).toBeVisible();
     await staff.getByRole("button", { name: `إدارة صباح ${stamp}` }).click();
     expect((await staff.request.get(`${origin}/api/v1/center/group-instructor-options?branch_id=${south.id}`)).status()).toBe(404);

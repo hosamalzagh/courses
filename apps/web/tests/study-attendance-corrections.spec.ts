@@ -117,7 +117,7 @@ test("academic owner corrects and revokes a held lecture with visible impact whi
     await expect(owner.getByText("حُفظ تصحيح الحضور وسببه في سجل التدقيق.")).toBeVisible();
     await expect(owner.getByRole("row").filter({ hasText: student.body.student.name })).toContainText("حاضر محتسب");
     await owner.getByRole("banner").getByRole("button", { name: "معاينة إلغاء اعتماد المحاضرة" }).click();
-    await expect(owner.getByText(/سيتأثر احتساب التغطية الحالي/)).toBeVisible();
+    await expect(owner.getByText(/قد تتأثر التغطية لما يصل إلى/)).toBeVisible();
     await owner.getByLabel("سبب إلغاء الاعتماد").fill("لا يعتمد هذا اللقاء أكاديميًا");
     await owner.getByRole("banner").getByRole("button", { name: "تأكيد إلغاء الاعتماد" }).click();
     await expect(owner.getByText("أُلغي اعتماد المحاضرة. بقي كشفها وتاريخها محفوظين، وأُعيد احتساب التقارير.")).toBeVisible();
