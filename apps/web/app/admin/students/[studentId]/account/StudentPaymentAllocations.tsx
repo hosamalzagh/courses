@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions } from "@/components/CenterShell";
+import { ChoiceField } from "@/components/ChoiceField";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { DataTable } from "@/components/DataTable";
 import { FormField } from "@/components/FormField";
@@ -13,11 +14,15 @@ import type { StudentPayment } from "@/lib/server-context";
 import { FinancialEventNoteEditor } from "./FinancialEventNoteEditor";
 
 type Fee = { id: string; attempt_id: string; branch_id: number; branch_name: string; group_name: string | null; fee_created_at: string; net_amount: string; current_due: string; paid_amount: string; remaining_amount: string; currency: string };
-type Allocation = { id: string; fee_id: string; attempt_id: string; target_branch_id: number; target_branch_name: string; group_name: string | null; fee_created_at: string; amount: string; currency: string; actor_name: string; created_at: string; can_correct: boolean; reversal_id: string | null; reversal_reason: string | null; reversed_by_name: string | null; reversed_at: string | null };
+type Allocation = { id: string; fee_id: string; attempt_id: string; target_branch_id: number; target_branch_name: string; group_name: string | null; fee_created_at: string; amount: string; currency: string; actor_name: string; created_at: string; can_correct: boolean; reversal_id: string | null; reversal_reason: string | null; reversal_kind: string | null; corrected_allocation_id: string | null; reversed_by_name: string | null; reversed_at: string | null };
 type Options = { payment: { id: string; branch_id: number; branch_name: string; available_amount: string; amount: string; currency: string }; version: string; can_allocate: boolean; can_correct: boolean; fees: Fee[]; history: Allocation[]; pagination: { page: number; has_more: boolean; history_page: number; history_has_more: boolean } };
 type AllocationPreview = { version: string; cross_branch: boolean; source: { payment_id: string; branch_id: number; branch_name: string; currency: string; available_before: string; available_after: string };
   targets: { attempt_id: string; fee_id: string; branch_id: number; branch_name: string; group_name: string | null;
     amount: string; remaining_before: string; remaining_after: string }[] };
+type CorrectionPreview = { version: string; source: { payment_id: string; branch_id: number; branch_name: string; received_amount: string; received_on: string; currency: string; available_before: string; available_after: string };
+  original: { allocation_id: string; attempt_id: string; branch_id: number; branch_name: string; group_name: string | null; amount: string; remaining_before: string; remaining_after: string };
+  target: { attempt_id: string; branch_id: number; branch_name: string; group_name: string | null; amount: string; remaining_before: string; remaining_after: string } | null;
+  account: { available_before: string; available_after: string; debt_before: string; debt_after: string } };
 
 function cents(value: string): number {
   const [whole, fraction = ""] = value.split(".");
@@ -30,12 +35,18 @@ export function StudentPaymentAllocations({ studentId, payment, focusNote, onClo
   const prefix = useId();
   const formId = `${prefix}-allocation-form`;
   const reversalFormId = `${prefix}-reversal-form`;
+  const correctionFormId = `${prefix}-correction-form`;
   const [options, setOptions] = useState<Options | null>(null);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [selectedFees, setSelectedFees] = useState<Record<string, Fee>>({});
   const [preview, setPreview] = useState<AllocationPreview | null>(null);
   const [confirmCrossBranch, setConfirmCrossBranch] = useState(false);
   const [reversing, setReversing] = useState<string | null>(null);
+  const [correcting, setCorrecting] = useState<Allocation | null>(null);
+  const [correctionTarget, setCorrectionTarget] = useState<Fee | null>(null);
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [correctionPreview, setCorrectionPreview] = useState<CorrectionPreview | null>(null);
+  const [confirmCorrection, setConfirmCorrection] = useState(false);
   const [selectedNote, setSelectedNote] = useState<{ type: "payment" | "allocation"; id: string; label: string } | null>(null);
   const [noteDirty, setNoteDirty] = useState(false);
   const [reason, setReason] = useState("");
@@ -47,7 +58,7 @@ export function StudentPaymentAllocations({ studentId, payment, focusNote, onClo
   const [notice, setNotice] = useState("");
   const requestId = useRef<string | null>(null);
   const submitting = useRef(false);
-  const dirty = Object.values(amounts).some(Boolean) || Boolean(reason) || noteDirty;
+  const dirty = Object.values(amounts).some(Boolean) || Boolean(reason) || Boolean(correctionReason) || Boolean(correctionTarget) || noteDirty;
   const path = `students/${studentId}/payments/${payment.id}`;
 
   const load = useCallback(async (page = 1, historyPage = 1) => {
@@ -57,7 +68,7 @@ export function StudentPaymentAllocations({ studentId, payment, focusNote, onClo
         ...(focusNote && focusNote !== "payment" ? { allocation_id: focusNote } : {}) })}`, "GET");
       if (!response.ok) { setError(await responseMessage(response)); return; }
       const result = await response.json() as Options;
-      setOptions(result); setConflict(false); setPreview(null);
+      setOptions(result); setConflict(false); setPreview(null); setCorrectionPreview(null);
       if (focusNote === "payment") setSelectedNote({ type: "payment", id: payment.id, label: "الدفعة" });
       else if (focusNote && result.history.some(row => row.id === focusNote)) setSelectedNote({ type: "allocation", id: focusNote, label: "التخصيص" });
     } catch { setError("تعذر تحميل التخصيصات. تحقق من الاتصال وأعد المحاولة."); }
@@ -161,12 +172,67 @@ export function StudentPaymentAllocations({ studentId, payment, focusNote, onClo
     }
   }
 
+  async function correction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!options || !correcting || submitting.current || conflict) return;
+    if (!correctionTarget) { setError("اختر التسجيل الذي يجب أن يستفيد من الدفعة."); focus(`${prefix}-correction-target`); return; }
+    if (!correctionReason.trim()) { setError("أدخل سبب تصحيح التخصيص."); focus(`${prefix}-correction-reason`); return; }
+    if (correctionPreview) { setConfirmCorrection(true); return; }
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await centerRequest(`students/${studentId}/allocations/${correcting.id}/corrections/preview`, "POST", {
+        target_attempt_id: correctionTarget.attempt_id, version: options.version,
+      });
+      if (!response.ok) {
+        if (response.status === 409) setConflict(true);
+        setError(response.status === 409 ? "تغير الحساب أو الرسوم. حمّل أحدث البيانات قبل التصحيح." : await responseMessage(response));
+        return;
+      }
+      setCorrectionPreview(await response.json() as CorrectionPreview);
+      setNotice("راجع التخصيص الأصلي ومصدر الدفعة والوجهة الجديدة وأثر الدين والرصيد قبل الاعتماد.");
+      focus(`${prefix}-correction-preview`);
+    } catch { setError("تعذرت معاينة التصحيح. تحقق من الاتصال وأعد المحاولة."); }
+    finally { setBusy(false); }
+  }
+
+  async function commitCorrection() {
+    if (!options || !correcting || !correctionTarget || !correctionPreview || submitting.current || conflict) return;
+    submitting.current = true; setBusy(true); setError(""); setNotice("");
+    let committed = false;
+    try {
+      requestId.current ??= newSubmissionId();
+      const response = await centerRequest(`students/${studentId}/allocations/${correcting.id}/corrections`, "POST", {
+        target_attempt_id: correctionTarget.attempt_id, reason: correctionReason.trim(),
+        version: correctionPreview.version, request_id: requestId.current,
+      });
+      if (!response.ok) {
+        if (response.status === 409) { setConflict(true); setCorrectionPreview(null); setUncertain(false); setError("تغير التخصيص أو الحساب. حمّل أحدث البيانات قبل التصحيح."); }
+        else if (response.status >= 500) { setUncertain(true); setError("تعذر التأكد من حفظ التصحيح. أبقِ الوجهة والسبب وأعد المحاولة بالمفتاح نفسه."); }
+        else { setUncertain(false); setError(await responseMessage(response)); }
+        return;
+      }
+      requestId.current = null; setUncertain(false); setCorrecting(null); setCorrectionTarget(null);
+      setCorrectionReason(""); setCorrectionPreview(null); committed = true;
+    } catch { setUncertain(true); setError("تعذر التأكد من حفظ التصحيح. أبقِ الوجهة والسبب وأعد المحاولة بالمفتاح نفسه."); }
+    finally { submitting.current = false; setBusy(false); }
+    if (committed) {
+      const refreshed = await Promise.allSettled([load(options.pagination.page, options.pagination.history_page), onChanged()]);
+      if (refreshed.some((result) => result.status === "rejected")) setError("حُفظ التصحيح، لكن تعذر تحديث الحساب. أعد تحميل الصفحة لعرض الرصيد الحالي.");
+      else setNotice("حُفظ التصحيح: عُكس التخصيص الخاطئ وسُجل التخصيص الصحيح دون تغيير الدفعة المقبوضة.");
+      focus(`${prefix}-title`);
+    }
+  }
+
   const changePage = (page: number, historyPage: number) => {
     if (uncertain || busy) return;
     void load(page, historyPage);
   };
   const selectedCrossBranch = Boolean(options && Object.values(selectedFees).some((fee) => amounts[fee.attempt_id]?.trim()
     && fee.branch_id !== options.payment.branch_id));
+  const correctionChoices = correcting ? [...(options?.fees ?? []), ...(correctionTarget ? [correctionTarget] : [])]
+    .filter((fee, index, fees) => fee.attempt_id !== correcting.attempt_id
+      && cents(fee.remaining_amount) >= cents(correcting.amount)
+      && fees.findIndex((item) => item.attempt_id === fee.attempt_id) === index) : [];
 
   return <section className="context-card form-stack" aria-labelledby={`${prefix}-title`}>
     <h2 id={`${prefix}-title`} data-payment-allocation-title tabIndex={-1}>تخصيص الدفعة المستلمة في <bdi dir="ltr">{payment.received_on}</bdi></h2>
@@ -207,15 +273,20 @@ export function StudentPaymentAllocations({ studentId, payment, focusNote, onClo
       </CenterHeaderActions> : null}
     </> : <p className="muted">لديك صلاحية عرض الحركات دون تخصيص مبالغ.</p>}
     <DataTable id={`${prefix}-history`} title="سجل التخصيص والعكس" rows={options?.history ?? []} rowKey={(row) => row.id} pageSize={20}
-      searchText={(row) => `${row.target_branch_name} ${row.group_name ?? ""} ${row.attempt_id} ${row.amount} ${row.actor_name} ${row.reversal_reason ?? ""}`}
+      searchText={(row) => `${row.target_branch_name} ${row.group_name ?? ""} ${row.attempt_id} ${row.amount} ${row.actor_name} ${row.reversal_reason ?? ""} ${row.corrected_allocation_id ?? ""}`}
       emptyMessage="لم تُسجل تخصيصات لهذه الدفعة." columns={[
         { key: "group", label: "المحاولة", render: (row) => <>{row.target_branch_name} — {row.group_name ?? "مجموعة غير متاحة"} — <bdi dir="ltr" title={row.attempt_id}>{row.attempt_id.slice(0, 8)}</bdi></> },
         { key: "amount", label: "المبلغ", render: (row) => <bdi dir="ltr">{row.amount} {row.currency}</bdi> },
-        { key: "status", label: "الحالة", render: (row) => row.reversal_id ? `معكوس: ${row.reversal_reason}` : "معتمد" },
+        { key: "status", label: "الحالة", render: (row) => row.reversal_id
+          ? row.reversal_kind === "correct"
+            ? <>صُحح {row.corrected_allocation_id ? <>إلى تخصيص <bdi dir="ltr" title={row.corrected_allocation_id}>{row.corrected_allocation_id.slice(0, 8)}</bdi></> : "وأُعيد إلى الرصيد"} — {row.reversal_reason}</>
+            : `معكوس: ${row.reversal_reason}` : "معتمد" },
         { key: "actor", label: "الموظف", render: (row) => row.actor_name },
         { key: "action", label: "إجراءات", actions: true, render: (row) => <span className="flex flex-wrap gap-2">
           <Button id={`${prefix}-allocation-note-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => setSelectedNote({ type: "allocation", id: row.id, label: "التخصيص" })}>ملاحظة التخصيص</Button>
-          {row.can_correct && !row.reversal_id ? <Button id={`${prefix}-reverse-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => { setReversing(row.id); setReason(""); requestId.current = null; focus(`${prefix}-reason`); }}>عكس التخصيص</Button> : null}
+          {row.can_correct && !row.reversal_id ? <Button id={`${prefix}-reverse-${row.id}`} disabled={busy || uncertain || dirty} onClick={() => { setCorrecting(null); setCorrectionTarget(null); setCorrectionReason(""); setCorrectionPreview(null); setReversing(row.id); setReason(""); requestId.current = null; focus(`${prefix}-reason`); }}>عكس التخصيص</Button> : null}
+          {row.can_correct && options?.can_allocate && !row.reversal_id ? <Button id={`${prefix}-correct-${row.id}`} disabled={busy || uncertain || dirty}
+            onClick={() => { setCorrecting(row); setCorrectionTarget(null); setCorrectionReason(""); setCorrectionPreview(null); setReversing(null); requestId.current = null; focus(`${prefix}-correction-target`); }}>تصحيح التخصيص</Button> : null}
         </span> },
       ]} />
     {selectedNote?.type === "allocation" ? <FinancialEventNoteEditor key={selectedNote.id} studentId={studentId} type="allocation" eventId={selectedNote.id} label="التخصيص"
@@ -229,10 +300,42 @@ export function StudentPaymentAllocations({ studentId, payment, focusNote, onClo
       <form id={reversalFormId} noValidate onSubmit={reverse}><FieldSet disabled={busy || uncertain || conflict} className="border-0 p-0"><FieldGroup><FormField id={`${prefix}-reason`} label="سبب العكس" type="text" value={reason} onChange={(value) => { setReason(value); setError(""); requestId.current = null; }} hint="سيبقى التخصيص الأصلي ظاهرًا في السجل مع سبب العكس." /></FieldGroup></FieldSet></form>
       <CenterHeaderActions><Button form={reversalFormId} type="submit" variant="primary" busy={busy} disabled={conflict}>{uncertain ? "التحقق من العكس" : "اعتماد العكس"}</Button><Button disabled={busy || uncertain} onClick={() => { const trigger = reversing; setReversing(null); setReason(""); requestId.current = null; focus(`${prefix}-reverse-${trigger}`); }}>إلغاء التصحيح</Button></CenterHeaderActions>
     </section> : null}
+    {correcting ? <section className="form-stack" aria-label="تصحيح التخصيص">
+      <h3>تصحيح التخصيص</h3>
+      <p>التخصيص الخاطئ: {correcting.target_branch_name} — {correcting.group_name ?? "مجموعة غير متاحة"}، محاولة <bdi dir="ltr">{correcting.attempt_id.slice(0, 8)}</bdi> بمبلغ <bdi dir="ltr">{correcting.amount} {correcting.currency}</bdi>.</p>
+      <p className="muted">اختر التسجيل الصحيح من الرسوم المعروضة. استخدم صفحات الرسوم للعثور على تسجيل آخر؛ يبقى اختيارك محفوظًا أثناء التنقل. لإرجاع المبلغ إلى الرصيد دون وجهة جديدة استخدم «عكس التخصيص».</p>
+      <form id={correctionFormId} noValidate onSubmit={correction}>
+        <FieldSet disabled={busy || conflict || uncertain} className="border-0 p-0"><FieldGroup>
+          <ChoiceField id={`${prefix}-correction-target`} label="التسجيل الصحيح" value={correctionTarget?.attempt_id ?? "choose"}
+            items={[{ value: "choose", label: "اختر تسجيلًا", disabled: true }, ...correctionChoices.map((fee) => ({ value: fee.attempt_id,
+              label: `${fee.branch_name} — ${fee.group_name ?? "مجموعة غير متاحة"} — ${fee.remaining_amount} ${fee.currency} متبقي` }))]}
+            onChange={(value) => { setCorrectionTarget(correctionChoices.find((fee) => fee.attempt_id === value) ?? null); setCorrectionPreview(null); setError(""); requestId.current = null; }} />
+          <FormField id={`${prefix}-correction-reason`} label="سبب تصحيح التخصيص" type="text" value={correctionReason}
+            onChange={(value) => { setCorrectionReason(value); setCorrectionPreview(null); setError(""); requestId.current = null; }}
+            hint="سيبقى التخصيص والدفعة الأصليان ظاهرين مع سبب التصحيح ومن نفذه." />
+        </FieldGroup></FieldSet>
+      </form>
+      {correctionPreview ? <section className="context-card form-stack" aria-labelledby={`${prefix}-correction-preview`}>
+        <h4 id={`${prefix}-correction-preview`} tabIndex={-1}>معاينة التصحيح قبل الاعتماد</h4>
+        <p>الدفعة الأصلية: {correctionPreview.source.branch_name}، مبلغ <bdi dir="ltr">{correctionPreview.source.received_amount} {correctionPreview.source.currency}</bdi> بتاريخ <bdi dir="ltr">{correctionPreview.source.received_on}</bdi>. لن تتغير.</p>
+        <p>التسجيل الخاطئ: {correctionPreview.original.branch_name} — {correctionPreview.original.group_name ?? "مجموعة غير متاحة"}؛ المتبقي <bdi dir="ltr">{correctionPreview.original.remaining_before}</bdi> ← <bdi dir="ltr">{correctionPreview.original.remaining_after}</bdi>.</p>
+        {correctionPreview.target ? <p>التسجيل الصحيح: {correctionPreview.target.branch_name} — {correctionPreview.target.group_name ?? "مجموعة غير متاحة"}؛ المتبقي <bdi dir="ltr">{correctionPreview.target.remaining_before}</bdi> ← <bdi dir="ltr">{correctionPreview.target.remaining_after}</bdi>.</p> : null}
+        <p>الرصيد المتاح من الدفعة: <bdi dir="ltr">{correctionPreview.source.available_before}</bdi> ← <bdi dir="ltr">{correctionPreview.source.available_after} {correctionPreview.source.currency}</bdi>.</p>
+        <p>رصيد الفروع المعنية: <bdi dir="ltr">{correctionPreview.account.available_before}</bdi> ← <bdi dir="ltr">{correctionPreview.account.available_after}</bdi>؛ المديونية: <bdi dir="ltr">{correctionPreview.account.debt_before}</bdi> ← <bdi dir="ltr">{correctionPreview.account.debt_after} {correctionPreview.source.currency}</bdi>.</p>
+      </section> : null}
+      <CenterHeaderActions>
+        <Button id={`${prefix}-correction-submit`} form={correctionFormId} type="submit" variant="primary" busy={busy} disabled={conflict || !correctionTarget || !correctionReason.trim()}>{uncertain ? "التحقق من التصحيح" : correctionPreview ? "اعتماد التصحيح" : "معاينة التصحيح"}</Button>
+        <Button disabled={busy || uncertain} onClick={() => { const trigger = correcting.id; setCorrecting(null); setCorrectionTarget(null); setCorrectionReason(""); setCorrectionPreview(null); requestId.current = null; setError(""); focus(`${prefix}-correct-${trigger}`); }}>إلغاء التصحيح</Button>
+      </CenterHeaderActions>
+    </section> : null}
     {confirmCrossBranch && preview ? <ConfirmationDialog title="اعتماد استخدام الرصيد بين الفروع"
       description={`ستستخدم ${preview.targets.reduce((sum, target) => sum + cents(target.amount), 0) / 100} ${preview.source.currency} من دفعة ${preview.source.branch_name} لسداد رسوم في ${Array.from(new Set(preview.targets.map(target => target.branch_name))).join("، ")}.`}
       confirmLabel="تأكيد التخصيص" onCancel={() => { setConfirmCrossBranch(false); focus(`${prefix}-submit`); }}
       onConfirm={() => { setConfirmCrossBranch(false); void commitAllocation(preview.targets.map(target => ({ attempt_id: target.attempt_id, amount: target.amount }))); }} /> : null}
+    {confirmCorrection && correctionPreview ? <ConfirmationDialog title="اعتماد تصحيح التخصيص"
+      description={`سيُعكس تخصيص ${correctionPreview.original.amount} ${correctionPreview.source.currency} من ${correctionPreview.original.branch_name} ويُسجل على ${correctionPreview.target?.branch_name ?? "الرصيد المتاح"}، مع بقاء الدفعة الأصلية.`}
+      confirmLabel="تأكيد التصحيح" onCancel={() => { setConfirmCorrection(false); focus(`${prefix}-correction-submit`); }}
+      onConfirm={() => { setConfirmCorrection(false); void commitCorrection(); }} /> : null}
     <CenterHeaderActions><Button disabled={busy || uncertain || dirty} onClick={onClose}>إغلاق تفاصيل الدفعة</Button></CenterHeaderActions>
   </section>;
 }

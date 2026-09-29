@@ -868,6 +868,193 @@ class StudyEnrollmentTest extends TestCase
             $this->getJson("{$this->base}/branches/{$this->south}/audit")->assertOk()->getContent());
     }
 
+    public function test_allocation_correction_moves_a_real_payment_atomically_without_changing_receipt(): void
+    {
+        $this->center->run(function (): void {
+            $this->assertTrue(DB::table('pg_indexes')
+                ->where('tablename', 'student_payment_allocations')
+                ->where('indexname', 'student_payment_allocations_submission_id_index')->exists());
+        });
+        $northGroup = $this->group($this->north, '400.00');
+        $southGroup = $this->group($this->south, '400.00');
+        $student = $this->student([$this->north, $this->south]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $enrollmentUrl = "{$this->base}/students/{$student['id']}/enrollments";
+        $attempts = [];
+        foreach ([$northGroup, $southGroup] as $group) {
+            $workspace = $this->getJson($enrollmentUrl)->assertOk()->json();
+            $attempts[] = $this->postJson($enrollmentUrl, [
+                'group_id' => $group['id'], 'group_revision' => $group['revision'],
+                'currency_revision' => $workspace['student']['currency_revision'], 'joined_on' => '2026-09-28',
+                'discount' => '0.00', 'discount_reason' => null, 'version' => $workspace['student']['version'],
+                'request_id' => (string) Str::uuid(),
+            ])->assertCreated()->json('attempt');
+        }
+        $accountUrl = "{$this->base}/students/{$student['id']}/account";
+        $payment = $this->postJson("{$this->base}/students/{$student['id']}/payments", [
+            'branch_id' => $this->north, 'method' => 'cash', 'received_on' => '2026-09-28',
+            'amount' => '1000.00', 'version' => $this->getJson($accountUrl)->json('account.version'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('payment');
+        $paymentUrl = "{$this->base}/students/{$student['id']}/payments/{$payment['id']}";
+        $allocation = $this->postJson("{$paymentUrl}/allocations", [
+            'targets' => [['attempt_id' => $attempts[0]['id'], 'amount' => '400.00']],
+            'version' => $this->getJson("{$paymentUrl}/allocation-options")->json('version'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('allocations.0');
+        $transferGroup = $this->group($this->south, '0.00');
+        [$sourceLecture, $destinationLecture] = $this->center->run(fn () => [
+            DB::table('plan_lectures')->where('plan_version_id', $northGroup['plan_version_id'])->value('id'),
+            DB::table('plan_lectures')->where('plan_version_id', $transferGroup['plan_version_id'])->value('id'),
+        ]);
+        $this->postJson("{$this->base}/content-equivalences", [
+            'source_plan_version_id' => $northGroup['plan_version_id'],
+            'target_plan_version_id' => $transferGroup['plan_version_id'],
+            'source_lecture_ids' => [$sourceLecture], 'target_lecture_ids' => [$destinationLecture],
+            'reason' => 'معادلة قبل نقل الدراسة', 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $transferUrl = "{$enrollmentUrl}/{$attempts[0]['id']}/transfer";
+        $transferPreview = $this->getJson("{$transferUrl}/preview?".http_build_query([
+            'group_id' => $transferGroup['id'], 'transferred_on' => '2026-09-28',
+        ]))->assertOk()->json('preview');
+        $this->postJson($transferUrl, [
+            'group_id' => $transferGroup['id'], 'group_revision' => $transferGroup['revision'],
+            'transferred_on' => '2026-09-28', 'revision' => $attempts[0]['revision'],
+            'preview_hash' => $transferPreview['hash'], 'reason' => 'نقل أكاديمي مستقل عن المال',
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->getJson($accountUrl)->assertJsonPath('account.available_balance', '600.00')
+            ->assertJsonPath('account.paid_total', '400.00');
+        $this->center->run(function () use ($attempts): void {
+            $this->assertSame(1, DB::table('student_payment_allocations')->count());
+            $this->assertSame($this->south, (int) DB::table('study_attempts')->where('id', $attempts[0]['id'])->value('branch_id'));
+            $this->assertSame($this->north, (int) DB::table('study_attempt_fees')->where('attempt_id', $attempts[0]['id'])->value('branch_id'));
+        });
+        $url = "{$this->base}/students/{$student['id']}/allocations/{$allocation['id']}/corrections";
+        $version = $this->getJson($accountUrl)->json('account.version');
+        $this->postJson("{$url}/preview", [
+            'target_attempt_id' => strtoupper($attempts[0]['id']), 'version' => $version,
+        ])->assertUnprocessable();
+        $this->postJson($url, [
+            'target_attempt_id' => strtoupper($attempts[0]['id']), 'reason' => 'لن تنقل إلى التسجيل نفسه',
+            'version' => $version, 'request_id' => (string) Str::uuid(),
+        ])->assertUnprocessable();
+        $previewRequest = ['target_attempt_id' => $attempts[1]['id'], 'version' => $version];
+        $this->postJson("{$url}/preview", $previewRequest)->assertOk()
+            ->assertJsonPath('original.attempt_id', $attempts[0]['id'])
+            ->assertJsonPath('source.received_amount', '1000.00')
+            ->assertJsonPath('source.available_before', '600.00')
+            ->assertJsonPath('source.available_after', '600.00')
+            ->assertJsonPath('target.attempt_id', $attempts[1]['id'])
+            ->assertJsonPath('account.debt_before', '400.00')
+            ->assertJsonPath('account.debt_after', '400.00');
+        $payload = [...$previewRequest, 'reason' => 'خُصص للتسجيل الخطأ', 'request_id' => (string) Str::uuid()];
+        $this->grant([$this->north => ['accounting', 'branch_auditor', 'financial_approval']]);
+        $this->asUser($this->staff);
+        $previewRequest['version'] = $this->getJson($accountUrl)->json('account.version');
+        $payload['version'] = $previewRequest['version'];
+        $this->postJson("{$url}/preview", $previewRequest)->assertNotFound();
+        $this->postJson($url, $payload)->assertNotFound();
+        $this->grant([$this->north => ['accounting', 'branch_auditor', 'financial_approval'],
+            $this->south => ['accounting']]);
+        $this->asUser($this->staff);
+        $previewRequest['version'] = $this->getJson($accountUrl)->json('account.version');
+        $this->postJson("{$url}/preview", $previewRequest)->assertForbidden();
+        $this->grant([$this->north => ['accounting', 'branch_auditor', 'financial_approval'],
+            $this->south => ['accounting', 'financial_approval']]);
+        $this->asUser($this->staff);
+        $payload['version'] = $this->getJson($accountUrl)->json('account.version');
+        $this->center->run(fn () => DB::statement("ALTER TABLE center_audit_logs ADD CONSTRAINT correction_audit_failure CHECK (event <> 'student.payment_allocation_corrected') NOT VALID"));
+        try {
+            $this->postJson($url, $payload)->assertServerError();
+        } finally {
+            $this->center->run(fn () => DB::statement('ALTER TABLE center_audit_logs DROP CONSTRAINT correction_audit_failure'));
+        }
+        $this->center->run(fn () => $this->assertSame(0, DB::table('student_payment_allocation_reversals')->count()));
+        $saved = $this->postJson($url, $payload)->assertCreated()->json();
+        $this->postJson($url, $payload)->assertOk()->assertJsonPath('allocation.id', $saved['allocation']['id']);
+        $this->postJson($url, [...$payload, 'reason' => 'سبب مختلف'])->assertConflict()
+            ->assertJsonPath('code', 'allocation_request_changed');
+        $this->postJson($url, [...$payload, 'request_id' => (string) Str::uuid()])->assertConflict()
+            ->assertJsonPath('code', 'student_account_changed');
+        $this->postJson($url, [...$payload, 'request_id' => (string) Str::uuid(), 'amount' => '1.00'])
+            ->assertUnprocessable()->assertJsonValidationErrors('amount');
+        $history = $this->getJson("{$paymentUrl}/allocation-options")->assertOk()->json('history');
+        $this->assertSame($saved['allocation']['id'], collect($history)->firstWhere('id', $allocation['id'])['corrected_allocation_id']);
+        $this->assertSame('correct', collect($history)->firstWhere('id', $allocation['id'])['reversal_kind']);
+        $this->getJson($accountUrl)->assertJsonPath('account.received_total', '1000.00')
+            ->assertJsonPath('account.available_balance', '600.00')->assertJsonPath('account.debt', '400.00');
+        $this->center->run(function () use ($payment, $allocation, $saved): void {
+            $this->assertSame('1000.00', DB::table('student_payments')->where('id', $payment['id'])->value('amount'));
+            $this->assertSame('2026-09-28', DB::table('student_payments')->where('id', $payment['id'])->value('received_on'));
+            $this->assertSame(2, DB::table('student_payment_allocations')->count());
+            $this->assertSame($saved['reversal']['submission_id'], $saved['allocation']['submission_id']);
+            $this->assertSame($allocation['id'], $saved['reversal']['allocation_id']);
+            $this->assertSame('خُصص للتسجيل الخطأ', $saved['reversal']['reason']);
+            try {
+                (require database_path('migrations/tenant/2026_09_29_030000_allow_student_allocation_corrections.php'))->down();
+                $this->fail('Approved corrections must prevent rollback of their submission kind.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString('Cannot roll back', $exception->getMessage());
+            }
+        });
+        $this->grant([$this->north => ['accounting', 'branch_auditor', 'financial_approval']]);
+        $this->asUser($this->staff);
+        $this->postJson($url, $payload)->assertNotFound();
+        $this->getJson("{$paymentUrl}/allocation-options")->assertOk()->assertJsonCount(0, 'history');
+        $this->assertStringNotContainsString('student.payment_allocation_corrected',
+            $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent());
+        $this->asUser($this->owner);
+        $creditUrl = "{$this->base}/students/{$student['id']}/allocations/{$saved['allocation']['id']}/corrections";
+        $creditVersion = $this->getJson($accountUrl)->json('account.version');
+        $this->postJson("{$creditUrl}/preview", ['target_attempt_id' => null, 'version' => $creditVersion])->assertOk()
+            ->assertJsonPath('account.available_after', '1000.00')->assertJsonPath('account.debt_after', '800.00');
+        $this->postJson($creditUrl, ['target_attempt_id' => null, 'reason' => 'إعادة إلى الرصيد',
+            'version' => $creditVersion, 'request_id' => (string) Str::uuid()])->assertCreated()->assertJsonPath('allocation', null);
+        $this->getJson($accountUrl)->assertJsonPath('account.received_total', '1000.00')
+            ->assertJsonPath('account.available_balance', '1000.00')->assertJsonPath('account.debt', '800.00');
+
+        $west = $this->postJson("{$this->base}/branches", ['name' => 'West', 'slug' => 'west'])
+            ->assertCreated()->json('branch.id');
+        $this->center->run(fn () => DB::table('student_branches')->insert([
+            'student_id' => $student['id'], 'branch_id' => $west, 'created_at' => now(),
+        ]));
+        $this->postJson("{$this->base}/students/{$student['id']}/payments", [
+            'branch_id' => $west, 'method' => 'cash', 'received_on' => '2026-09-28',
+            'amount' => '500.00', 'version' => $this->getJson($accountUrl)->json('account.version'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $nextAllocation = $this->postJson("{$paymentUrl}/allocations", [
+            'targets' => [['attempt_id' => $attempts[0]['id'], 'amount' => '100.00']],
+            'version' => $this->getJson("{$paymentUrl}/allocation-options")->json('version'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('allocations.0');
+        $scopedUrl = "{$this->base}/students/{$student['id']}/allocations/{$nextAllocation['id']}/corrections";
+        $scopedVersion = $this->getJson($accountUrl)->json('account.version');
+        $this->postJson("{$scopedUrl}/preview", [
+            'target_attempt_id' => $attempts[1]['id'], 'version' => $scopedVersion,
+        ])->assertOk()->assertJsonPath('account.available_before', '900.00')
+            ->assertJsonPath('account.debt_before', '700.00');
+        $this->postJson($scopedUrl, [
+            'target_attempt_id' => $attempts[1]['id'], 'reason' => 'تصحيح بعد دفعة فرع مستقل',
+            'version' => $scopedVersion, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->getJson($accountUrl)->assertJsonPath('account.available_balance', '1400.00');
+        $this->center->run(function () use ($west): void {
+            $details = json_decode(DB::table('center_audit_logs')
+                ->where('event', 'student.payment_allocation_corrected')->orderByDesc('id')->value('details'), true);
+            $this->assertSame('900.00', $details['account_before']['available_balance']);
+            $this->assertSame([$this->north, $this->south], $details['account_scope_branch_ids']);
+            $this->assertNotContains($west, $details['account_scope_branch_ids']);
+        });
+        $this->grant([$this->north => ['accounting', 'branch_auditor', 'financial_approval'],
+            $this->south => ['accounting', 'financial_approval']]);
+        $this->asUser($this->staff);
+        $audit = $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->json('entries');
+        $visibleCorrection = collect($audit)->firstWhere('event', 'student.payment_allocation_corrected');
+        $this->assertSame('تصحيح بعد دفعة فرع مستقل', json_decode($visibleCorrection['details'], true)['reason']);
+    }
+
     public function test_suspended_incomplete_student_can_pay_and_allocate_existing_debt_with_current_branch_grants(): void
     {
         $group = $this->group($this->north, '100.00');

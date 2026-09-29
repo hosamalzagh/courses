@@ -31,7 +31,7 @@ async function write(page: Page, route: string, payload: object, method = "POST"
   }, { route, payload, method });
 }
 
-async function pricedGroup(page: Page, branchId: number) {
+async function pricedGroup(page: Page, branchId: number, approvedPrice = "100.00") {
   const course = await write(page, "courses", { branch_id: branchId, name: `Course ${crypto.randomUUID().slice(0, 6)}`, request_id: crypto.randomUUID() });
   expect(course.status).toBe(201);
   const stage = await write(page, `courses/${course.body.course.id}/stages`, { name: "Stage", request_id: crypto.randomUUID() });
@@ -41,7 +41,7 @@ async function pricedGroup(page: Page, branchId: number) {
   const instructor = await write(page, "instructors", { name: `Teacher ${Date.now()}`, branch_ids: [branchId], request_id: crypto.randomUUID() });
   expect(instructor.status).toBe(201);
   const group = await write(page, "groups", { level_id: level.body.level.id, plan_version_id: level.body.level.plan.id,
-    name: `Group ${crypto.randomUUID().slice(0, 6)}`, approved_price: "100.00", instructor_ids: [instructor.body.instructor.id], request_id: crypto.randomUUID() });
+    name: `Group ${crypto.randomUUID().slice(0, 6)}`, approved_price: approvedPrice, instructor_ids: [instructor.body.instructor.id], request_id: crypto.randomUUID() });
   expect(group.status).toBe(201);
   return group.body.group;
 }
@@ -226,6 +226,123 @@ test("uses a payment across branches only after an explicit preview and current 
     await expect(staff.getByText("حُفظ التخصيص", { exact: false })).toBeVisible();
     const final = await (await owner.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
     expect(final.account).toMatchObject({ available_balance: "10.00", paid_total: "70.00", debt: "30.00" });
+    await staff.setViewportSize({ width: 390, height: 844 });
+    expect(await staff.locator("html").getAttribute("dir")).toBe("rtl");
+    await staff.getByRole("button", { name: "القائمة" }).click();
+    await staff.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
+    await expect(staff.locator("html")).toHaveAttribute("data-theme", "dark");
+    await staff.getByRole("button", { name: "إغلاق القائمة" }).click();
+    expect(await staff.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  } finally { await owner.close(); await staff.close(); }
+});
+
+test("corrects an allocation to another branch while retaining the original receipt", async ({ browser }) => {
+  test.setTimeout(90_000);
+  const owner = await browser.newPage();
+  const staff = await browser.newPage();
+  try {
+    await signIn(owner);
+    const workspace = await (await owner.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+    const north = workspace.branches.find((branch: { slug: string }) => branch.slug === "north");
+    const south = workspace.branches.find((branch: { slug: string }) => branch.slug === "south");
+    const wrongGroup = await pricedGroup(owner, north.id, "400.00");
+    const rightGroup = await pricedGroup(owner, south.id, "400.00");
+    const student = await write(owner, "students", { name: `تصحيح تخصيص ${Date.now()}`,
+      branch_ids: [north.id, south.id], request_id: crypto.randomUUID() });
+    expect(student.status).toBe(201);
+    const studentId = student.body.student.id;
+    const accountPath = `students/${studentId}/account`;
+    const initial = await (await owner.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+    if (!initial.account.currency) expect((await write(owner, "financial-currency", {
+      currency: "EGP", revision: initial.account.currency_revision,
+    }, "PATCH")).status).toBe(200);
+    const attempts: { id: string }[] = [];
+    for (const group of [wrongGroup, rightGroup]) {
+      const enrollment = await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+      const saved = await write(owner, `students/${studentId}/enrollments`, {
+        group_id: group.id, group_revision: group.revision,
+        currency_revision: enrollment.student.currency_revision, joined_on: "2026-09-28",
+        discount: "0.00", discount_reason: null, version: enrollment.student.version, request_id: crypto.randomUUID(),
+      });
+      expect(saved.status).toBe(201);
+      attempts.push(saved.body.attempt);
+    }
+    const account = await (await owner.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+    const payment = await write(owner, `students/${studentId}/payments`, {
+      branch_id: north.id, method: "cash", received_on: "2026-09-28", amount: "1000.00",
+      version: account.account.version, request_id: crypto.randomUUID(),
+    });
+    expect(payment.status).toBe(201);
+    const paymentPath = `students/${studentId}/payments/${payment.body.payment.id}`;
+    const options = await (await owner.request.get(`${origin}/api/v1/center/${paymentPath}/allocation-options`)).json();
+    const allocation = await write(owner, `${paymentPath}/allocations`, { targets: [{ attempt_id: attempts[0].id, amount: "400.00" }],
+      version: options.version, request_id: crypto.randomUUID() });
+    expect(allocation.status).toBe(201);
+    const correctionPath = `students/${studentId}/allocations/${allocation.body.allocations[0].id}/corrections`;
+
+    expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, {
+      center_roles: [], branch_roles: { [north.id]: ["accounting", "branch_auditor", "financial_approval"], [south.id]: ["accounting"] },
+    }, "PUT")).status).toBe(200);
+    await signIn(staff, "staff");
+    await staff.goto(`${origin}/admin/students/${studentId}/account`);
+    await staff.getByRole("button", { name: "عرض وتخصيص" }).click();
+    await staff.getByRole("button", { name: "تصحيح التخصيص" }).click();
+    await expect(staff.getByRole("combobox", { name: "التسجيل الصحيح" })).toBeFocused();
+    await staff.getByRole("button", { name: "عكس التخصيص" }).click();
+    await expect(staff.getByRole("region", { name: "تصحيح التخصيص" })).toHaveCount(0);
+    await expect(staff.getByRole("region", { name: "عكس التخصيص" })).toBeVisible();
+    await staff.getByRole("button", { name: "إلغاء التصحيح" }).click();
+    await staff.getByRole("button", { name: "تصحيح التخصيص" }).click();
+    const staffOptions = await (await staff.request.get(`${origin}/api/v1/center/${paymentPath}/allocation-options`)).json();
+    expect(staffOptions.fees.some((fee: { attempt_id: string }) => fee.attempt_id === attempts[1].id)).toBe(false);
+    expect((await write(staff, `${correctionPath}/preview`, {
+      target_attempt_id: attempts[1].id, version: staffOptions.version,
+    })).status).toBe(403);
+    await staff.getByRole("button", { name: "إلغاء التصحيح" }).click();
+    await expect(staff.getByRole("button", { name: "تصحيح التخصيص" })).toBeFocused();
+
+    expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, {
+      center_roles: [], branch_roles: { [north.id]: ["accounting", "branch_auditor", "financial_approval"],
+        [south.id]: ["accounting", "financial_approval"] },
+    }, "PUT")).status).toBe(200);
+    await staff.reload();
+    await staff.getByRole("button", { name: "عرض وتخصيص" }).click();
+    await staff.getByRole("button", { name: "تصحيح التخصيص" }).click();
+    await staff.getByRole("combobox", { name: "التسجيل الصحيح" }).click();
+    await staff.locator('[data-slot="select-content"] [data-slot="select-item"]').filter({ hasText: south.name }).click();
+    await staff.getByRole("textbox", { name: "سبب تصحيح التخصيص" }).fill("تسجيل خاطئ، التصحيح للمجموعة الصحيحة");
+    await staff.getByRole("button", { name: "معاينة التصحيح" }).click();
+    const preview = staff.getByRole("region", { name: "معاينة التصحيح قبل الاعتماد" });
+    await expect(preview).toContainText(north.name);
+    await expect(preview).toContainText(south.name);
+    await expect(preview).toContainText("1000.00");
+    await expect(preview).toContainText("400.00");
+    await staff.getByRole("button", { name: "اعتماد التصحيح" }).click();
+    await expect(staff.getByRole("alertdialog")).toContainText(south.name);
+    await staff.getByRole("button", { name: "إلغاء", exact: true }).click();
+    await expect(staff.getByRole("button", { name: "اعتماد التصحيح" })).toBeFocused();
+    expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, {
+      center_roles: [], branch_roles: { [north.id]: ["accounting", "branch_auditor", "financial_approval"], [south.id]: ["accounting"] },
+    }, "PUT")).status).toBe(200);
+    await staff.getByRole("button", { name: "اعتماد التصحيح" }).click();
+    await staff.getByRole("button", { name: "تأكيد التصحيح" }).click();
+    await expect(staff.getByRole("region", { name: "تخصيص الدفعة المستلمة", exact: false }).getByRole("alert"))
+      .toContainText("هذه العملية خارج صلاحيتك");
+    const deniedAccount = await (await owner.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+    expect(deniedAccount.account).toMatchObject({ received_total: "1000.00", available_balance: "600.00", debt: "400.00" });
+    expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, {
+      center_roles: [], branch_roles: { [north.id]: ["accounting", "branch_auditor", "financial_approval"],
+        [south.id]: ["accounting", "financial_approval"] },
+    }, "PUT")).status).toBe(200);
+    await staff.getByRole("button", { name: "اعتماد التصحيح" }).click();
+    await staff.getByRole("button", { name: "تأكيد التصحيح" }).click();
+    await expect(staff.getByText("حُفظ التصحيح", { exact: false })).toBeVisible();
+    await expect(staff.getByText("صُحح إلى تخصيص", { exact: false })).toBeVisible();
+    const corrected = await (await owner.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+    expect(corrected.account).toMatchObject({ received_total: "1000.00", available_balance: "600.00", debt: "400.00" });
+    await owner.goto(`${origin}/admin/audit`);
+    await owner.getByText("تفاصيل تصحيح التخصيص").first().click();
+    await expect(owner.getByText("تسجيل خاطئ، التصحيح للمجموعة الصحيحة")).toBeVisible();
     await staff.setViewportSize({ width: 390, height: 844 });
     expect(await staff.locator("html").getAttribute("dir")).toBe("rtl");
     await staff.getByRole("button", { name: "القائمة" }).click();
