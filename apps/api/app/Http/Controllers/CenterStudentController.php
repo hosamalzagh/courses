@@ -35,9 +35,11 @@ class CenterStudentController extends Controller
             'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'status_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'branches_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
-            'tab' => ['sometimes', 'in:custom-history,attachments,enrollment-notes,notes,study'],
+            'tab' => ['sometimes', 'in:custom-history,attachments,enrollment-notes,notes,study,attendance'],
             'study_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'study_q' => ['sometimes', 'string', 'max:100'],
+            'attendance_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'attendance_q' => ['sometimes', 'string', 'max:100'],
             'custom_history_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'attachments_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'notes_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
@@ -212,6 +214,63 @@ class CenterStudentController extends Controller
             $query->selectSub(DB::connection('tenant')->query()->fromSub($attempts, 'study_rows')
                 ->selectRaw('json_agg(study_rows ORDER BY joined_on DESC, period_id DESC)'), 'study_attempts');
         }
+        if ($studentId !== null && ($data['tab'] ?? '') === 'attendance') {
+            $attendancePage = (int) ($data['attendance_page'] ?? 1);
+            $attendanceSearch = trim($data['attendance_q'] ?? '');
+            $readableSource = 'EXISTS (SELECT 1 FROM student_branches AS source_associations WHERE source_associations.student_id = students.id AND source_associations.branch_id = source_courses.branch_id)';
+            if (! $permissions->isCenterManager()) {
+                $readableSource .= ' AND source_courses.branch_id IN ('.(implode(',', array_map('intval', $this->branchScope($permissions, 'read'))) ?: 'NULL').')';
+            }
+            $attendance = DB::connection('tenant')->table('study_attendance_entries as entries')
+                ->join('study_attempts as attempts', 'attempts.id', '=', 'entries.attempt_id')
+                ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
+                ->join('study_groups as groups', 'groups.id', '=', 'sessions.group_id')
+                ->join('levels', 'levels.id', '=', 'groups.level_id')
+                ->join('stages', 'stages.id', '=', 'levels.stage_id')
+                ->join('courses', 'courses.id', '=', 'stages.course_id')
+                ->join('branches', 'branches.id', '=', 'courses.branch_id')
+                ->leftJoin('study_makeup_bookings as bookings', function ($join): void {
+                    $join->on('bookings.attempt_id', '=', 'entries.attempt_id')
+                        ->on('bookings.session_id', '=', 'entries.session_id');
+                })
+                ->leftJoin('study_sessions as source_sessions', 'source_sessions.id', '=', 'bookings.source_session_id')
+                ->leftJoin('study_groups as source_groups', 'source_groups.id', '=', 'source_sessions.group_id')
+                ->leftJoin('levels as source_levels', 'source_levels.id', '=', 'source_groups.level_id')
+                ->leftJoin('stages as source_stages', 'source_stages.id', '=', 'source_levels.stage_id')
+                ->leftJoin('courses as source_courses', 'source_courses.id', '=', 'source_stages.course_id')
+                ->whereColumn('attempts.student_id', 'students.id')
+                ->when(! $permissions->isCenterManager(), fn (Builder $rows) => $rows->whereIn('courses.branch_id', $this->branchScope($permissions, 'read')))
+                ->when($attendanceSearch !== '', function (Builder $rows) use ($attendanceSearch): void {
+                    $term = '%'.addcslashes($attendanceSearch, '%_\\').'%';
+                    $rows->where(function (Builder $matches) use ($term): void {
+                        $matches->where('courses.name', 'ILIKE', $term)
+                            ->orWhere('groups.name', 'ILIKE', $term)
+                            ->orWhere('branches.name', 'ILIKE', $term)
+                            ->orWhere('sessions.title', 'ILIKE', $term)
+                            ->orWhereRaw('sessions.number::text ILIKE ?', [$term]);
+                    });
+                })
+                ->where(function (Builder $rows): void {
+                    $rows->whereNotNull('entries.status')->orWhereExists(DB::connection('tenant')->table('student_suspensions as attendance_suspensions')
+                        ->whereColumn('attendance_suspensions.student_id', 'attempts.student_id')
+                        ->whereColumn('attendance_suspensions.suspended_at', '<=', 'sessions.scheduled_at')
+                        ->where(fn (Builder $period) => $period->whereNull('attendance_suspensions.lifted_at')
+                            ->orWhereColumn('attendance_suspensions.lifted_at', '>', 'sessions.scheduled_at'))->selectRaw('1'));
+                })
+                ->orderByDesc('sessions.scheduled_at')->orderByDesc('entries.id')
+                ->offset(($attendancePage - 1) * 20)->limit(21)
+                ->select(['entries.id', 'entries.status', 'entries.revision', 'entries.recorded_at',
+                    'attempts.id as attempt_id', 'sessions.id as session_id', 'sessions.scheduled_at',
+                    'sessions.number as session_number', 'sessions.title as session_title',
+                    'sessions.status as session_status',
+                    'groups.id as group_id', 'groups.name as group_name', 'courses.branch_id',
+                    'branches.name as branch_name', 'courses.name as course_name',
+                    'bookings.id as booking_id'])
+                ->selectRaw("CASE WHEN {$readableSource} THEN bookings.source_session_id END AS source_session_id, CASE WHEN {$readableSource} THEN source_groups.id END AS source_group_id")
+                ->selectRaw("CASE WHEN entries.status IS NULL THEN 'suspended' WHEN bookings.id IS NOT NULL THEN 'makeup' ELSE 'primary' END AS kind");
+            $query->selectSub(DB::connection('tenant')->query()->fromSub($attendance, 'attendance_rows')
+                ->selectRaw('json_agg(attendance_rows ORDER BY scheduled_at DESC, id DESC)'), 'attendance_entries');
+        }
         $students = $query->orderBy('student_number')->offset(($page - 1) * 50)->limit(51)->get();
         if ($studentId !== null) {
             abort_if($students->isEmpty(), 404);
@@ -237,6 +296,8 @@ class CenterStudentController extends Controller
                 'pagination' => ['page' => $notesPage, 'has_more' => count(json_decode($students->first()->student_notes ?? '[]', true) ?? []) > 20]]] : []),
             ...($studentId !== null && ($data['tab'] ?? '') === 'study' ? ['study' => ['attempts' => array_slice(json_decode($students->first()->study_attempts ?? '[]', true) ?? [], 0, 20),
                 'pagination' => ['page' => $studyPage, 'has_more' => count(json_decode($students->first()->study_attempts ?? '[]', true) ?? []) > 20]]] : []),
+            ...($studentId !== null && ($data['tab'] ?? '') === 'attendance' ? ['attendance' => ['entries' => array_slice(json_decode($students->first()->attendance_entries ?? '[]', true) ?? [], 0, 20),
+                'pagination' => ['page' => $attendancePage, 'has_more' => count(json_decode($students->first()->attendance_entries ?? '[]', true) ?? []) > 20]]] : []),
             'pagination' => ['page' => $page, 'has_more' => $students->count() > 50, 'branches_page' => $branchPage, 'branches_has_more' => $branches->count() > 50],
         ])->header('Cache-Control', 'private, no-store');
     }

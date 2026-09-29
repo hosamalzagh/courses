@@ -154,6 +154,150 @@ class StudyEnrollmentTest extends TestCase
             $this->getJson("{$this->base}/audit")->assertOk()->getContent());
     }
 
+    public function test_profile_attendance_shows_actual_absence_makeup_and_suspension_without_cross_branch_source(): void
+    {
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $north = $this->group($this->north, '0.00', 2);
+        $south = $this->group($this->south, '0.00');
+        $student = $this->student([$this->north, $this->south]);
+        $enrollments = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($enrollments)->assertOk()->json();
+        $attempt = $this->postJson($enrollments, [
+            'group_id' => $north['id'], 'group_revision' => $north['revision'],
+            'currency_revision' => $workspace['student']['currency_revision'],
+            'joined_on' => now('Africa/Cairo')->subDays(2)->toDateString(),
+            'discount' => '0.00', 'discount_reason' => null,
+            'version' => $workspace['student']['version'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $ids = $this->center->run(function () use ($north, $south, $attempt): array {
+            $sessions = [];
+            foreach ([[$north, 1, 'absent', now()->subDay()],
+                [$south, 1, 'counted', now()->subDay()->addHour()],
+                [$north, 2, null, now()->addHours(4)]] as [$group, $number, $status, $scheduled]) {
+                $lecture = DB::table('plan_lectures')->where('plan_version_id', $group['plan_version_id'])
+                    ->where('number', $number)->value('id');
+                $sessionId = (string) Str::uuid();
+                $entryId = (string) Str::uuid();
+                DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $group['id'],
+                    'plan_lecture_id' => $lecture, 'number' => $number, 'scheduled_at' => $scheduled,
+                    'status' => 'held', 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
+                    'created_at' => now(), 'updated_at' => now()]);
+                DB::table('study_attendance_entries')->insert(['id' => $entryId, 'session_id' => $sessionId,
+                    'attempt_id' => $attempt['id'], 'status' => $status, 'recorded_by' => $status ? $this->owner->id : null,
+                    'recorded_at' => $status ? now() : null, 'created_at' => now(), 'updated_at' => now()]);
+                $sessions[] = ['session' => $sessionId, 'entry' => $entryId];
+            }
+            DB::table('study_makeup_bookings')->insert(['id' => (string) Str::uuid(),
+                'attempt_id' => $attempt['id'], 'session_id' => $sessions[1]['session'],
+                'source_session_id' => $sessions[0]['session'], 'booked_by' => $this->owner->id,
+                'booked_at' => now()->subDay(), 'proved_by' => $this->owner->id,
+                'proved_at' => now(), 'proof_reason' => 'حضور بديل', 'request_id' => (string) Str::uuid(),
+                'request_hash' => str_repeat('a', 64), 'proof_request_id' => (string) Str::uuid(),
+                'proof_request_hash' => str_repeat('b', 64), 'created_at' => now(), 'updated_at' => now()]);
+
+            return $sessions;
+        });
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'suspended', 'reason' => 'إيقاف مؤقت', 'status_revision' => 1,
+            'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $path = "{$this->base}/students/{$student['id']}?tab=attendance";
+        $owner = $this->getJson($path)->assertOk()->assertJsonCount(3, 'attendance.entries');
+        $this->assertLessThanOrEqual(6, (int) $owner->headers->get('X-Courses-Query-Count'));
+        $entries = collect($owner->json('attendance.entries'));
+        $this->assertSame('absent', $entries->firstWhere('id', $ids[0]['entry'])['status']);
+        $this->assertSame('makeup', $entries->firstWhere('id', $ids[1]['entry'])['kind']);
+        $this->assertSame('suspended', $entries->firstWhere('id', $ids[2]['entry'])['kind']);
+        $this->center->run(fn () => DB::table('student_branches')->where('student_id', $student['id'])
+            ->where('branch_id', $this->south)->delete());
+        $this->getJson($path)->assertOk()->assertJsonCount(3, 'attendance.entries')
+            ->assertJsonPath('attendance.entries.1.id', $ids[1]['entry']);
+        $this->grant([$this->north => ['branch_viewer'], $this->south => ['branch_viewer']]);
+        $this->asUser($this->staff);
+        $this->getJson($path)->assertOk()->assertJsonCount(3, 'attendance.entries');
+        $this->asUser($this->owner);
+        $this->center->run(fn () => DB::table('student_branches')->insert([
+            'student_id' => $student['id'], 'branch_id' => $this->south, 'created_at' => now(),
+        ]));
+        $this->getJson($path.'&attendance_page=2')->assertOk()->assertJsonCount(0, 'attendance.entries');
+        $this->center->run(fn () => DB::table('study_sessions')->whereIn('id', [$ids[1]['session'], $ids[2]['session']])
+            ->update(['status' => 'cancelled']));
+        $this->getJson($path)->assertOk()->assertJsonPath('attendance.entries.0.kind', 'suspended')
+            ->assertJsonPath('attendance.entries.0.session_status', 'cancelled');
+        $this->getJson($path)->assertOk()->assertJsonPath('attendance.entries.1.session_status', 'cancelled');
+
+        $this->grant([$this->south => ['branch_viewer']]);
+        $this->asUser($this->staff);
+        $southOnly = $this->getJson($path)->assertOk()->assertJsonCount(1, 'attendance.entries')
+            ->assertJsonPath('attendance.entries.0.kind', 'makeup')
+            ->assertJsonPath('attendance.entries.0.session_status', 'cancelled')
+            ->assertJsonPath('attendance.entries.0.source_session_id', null);
+        $this->assertLessThanOrEqual(6, (int) $southOnly->headers->get('X-Courses-Query-Count'));
+        $this->assertStringNotContainsString($ids[0]['session'], $southOnly->getContent());
+        $this->grant([$this->north => ['branch_viewer']]);
+        $this->asUser($this->staff);
+        $northOnly = $this->getJson($path)->assertOk()->assertJsonCount(2, 'attendance.entries');
+        $this->assertSame(['primary', 'suspended'], collect($northOnly->json('attendance.entries'))->pluck('kind')
+            ->sort()->values()->all());
+        $this->assertStringNotContainsString($ids[1]['session'], $northOnly->getContent());
+    }
+
+    public function test_profile_attendance_search_finds_an_event_beyond_the_first_page(): void
+    {
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $group = $this->group($this->north, '0.00', 21);
+        $student = $this->student([$this->north]);
+        $enrollments = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($enrollments)->assertOk()->json();
+        $attempt = $this->postJson($enrollments, [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $workspace['student']['currency_revision'],
+            'joined_on' => now('Africa/Cairo')->subDays(30)->toDateString(),
+            'discount' => '0.00', 'discount_reason' => null,
+            'version' => $workspace['student']['version'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $oldestId = $this->center->run(function () use ($group, $attempt): string {
+            $lectures = DB::table('plan_lectures')->where('plan_version_id', $group['plan_version_id'])
+                ->pluck('id', 'number');
+            $sessions = [];
+            $entries = [];
+            $oldestId = '';
+            foreach (range(1, 21) as $number) {
+                $sessionId = (string) Str::uuid();
+                $entryId = (string) Str::uuid();
+                if ($number === 1) {
+                    $oldestId = $entryId;
+                }
+                $sessions[] = ['id' => $sessionId, 'group_id' => $group['id'],
+                    'plan_lecture_id' => $lectures[$number], 'number' => $number,
+                    'title' => $number === 1 ? 'Needle history' : 'Ordinary lecture',
+                    'scheduled_at' => now()->subDays(22 - $number), 'status' => 'held',
+                    'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
+                    'created_at' => now(), 'updated_at' => now()];
+                $entries[] = ['id' => $entryId, 'session_id' => $sessionId,
+                    'attempt_id' => $attempt['id'], 'status' => 'counted',
+                    'recorded_by' => $this->owner->id, 'recorded_at' => now(),
+                    'created_at' => now(), 'updated_at' => now()];
+            }
+            DB::table('study_sessions')->insert($sessions);
+            DB::table('study_attendance_entries')->insert($entries);
+
+            return $oldestId;
+        });
+        $path = "{$this->base}/students/{$student['id']}?tab=attendance";
+        $first = $this->getJson($path)->assertOk()->assertJsonCount(20, 'attendance.entries')
+            ->assertJsonPath('attendance.pagination.has_more', true);
+        $this->assertLessThanOrEqual(6, (int) $first->headers->get('X-Courses-Query-Count'));
+        $this->assertNotContains($oldestId, collect($first->json('attendance.entries'))->pluck('id'));
+        $this->getJson($path.'&attendance_page=2')->assertOk()->assertJsonCount(1, 'attendance.entries')
+            ->assertJsonPath('attendance.entries.0.id', $oldestId);
+        $searched = $this->getJson($path.'&attendance_q=Needle')->assertOk()
+            ->assertJsonCount(1, 'attendance.entries')
+            ->assertJsonPath('attendance.entries.0.id', $oldestId)
+            ->assertJsonPath('attendance.pagination.has_more', false);
+        $this->assertLessThanOrEqual(6, (int) $searched->headers->get('X-Courses-Query-Count'));
+    }
+
     public function test_profile_study_tab_preserves_attempts_during_suspension_and_hides_other_branches(): void
     {
         $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
