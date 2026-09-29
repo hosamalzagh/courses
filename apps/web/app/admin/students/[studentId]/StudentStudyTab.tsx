@@ -51,7 +51,7 @@ export function StudentStudyTab({ context, search }: { context: StudentContext; 
         </div> },
       ]}
       expanded={attempt => <div className="space-y-2">
-        <p>بدأت المحاولة: {attempt.joined_on}.</p>
+        <p>بدأت المشاركة في المجموعة: {attempt.joined_on}.</p>
         {attempt.left_on ? <p>انتهت المشاركة في المجموعة: {attempt.left_on}.</p> : null}
         {attempt.latest_waitlist ? <p>{attempt.latest_waitlist.left_on ? "انتظار سابق" : "في الانتظار منذ"}: {attempt.latest_waitlist.entered_on}{attempt.latest_waitlist.left_on ? ` · انتهى ${attempt.latest_waitlist.left_on}` : ""}.</p> : null}
         {attempt.last_visible_transfer_on ? <p>آخر نقل ظاهر بين فروعك: {attempt.last_visible_transfer_on}.</p> : null}
