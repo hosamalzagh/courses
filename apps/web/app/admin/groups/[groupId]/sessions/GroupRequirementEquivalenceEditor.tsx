@@ -91,7 +91,7 @@ export function GroupRequirementEquivalenceEditor({ group, onClose }: {
     <p>اختر متطلب هذه المجموعة ومحاضرة مضافة من مجموعة أخرى في المستوى نفسه. لا يُحتسب التعويض حتى يعتمد الربط صراحة.</p>
     <Field><FieldLabel htmlFor={`${formId}-required`}>المتطلب المطلوب من هذه المجموعة</FieldLabel>
       <NativeSelect id={`${formId}-required`} value={requiredId} disabled={busy}
-        onChange={event => { setRequiredId(event.target.value); setCandidates([]); setDecision(null); setError(""); setNotice(""); }}>
+        onChange={event => { setRequiredId(event.target.value); setSearch(""); setCandidates([]); setDecision(null); setError(""); setNotice(""); }}>
         <NativeSelectOption value="">اختر محاضرة مضافة</NativeSelectOption>
         {required.map(item => <NativeSelectOption key={item.id} value={item.id}>
           {item.number.toLocaleString("ar-EG")} · {item.title || item.content}

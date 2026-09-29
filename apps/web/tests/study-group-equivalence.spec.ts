@@ -58,6 +58,15 @@ test("approved group-added content equivalence is visible, reversible, scoped an
     expect(added.status).toBe(201);
     groups.push({ id: group.body.group.id, requirement: added.body.requirement });
   }
+  const requiredRoute = `groups/${groups[0].id}/requirements`;
+  const another = { kind: "add", content: `متطلب آخر ${stamp}`, reason: "إضافة متطلب ثانٍ لاختبار تبديل البحث" };
+  const anotherPreview = await write(page, `${requiredRoute}/preview`, another);
+  expect(anotherPreview.status).toBe(200);
+  const anotherRequirement = await write(page, requiredRoute, { ...another,
+    group_revision: anotherPreview.body.group_revision, preview_token: anotherPreview.body.preview_token,
+    request_id: crypto.randomUUID(),
+  });
+  expect(anotherRequirement.status).toBe(201);
   const path = `/admin/groups/${groups[0].id}/sessions`;
   const apiPath = `/api/v1/center/groups/${groups[0].id}/sessions`;
   const beforePage = reads().length;
@@ -72,6 +81,14 @@ test("approved group-added content equivalence is visible, reversible, scoped an
   const optionsResponse = page.waitForResponse(response => response.url().includes("/requirement-equivalences/options"));
   await page.getByLabel("المتطلب المطلوب من هذه المجموعة").selectOption(groups[0].requirement.id);
   expect(Number((await optionsResponse).headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+  await expect(page.getByRole("table", { name: "متطلبات المجموعات الأخرى" })).toContainText(`محتوى البديلة ${stamp}`);
+  await page.getByRole("textbox", { name: "بحث عن المجموعة أو المحتوى المقابل" }).fill("لا نتائج مطابقة");
+  await page.getByRole("button", { name: "بحث", exact: true }).click();
+  await expect(page.getByText("لا توجد محاضرات مضافة مطابقة", { exact: false })).toBeVisible();
+  await page.getByLabel("المتطلب المطلوب من هذه المجموعة").selectOption(anotherRequirement.body.requirement.id);
+  await expect(page.getByRole("textbox", { name: "بحث عن المجموعة أو المحتوى المقابل" })).toHaveValue("");
+  await expect(page.getByRole("table", { name: "متطلبات المجموعات الأخرى" })).toContainText(`محتوى البديلة ${stamp}`);
+  await page.getByLabel("المتطلب المطلوب من هذه المجموعة").selectOption(groups[0].requirement.id);
   await expect(page.getByRole("table", { name: "متطلبات المجموعات الأخرى" })).toContainText(`محتوى البديلة ${stamp}`);
   await page.getByRole("textbox", { name: "سبب الاعتماد أو السحب" }).fill("اعتماد بديل أكاديمي للمحتوى المضاف");
   await page.getByRole("button", { name: "اعتماد التكافؤ" }).click();
