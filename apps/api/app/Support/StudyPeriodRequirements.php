@@ -9,20 +9,17 @@ class StudyPeriodRequirements
     public static function close(string $periodId, string $groupId, string $leftOn): bool
     {
         $period = DB::connection('tenant')->table('study_attempt_group_periods')
-            ->where('id', $periodId)->first(['attempt_id', 'created_at']);
+            ->where('id', $periodId)->first(['attempt_id', 'created_at', 'opening_required_credit_ids']);
         $openedAt = $period->created_at;
-        $appliedRequirements = DB::connection('tenant')->table('study_attempt_plan_applications as applications')
-            ->join('study_attempts as attempts', 'attempts.id', '=', 'applications.attempt_id')
-            ->where('applications.attempt_id', $period->attempt_id)->where('applications.group_id', $groupId)
-            ->where(function ($query) use ($openedAt): void {
-                $query->where('applications.approved_at', '>=', $openedAt)
-                    ->orWhereColumn('applications.to_plan_version_id', 'attempts.plan_version_id');
-            })
-            ->whereRaw("(applications.approved_at AT TIME ZONE 'Africa/Cairo')::date <= ?::date", [$leftOn])
-            ->orderByDesc('applications.approved_at')->orderByDesc('applications.id')
-            ->value('applications.after_requirements');
+        $appliedRequirements = DB::connection('tenant')->table('study_attempt_plan_applications')
+            ->where('attempt_id', $period->attempt_id)->where('group_id', $groupId)
+            ->where('approved_at', '>=', $openedAt)
+            ->whereRaw("(approved_at AT TIME ZONE 'Africa/Cairo')::date <= ?::date", [$leftOn])
+            ->orderByDesc('approved_at')->orderByDesc('id')->value('after_requirements');
         if ($appliedRequirements !== null) {
             $requiredCreditIds = array_column(json_decode($appliedRequirements, true), 'id');
+        } elseif ($period->opening_required_credit_ids !== null) {
+            $requiredCreditIds = json_decode($period->opening_required_credit_ids, true);
         } else {
             $requirements = DB::connection('tenant')->table('study_group_requirements')
                 ->where('group_id', $groupId);

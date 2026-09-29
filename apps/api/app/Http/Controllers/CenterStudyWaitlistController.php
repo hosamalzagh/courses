@@ -31,7 +31,8 @@ class CenterStudyWaitlistController extends Controller
             })
             ->where('attempts.id', $attemptId)
             ->first(['attempts.id', 'attempts.level_id', 'attempts.plan_version_id',
-                'attempts.branch_id', 'attempts.status', 'attempts.current_group_id', 'attempts.revision']);
+                'attempts.branch_id', 'attempts.status', 'attempts.current_group_id',
+                'attempts.required_lectures', 'attempts.revision']);
         abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
         $page = (int) ($data['page'] ?? 1);
         $historyPage = (int) ($data['history_page'] ?? 1);
@@ -50,13 +51,15 @@ class CenterStudyWaitlistController extends Controller
                 ->join('courses', 'courses.id', '=', 'stages.course_id')
                 ->where('groups.level_id', $attempt->level_id)
                 ->where(function ($query) use ($attempt): void {
-                    $query->where('groups.plan_version_id', $attempt->plan_version_id)
-                        ->orWhereExists(function ($applications) use ($attempt): void {
+                    $query->where('groups.plan_version_id', $attempt->plan_version_id);
+                    if ($attempt->required_lectures !== null) {
+                        $query->orWhereExists(function ($applications) use ($attempt): void {
                             $applications->selectRaw('1')->from('study_attempt_plan_applications as applications')
                                 ->whereColumn('applications.group_id', 'groups.id')
                                 ->where('applications.attempt_id', $attempt->id)
                                 ->where('applications.to_plan_version_id', $attempt->plan_version_id);
                         });
+                    }
                 })
                 ->where('courses.branch_id', $attempt->branch_id)
                 ->where('groups.status', '!=', 'completed')
@@ -146,9 +149,12 @@ class CenterStudyWaitlistController extends Controller
                     'groups.revision', 'courses.branch_id']);
             abort_unless($group && $permissions->can('enrollment.manage', (int) $group->branch_id), 404);
             $appliedInGroup = $group->plan_version_id !== $attempt->plan_version_id
+                && $attempt->required_lectures !== null
                 && DB::connection('tenant')->table('study_attempt_plan_applications')
                     ->where('attempt_id', $attemptId)->where('group_id', $group->id)
-                    ->where('to_plan_version_id', $attempt->plan_version_id)->exists();
+                    ->where('to_plan_version_id', $attempt->plan_version_id)
+                    ->whereRaw("(approved_at AT TIME ZONE 'Africa/Cairo')::date <= ?::date", [$data['joined_on']])
+                    ->exists();
             abort_unless($group->branch_id === $attempt->branch_id && $group->level_id === $attempt->level_id
                 && ($group->plan_version_id === $attempt->plan_version_id || $appliedInGroup), 422,
                 'اختر مجموعة في الفرع والمستوى وإصدار الخطة نفسها.');
@@ -166,7 +172,10 @@ class CenterStudyWaitlistController extends Controller
             $now = now();
             DB::connection('tenant')->table('study_attempt_group_periods')->insert([
                 'id' => (string) Str::uuid(), 'attempt_id' => $attemptId,
-                'group_id' => $group->id, 'joined_on' => $data['joined_on'], 'created_at' => $now,
+                'group_id' => $group->id, 'joined_on' => $data['joined_on'],
+                'opening_required_credit_ids' => $attempt->required_lectures === null ? null : json_encode(
+                    array_column(json_decode($attempt->required_lectures, true), 'id')),
+                'created_at' => $now,
             ]);
             DB::connection('tenant')->table('study_attempts')->where('id', $attemptId)->update([
                 'current_group_id' => $group->id, 'revision' => $attempt->revision + 1, 'updated_at' => $now,

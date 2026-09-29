@@ -851,11 +851,24 @@ class StudyCoverageTest extends TestCase
             $this->assertSame(1, DB::table('study_attempt_plan_applications')
                 ->where('attempt_id', $attempt['id'])->count());
         });
-        $withdrawnOn = now('Africa/Cairo')->addDay()->toDateString();
+        $this->travelTo(now('Africa/Cairo')->addDay()->setTime(12, 0));
+        $thirdPlan = $this->postJson("{$this->base}/levels/{$group['level_id']}/plan-versions", [
+            'base_plan_version_id' => $newPlan['id'], 'base_revision' => $newPlan['revision'],
+            'lectures' => [['number' => 1, 'content' => 'المحاضرة الأولى المعدلة', 'planned_hours' => 1],
+                ['number' => 2, 'content' => 'المحاضرة الثانية المعدلة', 'planned_hours' => 1],
+                ['number' => 3, 'content' => 'المحاضرة الثالثة', 'planned_hours' => 1]],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('plan');
+        $thirdChange = ['target_plan_version_id' => $thirdPlan['id'], 'attempt_ids' => [$attempt['id']],
+            'reason' => 'تطبيق الإصدار الثالث بعد إعادة الإلحاق'];
+        $thirdPreview = $this->postJson("{$path}/preview", $thirdChange)->assertOk()->json();
+        $this->postJson($path, [...$thirdChange, 'group_revision' => $thirdPreview['group_revision'],
+            'preview_token' => $thirdPreview['preview_token'], 'request_id' => (string) Str::uuid()])
+            ->assertCreated();
         $this->travelTo(now('Africa/Cairo')->addDay()->setTime(12, 0));
         $rejoinedRevision = $this->getJson($enrollmentPath)->assertOk()->json('attempts.0.revision');
         $this->postJson("{$enrollmentPath}/{$attempt['id']}/withdraw", [
-            'withdrawn_on' => $withdrawnOn, 'reason' => 'إغلاق فترة العودة مع حفظ الإصدار المطبق',
+            'withdrawn_on' => $today, 'reason' => 'إغلاق فترة العودة قبل تطبيق الإصدار الثالث',
             'revision' => $rejoinedRevision, 'request_id' => (string) Str::uuid(),
         ])->assertOk();
         $this->center->run(function () use ($attempt, $newPlan): void {
@@ -870,11 +883,89 @@ class StudyCoverageTest extends TestCase
         });
         $withdrawnEnrollment = $this->getJson($enrollmentPath)->assertOk()
             ->assertJsonPath('attempts.0.status', 'withdrawn')
+            ->assertJsonPath('attempts.0.plan_version_id', $thirdPlan['id'])
             ->assertJsonPath('attempts.0.requirements_count', 2);
         $this->assertLessThanOrEqual(6, (int) $withdrawnEnrollment->headers->get('X-Courses-Query-Count'));
         $withdrawnCoverage = $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk()
             ->assertJsonPath('students.0.required_count', 2);
         $this->assertLessThanOrEqual(6, (int) $withdrawnCoverage->headers->get('X-Courses-Query-Count'));
+
+        $transferredStudent = $this->student();
+        $transferredAttempt = $this->enroll($transferredStudent['id'], $group, now('Africa/Cairo')->toDateString());
+        $transferChange = ['target_plan_version_id' => $newPlan['id'],
+            'attempt_ids' => [$transferredAttempt['id']], 'reason' => 'تطبيق قبل النقل لمجموعة أخرى'];
+        $transferApplication = $this->postJson("{$path}/preview", $transferChange)->assertOk()->json();
+        $this->postJson($path, [...$transferChange,
+            'group_revision' => $transferApplication['group_revision'],
+            'preview_token' => $transferApplication['preview_token'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $targetGroup = $this->postJson("{$this->base}/groups", [
+            'level_id' => $group['level_id'], 'plan_version_id' => $newPlan['id'],
+            'name' => 'مجموعة الإصدار الثاني', 'approved_price' => '100.00',
+            'instructor_ids' => [$instructorId], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $transferredEnrollmentPath = "{$this->base}/students/{$transferredStudent['id']}/enrollments";
+        $transferPath = "{$transferredEnrollmentPath}/{$transferredAttempt['id']}/transfer";
+        $transferPreview = $this->getJson("{$transferPath}/preview?".http_build_query([
+            'group_id' => $targetGroup['id'], 'transferred_on' => now('Africa/Cairo')->toDateString(),
+        ]))->assertOk()->json('preview');
+        $this->postJson($transferPath, [
+            'group_id' => $targetGroup['id'], 'group_revision' => $targetGroup['revision'],
+            'transferred_on' => now('Africa/Cairo')->toDateString(), 'revision' => $transferPreview['revision'],
+            'preview_hash' => $transferPreview['hash'], 'reason' => 'النقل بعد تطبيق الإصدار الثاني',
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->center->run(fn () => $this->assertNull(DB::table('study_attempts')
+            ->where('id', $transferredAttempt['id'])->value('required_lectures')));
+        $transferredRevision = $this->getJson($transferredEnrollmentPath)->assertOk()
+            ->json('attempts.0.revision');
+        $transferredWaitlistPath = "{$transferredEnrollmentPath}/{$transferredAttempt['id']}/waitlist";
+        $this->postJson($transferredWaitlistPath, [
+            'entered_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'انتظار بعد النقل',
+            'revision' => $transferredRevision, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $transferredChoices = $this->getJson($transferredWaitlistPath)->assertOk();
+        $this->assertNotContains($group['id'], array_column($transferredChoices->json('groups'), 'id'));
+        $this->assertLessThanOrEqual(6, (int) $transferredChoices->headers->get('X-Courses-Query-Count'));
+        $this->postJson("{$transferredEnrollmentPath}/{$transferredAttempt['id']}/reattach", [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'joined_on' => now('Africa/Cairo')->toDateString(),
+            'revision' => $transferredChoices->json('attempt_revision'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertUnprocessable();
+
+        $backdatedStudent = $this->student();
+        $backdatedAttempt = $this->enroll($backdatedStudent['id'], $group,
+            now('Africa/Cairo')->subDays(2)->toDateString());
+        $backdatedChange = ['target_plan_version_id' => $newPlan['id'],
+            'attempt_ids' => [$backdatedAttempt['id']], 'reason' => 'تطبيق قبل انتظار مؤرخ سابقًا'];
+        $backdatedPreview = $this->postJson("{$path}/preview", $backdatedChange)->assertOk()->json();
+        $this->postJson($path, [...$backdatedChange,
+            'group_revision' => $backdatedPreview['group_revision'],
+            'preview_token' => $backdatedPreview['preview_token'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $backdatedEnrollmentPath = "{$this->base}/students/{$backdatedStudent['id']}/enrollments";
+        $backdatedRevision = $this->getJson($backdatedEnrollmentPath)->assertOk()
+            ->json('attempts.0.revision');
+        $backdatedWaitlistPath = "{$backdatedEnrollmentPath}/{$backdatedAttempt['id']}/waitlist";
+        $yesterday = now('Africa/Cairo')->subDay()->toDateString();
+        $this->postJson($backdatedWaitlistPath, [
+            'entered_on' => $yesterday, 'reason' => 'انتظار مؤرخ قبل اعتماد الخطة',
+            'revision' => $backdatedRevision, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $backdatedChoices = $this->getJson($backdatedWaitlistPath)->assertOk();
+        $originalGroup = collect($backdatedChoices->json('groups'))->firstWhere('id', $group['id']);
+        $backdatedRejoin = ['group_id' => $group['id'], 'group_revision' => $originalGroup['revision'],
+            'revision' => $backdatedChoices->json('attempt_revision'),
+            'request_id' => (string) Str::uuid()];
+        $this->postJson("{$backdatedEnrollmentPath}/{$backdatedAttempt['id']}/reattach", [
+            ...$backdatedRejoin, 'joined_on' => $yesterday,
+        ])->assertUnprocessable();
+        $this->postJson("{$backdatedEnrollmentPath}/{$backdatedAttempt['id']}/reattach", [
+            ...$backdatedRejoin, 'joined_on' => now('Africa/Cairo')->toDateString(),
+        ])->assertCreated();
     }
 
     public function test_repeated_plan_application_keeps_approved_equivalence_chain_and_both_snapshots(): void
