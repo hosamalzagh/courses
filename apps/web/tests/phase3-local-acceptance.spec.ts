@@ -254,3 +254,116 @@ test("student register stays paged and keeps the SQL budget on a longer dataset"
     await owner.close();
   }
 });
+
+test("a missed student makes up content and is approved after the group is complete", async ({ browser }) => {
+  const owner = await browser.newPage();
+  try {
+    await signIn(owner, "alpha");
+    const workspace = (await read(owner, "student-workspace")).body;
+    const centerId = workspace.center.id as string;
+    const north = workspace.branches.find((branch: { slug: string }) => branch.slug === "north").id as number;
+    const label = `إتمام متأخر ${crypto.randomUUID().slice(0, 6)}`;
+    const course = await write(owner, "courses", { branch_id: north, name: label, request_id: crypto.randomUUID() });
+    expect(course.status).toBe(201);
+    const stage = await write(owner, `courses/${course.body.course.id}/stages`, { name: "مرحلة القبول", request_id: crypto.randomUUID() });
+    expect(stage.status).toBe(201);
+    const level = await write(owner, `stages/${stage.body.stage.id}/levels`, { name: "مستوى القبول",
+      lectures: [{ number: 1, content: "المحتوى المطلوب", planned_hours: 1 }], request_id: crypto.randomUUID() });
+    expect(level.status).toBe(201);
+    const instructor = await write(owner, "instructors", { name: `محاضر ${label}`, branch_ids: [north], request_id: crypto.randomUUID() });
+    expect(instructor.status).toBe(201);
+    const group = async (name: string) => {
+      const result = await write(owner, "groups", { level_id: level.body.level.id, plan_version_id: level.body.level.plan.id,
+        name, approved_price: "0.00", instructor_ids: [instructor.body.instructor.id], request_id: crypto.randomUUID() });
+      expect(result.status).toBe(201);
+      return result.body.group;
+    };
+    const source = await group(`الأصل ${label}`);
+    const makeup = await group(`التعويض ${label}`);
+    const students = [];
+    for (const name of [`حاضر ${label}`, `متغيب ${label}`]) {
+      const student = await write(owner, "students", { name, branch_ids: [north], request_id: crypto.randomUUID() });
+      expect(student.status).toBe(201);
+      students.push(student.body.student);
+    }
+    const account = (await read(owner, `students/${students[0].id}/account`)).body;
+    if (!account.account.currency) {
+      expect((await write(owner, "financial-currency", { currency: "EGP", revision: account.account.currency_revision }, "PATCH")).status).toBe(200);
+    }
+    const attempts: { id: string; revision: number }[] = [];
+    for (const student of students) {
+      const current = (await read(owner, `students/${student.id}/enrollments`)).body;
+      const enrollment = await write(owner, `students/${student.id}/enrollments`, { group_id: source.id,
+        group_revision: source.revision, currency_revision: current.student.currency_revision,
+        joined_on: cairoDate(-3), discount: "0.00", discount_reason: null,
+        version: current.student.version, request_id: crypto.randomUUID() });
+      expect(enrollment.status).toBe(201);
+      attempts.push(enrollment.body.attempt);
+    }
+    const session = async (groupId: string, revision: number) => {
+      const result = await write(owner, `groups/${groupId}/sessions`, { kind: "single", revision,
+        start_at: `${cairoDate(2)}T17:00`, plan_lecture_number: 1, request_id: crypto.randomUUID() });
+      expect(result.status).toBe(201);
+      return result.body;
+    };
+    const sourceSession = await session(source.id, source.revision);
+    const makeupSession = await session(makeup.id, makeup.revision);
+    const sourceSessionId = sourceSession.sessions[0].id as string;
+    const makeupSessionId = makeupSession.sessions[0].id as string;
+    expect((await write(owner, `groups/${source.id}/start`, { revision: sourceSession.group_revision })).status).toBe(200);
+    backdate(centerId, `UPDATE study_groups SET started_at = now() - interval '3 days' WHERE id = '${source.id}';
+      UPDATE study_sessions SET scheduled_at = now() - interval '2 days' WHERE id = '${sourceSessionId}'`);
+    expect((await write(owner, `groups/${source.id}/sessions/${sourceSessionId}/attendance`, {
+      attempt_id: attempts[0].id, status: "counted", revision: 1, request_id: crypto.randomUUID(),
+    })).status).toBe(201);
+    const closedSource = await write(owner, `groups/${source.id}/sessions/${sourceSessionId}/close`, {
+      revision: 2, request_id: crypto.randomUUID(),
+    });
+    expect(closedSource.status).toBe(200);
+    expect(closedSource.body.absent_count).toBe(1);
+    await measurePage(owner, `groups/${source.id}/coverage`, students[0].name);
+    await owner.getByRole("checkbox", { name: `اختيار إتمام ${students[0].name}` }).check();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" }).click();
+    await expect(owner.getByRole("heading", { name: "معاينة قرار الإتمام" })).toBeVisible();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "تأكيد الاعتماد" }).click();
+    await expect(owner.getByText("اكتملت المجموعة، وحُفظت قرارات الطلاب المختارين.")).toBeVisible();
+    const completed = (await read(owner, `groups/${source.id}/coverage`)).body;
+    expect(completed.group.status).toBe("completed");
+    expect(completed.students.find((row: { attempt_id: string }) => row.attempt_id === attempts[1].id).attempt_status).toBe("active");
+
+    const booked = await write(owner, `students/${students[1].id}/enrollments/${attempts[1].id}/makeup/book`, {
+      session_id: makeupSessionId, source_session_id: sourceSessionId,
+      attempt_revision: attempts[1].revision, session_revision: makeupSession.sessions[0].revision,
+      request_id: crypto.randomUUID(),
+    });
+    expect(booked.status, JSON.stringify(booked.body)).toBe(201);
+    expect((await write(owner, `groups/${makeup.id}/start`, { revision: makeupSession.group_revision })).status).toBe(200);
+    backdate(centerId, `UPDATE study_groups SET started_at = now() - interval '2 days' WHERE id = '${makeup.id}';
+      UPDATE study_sessions SET scheduled_at = now() - interval '1 hour' WHERE id = '${makeupSessionId}'`);
+    expect((await write(owner, `groups/${makeup.id}/sessions/${makeupSessionId}/attendance`, {
+      attempt_id: attempts[1].id, status: "counted", revision: 1, request_id: crypto.randomUUID(),
+    })).status).toBe(201);
+    expect((await write(owner, `groups/${makeup.id}/sessions/${makeupSessionId}/close`, {
+      revision: 2, request_id: crypto.randomUUID(),
+    })).status).toBe(200);
+    const restored = (await read(owner, `groups/${source.id}/coverage`)).body;
+    expect(restored.students.find((row: { attempt_id: string }) => row.attempt_id === attempts[1].id)).toMatchObject({
+      covered_count: 1, required_count: 1, missing_numbers: [], attempt_status: "active",
+    });
+    await measurePage(owner, `groups/${source.id}/coverage`, students[1].name);
+    await owner.getByRole("checkbox", { name: `اختيار إتمام ${students[1].name}` }).check();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة اعتماد الطلاب" }).click();
+    await expect(owner.getByRole("heading", { name: "معاينة قرار الإتمام" })).toBeVisible();
+    await expect(owner.getByText("المجموعة مكتملة بالفعل. عدد الطلاب المختارين: ١.")).toBeVisible();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "تأكيد الاعتماد" }).click();
+    await expect(owner.getByText("حُفظ اعتماد إتمام الطلاب المختارين.")).toBeVisible();
+    const final = (await read(owner, `groups/${source.id}/coverage`)).body;
+    expect(final.group.status).toBe("completed");
+    expect(final.students.filter((row: { attempt_status: string }) => row.attempt_status === "completed")).toHaveLength(2);
+    await owner.goto(`${origin}/admin/audit`);
+    await expect(owner.getByRole("heading", { name: "إكمال مجموعة" }).first()).toBeVisible();
+    await expect(owner.getByRole("heading", { name: "اعتماد إتمام دراسة طالب" }).first()).toBeVisible();
+  } finally {
+    await owner.close();
+  }
+});
