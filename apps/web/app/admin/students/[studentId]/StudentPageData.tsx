@@ -38,9 +38,19 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
       {student.photo ? <Image src={student.photo.preview} alt={`صورة ${student.name}`} width={96} height={96} unoptimized className='rounded-lg object-cover' /> : <p>لم تُضف صورة للطالب بعد.</p>}
       <h2>{student.name}</h2>
       <p>رقم الطالب الداخلي: <bdi>{student.student_number.toLocaleString('ar-EG')}</bdi></p>
+      <p>حالة الملف: <strong>{student.status === 'suspended' ? 'موقوف' : 'نشط'}</strong></p>
       {student.manual_code !== null ? <p>{context.student_code_settings.label}{context.student_code_settings.enabled ? '' : ' — معطل، والقيمة محفوظة'}: <bdi dir='ltr'>{student.manual_code}</bdi></p> : null}
       <p>رقم التواصل: <bdi dir='ltr'>{value(student.phone)}</bdi>{primaryContact ? ` — ${primaryContact.name} (${primaryContact.relationship})` : student.phone ? ' — صاحبه غير محدد' : ''}</p>
       <p>الفروع المصرح بها: {student.branch_ids.map((id) => context.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join('، ')}</p>
+      {context.summary ? <div className='form-stack'>
+        <h3>الدراسة الحالية</h3>
+        {context.summary.current_study.length ? <ul>{context.summary.current_study.map(attempt => <li key={attempt.id}>
+          {attempt.course_name} · {attempt.level_name} · {attempt.branch_name} · {attempt.group_name ?? 'ينتظر مجموعة للمستوى'}
+        </li>)}</ul> : <p className='muted'>لا توجد دراسة جارية في الفروع المصرح بها.</p>}
+        {context.summary.current_study_has_more ? <p className='muted'>تظهر أحدث ثلاث محاولات فقط في الملخص.</p> : null}
+        <Link href={`/admin/students/${student.id}?tab=study`}>عرض الدراسة</Link>
+        {context.summary.financial && Number(context.summary.financial.debt) > 0 ? <InlineNotice tone='warning'>مديونية في الفروع المالية المصرح بها: {context.summary.financial.debt} {context.summary.financial.currency ?? ''}. <Link href={`/admin/students/${student.id}/account`}>فتح الحساب المالي</Link></InlineNotice> : null}
+      </div> : null}
     </section>
     {context.important_notes?.length ? <section className='context-card form-stack' aria-label='الملاحظات المهمة'>
       <h2>ملاحظات مهمة</h2>

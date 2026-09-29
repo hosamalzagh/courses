@@ -107,6 +107,10 @@ test("enrolls through the employee page and preserves SSR, credit, RTL, and the 
     expect(reads.every(read => Number.isInteger(read.count) && read.count! <= 6)).toBe(true);
   }
   await page.goto(studyUrl);
+  const summary = page.getByRole("region", { name: "ملخص الطالب" });
+  await expect(summary).toContainText(body.attempts[0].course_name);
+  await expect(summary).toContainText("1300.00 EGP");
+  await expect(summary).toContainText("نشط");
   await expect(page.getByRole("heading", { name: "الدراسة", exact: true })).toBeVisible();
   await expect(page.getByRole("row", { name: new RegExp(body.attempts[0].course_name) })).toContainText("يدرس المستوى");
   await page.getByRole("searchbox", { name: "بحث في محاولات الدراسة" }).fill(body.attempts[0].course_name);
@@ -128,6 +132,7 @@ test("enrolls through the employee page and preserves SSR, credit, RTL, and the 
   expect(suspended.status).toBe(200);
   await page.goto(studyUrl);
   await expect(page.getByText(/الملف موقوف حاليًا/)).toBeVisible();
+  await expect(summary).toContainText("موقوف");
   await expect(page.getByRole("row", { name: new RegExp(body.attempts[0].course_name) })).toContainText("يدرس المستوى");
   expect((await write(page, `students/${studentId}/status`, { status: "active", reason: "انتهت المراجعة", status_revision: suspended.body.status_revision, request_id: crypto.randomUUID() })).status).toBe(200);
   await page.goto(`${origin}/admin/students/${studentId}/account`);

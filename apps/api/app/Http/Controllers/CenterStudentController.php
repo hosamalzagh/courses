@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use App\Support\ActiveStudentAllocations;
+use App\Support\EffectiveStudyFees;
 use App\Support\StudentAttachments;
 use App\Support\StudentBarcode;
 use App\Support\StudentContacts;
@@ -11,6 +13,7 @@ use App\Support\StudentCustomFields;
 use App\Support\StudentEventNotes;
 use App\Support\StudentIdentity;
 use App\Support\StudentManualCodes;
+use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
 use App\Support\StudentProfileChoices;
 use Carbon\CarbonImmutable;
@@ -104,6 +107,41 @@ class CenterStudentController extends Controller
                 ->selectRaw('COALESCE(payment.id, allocation.payment_id) as payment_id');
             $query->selectSub(DB::connection('tenant')->query()->fromSub($important, 'important_rows')
                 ->selectRaw('json_agg(important_rows)'), 'important_notes');
+            $currentStudy = DB::connection('tenant')->table('study_attempts as summary_attempts')
+                ->join('levels as summary_levels', 'summary_levels.id', '=', 'summary_attempts.level_id')
+                ->join('stages as summary_stages', 'summary_stages.id', '=', 'summary_levels.stage_id')
+                ->join('courses as summary_courses', 'summary_courses.id', '=', 'summary_stages.course_id')
+                ->join('branches as summary_branches', 'summary_branches.id', '=', 'summary_attempts.branch_id')
+                ->leftJoin('study_groups as summary_groups', function ($join): void {
+                    $join->on('summary_groups.id', '=', 'summary_attempts.current_group_id')
+                        ->on('summary_groups.level_id', '=', 'summary_attempts.level_id');
+                })
+                ->whereColumn('summary_attempts.student_id', 'students.id')
+                ->where('summary_attempts.status', 'active')
+                ->whereColumn('summary_courses.branch_id', 'summary_attempts.branch_id')
+                ->whereExists(DB::connection('tenant')->table('student_branches as summary_associations')
+                    ->whereColumn('summary_associations.student_id', 'students.id')
+                    ->whereColumn('summary_associations.branch_id', 'summary_attempts.branch_id')->selectRaw('1'))
+                ->when(! $permissions->isCenterManager(), fn (Builder $rows) => $rows->whereIn('summary_attempts.branch_id', $this->branchScope($permissions, 'read')))
+                ->orderByDesc('summary_attempts.updated_at')->orderByDesc('summary_attempts.id')->limit(4)
+                ->select(['summary_attempts.id', 'summary_attempts.branch_id', 'summary_attempts.updated_at',
+                    'summary_branches.name as branch_name', 'summary_courses.name as course_name',
+                    'summary_levels.name as level_name', 'summary_groups.name as group_name']);
+            $query->selectSub(DB::connection('tenant')->query()->fromSub($currentStudy, 'study_summary_rows')
+                ->selectRaw('json_agg(study_summary_rows ORDER BY updated_at DESC, id DESC)'), 'current_study_summary');
+            $financeBranches = $this->branchScope($permissions, 'finance.read');
+            if ($permissions->isCenterManager() || $financeBranches !== []) {
+                $due = DB::connection('tenant')->table('study_attempt_fees as summary_fees')
+                    ->whereColumn('summary_fees.student_id', 'students.id')
+                    ->when(! $permissions->isCenterManager(), fn (Builder $rows) => $rows->whereIn('summary_fees.branch_id', $financeBranches))
+                    ->selectRaw('COALESCE(SUM('.EffectiveStudyFees::amount('summary_fees').'), 0)');
+                $paid = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'students.id')
+                    ->when(! $permissions->isCenterManager(), fn (Builder $rows) => $rows->whereIn('allocations.target_branch_id', $financeBranches))
+                    ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
+                $query->selectSub($due, 'summary_due_total')->selectSub($paid, 'summary_paid_total')
+                    ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)
+                        ->select('financial_currency'), 'summary_currency');
+            }
         }
         if ($studentId !== null && ($data['tab'] ?? '') === 'custom-history') {
             $historyPage = (int) ($data['custom_history_page'] ?? 1);
@@ -233,6 +271,14 @@ class CenterStudentController extends Controller
             ...(($data['tab'] ?? '') === 'enrollment-notes' ? ['enrollment_notes' => ['entries' => array_slice(json_decode($students->first()->enrollment_notes ?? '[]', true) ?? [], 0, 20),
                 'pagination' => ['page' => $notesPage, 'has_more' => count(json_decode($students->first()->enrollment_notes ?? '[]', true) ?? []) > 20]]] : []),
             ...($studentId !== null ? ['important_notes' => json_decode($students->first()->important_notes ?? '[]', true) ?? []] : []),
+            ...($studentId !== null ? ['summary' => [
+                'current_study' => array_slice(json_decode($students->first()->current_study_summary ?? '[]', true) ?? [], 0, 3),
+                'current_study_has_more' => count(json_decode($students->first()->current_study_summary ?? '[]', true) ?? []) > 3,
+                'financial' => isset($students->first()->summary_due_total)
+                    ? ['debt' => StudentMoney::format(max(0, StudentMoney::cents($students->first()->summary_due_total)
+                        - StudentMoney::cents($students->first()->summary_paid_total))), 'currency' => $students->first()->summary_currency]
+                    : null,
+            ]] : []),
             ...($studentId !== null && ($data['tab'] ?? '') === 'notes' ? ['student_notes' => ['entries' => array_slice(json_decode($students->first()->student_notes ?? '[]', true) ?? [], 0, 20),
                 'pagination' => ['page' => $notesPage, 'has_more' => count(json_decode($students->first()->student_notes ?? '[]', true) ?? []) > 20]]] : []),
             ...($studentId !== null && ($data['tab'] ?? '') === 'study' ? ['study' => ['attempts' => array_slice(json_decode($students->first()->study_attempts ?? '[]', true) ?? [], 0, 20),

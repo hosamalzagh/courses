@@ -157,8 +157,8 @@ class StudyEnrollmentTest extends TestCase
     public function test_profile_study_tab_preserves_attempts_during_suspension_and_hides_other_branches(): void
     {
         $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
-        $north = $this->group($this->north, '0.00');
-        $south = $this->group($this->south, '0.00');
+        $north = $this->group($this->north, '100.00');
+        $south = $this->group($this->south, '200.00');
         $transferTarget = $this->group($this->south, '0.00');
         $this->center->run(fn () => DB::table('study_groups')->where('id', $north['id'])
             ->update(['name' => 'Northern group']));
@@ -179,7 +179,10 @@ class StudyEnrollmentTest extends TestCase
         }
         $path = "{$this->base}/students/{$student['id']}?tab=study";
         $before = $this->getJson($path)->assertOk()->assertJsonCount(2, 'study.attempts')
-            ->assertJsonPath('study.attempts.0.status', 'active');
+            ->assertJsonPath('study.attempts.0.status', 'active')
+            ->assertJsonCount(2, 'summary.current_study')
+            ->assertJsonPath('summary.financial.debt', '300.00')
+            ->assertJsonPath('summary.financial.currency', 'EGP');
         $this->assertLessThanOrEqual(6, (int) $before->headers->get('X-Courses-Query-Count'));
         $this->postJson("{$this->base}/students/{$student['id']}/status", [
             'status' => 'suspended', 'reason' => 'مراجعة ملف الطالب', 'status_revision' => 1,
@@ -218,12 +221,21 @@ class StudyEnrollmentTest extends TestCase
         $this->center->run(fn () => DB::table('student_branches')
             ->where('student_id', $student['id'])->where('branch_id', $this->south)->delete());
         $this->getJson($path)->assertOk()->assertJsonCount(1, 'study.attempts')
-            ->assertJsonPath('study.attempts.0.branch_id', $this->north);
+            ->assertJsonPath('study.attempts.0.branch_id', $this->north)
+            ->assertJsonCount(0, 'summary.current_study');
+
+        $this->grant([$this->north => ['accounting']]);
+        $this->asUser($this->staff);
+        $accounting = $this->getJson($path)->assertOk()->assertJsonCount(0, 'summary.current_study')
+            ->assertJsonPath('summary.financial.debt', '100.00');
+        $this->assertLessThanOrEqual(6, (int) $accounting->headers->get('X-Courses-Query-Count'));
+        $this->assertStringNotContainsString('South', $accounting->getContent());
 
         $this->grant([$this->north => ['branch_viewer']]);
         $this->asUser($this->staff);
         $visible = $this->getJson($path)->assertOk()->assertJsonCount(1, 'study.attempts')
-            ->assertJsonPath('study.attempts.0.branch_id', $this->north);
+            ->assertJsonPath('study.attempts.0.branch_id', $this->north)
+            ->assertJsonPath('summary.financial', null);
         $this->assertLessThanOrEqual(6, (int) $visible->headers->get('X-Courses-Query-Count'));
         $this->assertStringNotContainsString('South', $visible->getContent());
         $this->getJson("{$this->base}/students/{$student['id']}?tab=study&study_page=2")->assertOk()
