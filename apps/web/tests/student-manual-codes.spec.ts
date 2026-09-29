@@ -177,7 +177,8 @@ test('settings conflict recovers through the correct header form and RTL themes 
   await page.screenshot({path:'/tmp/courses-issue57/codes-settings-desktop-dark.png',fullPage:true,animations:'disabled'});
   await page.setViewportSize({width:390,height:844}); expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.screenshot({path:'/tmp/courses-issue57/codes-settings-mobile-dark.png',fullPage:true});
-  await label.fill('قيمة ملغاة'); await page.getByRole('button',{name:'إلغاء إعداد الباركود',exact:true}).click(); await expect(label).toHaveValue('كارت لوحة المفاتيح');
+  await label.fill('قيمة ملغاة'); await expect(page.getByRole('button',{name:'حفظ إعداد الباركود الإضافي',exact:true})).toBeVisible();
+  await label.fill('كارت لوحة المفاتيح'); await expect(page.getByRole('button',{name:'حفظ إعداد الباركود الإضافي',exact:true})).toHaveCount(0);
 });
 
 test('ordinary SSR code settings, create, profile, edit and scan remain at six measured SQL queries', async ({page}) => {

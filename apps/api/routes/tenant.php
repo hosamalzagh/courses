@@ -82,8 +82,9 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
 
             if ($request->query('include') === 'settings' && $permissions->isCenterManager()) {
                 $payload['settings'] = DB::connection('tenant')->table('center_settings')->where('id', 1)
-                    ->first(['contact_email', 'phone', 'address', 'student_number_start', 'student_number_revision', 'student_code_enabled', 'student_code_label', 'student_code_revision', 'financial_currency', 'financial_currency_revision', 'financial_currency_locked_at']) ?: [
+                    ->first(['contact_email', 'phone', 'address', 'student_number_start', 'student_number_revision', 'student_code_enabled', 'student_code_label', 'student_code_revision', 'student_all_branches_enabled', 'student_all_branches_revision', 'financial_currency', 'financial_currency_revision', 'financial_currency_locked_at']) ?: [
                         'contact_email' => null, 'phone' => null, 'address' => null, 'student_number_start' => 1, 'student_number_revision' => 1,
+                        'student_all_branches_enabled' => false, 'student_all_branches_revision' => 1,
                         'financial_currency' => null, 'financial_currency_revision' => 1, 'financial_currency_locked_at' => null,
                     ];
             }
@@ -94,7 +95,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
                     ->where('settings.id', 1)->where('policy.id', 1)
                     ->first([
                         'settings.student_number_start', 'settings.student_number_revision', 'settings.student_code_enabled',
-                        'settings.student_code_label', 'settings.student_code_revision',
+                        'settings.student_code_label', 'settings.student_code_revision', 'settings.student_all_branches_enabled', 'settings.student_all_branches_revision',
                         'policy.enabled as policy_enabled', 'policy.revision as policy_revision',
                         'policy.default_sharing_enabled as policy_default_sharing_enabled',
                     ]);
@@ -104,6 +105,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
                     'student_code_enabled' => (bool) $studentSettings->student_code_enabled,
                     'student_code_label' => $studentSettings->student_code_label,
                     'student_code_revision' => $studentSettings->student_code_revision,
+                    'student_all_branches_enabled' => (bool) $studentSettings->student_all_branches_enabled,
+                    'student_all_branches_revision' => $studentSettings->student_all_branches_revision,
                 ];
                 $payload['student_search_policy'] = [
                     'enabled' => (bool) $studentSettings->policy_enabled,
@@ -272,6 +275,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::put('members/{membership}/grants', [CenterMemberController::class, 'updateGrants']);
         Route::get('settings', [CenterSettingsController::class, 'show']);
         Route::patch('student-code-settings', [CenterStudentController::class, 'updateCodeSettings']);
+        Route::patch('student-branch-settings', [CenterSettingsController::class, 'updateStudentBranches']);
         Route::patch('student-numbering', [CenterStudentNumberingController::class, 'update']);
         Route::patch('settings', [CenterSettingsController::class, 'update']);
         Route::get('audit', [CenterAuditController::class, 'index']);

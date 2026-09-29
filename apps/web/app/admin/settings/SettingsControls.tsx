@@ -48,7 +48,7 @@ export function SettingsControls({ context, initialSettings }: { context: Center
   }
 
   return <>
-    <CenterPageActions context={context} actions={<><Button variant="primary" form={`${formPrefix}-0`} disabled={busy} type="submit" busy={busy} busyLabel="جارٍ الحفظ…">حفظ الإعدادات</Button>{dirty ? <Button disabled={busy} onClick={() => { setEmail(saved.email); setPhone(saved.phone); setAddress(saved.address); setError(""); setFieldErrors({}); }}>إلغاء تعديل بيانات المركز</Button> : null}</>} />
+    <CenterPageActions context={context} actions={dirty ? <Button variant="primary" form={`${formPrefix}-0`} disabled={busy} type="submit" busy={busy} busyLabel="جارٍ الحفظ…">حفظ الإعدادات</Button> : null} />
       <UnsavedChangesGuard dirty={dirty} guardHistory />
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
@@ -58,13 +58,13 @@ export function SettingsControls({ context, initialSettings }: { context: Center
             <p><strong>{context.center.name}</strong></p>
           </SettingsRow>
           <SettingsRow title="بريد التواصل" description="البريد الذي يستخدمه المركز للتواصل مع الطلاب وأولياء الأمور.">
-            <FormField id={`${formPrefix}-email`} label="بريد التواصل" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.contact_email} direction="ltr" />
+            <FormField id={`${formPrefix}-email`} label="بريد التواصل" type="email" value={email} onChange={(value) => { setEmail(value); setError(""); setFieldErrors({}); }} error={fieldErrors.contact_email} direction="ltr" />
           </SettingsRow>
           <SettingsRow title="هاتف المركز" description="رقم التواصل الرئيسي للمركز.">
-            <FormField id={`${formPrefix}-phone`} label="الهاتف" type="tel" value={phone} onChange={(value) => { setPhone(value); setFieldErrors({}); }} error={fieldErrors.phone} direction="ltr" />
+            <FormField id={`${formPrefix}-phone`} label="الهاتف" type="tel" value={phone} onChange={(value) => { setPhone(value); setError(""); setFieldErrors({}); }} error={fieldErrors.phone} direction="ltr" />
           </SettingsRow>
           <SettingsRow title="عنوان المركز" description="العنوان العام للمركز؛ لكل فرع عنوانه الخاص في تبويب الفروع.">
-            <FormField id={`${formPrefix}-address`} label="العنوان" value={address} onChange={(value) => { setAddress(value); setFieldErrors({}); }} error={fieldErrors.address} />
+            <FormField id={`${formPrefix}-address`} label="العنوان" value={address} onChange={(value) => { setAddress(value); setError(""); setFieldErrors({}); }} error={fieldErrors.address} />
           </SettingsRow>
         </FieldGroup>
       </form>

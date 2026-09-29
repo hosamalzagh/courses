@@ -49,6 +49,7 @@ class CenterStudentController extends Controller
             'attachments_status' => ['sometimes', 'in:active,archived'],
             'q' => ['nullable', 'string', 'max:255'],
             'identifier' => ['nullable', 'string', 'max:50'],
+            'search_only' => ['sometimes', 'boolean'],
         ]);
         $permissions = $request->attributes->get('center_permissions');
         $page = (int) ($data['page'] ?? 1);
@@ -64,7 +65,8 @@ class CenterStudentController extends Controller
             ->selectSub(StudentCustomFields::initialQuery($permissions, $studentId), 'custom_fields')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('student_custom_fields_revision'), 'custom_fields_revision')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->selectRaw("json_build_object('enabled', student_code_enabled, 'label', student_code_label, 'revision', student_code_revision)"), 'code_settings')
-            ->selectSub(DB::connection('tenant')->table('student_search_policy')->where('id', 1)->select('enabled'), 'student_search_enabled')->first();
+            ->selectSub(DB::connection('tenant')->table('student_search_policy')->where('id', 1)->select('enabled'), 'student_search_enabled')
+            ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->selectRaw("json_build_object('enabled', student_all_branches_enabled, 'revision', student_all_branches_revision)"), 'branch_settings')->first();
         $branches = collect(json_decode($workspace->branches ?? '[]'));
         $choiceRows = collect(json_decode($workspace->choices ?? '[]', true));
         $choices = [];
@@ -333,7 +335,9 @@ class CenterStudentController extends Controller
             $query->selectSub(DB::connection('tenant')->query()->fromSub($attendance, 'attendance_rows')
                 ->selectRaw('json_agg(attendance_rows ORDER BY scheduled_at DESC, id DESC)'), 'attendance_entries');
         }
-        $students = $query->orderBy('student_number')->offset(($page - 1) * 50)->limit(51)->get();
+        $emptySearch = $studentId === null && ($data['search_only'] ?? false)
+            && trim($data['q'] ?? '') === '' && trim($data['identifier'] ?? '') === '';
+        $students = $emptySearch ? collect() : $query->orderBy('student_number')->offset(($page - 1) * 50)->limit(51)->get();
         if ($studentId !== null) {
             abort_if($students->isEmpty(), 404);
         }
@@ -347,6 +351,7 @@ class CenterStudentController extends Controller
             'profile_choice_lists' => $choices,
             'student_code_settings' => json_decode($workspace->code_settings, true),
             'student_search_enabled' => (bool) $workspace->student_search_enabled,
+            'student_branch_settings' => json_decode($workspace->branch_settings, true),
             'custom_fields' => ['fields' => array_slice(json_decode($workspace->custom_fields ?? '[]', true) ?? [], 0, 50), 'revision' => (int) $workspace->custom_fields_revision, 'page' => 1, 'has_more' => count(json_decode($workspace->custom_fields ?? '[]', true) ?? []) > 50],
             'students' => $students->take(50)->map(fn (stdClass $student): array => $this->payload($student, $permissions))->values(),
             ...($studentId !== null ? ['suspensions' => array_slice(json_decode($students->first()->suspensions ?? '[]', true) ?? [], 0, 20), 'status_pagination' => ['page' => $statusPage, 'has_more' => count(json_decode($students->first()->suspensions ?? '[]', true) ?? []) > 20]] : []),
@@ -445,11 +450,19 @@ class CenterStudentController extends Controller
 
                 return response()->json(['student' => $this->read($existing->id, $permissions)]);
             }
+            $settings = DB::connection('tenant')->table('center_settings')->where('id', 1)->lockForUpdate()
+                ->first(['student_number_start', 'student_all_branches_enabled', 'student_all_branches_revision']);
+            if (isset($data['student_branch_settings_revision']) && (int) $data['student_branch_settings_revision'] !== (int) $settings->student_all_branches_revision) {
+                $this->conflict('student_branch_settings_changed');
+            }
+            if ($settings->student_all_branches_enabled && $permissions->isCenterManager()) {
+                $data['branch_ids'] = DB::connection('tenant')->table('branches')->orderBy('id')->pluck('id')->map(fn ($id): int => (int) $id)->all();
+            }
             StudentManualCodes::validate($data['manual_code'] ?? null);
             $identity = StudentIdentity::columns($data, $permissions, $data['branch_ids']);
             StudentProfileChoices::validate($data);
             $customValues = StudentCustomFields::validate($data, StudentIdentity::canManage($permissions, $data['branch_ids']));
-            $start = DB::connection('tenant')->table('center_settings')->where('id', 1)->value('student_number_start');
+            $start = $settings->student_number_start;
             $sequence = DB::connection('tenant')->selectOne('SELECT last_value, is_called FROM students_student_number_seq');
             $next = (int) $sequence->last_value + ($sequence->is_called ? 1 : 0);
             if (max($next, (int) $start) > 9007199254740991) {
@@ -625,6 +638,7 @@ class CenterStudentController extends Controller
         $data = $request->validate([
             'custom_values' => ['sometimes', 'array', 'max:10000'],
             'custom_fields_revision' => ['sometimes', 'integer', 'min:1'],
+            'student_branch_settings_revision' => ['sometimes', 'integer', 'min:1'],
             'national_id' => ['sometimes', 'nullable', 'string', 'max:14'],
             'passport_number' => ['sometimes', 'nullable', 'string', 'max:50'],
             'manual_code' => ['sometimes', 'nullable', 'string', 'max:50'],

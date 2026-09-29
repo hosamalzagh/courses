@@ -1,19 +1,16 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { credentials as localCredentials, ensureLocalFixtures } from './local-fixtures';
+import { credentials as localCredentials, ensureLocalFixtures, signIn } from './local-fixtures';
 
 const origin = process.env.COURSES_PROFILE_TEST_ORIGIN ?? 'http://alpha.courses.test';
 const fixtureFile = process.env.COURSES_PROFILE_FIXTURE_FILE;
 const fixture = fixtureFile ? JSON.parse(readFileSync(fixtureFile, 'utf8')) : undefined;
 
 test.beforeEach(async ({ page, browser }) => {
+  test.setTimeout(120_000);
   if (!fixture) await ensureLocalFixtures(browser);
   const account = fixture?.alpha ?? localCredentials('alpha');
-  await page.goto(`${origin}/login`);
-  await page.getByRole('textbox', { name: 'البريد الإلكتروني' }).fill(account.email);
-  await page.getByRole('textbox', { name: 'كلمة المرور' }).fill(account.password);
-  await page.getByRole('button', { name: 'دخول المركز', exact: true }).click();
-  await expect(page).toHaveURL(/\/admin$/);
+  await signIn(page, origin, account.email, account.password);
 });
 
 async function headerSubmit(page: Page, label: string) {
@@ -28,6 +25,8 @@ async function headerSubmit(page: Page, label: string) {
 }
 
 test('every admin editor places submit and cancel in the shared header', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto(`${origin}/admin/settings?tab=branches`);
   await page.getByRole('button', { name: 'إنشاء فرع', exact: true }).click();
   await headerSubmit(page, 'حفظ الفرع');
   await page.getByRole('textbox', { name: 'اسم الفرع', exact: true }).fill('تحقق الهيدر');
@@ -59,12 +58,70 @@ test('every admin editor places submit and cancel in the shared header', async (
   }
 
   await page.goto(`${origin}/admin/settings`);
+  const generalHeader = page.locator('.center-topbar');
+  const contactEmail = page.getByRole('textbox', { name: 'بريد التواصل' });
+  const savedEmail = await contactEmail.inputValue();
+  await expect(generalHeader.getByRole('button', { name: 'حفظ الإعدادات', exact: true })).toHaveCount(0);
+  await expect(generalHeader.getByRole('button', { name: 'حفظ عملة المركز', exact: true })).toHaveCount(0);
+  await expect(generalHeader.getByRole('button', { name: 'إلغاء تعديل العملة', exact: true })).toHaveCount(0);
+  const currency = page.getByRole('combobox', { name: 'عملة المركز' });
+  if (await currency.count()) {
+    const savedCurrency = await currency.inputValue();
+    await currency.selectOption(savedCurrency === 'EGP' ? 'SAR' : 'EGP');
+    await expect(generalHeader.getByRole('button', { name: 'حفظ عملة المركز', exact: true })).toBeVisible();
+    await expect(generalHeader.getByRole('button', { name: 'إلغاء تعديل العملة', exact: true })).toHaveCount(0);
+    await currency.selectOption(savedCurrency);
+    await expect(generalHeader.getByRole('button', { name: 'حفظ عملة المركز', exact: true })).toHaveCount(0);
+  }
+  await contactEmail.fill('review@example.test');
   await headerSubmit(page, 'حفظ الإعدادات');
+  await contactEmail.fill(savedEmail);
+  await expect(generalHeader.getByRole('button', { name: 'حفظ الإعدادات', exact: true })).toHaveCount(0);
   await page.getByRole('tab', { name: 'الطلاب', exact: true }).click();
+  const numbering = page.getByRole('spinbutton', { name: 'بداية ترقيم الطلاب' });
+  await numbering.fill(String(Number(await numbering.inputValue()) + 1));
   await headerSubmit(page, 'حفظ بداية الترقيم');
+  await numbering.fill(String(Number(await numbering.inputValue()) - 1));
 
   await page.goto(`${origin}/admin/settings?tab=security`);
   await headerSubmit(page, 'تفعيل التحقق بخطوتين');
+});
+
+test('student settings header shows only relevant actions on desktop and mobile', async ({ page }) => {
+  for (const [width, theme] of [[1440, 'light'], [390, 'dark']] as const) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.context().addCookies([{ name: 'courses_theme', value: theme, url: origin }]);
+    await page.goto(`${origin}/admin/settings?tab=students`);
+    const header = page.locator('.center-topbar');
+    await expect(header.getByRole('button', { name: /حفظ (بداية الترقيم|إعداد الفروع|إعداد الباركود الإضافي)/ })).toHaveCount(0);
+    await expect(header.getByRole('button', { name: 'إجراءات البحث والمشاركة', exact: true })).toHaveCount(0);
+    const toggle = page.getByRole('checkbox', { name: 'تفعيل البحث بين الفروع', exact: true });
+    await expect(toggle).toBeVisible();
+    await expect(page.getByRole('checkbox', { name: 'السماح بمشاركة الملفات الجديدة', exact: true })).toBeVisible();
+    await toggle.click();
+    await expect(page.getByRole('alertdialog', { name: 'تفعيل البحث بين الفروع' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(toggle).toBeFocused();
+    await expect(toggle).not.toBeChecked();
+    await expect(page.getByRole('tablist', { name: 'أقسام الإعدادات' }).getByRole('tab', { name: 'الحقول الإضافية' })).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: 'إعدادات الطلاب', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('tab', { name: 'الحقول الإضافية', exact: true }).click();
+    await expect(page).toHaveURL(`${origin}/admin/settings?tab=student-fields`);
+    await expect(page.getByRole('tab', { name: 'الطلاب', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('tab', { name: 'قوائم بيانات الطالب', exact: true }).click();
+    await expect(page).toHaveURL(`${origin}/admin/settings?tab=student-choices`);
+    await page.getByRole('tab', { name: 'إعدادات الطلاب', exact: true }).click();
+    await expect(page).toHaveURL(`${origin}/admin/settings?tab=students`);
+
+    const numbering = page.getByRole('spinbutton', { name: 'بداية ترقيم الطلاب' });
+    const original = await numbering.inputValue();
+    await numbering.fill(String(Number(original) + 1));
+    await headerSubmit(page, 'حفظ بداية الترقيم');
+    await numbering.fill(original);
+    await expect(numbering).toHaveValue(original);
+    await expect(header.getByRole('button', { name: 'حفظ بداية الترقيم', exact: true })).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
 });
 
 test('student form keeps header actions visible on a narrow dark screen', async ({ page }) => {
@@ -74,14 +131,53 @@ test('student form keeps header actions visible on a narrow dark screen', async 
   await headerSubmit(page, 'حفظ ملف الطالب');
   await expect(page.locator('.center-topbar').getByRole('link', { name: 'إلغاء', exact: true })).toBeVisible();
   await expect(page.locator('#student-name')).toHaveAttribute('data-slot', 'input');
-  await expect(page.getByRole('checkbox').first()).toHaveAttribute('data-slot', 'checkbox');
+  const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+  if (workspace.student_branch_settings.enabled) {
+    await expect(page.getByRole('checkbox')).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'الفروع' })).toHaveCount(0);
+  } else {
+    await expect(page.getByRole('checkbox').first()).toHaveAttribute('data-slot', 'checkbox');
+  }
   await expect(page.getByRole('radio').first()).toHaveAttribute('data-slot', 'radio-group-item');
+  await page.getByRole('button', { name: 'اختيار تاريخ الميلاد', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'اختيار تاريخ الميلاد' })).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   await expect(page.locator('.center-topbar').getByRole('button', { name: 'حفظ ملف الطالب', exact: true })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole('button', { name: 'القائمة', exact: true }).click();
-  await expect(page.getByRole('dialog')).toHaveAttribute('data-slot', 'sheet-content');
+  await expect(page.getByRole('dialog', { name: 'مركز ألفا' })).toHaveAttribute('data-slot', 'sheet-content');
   await expect(page.getByRole('button', { name: 'إغلاق القائمة', exact: true })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: 'القائمة', exact: true })).toBeFocused();
+});
+
+test('center-wide student linking updates the owner creation form', async ({ page }) => {
+  const settingsResponse = await page.request.get(`${origin}/api/v1/center/user?include=student-settings`);
+  expect(settingsResponse.ok()).toBe(true);
+  const original = Boolean((await settingsResponse.json()).settings.student_all_branches_enabled);
+  const settingName = 'ربط كل ملف طالب جديد بجميع فروع المركز';
+
+  async function setBranchLinking(enabled: boolean) {
+    await page.goto(`${origin}/admin/settings?tab=students`);
+    const checkbox = page.getByRole('checkbox', { name: settingName, exact: true });
+    await expect(checkbox).toBeVisible();
+    if ((await checkbox.isChecked()) !== enabled) {
+      await checkbox.click();
+      const save = page.locator('.center-topbar').getByRole('button', { name: 'حفظ إعداد الفروع', exact: true });
+      await save.click();
+      await expect(save).toHaveCount(0);
+      await expect(checkbox).toBeChecked({ checked: enabled });
+      await expect.poll(async () => Boolean((await (await page.request.get(`${origin}/api/v1/center/user?include=student-settings`)).json()).settings.student_all_branches_enabled)).toBe(enabled);
+    }
+  }
+
+  try {
+    await setBranchLinking(true);
+    await page.goto(`${origin}/admin/students/new`);
+    await expect(page.getByRole('region', { name: 'الفروع', exact: true })).toHaveCount(0);
+    await expect(page.locator('.center-topbar').getByRole('button', { name: 'حفظ ملف الطالب', exact: true })).toBeVisible();
+  } finally {
+    await setBranchLinking(original);
+  }
 });

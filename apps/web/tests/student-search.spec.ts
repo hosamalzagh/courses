@@ -133,14 +133,15 @@ test('center search management confirms visibility, recovers stale and uncertain
     await expect(page.getByRole('radio', { name: 'كل المركز', exact: true })).toBeDisabled();
     await expect(page.getByRole('searchbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' })).toBeEnabled();
     await page.goto(`${host}/admin/settings?tab=students`);
-    const toggle = page.getByRole('button', { name: 'تفعيل البحث بين الفروع', exact: true });
+    const toggle = page.getByRole('checkbox', { name: 'تفعيل البحث بين الفروع', exact: true });
     await toggle.click();
     const dialog = page.getByRole('alertdialog', { name: 'تفعيل البحث بين الفروع' });
     await expect(dialog.getByRole('button', { name: 'إلغاء', exact: true })).toBeFocused();
     await page.keyboard.press('Escape'); await expect(toggle).toBeFocused();
     await toggle.click();
     await dialog.getByRole('button', { name: 'تفعيل البحث', exact: true }).click();
-    await expect(page.getByRole('status').filter({ hasText: 'فُعّل البحث' })).toBeVisible();
+    await expect(toggle).toBeChecked();
+    await expect(page.getByText('فُعّل البحث بين الفروع.', { exact: true })).toHaveCount(0);
     await restorePolicy(page, false);
     const current = (await workspace(page)).policy;
     const before = await (await page.request.get(`${host}/api/v1/center/audit`)).json();
@@ -160,7 +161,7 @@ test('center search management confirms visibility, recovers stale and uncertain
     const old = (await workspace(page)).policy;
     expect((await write(page, 'student-search-policy', 'PATCH', { enabled: false, revision: old.revision })).status).toBe(200);
     expect((await write(page, 'student-search-policy', 'PATCH', { enabled: true, revision: old.revision + 1 })).status).toBe(200);
-    await page.getByRole('button', { name: 'تعطيل البحث بين الفروع', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'تفعيل البحث بين الفروع', exact: true }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'تعطيل البحث', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'تغيّر إعداد البحث' })).toBeVisible();
     await page.getByRole('button', { name: 'تحميل أحدث إعداد للبحث' }).click();
@@ -169,11 +170,11 @@ test('center search management confirms visibility, recovers stale and uncertain
       if (route.request().method() === 'PATCH') { await route.fetch(); await route.abort('connectionfailed'); await page.unroute('**/api/v1/center/student-search-policy'); }
       else await route.continue();
     });
-    await page.getByRole('button', { name: 'تعطيل البحث بين الفروع', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'تفعيل البحث بين الفروع', exact: true }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'تعطيل البحث', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'تعذر التأكد من حفظ الإعداد' })).toBeVisible();
     await page.getByRole('button', { name: 'تحميل أحدث إعداد للبحث' }).click();
-    await expect(page.getByRole('button', { name: 'تفعيل البحث بين الفروع', exact: true })).toBeVisible();
+    await expect(page.getByRole('checkbox', { name: 'تفعيل البحث بين الفروع', exact: true })).not.toBeChecked();
     const light = page.getByRole('button', { name: 'تفعيل الوضع الفاتح' });
     if (await light.count()) await light.click();
     await page.screenshot({ path: '/tmp/courses-issue22/search-light.png', fullPage: true });

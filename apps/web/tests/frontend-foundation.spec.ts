@@ -71,6 +71,6 @@ test("shared theme, table state, drawer focus and responsive overflow work toget
   await expect(page.getByRole("table", { name: "الأحداث", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "الإعدادات", exact: true }).click();
   await page.getByRole("tab", { name: "عام", exact: true }).click();
-  await expect(page.getByRole("button", { name: "حفظ الإعدادات", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "حفظ الإعدادات", exact: true })).toHaveCount(0);
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 });

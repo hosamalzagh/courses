@@ -1,17 +1,20 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions } from "@/components/CenterShell";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { InlineNotice } from "@/components/InlineNotice";
 import { SettingsRow } from "@/components/SettingsRow";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { centerRequest, responseMessage } from "@/lib/client-api";
 import type { CenterContext, StudentSearchPolicy } from "@/lib/server-context";
 
 export function StudentSearchPolicyControls({ initialPolicy }: { initialPolicy: StudentSearchPolicy }) {
   const router = useRouter();
+  const prefix = useId();
   const saving = useRef(false);
   const [policy, setPolicy] = useState(initialPolicy);
   const [confirmation, setConfirmation] = useState<"search" | "default" | null>(null);
@@ -19,6 +22,7 @@ export function StudentSearchPolicyControls({ initialPolicy }: { initialPolicy: 
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [pendingChoice, setPendingChoice] = useState<"search" | "default" | null>(null);
 
   async function reload() {
     if (saving.current) return;
@@ -37,7 +41,7 @@ export function StudentSearchPolicyControls({ initialPolicy }: { initialPolicy: 
   async function save() {
     if (saving.current || !confirmation) return;
     const choice = confirmation;
-    saving.current = true; setConfirmation(null); setBusy(true); setError(""); setNotice("");
+    saving.current = true; setPendingChoice(choice); setConfirmation(null); setBusy(true); setError(""); setNotice("");
     try {
       const response = await centerRequest("student-search-policy", "PATCH", {
         ...(choice === "default" ? { default_sharing_enabled: !policy.default_sharing_enabled } : { enabled: !policy.enabled }),
@@ -50,23 +54,33 @@ export function StudentSearchPolicyControls({ initialPolicy }: { initialPolicy: 
       }
       const data = await response.json() as { policy: StudentSearchPolicy };
       setPolicy(data.policy); setConflict(false);
-      setNotice(choice === "default" ? "حُفظ افتراضي مشاركة الملفات الجديدة." : data.policy.enabled ? "فُعّل البحث بين الفروع." : "عُطّل البحث بين الفروع.");
       router.refresh();
     } catch { setConflict(true); setError("تعذر التأكد من حفظ الإعداد. حمّل أحدث حالة قبل المحاولة مجددًا."); }
-    finally { saving.current = false; setBusy(false); }
+    finally { saving.current = false; setPendingChoice(null); setBusy(false); }
   }
 
   return <>
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
+    <CenterHeaderActions>{conflict ? <Button disabled={busy} onClick={reload}>تحميل أحدث إعداد للبحث</Button> : null}</CenterHeaderActions>
     <div className="settings-list">
       <SettingsRow title="البحث بين الفروع" description="إتاحة العثور على بيانات الطلاب الأساسية خارج الفروع المسندة، لمن يملك صلاحية البحث المستقلة.">
-        <p>الحالة: <strong>{policy.enabled ? "مفعّل" : "مغلق"}</strong></p>
-        <CenterHeaderActions><Button busy={busy} disabled={busy || conflict} onClick={() => setConfirmation("search")}>{policy.enabled ? "تعطيل البحث بين الفروع" : "تفعيل البحث بين الفروع"}</Button>{conflict ? <Button disabled={busy} onClick={reload}>تحميل أحدث إعداد للبحث</Button> : null}</CenterHeaderActions>
+        <Field orientation="horizontal" data-disabled={busy || conflict}>
+          <Checkbox id={`${prefix}-search-enabled`} checked={policy.enabled} disabled={busy || conflict} aria-busy={pendingChoice === "search" || undefined} aria-describedby={`${prefix}-search-state`} onCheckedChange={() => setConfirmation("search")} />
+          <FieldContent>
+            <FieldLabel htmlFor={`${prefix}-search-enabled`}>تفعيل البحث بين الفروع</FieldLabel>
+            <FieldDescription id={`${prefix}-search-state`} aria-live="polite">{pendingChoice === "search" ? "جارٍ حفظ التغيير…" : `الحالة: ${policy.enabled ? "مفعّل" : "مغلق"}`}</FieldDescription>
+          </FieldContent>
+        </Field>
       </SettingsRow>
       <SettingsRow title="مشاركة الملفات الجديدة" description="الاختيار الافتراضي عند إنشاء طالب جديد. لا يغيّر مشاركة الطلاب الموجودين.">
-        <p>الحالة: <strong>{policy.default_sharing_enabled ? "مسموحة" : "مغلقة"}</strong></p>
-        <CenterHeaderActions><Button busy={busy} disabled={busy || conflict} onClick={() => setConfirmation("default")}>تغيير افتراضي المشاركة</Button></CenterHeaderActions>
+        <Field orientation="horizontal" data-disabled={busy || conflict}>
+          <Checkbox id={`${prefix}-default-sharing`} checked={policy.default_sharing_enabled} disabled={busy || conflict} aria-busy={pendingChoice === "default" || undefined} aria-describedby={`${prefix}-sharing-state`} onCheckedChange={() => setConfirmation("default")} />
+          <FieldContent>
+            <FieldLabel htmlFor={`${prefix}-default-sharing`}>السماح بمشاركة الملفات الجديدة</FieldLabel>
+            <FieldDescription id={`${prefix}-sharing-state`} aria-live="polite">{pendingChoice === "default" ? "جارٍ حفظ التغيير…" : `الحالة: ${policy.default_sharing_enabled ? "مسموحة" : "مغلقة"}`}</FieldDescription>
+          </FieldContent>
+        </Field>
       </SettingsRow>
     </div>
     {confirmation ? <ConfirmationDialog

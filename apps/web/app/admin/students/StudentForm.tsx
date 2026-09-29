@@ -1,14 +1,10 @@
 'use client';
 
-import { useId } from "react";
+import { useId, useRef, useState, type FormEvent } from 'react';
 
-import { Field } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
-import { FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/field";
-
-
-import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard';
@@ -22,7 +18,9 @@ import { StudentContactFields } from '@/components/StudentContactFields';
 import { studentContactsData, contactValidation } from '@/lib/student-contacts';
 import { StudentChoiceFields } from '@/components/StudentChoiceFields';
 import { FormField } from '@/components/FormField';
+import { DateField } from '@/components/DateField';
 import { InlineNotice } from '@/components/InlineNotice';
+import { FormSection, FormSectionsLayout } from '@/components/FormSections';
 import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } from '@/lib/client-api';
 import type { Student, StudentContext, StudentGeneralData, StudentIdentityData, StudentCustomValues } from '@/lib/server-context';
 
@@ -32,12 +30,14 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
   const formPrefix = useId();
   const router = useRouter();
   const [branches, setBranches] = useState(context.branches);
+  const [branchSettings, setBranchSettings] = useState(context.student_branch_settings);
   const [branchPage, setBranchPage] = useState(context.pagination.branches_page);
   const [hasMoreBranches, setHasMoreBranches] = useState(context.pagination.branches_has_more);
   const [loadingBranches, setLoadingBranches] = useState(false);
   const loadingBranchPage = useRef(false);
   const manageable = branches.filter((branch) => context.permissions.can_manage_center || (context.permissions.branch_actions?.[String(branch.id)] ?? []).includes('students.manage'));
   const [editor, setEditor] = useState<Student | 'new'>(student ?? 'new');
+  const autoAllBranches = editor === 'new' && branchSettings.enabled && context.permissions.can_manage_center;
   const [name, setName] = useState(student?.name ?? '');
   const [manualCode, setManualCode] = useState(student?.manual_code ?? '');
   const [phone, setPhone] = useState(student?.legacy_phone ?? '');
@@ -99,7 +99,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
     setError(''); setFieldErrors({}); setNotice('');
     const errors: Record<string, string> = {...contactValidation(contactData),...customFieldErrors(customFields.fields.filter(field=>field.classification !== 'identity' || canManageIdentity),customValues)};
     if (!name.trim()) errors.name = 'أدخل اسم الطالب.';
-    if (editor === 'new' && !branchIds.length) errors.branch_ids = 'اختر فرعًا مصرحًا به على الأقل.';
+    if (editor === 'new' && !branchIds.length) errors.branch_ids = 'لا يوجد فرع مصرح لك بالتسجيل فيه.';
     if (Object.keys(errors).length) { setFieldErrors(errors); return; }
     saving.current = true; setBusy(true);
     try {
@@ -117,9 +117,15 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
       }
       const response = await centerRequest(editor === 'new' ? 'students' : `students/${editor.id}`, editor === 'new' ? 'POST' : 'PATCH', {
         custom_values:Object.fromEntries(Object.entries(customValues).filter(([id])=>canManageIdentity || !customFields.fields.some(field=>field.id === id && field.classification === 'identity'))), custom_fields_revision:customFields.revision, name: name.trim(), phone: phone.trim() || null, branch_ids: editor === 'new' ? branchIds : branchIds.filter((id) => !editor.branch_ids.includes(id)), ...general, ...contactData, ...(canManageIdentity ? identity : {}), ...(context.student_code_settings.enabled ? {manual_code:manualCode.trim() || null} : {}),
-        ...(editor === 'new' ? { request_id: requestId } : { revision: editor.revision }),
+        ...(editor === 'new' ? { request_id: requestId, student_branch_settings_revision: branchSettings.revision } : { revision: editor.revision }),
       });
       if (!response.ok) {
+        if (editor === 'new' && response.status === 409 && (await response.clone().json().catch(() => ({}))).code === 'student_branch_settings_changed') {
+          const current = await centerRequest('student-workspace', 'GET');
+          if (current.ok) setBranchSettings(((await current.json()) as StudentContext).student_branch_settings);
+          setError('تغير إعداد ربط الطلاب بالفروع أثناء تحرير الملف. راجع اختيار الفروع ثم احفظ مرة أخرى؛ بياناتك محفوظة.');
+          return;
+        }
         if (response.status === 409 && !['student_numbering_exhausted','student_number_code_collision'].includes((await response.clone().json().catch(() => ({}))).code)) {
           if ((await response.clone().json().catch(()=>({}))).code === 'student_custom_fields_changed') {setError('تغيرت تعريفات الحقول. حمّل التعريفات الحالية من الهيدر؛ مدخلاتك محفوظة.');return;}
           setConflict(true);
@@ -175,41 +181,56 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
     <UnsavedChangesGuard dirty={dirty} guardHistory />
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
-      <form id={`${formPrefix}-0`} className='context-card form-stack' aria-label={editor === 'new' ? 'ملف طالب جديد' : `تعديل ملف ${editor.name}`} noValidate onSubmit={save}>
-<FieldGroup>
-
-        <FieldSet disabled={busy} className="form-stack" style={{ border: 0, padding: 0, margin: 0 }}>
-        <h2>البيانات الشخصية</h2>
+      <form id={`${formPrefix}-0`} className='student-form' aria-label={editor === 'new' ? 'ملف طالب جديد' : `تعديل ملف ${editor.name}`} noValidate onSubmit={save}>
+      <FormSectionsLayout sections={[
+          { id: 'student-personal', title: 'البيانات الأساسية' },
+          ...(!autoAllBranches ? [{ id: 'student-branches', title: 'الفروع' }] : []),
+          { id: 'student-contact', title: 'التواصل' },
+          { id: 'student-background', title: 'الدراسة والعمل' },
+          { id: 'student-source', title: 'المصدر والحقول' },
+        ]}>
+        <FieldSet disabled={busy} className="border-0 p-0">
+        <FormSection id='student-personal' title='البيانات الأساسية' description='الاسم مطلوب لإنشاء الملف؛ يمكنك استكمال بقية البيانات لاحقًا.'>
+        <FieldGroup>
         <div className='student-fields'>
         <FormField id='student-name' label='اسم الطالب' focusOnMount value={name} onChange={(value) => { setSaved(false); setName(value); setFieldErrors({}); setSimilar([]); }} error={fieldErrors.name} required autoComplete='off' />
-        <FormField id='student-date_of_birth' label='تاريخ الميلاد' value={general.date_of_birth ?? ''} onChange={(value) => changeGeneral('date_of_birth', value)} error={fieldErrors.date_of_birth} direction='ltr' hint='اختياري بصيغة YYYY-MM-DD. العمر يُحسب تلقائيًا من التاريخ.' />
-        <FieldSet data-invalid={Boolean(fieldErrors.gender)}><FieldLegend>النوع (اختياري)</FieldLegend><Field data-invalid={Boolean(fieldErrors.gender)}><RadioGroup disabled={busy} aria-invalid={Boolean(fieldErrors.gender)} name='student-gender' value={general.gender ?? ''} onValueChange={(value) => changeGeneral('gender', String(value))}>{[['', 'غير محدد'], ['male', 'ذكر'], ['female', 'أنثى']].map(([value, label]) => <FieldLabel className="flex items-center gap-2" key={value}><RadioGroupItem value={value} />{label}</FieldLabel>)}</RadioGroup></Field>{fieldErrors.gender ? <p className='field-error' role='alert'>{fieldErrors.gender}</p> : null}</FieldSet>
+        <DateField id='student-date_of_birth' label='تاريخ الميلاد' value={general.date_of_birth ?? ''} onChange={(value) => changeGeneral('date_of_birth', value)} error={fieldErrors.date_of_birth} autoComplete='bday' maxDate={new Date()} hint='اختياري بصيغة YYYY-MM-DD. العمر يُحسب تلقائيًا من التاريخ.' />
+        <FieldSet data-invalid={Boolean(fieldErrors.gender)}><FieldLegend>النوع (اختياري)</FieldLegend><Field data-invalid={Boolean(fieldErrors.gender)}><RadioGroup className="flex flex-wrap gap-x-5 gap-y-2" disabled={busy} aria-invalid={Boolean(fieldErrors.gender)} name='student-gender' value={general.gender ?? ''} onValueChange={(value) => changeGeneral('gender', String(value))}>{[['', 'غير محدد'], ['male', 'ذكر'], ['female', 'أنثى']].map(([value, label]) => <FieldLabel className="flex items-center gap-2" key={value}><RadioGroupItem value={value} />{label}</FieldLabel>)}</RadioGroup></Field>{fieldErrors.gender ? <FieldError>{fieldErrors.gender}</FieldError> : null}</FieldSet>
         <FormField id='student-address' label='العنوان' value={general.address ?? ''} onChange={(value) => changeGeneral('address', value)} error={fieldErrors.address} autoComplete='street-address' />
         </div>
         {context.student_code_settings.enabled ? <FormField id={`${formPrefix}-manual-code`} label={context.student_code_settings.label} value={manualCode} direction='ltr' autoComplete='off' error={fieldErrors.manual_code} hint='اختياري. احتفظ بالأصفار والأحرف؛ الرمز فريد داخل المركز ولا يطابق رقم طالب آخر.' onChange={value => {setSaved(false);setManualCode(value);setFieldErrors({});}} /> : editor !== 'new' && editor.manual_code ? <p>{context.student_code_settings.label} — معطل، والقيمة محفوظة: <bdi dir='ltr'>{editor.manual_code}</bdi></p> : null}
         {canReadIdentity ? <StudentIdentityFields key={editor === 'new' ? requestId : `${editor.id}-${editor.revision}`} prefix={formPrefix} identity={identity} onChange={value => {setSaved(false);setIdentity(value);setFieldErrors({});}} dateOfBirth={general.date_of_birth} onBirthChange={value => changeGeneral('date_of_birth',value)} studentId={editor === 'new' ? undefined : editor.id} branchIds={branchIds} errors={fieldErrors} onFieldErrors={setFieldErrors} busy={busy} canManage={canManageIdentity} onBusyChange={value => {saving.current=value;setBusy(value);}} /> : null}
-        <h2>التواصل</h2><div className='student-fields'>
-        <FormField id='student-email' label='البريد الإلكتروني' type='email' direction='ltr' value={general.email ?? ''} onChange={(value) => changeGeneral('email', value)} error={fieldErrors.email} autoComplete='email' />
-        {editor !== 'new' && editor.legacy_phone !== null ? <FormField id='student-phone' label='رقم التواصل' value={phone} onChange={(value) => { setSaved(false); setPhone(value); setFieldErrors({}); setSimilar([]); }} error={fieldErrors.phone} type='tel' direction='ltr' autoComplete='off' hint='رقم سابق بصاحب غير محدد. أضف جهة وقناة لاستكمال صاحب الرقم؛ يبقى الرقم السابق محفوظًا.' /> : null}
-        </div><StudentContactFields prefix={formPrefix} data={contactData} onChange={value => { setSaved(false); setContactData(value); setFieldErrors({}); setSimilar([]); }} errors={fieldErrors} disabled={busy} /><h2>خلفية الدراسة والعمل</h2><div className='student-fields'>
-        {([['school', 'المدرسة / جهة الدراسة'], ['employer', 'جهة العمل'], ['specialization', 'التخصص']] as const).map(([key, label]) => <FormField key={key} id={`student-${key}`} label={label} value={general[key] ?? ''} onChange={(value) => changeGeneral(key, value)} error={fieldErrors[key]} />)}
-        </div>
-        <h2>اختيارات المركز والمصدر</h2><p className='muted'>طريقة جمع البيانات مستقلة عن مصدر المعرفة بالمركز. يُسجل الموظف وتاريخ الإنشاء تلقائيًا.</p>
-        <StudentChoiceFields prefix={formPrefix} context={context} student={editor === 'new' ? undefined : editor} data={general} onChange={changeGeneral} errors={fieldErrors} disabled={busy} />
-        <StudentCustomFields canReadIdentity={canReadIdentity} canManageIdentity={canManageIdentity} prefix={formPrefix} list={customFields} onListChange={setCustomFields} values={customValues} onValuesChange={values=>{setSaved(false);setCustomValues(values);}} studentId={editor === 'new' ? undefined : editor.id} onLoadedValues={loaded=>{setCustomValues(current=>({...loaded,...current}));setCustomBaseline(current=>({...loaded,...current}));}} errors={fieldErrors} disabled={busy} onBusyChange={value=>{saving.current=value;setBusy(value);}} />
+        </FieldGroup>
+        </FormSection>
+        {!autoAllBranches ? <FormSection id='student-branches' title='الفروع' description='اختر الفروع التي سيُربط بها ملف الطالب.'>
         <FieldSet data-invalid={Boolean(fieldErrors.branch_ids)} aria-describedby={fieldErrors.branch_ids ? 'student-branches-error' : 'student-branches-hint'}><FieldLegend>الفروع المرتبطة بالطالب</FieldLegend>
-          <p id='student-branches-hint' className='muted'>اختر فروع التسجيل المصرح بها. تبقى ارتباطات الملف السابقة محفوظة.</p>
+          <FieldDescription id='student-branches-hint'>اختر فروع التسجيل المصرح بها. تبقى ارتباطات الملف السابقة محفوظة.</FieldDescription>
           {manageable.map((branch) => {
             const associated = editor !== 'new' && editor.branch_ids.includes(branch.id);
-            return <FieldLabel key={branch.id} className="flex items-center gap-2"><Checkbox  aria-invalid={Boolean(fieldErrors.branch_ids)} checked={branchIds.includes(branch.id)} disabled={busy || associated} onCheckedChange={(checked) => { setSaved(false); setBranchIds((ids) => checked ? [...ids, branch.id] : ids.filter((id) => id !== branch.id)); setFieldErrors({}); }} />{branch.name}{associated ? ' — مرتبط بالفعل' : ''}</FieldLabel>;
+            return <FieldLabel key={branch.id} className="flex items-center gap-2"><Checkbox aria-invalid={Boolean(fieldErrors.branch_ids)} checked={branchIds.includes(branch.id)} disabled={busy || associated} onCheckedChange={(checked) => { setSaved(false); setBranchIds((ids) => checked ? [...ids, branch.id] : ids.filter((id) => id !== branch.id)); setFieldErrors({}); }} />{branch.name}{associated ? ' — مرتبط بالفعل' : ''}</FieldLabel>;
           })}
           {hasMoreBranches ? <Button busy={loadingBranches} onClick={loadMoreBranches}>تحميل المزيد من الفروع</Button> : null}
-          {fieldErrors.branch_ids ? <p id='student-branches-error' className='field-error' role='alert'>{fieldErrors.branch_ids}</p> : null}
+          {fieldErrors.branch_ids ? <FieldError id='student-branches-error'>{fieldErrors.branch_ids}</FieldError> : null}
         </FieldSet>
+        </FormSection> : null}
+        <FormSection id='student-contact' title='التواصل' description='أضف وسيلة تواصل الآن أو أكملها لاحقًا. جهات التواصل اختيارية.'>
+        <FieldGroup><div className='student-fields'>
+        <FormField id='student-email' label='البريد الإلكتروني' type='email' direction='ltr' value={general.email ?? ''} onChange={(value) => changeGeneral('email', value)} error={fieldErrors.email} autoComplete='email' />
+        {editor !== 'new' && editor.legacy_phone !== null ? <FormField id='student-phone' label='رقم التواصل' value={phone} onChange={(value) => { setSaved(false); setPhone(value); setFieldErrors({}); setSimilar([]); }} error={fieldErrors.phone} type='tel' direction='ltr' autoComplete='off' hint='رقم سابق بصاحب غير محدد. أضف جهة وقناة لاستكمال صاحب الرقم؛ يبقى الرقم السابق محفوظًا.' /> : null}
+        </div><StudentContactFields prefix={formPrefix} data={contactData} onChange={value => { setSaved(false); setContactData(value); setFieldErrors({}); setSimilar([]); }} errors={fieldErrors} disabled={busy} /></FieldGroup>
+        </FormSection>
+        <FormSection id='student-background' title='الدراسة والعمل' description='تفاصيل اختيارية تساعد المركز على معرفة سياق الطالب.'><div className='student-fields'>
+        {([['school', 'المدرسة / جهة الدراسة'], ['employer', 'جهة العمل'], ['specialization', 'التخصص']] as const).map(([key, label]) => <FormField key={key} id={`student-${key}`} label={label} value={general[key] ?? ''} onChange={(value) => changeGeneral(key, value)} error={fieldErrors[key]} />)}
+        </div></FormSection>
+        <FormSection id='student-source' title='المصدر والحقول' description='طريقة جمع البيانات مستقلة عن مصدر المعرفة بالمركز. يُسجل الموظف وتاريخ الإنشاء تلقائيًا.'>
+        <FieldGroup>
+        <StudentChoiceFields prefix={formPrefix} context={context} student={editor === 'new' ? undefined : editor} data={general} onChange={changeGeneral} errors={fieldErrors} disabled={busy} />
+        <StudentCustomFields canReadIdentity={canReadIdentity} canManageIdentity={canManageIdentity} prefix={formPrefix} list={customFields} onListChange={setCustomFields} values={customValues} onValuesChange={values=>{setSaved(false);setCustomValues(values);}} studentId={editor === 'new' ? undefined : editor.id} onLoadedValues={loaded=>{setCustomValues(current=>({...loaded,...current}));setCustomBaseline(current=>({...loaded,...current}));}} errors={fieldErrors} disabled={busy} onBusyChange={value=>{saving.current=value;setBusy(value);}} />
+        </FieldGroup></FormSection>
         {similar.length ? <InlineNotice tone='warning'><strong>توجد ملفات ببيانات متشابهة ضمن نطاق صلاحيتك.</strong><p>راجع الملف المتاح ضمن فروعك لإعادة استخدامه. البيانات الأساسية خارج فروعك لا تمنح تعديل الملف؛ تواصل مع مسؤول المركز عند الحاجة. يمكنك حفظ ملف مستقل إذا كان طالبًا آخر؛ لا تُدمج الملفات تلقائيًا.</p><ul>{similar.map((student) => <li key={student.id}>{student.within_scope === false ? <span>{student.name} — رقم {student.student_number.toLocaleString('ar-EG')} · بيانات أساسية خارج فروعك</span> : <Link href={`/admin/students/${student.id}`}>{student.name} — رقم {student.student_number.toLocaleString('ar-EG')}</Link>}{student.phone ? <bdi> · {student.phone}</bdi> : null}</li>)}</ul></InlineNotice> : null}
         <CenterHeaderActions>{conflict ? <Button disabled={busy} onClick={reloadStudent}>تحميل أحدث بيانات الطالب</Button> : null}<Button form={`${formPrefix}-0`} type='submit' variant='primary' busy={busy} disabled={conflict}>{similar.length && editor === 'new' ? 'إنشاء ملف مستقل' : editor === 'new' ? 'حفظ ملف الطالب' : 'حفظ بيانات الطالب'}</Button><Link inert={busy || undefined} aria-disabled={busy} onClick={(event) => { if (busy) event.preventDefault(); }} tabIndex={busy ? -1 : undefined} className={buttonVariants({ variant: 'outline' })} href={editor === 'new' ? '/admin/students?focus=create' : `/admin/students/${editor.id}?focus=edit`}>إلغاء</Link></CenterHeaderActions>
         </FieldSet>
-      </FieldGroup>
+      </FormSectionsLayout>
 </form>
   </>;
 }
