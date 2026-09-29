@@ -135,6 +135,7 @@ class CenterAttemptThresholdController extends Controller
             ->whereIn('attempts.id', $change['attempt_ids'])
             ->where('attempts.current_group_id', $group->id)
             ->where('attempts.plan_version_id', $group->plan_version_id)
+            ->where('attempts.status', 'active')
             ->select(['attempts.id', 'attempts.revision', 'attempts.completion_threshold',
                 'students.name', 'students.student_number'])
             ->selectRaw(<<<'SQL'

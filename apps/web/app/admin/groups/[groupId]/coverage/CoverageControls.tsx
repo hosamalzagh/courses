@@ -46,7 +46,8 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   }
   const group = context.group;
   const canManage = context.permissions.can_manage_center || context.permissions.branch_actions?.[String(group.branch_id)]?.includes("curriculum.manage");
-  const selectable = context.students.filter(row => row.completion_threshold !== group.completion_threshold);
+  const selectable = context.students.filter(row => row.attempt_status === "active"
+    && row.completion_threshold !== group.completion_threshold);
   const selectedOnPage = selected.filter(id => selectable.some(row => row.attempt_id === id));
   const dirty = selectedOnPage.length > 0 || Boolean(preview) || reason.length > 0;
   const base = `/admin/groups/${group.id}/coverage`;
@@ -151,7 +152,7 @@ export function CoverageControls({ context, search }: { context: CoverageContext
         previousHref: href(context.pagination.page - 1), nextHref: href(context.pagination.page + 1), onNavigate: navigate }}
       columns={[
         ...(canManage ? [{ key: "select", label: "اختيار", render: (row: CoverageRow) => <Checkbox
-          checked={selectedOnPage.includes(row.attempt_id)} disabled={busy || row.completion_threshold === group.completion_threshold}
+          checked={selectedOnPage.includes(row.attempt_id)} disabled={busy || row.attempt_status !== "active" || row.completion_threshold === group.completion_threshold}
           onCheckedChange={checked => toggle(row.attempt_id, checked === true)}
           aria-label={`اختيار تسجيل ${row.name} لتطبيق نسبة الإتمام`} /> }] : []),
         { key: "student", label: "الطالب", render: row => <Link href={`/admin/students/${row.student_id}`}>{row.name} · {row.student_number.toLocaleString("ar-EG")}</Link> },

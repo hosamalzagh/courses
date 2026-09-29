@@ -68,14 +68,27 @@ test("selected existing attempts keep their threshold until reviewed and approve
       version: enrollment.student.version, request_id: crypto.randomUUID(),
     });
     expect(saved.status).toBe(201);
+    const completedStudent = await write(owner, "students", { name: `طالب مكتمل ${Date.now()}`,
+      branch_ids: [north], request_id: crypto.randomUUID() });
+    expect(completedStudent.status).toBe(201);
+    const completedEnrollment = await (await owner.request.get(`${origin}/api/v1/center/students/${completedStudent.body.student.id}/enrollments`)).json();
+    const completedAttempt = await write(owner, `students/${completedStudent.body.student.id}/enrollments`, {
+      group_id: groupId, group_revision: group.body.group.revision,
+      currency_revision: completedEnrollment.student.currency_revision,
+      joined_on: new Date().toLocaleDateString("sv-SE", { timeZone: "Africa/Cairo" }),
+      discount: "0.00", discount_reason: null, version: completedEnrollment.student.version,
+      request_id: crypto.randomUUID(),
+    });
+    expect(completedAttempt.status).toBe(201);
     const settings = await write(owner, `groups/${groupId}/settings`, {
       revision: group.body.group.revision, approved_price: "0.00", completion_threshold: 60,
       instructor_ids: [instructor.body.instructor.id],
     }, "PATCH");
     expect(settings.status).toBe(200);
     const attemptId = saved.body.attempt.id as string;
+    const completedAttemptId = completedAttempt.body.attempt.id as string;
     const planId = level.body.level.plan.id as string;
-    for (const id of [centerId, groupId, attemptId, planId]) expect(id).toMatch(/^[a-f0-9-]{36}$/);
+    for (const id of [centerId, groupId, attemptId, completedAttemptId, planId]) expect(id).toMatch(/^[a-f0-9-]{36}$/);
     execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_THRESHOLD_DB_PORT!, "-U", "postgres",
       "-d", `courses_center_${centerId}`, "-v", "ON_ERROR_STOP=1", "-c", `
 INSERT INTO study_sessions (id, group_id, plan_lecture_id, number, scheduled_at, status, revision, created_by, created_by_name, created_at, updated_at)
@@ -86,6 +99,9 @@ INSERT INTO study_attendance_entries (id, session_id, attempt_id, status, revisi
 SELECT gen_random_uuid(), sessions.id, '${attemptId}', 'counted', 1,
   (SELECT user_id FROM center_grants WHERE role = 'center_owner' LIMIT 1), now(), now(), now()
 FROM study_sessions AS sessions WHERE sessions.group_id = '${groupId}';`], { stdio: "ignore" });
+    execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_THRESHOLD_DB_PORT!, "-U", "postgres",
+      "-d", `courses_center_${centerId}`, "-v", "ON_ERROR_STOP=1", "-c",
+      `UPDATE study_attempts SET status = 'completed' WHERE id = '${completedAttemptId}'`], { stdio: "ignore" });
 
     const url = `${origin}/admin/groups/${groupId}/coverage`;
     const log = process.env.COURSES_THRESHOLD_QUERY_LOG!;
@@ -99,7 +115,8 @@ FROM study_sessions AS sessions WHERE sessions.group_id = '${groupId}';`], { std
     expect(reads.every(read => Number.isInteger(read.count) && read.count! <= 6)).toBe(true);
 
     await owner.goto(url);
-    await expect(owner.getByText("حد هذه المحاولة: ٨٠%", { exact: false })).toBeVisible();
+    await expect(owner.getByText("حد هذه المحاولة: ٨٠%", { exact: false }).first()).toBeVisible();
+    await expect(owner.getByRole("checkbox", { name: `اختيار تسجيل ${completedStudent.body.student.name} لتطبيق نسبة الإتمام` })).toBeDisabled();
     await owner.getByRole("checkbox", { name: `اختيار تسجيل ${student.body.student.name} لتطبيق نسبة الإتمام` }).check();
     await owner.getByRole("textbox", { name: "سبب التطبيق" }).fill("قرار أكاديمي موثق بعد مراجعة نسبة المجموعة");
     await owner.getByRole("searchbox", { name: "بحث في تقرير أهلية إتمام الدراسة" }).fill("بحث آخر");

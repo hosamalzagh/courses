@@ -76,6 +76,19 @@ class StudyEnrollmentTest extends TestCase
             'revision' => $group['revision'], 'approved_price' => '0.00',
             'completion_threshold' => 60, 'instructor_ids' => array_column($group['instructors'], 'id'),
         ])->assertOk()->json('group');
+        $inactiveChange = ['attempt_ids' => [$attempts[1]['id']], 'reason' => 'اختبار ثبات قاعدة المحاولة المنتهية'];
+        $inactivePath = "{$this->base}/groups/{$group['id']}/completion-threshold";
+        $inactivePreview = $this->postJson("{$inactivePath}/preview", $inactiveChange)->assertOk()->json();
+        foreach (['withdrawn', 'completed'] as $status) {
+            $this->center->run(fn () => DB::table('study_attempts')->where('id', $attempts[1]['id'])
+                ->update(['status' => $status, 'revision' => DB::raw('revision + 1')]));
+            $this->postJson("{$inactivePath}/preview", $inactiveChange)->assertNotFound();
+            $this->postJson($inactivePath, [...$inactiveChange,
+                'preview_token' => $inactivePreview['preview_token'], 'request_id' => (string) Str::uuid(),
+            ])->assertNotFound();
+            $this->center->run(fn () => DB::table('study_attempts')->where('id', $attempts[1]['id'])
+                ->update(['status' => 'active', 'revision' => DB::raw('revision + 1')]));
+        }
         $this->center->run(function () use ($group, $attempts): void {
             $lectures = DB::table('plan_lectures')->where('plan_version_id', $group['plan_version_id'])
                 ->orderBy('number')->limit(6)->get(['id', 'number']);
