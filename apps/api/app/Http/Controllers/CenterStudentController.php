@@ -160,8 +160,8 @@ class CenterStudentController extends Controller
             $studyPage = (int) ($data['study_page'] ?? 1);
             $studySearch = trim($data['study_q'] ?? '');
             $readableBranches = $permissions->isCenterManager() ? null : $this->branchScope($permissions, 'read');
-            $currentPeriod = '(SELECT current_period.id FROM study_attempt_group_periods AS current_period WHERE current_period.attempt_id = attempts.id AND current_period.group_id = attempts.current_group_id ORDER BY current_period.joined_on DESC, current_period.created_at DESC LIMIT 1)';
-            $waitlistOriginPeriod = '(SELECT origin.id FROM study_attempt_waitlists AS study_waitlists JOIN study_attempt_group_periods AS origin ON origin.attempt_id = study_waitlists.attempt_id AND origin.group_id = study_waitlists.from_group_id AND origin.left_on = study_waitlists.entered_on WHERE study_waitlists.attempt_id = attempts.id ORDER BY study_waitlists.entered_on DESC, study_waitlists.created_at DESC, origin.created_at DESC, origin.id DESC LIMIT 1)';
+            $currentPeriod = '(SELECT current_period.id FROM study_attempt_group_periods AS current_period WHERE current_period.attempt_id = attempts.id AND current_period.group_id = attempts.current_group_id ORDER BY (current_period.left_on IS NULL) DESC, (NOT EXISTS (SELECT 1 FROM study_attempt_waitlists AS prior_waitlists WHERE prior_waitlists.origin_period_id = current_period.id)) DESC, current_period.joined_on DESC, current_period.created_at DESC, current_period.id DESC LIMIT 1)';
+            $waitlistOriginPeriod = '(SELECT study_waitlists.origin_period_id FROM study_attempt_waitlists AS study_waitlists WHERE study_waitlists.attempt_id = attempts.id ORDER BY study_waitlists.entry_revision DESC NULLS LAST, study_waitlists.entered_on DESC, study_waitlists.created_at DESC, study_waitlists.id DESC LIMIT 1)';
             $terminalPeriod = "(periods.id = {$currentPeriod} OR (attempts.status IN ('active', 'withdrawn') AND attempts.current_group_id IS NULL AND periods.id = {$waitlistOriginPeriod}))";
             $attempts = DB::connection('tenant')->table('study_attempt_group_periods as periods')
                 ->join('study_attempts as attempts', 'attempts.id', '=', 'periods.attempt_id')
@@ -200,14 +200,8 @@ class CenterStudentController extends Controller
                     (SELECT row_to_json(waitlist) FROM (
                         SELECT entered_on, left_on, reason FROM study_attempt_waitlists
                         WHERE attempt_id = attempts.id AND branch_id = study_courses.branch_id
-                            AND periods.id = (
-                                SELECT origin.id FROM study_attempt_group_periods AS origin
-                                WHERE origin.attempt_id = study_attempt_waitlists.attempt_id
-                                    AND origin.group_id = study_attempt_waitlists.from_group_id
-                                    AND origin.left_on = study_attempt_waitlists.entered_on
-                                ORDER BY origin.created_at DESC, origin.id DESC LIMIT 1
-                            )
-                        ORDER BY entered_on DESC, created_at DESC LIMIT 1
+                            AND periods.id = study_attempt_waitlists.origin_period_id
+                        ORDER BY entry_revision DESC NULLS LAST, entered_on DESC, created_at DESC, id DESC LIMIT 1
                     ) AS waitlist) AS latest_waitlist
                     SQL)
                 ->selectRaw('(SELECT max(transferred_on) FROM study_attempt_transfers WHERE attempt_id = attempts.id AND (from_branch_id = study_courses.branch_id OR to_branch_id = study_courses.branch_id)) AS last_visible_transfer_on');
