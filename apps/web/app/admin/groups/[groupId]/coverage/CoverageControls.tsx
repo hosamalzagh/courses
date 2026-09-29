@@ -312,7 +312,7 @@ export function CoverageControls({ context, search }: { context: CoverageContext
       ]}
       expanded={row => <div className="space-y-2"><p><strong>المستوفى:</strong> {label(row.covered_numbers, row)}</p><p><strong>الناقص:</strong> {label(row.missing_numbers, row)}</p>
         <p>حد هذه المحاولة: {row.completion_threshold.toLocaleString("ar-EG")}% ({Math.ceil(row.required_count * row.completion_threshold / 100).toLocaleString("ar-EG")} محاضرة كاملة على الأقل).</p>
-        {row.open_numbers.length ? <p role="status"><strong>حضور مبدئي في محاضرات مفتوحة:</strong> {label(row.open_numbers)}. قد تتغير النسبة عند التراجع، ولا يجوز اعتماد الإتمام حتى الإغلاق وإعادة المراجعة.</p> : null}
+        {row.open_numbers.length ? <p role="status"><strong>حضور مبدئي في محاضرات مفتوحة:</strong> {label(row.open_numbers, row)}. قد تتغير النسبة عند التراجع، ولا يجوز اعتماد الإتمام حتى الإغلاق وإعادة المراجعة.</p> : null}
         <p className="muted">إصدار متطلبات المحاولة: {row.plan_version.toLocaleString("ar-EG")} · تاريخ الانضمام: {row.joined_on} · حالة محاولة الدراسة: {row.attempt_status === "withdrawn" ? "منسحب" : row.attempt_status === "completed" ? "مكتملة" : "نشطة"}</p>
       </div>} />
   </>;
