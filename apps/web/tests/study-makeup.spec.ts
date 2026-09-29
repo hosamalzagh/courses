@@ -208,6 +208,14 @@ test('books makeup without granting coverage and hides the attempt from unauthor
     const attendanceRows = owner.getByRole('table', { name: 'سجل المحاضرات' });
     await expect(attendanceRows).toContainText('غياب مسجل');
     await expect(attendanceRows).toContainText('حضور تعويض محتسب');
+    await owner.getByRole('searchbox', { name: 'بحث في سجل المحاضرات' }).fill(target.name);
+    await owner.getByRole('button', { name: 'بحث في جميع سجل المحاضرات' }).click();
+    await expect(owner).toHaveURL(/attendance_q=/);
+    await expect(attendanceRows).toContainText('حضور تعويض محتسب');
+    await expect(attendanceRows).not.toContainText('غياب مسجل');
+    await owner.getByRole('searchbox', { name: 'بحث في سجل المحاضرات' }).fill('');
+    await owner.getByRole('button', { name: 'بحث في جميع سجل المحاضرات' }).click();
+    await expect(attendanceRows).toContainText('غياب مسجل');
     const scopedReads = queryRows().slice(attendanceStart)
       .filter(read => read.path === `/api/v1/center/students/${studentId}?tab=attendance`);
     expect(scopedReads.length).toBeGreaterThan(0);

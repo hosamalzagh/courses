@@ -39,6 +39,7 @@ class CenterStudentController extends Controller
             'study_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'study_q' => ['sometimes', 'string', 'max:100'],
             'attendance_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'attendance_q' => ['sometimes', 'string', 'max:100'],
             'custom_history_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'attachments_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'notes_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
@@ -215,6 +216,7 @@ class CenterStudentController extends Controller
         }
         if ($studentId !== null && ($data['tab'] ?? '') === 'attendance') {
             $attendancePage = (int) ($data['attendance_page'] ?? 1);
+            $attendanceSearch = trim($data['attendance_q'] ?? '');
             $readableSource = 'EXISTS (SELECT 1 FROM student_branches AS source_associations WHERE source_associations.student_id = students.id AND source_associations.branch_id = source_courses.branch_id)';
             if (! $permissions->isCenterManager()) {
                 $readableSource .= ' AND source_courses.branch_id IN ('.(implode(',', array_map('intval', $this->branchScope($permissions, 'read'))) ?: 'NULL').')';
@@ -241,6 +243,16 @@ class CenterStudentController extends Controller
                     ->whereColumn('attendance_associations.student_id', 'students.id')
                     ->whereColumn('attendance_associations.branch_id', 'courses.branch_id')->selectRaw('1'))
                 ->when(! $permissions->isCenterManager(), fn (Builder $rows) => $rows->whereIn('courses.branch_id', $this->branchScope($permissions, 'read')))
+                ->when($attendanceSearch !== '', function (Builder $rows) use ($attendanceSearch): void {
+                    $term = '%'.addcslashes($attendanceSearch, '%_\\').'%';
+                    $rows->where(function (Builder $matches) use ($term): void {
+                        $matches->where('courses.name', 'ILIKE', $term)
+                            ->orWhere('groups.name', 'ILIKE', $term)
+                            ->orWhere('branches.name', 'ILIKE', $term)
+                            ->orWhere('sessions.title', 'ILIKE', $term)
+                            ->orWhereRaw('sessions.number::text ILIKE ?', [$term]);
+                    });
+                })
                 ->where(function (Builder $rows): void {
                     $rows->whereNotNull('entries.status')->orWhereExists(DB::connection('tenant')->table('student_suspensions as attendance_suspensions')
                         ->whereColumn('attendance_suspensions.student_id', 'attempts.student_id')
