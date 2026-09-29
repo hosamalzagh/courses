@@ -208,6 +208,17 @@ class StudyEnrollmentTest extends TestCase
         $this->assertSame('absent', $entries->firstWhere('id', $ids[0]['entry'])['status']);
         $this->assertSame('makeup', $entries->firstWhere('id', $ids[1]['entry'])['kind']);
         $this->assertSame('suspended', $entries->firstWhere('id', $ids[2]['entry'])['kind']);
+        $this->center->run(fn () => DB::table('student_branches')->where('student_id', $student['id'])
+            ->where('branch_id', $this->south)->delete());
+        $this->getJson($path)->assertOk()->assertJsonCount(3, 'attendance.entries')
+            ->assertJsonPath('attendance.entries.1.id', $ids[1]['entry']);
+        $this->grant([$this->north => ['branch_viewer'], $this->south => ['branch_viewer']]);
+        $this->asUser($this->staff);
+        $this->getJson($path)->assertOk()->assertJsonCount(3, 'attendance.entries');
+        $this->asUser($this->owner);
+        $this->center->run(fn () => DB::table('student_branches')->insert([
+            'student_id' => $student['id'], 'branch_id' => $this->south, 'created_at' => now(),
+        ]));
         $this->getJson($path.'&attendance_page=2')->assertOk()->assertJsonCount(0, 'attendance.entries');
         $this->center->run(fn () => DB::table('study_sessions')->whereIn('id', [$ids[1]['session'], $ids[2]['session']])
             ->update(['status' => 'cancelled']));

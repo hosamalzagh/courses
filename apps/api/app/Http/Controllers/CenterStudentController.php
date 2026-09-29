@@ -239,9 +239,6 @@ class CenterStudentController extends Controller
                 ->leftJoin('stages as source_stages', 'source_stages.id', '=', 'source_levels.stage_id')
                 ->leftJoin('courses as source_courses', 'source_courses.id', '=', 'source_stages.course_id')
                 ->whereColumn('attempts.student_id', 'students.id')
-                ->whereExists(DB::connection('tenant')->table('student_branches as attendance_associations')
-                    ->whereColumn('attendance_associations.student_id', 'students.id')
-                    ->whereColumn('attendance_associations.branch_id', 'courses.branch_id')->selectRaw('1'))
                 ->when(! $permissions->isCenterManager(), fn (Builder $rows) => $rows->whereIn('courses.branch_id', $this->branchScope($permissions, 'read')))
                 ->when($attendanceSearch !== '', function (Builder $rows) use ($attendanceSearch): void {
                     $term = '%'.addcslashes($attendanceSearch, '%_\\').'%';
