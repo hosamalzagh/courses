@@ -63,7 +63,8 @@ class CenterStudentController extends Controller
             ->selectSub(StudentProfileChoices::initialQuery(), 'choices')
             ->selectSub(StudentCustomFields::initialQuery($permissions, $studentId), 'custom_fields')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('student_custom_fields_revision'), 'custom_fields_revision')
-            ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->selectRaw("json_build_object('enabled', student_code_enabled, 'label', student_code_label, 'revision', student_code_revision)"), 'code_settings')->first();
+            ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->selectRaw("json_build_object('enabled', student_code_enabled, 'label', student_code_label, 'revision', student_code_revision)"), 'code_settings')
+            ->selectSub(DB::connection('tenant')->table('student_search_policy')->where('id', 1)->select('enabled'), 'student_search_enabled')->first();
         $branches = collect(json_decode($workspace->branches ?? '[]'));
         $choiceRows = collect(json_decode($workspace->choices ?? '[]', true));
         $choices = [];
@@ -345,6 +346,7 @@ class CenterStudentController extends Controller
             'branches' => $branches->take(50)->values(),
             'profile_choice_lists' => $choices,
             'student_code_settings' => json_decode($workspace->code_settings, true),
+            'student_search_enabled' => (bool) $workspace->student_search_enabled,
             'custom_fields' => ['fields' => array_slice(json_decode($workspace->custom_fields ?? '[]', true) ?? [], 0, 50), 'revision' => (int) $workspace->custom_fields_revision, 'page' => 1, 'has_more' => count(json_decode($workspace->custom_fields ?? '[]', true) ?? []) > 50],
             'students' => $students->take(50)->map(fn (stdClass $student): array => $this->payload($student, $permissions))->values(),
             ...($studentId !== null ? ['suspensions' => array_slice(json_decode($students->first()->suspensions ?? '[]', true) ?? [], 0, 20), 'status_pagination' => ['page' => $statusPage, 'has_more' => count(json_decode($students->first()->suspensions ?? '[]', true) ?? []) > 20]] : []),

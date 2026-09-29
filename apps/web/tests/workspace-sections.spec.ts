@@ -28,9 +28,8 @@ test('peer views show one panel, retain route/header state, render without JS an
   test.setTimeout(90000); await login(page);
   mkdirSync('/tmp/courses-issue93', {recursive: true});
   const views = [
-    ['/admin/students','سجل الطلاب'], ['/admin/students?tab=search','البحث عن طالب'],
     ['/admin/instructors','سجل المحاضرين'], ['/admin/instructors?tab=search','البحث عن محاضر'],
-    ['/admin/student-search','البحث عن طالب'], ['/admin/settings?tab=students','الطلاب'],
+    ['/admin/settings?tab=students','الطلاب'],
     ['/admin/curriculum','الكورسات'], ['/admin/curriculum?tab=stages','المراحل الدراسية'], ['/admin/curriculum?tab=levels','المستويات وخططها'],
   ];
   for (const [route, label] of views) {
@@ -46,16 +45,21 @@ test('peer views show one panel, retain route/header state, render without JS an
       await expect(page.getByRole('button', {name:'تغيير افتراضي المشاركة',exact:true})).toBeVisible();
     }
   }
-  for (const [route, label] of [['students','سجل الطلاب'],['instructors','سجل المحاضرين']]) {
+  for (const route of ['/admin/students', '/admin/students?scope=center']) {
+    const start = cursor(); await page.goto(`${origin}${route}`);
+    await expect(page.getByRole('searchbox', {name:'الاسم أو رقم الطالب الداخلي أو رقم التواصل'})).toBeVisible();
+    await expect(page.getByRole('tab')).toHaveCount(0);
+    const rows = metrics(start); expect(rows.length).toBeGreaterThan(0);
+    expect(rows.reduce((sum,row) => sum + row.count, 0)).toBeLessThanOrEqual(6);
+  }
+  await page.goto(`${origin}/admin/students?q=missing-sections-result&page=99`);
+  await page.getByRole('button',{name:'مسح البحث في نتائج البحث',exact:true}).click();
+  await expect(page.getByRole('table')).toHaveCount(1);
+  for (const [route, label] of [['instructors','سجل المحاضرين']]) {
     await page.goto(`${origin}/admin/${route}?tab=search&q=missing-sections-result&page=99`);
     await page.getByRole('tab',{name:label,exact:true}).click();
     await expect(page).toHaveURL(`${origin}/admin/${route}?tab=register`);
     await expect(page.getByRole('table')).not.toContainText('لا يوجد');
-    if (route === 'students') {
-      const action = page.getByRole('button',{name:/^تغيير مشاركة الطالب — المشاركة (مسموحة|مغلقة)$/}).first();
-      await expect(action).toBeVisible();
-      await expect(action).toHaveAccessibleName(/المشاركة (مسموحة|مغلقة)$/);
-    }
   }
   await page.goto(`${origin}/admin/curriculum?courses_page=1`);
   await page.locator('.center-topbar').evaluate(node => node.setAttribute('data-sections-header','retained'));
@@ -80,10 +84,12 @@ test('peer views show one panel, retain route/header state, render without JS an
   await expect(ssr.getByRole('table')).toHaveCount(1); await expect(ssr.getByRole('tab',{name:'المستويات وخططها',exact:true})).toHaveAttribute('aria-selected','true'); await noJS.close();
   for (const width of [1440,390]) for (const theme of ['light','dark']) {
     await page.setViewportSize({width,height:900}); await page.context().addCookies([{name:'courses_theme',value:theme,url:origin}]);
-    for (const [route, label] of [['students','سجل الطلاب'],['instructors','سجل المحاضرين'],['student-search','البحث عن طالب'],['curriculum','الكورسات']]) {
-      await page.goto(`${origin}/admin/${route}`); await expect(page.getByRole('tab',{name:label,exact:true})).toBeVisible();
+    for (const [route, label] of [['students',''],['instructors','سجل المحاضرين'],['students?scope=center',''],['curriculum','الكورسات']]) {
+      await page.goto(`${origin}/admin/${route}`);
+      if (label) await expect(page.getByRole('tab',{name:label,exact:true})).toBeVisible();
+      else await expect(page.getByRole('searchbox',{name:'الاسم أو رقم الطالب الداخلي أو رقم التواصل'})).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      await page.screenshot({path:`/tmp/courses-issue93/${route}-${width}-${theme}.png`});
+      await page.screenshot({path:`/tmp/courses-issue93/${route.replaceAll(/[?&=]/g, '-')}-${width}-${theme}.png`});
     }
   }
 });
@@ -147,12 +153,12 @@ test('instructor editor owns the header form and survives errors while tabs prot
 });
 
 test('search settings register only their actions and recover current policy before returning to search', async ({page,browser}) => {
-  await login(page); await page.goto(`${origin}/admin/student-search`);
+  await login(page); await page.goto(`${origin}/admin/students?scope=center`);
   const original = (await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy;
   try {
     await expect(page.getByRole('button',{name:'تغيير افتراضي المشاركة',exact:true})).toHaveCount(0);
     await page.goto(`${origin}/admin/settings?tab=students`);
-    await expect(page.getByRole('form',{name:'البحث في البيانات الأساسية لطلاب المركز'})).toHaveCount(0);
+    await expect(page.getByRole('search')).toHaveCount(0);
     await page.getByRole('button',{name:'تغيير افتراضي المشاركة',exact:true}).click();
     await page.getByRole('alertdialog').getByRole('button',{name:original.default_sharing_enabled ? 'غلق المشاركة للملفات الجديدة' : 'السماح بالمشاركة للملفات الجديدة',exact:true}).click();
     await expect(page.getByRole('status').filter({hasText:'حُفظ افتراضي'})).toBeVisible();
@@ -170,14 +176,14 @@ test('search settings register only their actions and recover current policy bef
       await page.getByRole('alertdialog').getByRole('button',{name:'تفعيل البحث',exact:true}).click();
       await expect(page.getByRole('status').filter({hasText:'فُعّل البحث'})).toBeVisible();
     }
-    await page.goto(`${origin}/admin/student-search`);
+    await page.goto(`${origin}/admin/students?scope=center`);
     await expect(page.getByRole('button',{name:'تغيير افتراضي المشاركة',exact:true})).toHaveCount(0);
-    await expect(page.getByRole('button',{name:'بحث في طلاب المركز',exact:true})).toBeVisible();
-    const search = page.getByRole('textbox',{name:'الاسم أو رقم الطالب الداخلي أو رقم التواصل',exact:true});
+    await expect(page.getByRole('button',{name:'الاسم أو رقم الطالب الداخلي أو رقم التواصل',exact:true})).toBeVisible();
+    const search = page.getByRole('searchbox',{name:'الاسم أو رقم الطالب الداخلي أو رقم التواصل',exact:true});
     await search.fill('missing-sections-student');
-    await page.getByRole('button',{name:'بحث في طلاب المركز',exact:true}).click();
-    await expect(page.getByRole('heading',{name:'لا يوجد طالب مطابق في هذا المركز.',exact:true})).toBeVisible();
-    await page.getByRole('button',{name:'مسح البحث',exact:true}).click(); await expect(search).toBeFocused(); await expect(search).toHaveValue('');
+    await page.getByRole('button',{name:'الاسم أو رقم الطالب الداخلي أو رقم التواصل',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'لا يوجد طالب مطابق ضمن الملفات المتاحة للبحث.',exact:true})).toBeVisible();
+    await page.getByRole('button',{name:'مسح البحث في نتائج البحث',exact:true}).click(); await expect(search).toBeFocused(); await expect(search).toHaveValue('');
     const staff = await browser.newPage(); await login(staff,'staff'); await staff.goto(`${origin}/admin/settings?tab=branches`);
     await expect(staff.getByRole('tab',{name:'الطلاب',exact:true})).toHaveCount(0); await staff.close();
   } finally {
