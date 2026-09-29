@@ -313,11 +313,28 @@ class StudySessionsTest extends TestCase
 
     public function test_final_cancellation_and_count_reduction_commit_together_and_preserve_history(): void
     {
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
         $group = $this->group($this->north, 'Final cancellation', 2);
         $path = "{$this->base}/groups/{$group['id']}";
+        $instructorId = $this->center->run(fn () => DB::table('study_group_instructors')
+            ->where('group_id', $group['id'])->value('instructor_id'));
+        $makeupGroup = $this->postJson("{$this->base}/groups", [
+            'level_id' => $group['level_id'], 'plan_version_id' => $group['plan_version_id'],
+            'name' => 'محاضرة تعويض بعد خفض المتطلب', 'approved_price' => '100.00',
+            'instructor_ids' => [$instructorId], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $student = $this->student();
+        $this->enroll($student['id'], $group, now('Africa/Cairo')->toDateString());
+        $attempt = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")
+            ->assertOk()->json('attempts.0');
         $session = $this->postJson("{$path}/sessions", [
             'kind' => 'single', 'revision' => 1,
             'start_at' => now('Africa/Cairo')->addDays(14)->setTime(16, 0)->format('Y-m-d\\TH:i'),
+            'plan_lecture_number' => 2, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
+        $makeupSession = $this->postJson("{$this->base}/groups/{$makeupGroup['id']}/sessions", [
+            'kind' => 'single', 'revision' => $makeupGroup['revision'],
+            'start_at' => now('Africa/Cairo')->addDays(15)->setTime(16, 0)->format('Y-m-d\\TH:i'),
             'plan_lecture_number' => 2, 'request_id' => (string) Str::uuid(),
         ])->assertCreated()->json('sessions.0');
         $change = ['kind' => 'reduce', 'session_id' => $session['id'], 'decision' => 'none',
@@ -334,6 +351,12 @@ class StudySessionsTest extends TestCase
             ->assertJsonCount(1, 'group.requirements');
         $this->getJson("{$path}/sessions")->assertOk()->assertJsonPath('group.required_count', 1)
             ->assertJsonPath('sessions.0.cancellation_reason', $change['reason']);
+        $makeupPath = "{$this->base}/students/{$student['id']}/enrollments/{$attempt['id']}/makeup/book";
+        $this->postJson($makeupPath, ['session_id' => $makeupSession['id'],
+            'attempt_revision' => $attempt['revision'], 'session_revision' => $makeupSession['revision'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertUnprocessable();
+        $this->center->run(fn () => $this->assertSame(0, DB::table('study_makeup_bookings')->count()));
         $this->center->run(function () use ($session): void {
             $row = DB::table('study_sessions')->where('id', $session['id'])->firstOrFail();
             $this->assertSame('cancelled', $row->status);

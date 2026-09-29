@@ -331,8 +331,13 @@ class CenterStudyMakeupController extends Controller
             'اختر محاضرة تعويض من مجموعة أخرى لها محتوى معتمد.');
         $sourceLectureId = $sourceSessionId === null ? null
             : $this->sourceAbsence($attempt->id, $sourceSessionId, $permissions)->plan_lecture_id;
-        $requirements = DB::connection('tenant')->table('plan_lectures')
-            ->where('plan_version_id', $attempt->plan_version_id)->pluck('id')->all();
+        $requirements = $attempt->current_group_id === null
+            ? DB::connection('tenant')->table('plan_lectures')
+                ->where('plan_version_id', $attempt->plan_version_id)->pluck('id')->all()
+            : DB::connection('tenant')->table('study_group_requirements')
+                ->where('group_id', $attempt->current_group_id)->whereNull('retired_at')
+                ->get(['id', 'plan_lecture_id'])
+                ->map(fn (object $row): string => $row->plan_lecture_id ?? $row->id)->all();
         $attendance = DB::connection('tenant')->table('study_attendance_entries as entries')
             ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
             ->where('entries.attempt_id', $attempt->id)->where('entries.status', 'counted')
