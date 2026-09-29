@@ -273,8 +273,15 @@ class CenterStudyMakeupController extends Controller
             ->get(['sessions.plan_lecture_id as id', 'sessions.closed_at'])
             ->filter(fn ($row): bool => $row->id !== null)
             ->map(fn ($row): array => ['id' => $row->id, 'final' => $row->closed_at !== null])->all();
-        $approvals = DB::connection('tenant')->table('content_equivalences')
-            ->get(['id', 'source_lecture_ids', 'target_lecture_ids'])
+        $approvals = DB::connection('tenant')->table('content_equivalences as approvals')
+            ->where(function ($query) use ($attempt): void {
+                $query->where('approvals.target_plan_version_id', $attempt->plan_version_id)
+                    ->orWhereExists(DB::connection('tenant')->table('study_attempt_transfers as transfers')
+                        ->where('transfers.attempt_id', $attempt->id)
+                        ->whereColumn('transfers.to_plan_version_id', 'approvals.target_plan_version_id')
+                        ->selectRaw('1'));
+            })
+            ->get(['approvals.id', 'approvals.source_lecture_ids', 'approvals.target_lecture_ids'])
             ->map(fn ($row): array => ['id' => $row->id,
                 'source_lecture_ids' => json_decode($row->source_lecture_ids, true),
                 'target_lecture_ids' => json_decode($row->target_lecture_ids, true)])->all();

@@ -1148,6 +1148,23 @@ class StudySessionsTest extends TestCase
         $this->postJson("{$makeupPath}/book", $payload)->assertUnprocessable();
         $sourceLecture = $this->center->run(fn () => DB::table('plan_lectures')->where('plan_version_id', $source['plan_version_id'])->value('id'));
         $targetLecture = $this->center->run(fn () => DB::table('plan_lectures')->where('plan_version_id', $target['plan_version_id'])->value('id'));
+        $intermediate = $this->group($this->south, 'Unvisited intermediate plan', 1);
+        $intermediateLecture = $this->center->run(fn () => DB::table('plan_lectures')
+            ->where('plan_version_id', $intermediate['plan_version_id'])->value('id'));
+        $this->postJson("{$this->base}/content-equivalences", [
+            'source_plan_version_id' => $target['plan_version_id'],
+            'target_plan_version_id' => $intermediate['plan_version_id'],
+            'source_lecture_ids' => [$targetLecture], 'target_lecture_ids' => [$intermediateLecture],
+            'reason' => 'معادلة إلى خطة وسيطة لم يدرسها الطالب', 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->postJson("{$this->base}/content-equivalences", [
+            'source_plan_version_id' => $intermediate['plan_version_id'],
+            'target_plan_version_id' => $source['plan_version_id'],
+            'source_lecture_ids' => [$intermediateLecture], 'target_lecture_ids' => [$sourceLecture],
+            'reason' => 'معادلة وسيطة إلى الخطة الأصلية', 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->postJson("{$makeupPath}/book", [...$payload, 'request_id' => (string) Str::uuid()])
+            ->assertUnprocessable();
         $this->postJson("{$this->base}/content-equivalences", [
             'source_plan_version_id' => $target['plan_version_id'], 'target_plan_version_id' => $source['plan_version_id'],
             'source_lecture_ids' => [$targetLecture], 'target_lecture_ids' => [$sourceLecture],
