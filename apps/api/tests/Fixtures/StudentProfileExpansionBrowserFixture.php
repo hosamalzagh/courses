@@ -51,6 +51,13 @@ $sharedOwner = User::findOrFail($credentials['alpha']['id']);
 if ($sharedOwner->email !== $credentials['alpha']['email']) {
     throw new RuntimeException('Shared owner fixture identity changed.');
 }
+$staff = User::findOrFail($credentials['staff']['id']);
+$alpha->run(static function () use ($staff): void {
+    DB::table('branch_grants')->insertOrIgnore([
+        'user_id' => $staff->id, 'branch_id' => DB::table('branches')->where('slug', 'north')->value('id'),
+        'role' => 'registration',
+    ]);
+});
 CenterMembership::firstOrCreate(['tenant_id' => $beta->id, 'user_id' => $sharedOwner->id], ['status' => 'active']);
 $beta->run(static function () use ($sharedOwner): void {
     DB::table('center_grants')->insertOrIgnore(['user_id' => $sharedOwner->id, 'role' => 'center_owner']);
