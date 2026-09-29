@@ -42,6 +42,7 @@ export function StudentLookup(props: Props) {
     if (scope === "branches" && mode === "identifier") params.set("mode", "identifier");
     if (search) params.set(scope === "branches" && mode === "identifier" ? "identifier" : "q", search);
     if (page > 1) params.set("page", String(page));
+    if (branchContext && branchContext.pagination.branches_page > 1) params.set("branches_page", String(branchContext.pagination.branches_page));
     return `/admin/students?${params}`;
   }
 

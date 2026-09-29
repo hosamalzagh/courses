@@ -263,3 +263,36 @@ test('staff lose center lookup after grant revocation while branch search remain
     await expect(staff.getByText('نطاق البحث:')).toContainText('فروعي');
   } finally { await Promise.all([owner.close(), staff.close()]); }
 });
+
+test('student and branch batches retain each other while paging the register', async ({ page }) => {
+  test.setTimeout(240_000);
+  await login(page, 'owner');
+  let firstBranchId: number | undefined;
+  for (let index = 0; index < 51; index++) {
+    const branch = await write(page, 'branches', 'POST', { name: `Page branch ${suffix} ${index}`, slug: `page-${suffix}-${index}` });
+    expect(branch.status).toBe(201);
+    firstBranchId ??= branch.body.branch.id;
+  }
+  for (let index = 0; index < 51; index++) {
+    const student = await write(page, 'students', 'POST', { name: `Page student ${suffix} ${index}`, branch_ids: [firstBranchId], request_id: crypto.randomUUID() });
+    expect(student.status).toBe(201);
+  }
+  await page.goto(`${host}/admin/students?branches_page=2&students-page=5`);
+  const nextStudents = page.getByRole('link', { name: 'الصفحة التالية في الطلاب في فروعي' });
+  await expect(nextStudents).toBeVisible();
+  const nextStudentsUrl = new URL((await nextStudents.getAttribute('href'))!, host);
+  expect(nextStudentsUrl.searchParams.get('page')).toBe('2');
+  expect(nextStudentsUrl.searchParams.get('branches_page')).toBe('2');
+  await nextStudents.click();
+  await expect(page).toHaveURL(/page=2.*branches_page=2/);
+  const previousBranches = page.getByRole('link', { name: 'الفروع السابقة' });
+  const previousBranchesUrl = new URL((await previousBranches.getAttribute('href'))!, host);
+  expect(previousBranchesUrl.searchParams.get('page')).toBe('2');
+  expect(previousBranchesUrl.searchParams.has('branches_page')).toBe(false);
+  await previousBranches.click();
+  await expect(page).toHaveURL((url) => url.searchParams.get('page') === '2' && !url.searchParams.has('branches_page'));
+  const nextBranches = page.getByRole('link', { name: 'الفروع التالية' });
+  const nextBranchesUrl = new URL((await nextBranches.getAttribute('href'))!, host);
+  expect(nextBranchesUrl.searchParams.get('page')).toBe('2');
+  expect(nextBranchesUrl.searchParams.get('branches_page')).toBe('2');
+});
