@@ -17,11 +17,11 @@ import type { StudyEnrollmentContext } from "@/lib/server-context";
 type Attempt = StudyEnrollmentContext["attempts"][number];
 type Session = { id: string; group_id: string; group_name: string; branch_id: number; number: number;
   title: string | null; scheduled_at: string; status: "planned" | "held" | "cancelled";
-  revision: number; plan_lecture_id: string | null; can_book: boolean; can_prove: boolean;
+  revision: number; plan_lecture_id: string | null; can_book: boolean; can_prove: boolean; suspended_at_session: boolean;
   booking_id: string | null; source_session_id: string | null; booked_at: string | null;
   booked_source: Absence | null; proved_at: string | null; attendance_status: string | null };
 type Absence = { id: string; group_name: string; number: number; scheduled_at: string; branch_id: number };
-type Workspace = { attempt: { id: string; revision: number; status: string }; sessions: Session[];
+type Workspace = { attempt: { id: string; revision: number; status: string; student_status: "active" | "suspended" }; sessions: Session[];
   pagination: { page: number; has_more: boolean } };
 
 export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }: {
@@ -138,8 +138,12 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
     {loading ? <p role="status">جارٍ تحميل محاضرات التعويض…</p> : null}
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-    {conflict || uncertain ? <CenterHeaderActions><Button disabled={busy} onClick={() => void reload()}>تحميل أحدث البيانات</Button></CenterHeaderActions> : null}
+    {conflict || uncertain || workspace?.attempt.student_status === "suspended"
+      ? <CenterHeaderActions><Button disabled={busy} onClick={() => void reload()}>تحميل أحدث البيانات</Button></CenterHeaderActions> : null}
     {workspace && !loading ? <>
+      {workspace.attempt.student_status === "suspended" ? <InlineNotice tone="warning">
+        ملف الطالب موقوف؛ لا يمكن حجز أو إثبات حضور التعويض حتى فك الإيقاف.
+      </InlineNotice> : null}
       <DataTable id={`${prefix}-sessions`} title="محاضرات التعويض" rows={workspace.sessions} rowKey={row => row.id}
         pageSize={20} searchText={row => `${row.group_name} ${row.number} ${row.title ?? ""}`}
         serverSearch={{ value: searchTerm, onSearch: value => {
@@ -167,7 +171,9 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
                   setAbsencesFailed(false);
                   setAbsencesLoading(true); pendingId.current = null;
                   requestAnimationFrame(() => document.getElementById(`${prefix}-source`)?.focus()); }}>
-                {row.status === "held" ? "إثبات تعويض" : "حجز تعويض"}</Button> : <span className="muted">غير متاح</span> },
+                {row.status === "held" ? "إثبات تعويض" : "حجز تعويض"}</Button>
+              : <span className="muted">{workspace.attempt.student_status === "suspended" ? "الملف موقوف"
+                : row.suspended_at_session ? "موقوف وقت المحاضرة" : "غير متاح"}</span> },
         ]} />
       {workspace.pagination.page > 1 || workspace.pagination.has_more ? <div className="form-actions">
         <Button disabled={workspace.pagination.page <= 1 || busy || dirty} onClick={() => { setLoading(true); setPage(page - 1); }}>المحاضرات السابقة</Button>
