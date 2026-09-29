@@ -55,6 +55,105 @@ class StudyEnrollmentTest extends TestCase
         $this->south = $this->postJson("{$this->base}/branches", ['name' => 'South', 'slug' => 'south'])->assertCreated()->json('branch.id');
     }
 
+    public function test_existing_attempt_threshold_changes_only_after_selected_preview_and_approval(): void
+    {
+        $group = $this->group($this->north, '0.00', 10);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $attempts = [];
+        foreach (range(1, 2) as $number) {
+            $student = $this->student([$this->north]);
+            $url = "{$this->base}/students/{$student['id']}/enrollments";
+            $workspace = $this->getJson($url)->assertOk()->json();
+            $attempts[] = $this->postJson($url, [
+                'group_id' => $group['id'], 'group_revision' => $group['revision'],
+                'currency_revision' => $workspace['student']['currency_revision'],
+                'joined_on' => now('Africa/Cairo')->toDateString(), 'discount' => '0.00',
+                'discount_reason' => null, 'version' => $workspace['student']['version'],
+                'request_id' => (string) Str::uuid(),
+            ])->assertCreated()->json('attempt');
+        }
+        $updatedGroup = $this->patchJson("{$this->base}/groups/{$group['id']}/settings", [
+            'revision' => $group['revision'], 'approved_price' => '0.00',
+            'completion_threshold' => 60, 'instructor_ids' => array_column($group['instructors'], 'id'),
+        ])->assertOk()->json('group');
+        $inactiveChange = ['attempt_ids' => [$attempts[1]['id']], 'reason' => 'اختبار ثبات قاعدة المحاولة المنتهية'];
+        $inactivePath = "{$this->base}/groups/{$group['id']}/completion-threshold";
+        $inactivePreview = $this->postJson("{$inactivePath}/preview", $inactiveChange)->assertOk()->json();
+        foreach (['withdrawn', 'completed'] as $status) {
+            $this->center->run(fn () => DB::table('study_attempts')->where('id', $attempts[1]['id'])
+                ->update(['status' => $status, 'revision' => DB::raw('revision + 1')]));
+            $this->postJson("{$inactivePath}/preview", $inactiveChange)->assertNotFound();
+            $this->postJson($inactivePath, [...$inactiveChange,
+                'preview_token' => $inactivePreview['preview_token'], 'request_id' => (string) Str::uuid(),
+            ])->assertNotFound();
+            $this->center->run(fn () => DB::table('study_attempts')->where('id', $attempts[1]['id'])
+                ->update(['status' => 'active', 'revision' => DB::raw('revision + 1')]));
+        }
+        $this->center->run(function () use ($group, $attempts): void {
+            $lectures = DB::table('plan_lectures')->where('plan_version_id', $group['plan_version_id'])
+                ->orderBy('number')->limit(6)->get(['id', 'number']);
+            foreach ($lectures as $lecture) {
+                $sessionId = (string) Str::uuid();
+                DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $group['id'],
+                    'plan_lecture_id' => $lecture->id, 'number' => $lecture->number,
+                    'scheduled_at' => now()->addHours((int) $lecture->number), 'status' => 'planned', 'created_by' => $this->owner->id,
+                    'created_by_name' => $this->owner->name, 'created_at' => now(), 'updated_at' => now()]);
+                DB::table('study_attendance_entries')->insert(['id' => (string) Str::uuid(),
+                    'session_id' => $sessionId, 'attempt_id' => $attempts[0]['id'], 'status' => 'counted',
+                    'recorded_by' => $this->owner->id, 'recorded_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+            }
+        });
+        $path = "{$this->base}/groups/{$group['id']}/completion-threshold";
+        $change = ['attempt_ids' => [$attempts[0]['id']], 'reason' => 'تطبيق الحد الجديد على المحاولة المختارة'];
+        $preview = $this->postJson("{$path}/preview", $change)->assertOk()
+            ->assertJsonPath('students.0.before_threshold', 80)
+            ->assertJsonPath('students.0.after_threshold', 60)
+            ->assertJsonPath('students.0.before_needed', 8)
+            ->assertJsonPath('students.0.after_needed', 6)
+            ->assertJsonPath('students.0.open_credited_count', 6)
+            ->assertJsonPath('students.0.before_eligible', false)
+            ->assertJsonPath('students.0.after_eligible', true)
+            ->assertJsonPath('students.0.after_provisional', true)->json();
+        $confirmation = [...$change, 'preview_token' => $preview['preview_token'],
+            'request_id' => (string) Str::uuid()];
+        $this->grant([$this->north => ['branch_viewer']]);
+        $this->asUser($this->staff);
+        $this->postJson("{$path}/preview", $change)->assertForbidden();
+        $this->postJson($path, $confirmation)->assertForbidden();
+        $this->asUser($this->owner);
+        $this->patchJson("{$this->base}/groups/{$group['id']}/settings", [
+            'revision' => $updatedGroup['revision'], 'approved_price' => '1.00',
+            'completion_threshold' => 60, 'instructor_ids' => array_column($group['instructors'], 'id'),
+        ])->assertOk();
+        $this->postJson($path, $confirmation)->assertConflict();
+        $preview = $this->postJson("{$path}/preview", $change)->assertOk()->json();
+        $confirmation = [...$change, 'preview_token' => $preview['preview_token'],
+            'request_id' => (string) Str::uuid()];
+        $this->postJson($path, $confirmation)->assertOk()->assertJsonPath('students.0.after_threshold', 60);
+        $this->postJson($path, $confirmation)->assertOk();
+        $this->center->run(function () use ($attempts): void {
+            $this->assertSame(60, DB::table('study_attempts')->where('id', $attempts[0]['id'])->value('completion_threshold'));
+            $this->assertSame(80, DB::table('study_attempts')->where('id', $attempts[1]['id'])->value('completion_threshold'));
+            $this->assertSame(1, DB::table('study_attempt_threshold_history')->count());
+            $this->assertSame(6, DB::table('study_attempt_threshold_history')->value('open_credited_count'));
+            $this->assertTrue(DB::table('study_attempt_threshold_history')->value('after_provisional'));
+            try {
+                (require database_path('migrations/tenant/2026_09_29_045000_create_attempt_threshold_decisions.php'))->down();
+                $this->fail('Rollback must preserve recorded threshold decisions.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString('Cannot roll back', $exception->getMessage());
+            }
+        });
+        $this->grant([$this->north => ['academic_admin', 'branch_auditor']]);
+        $this->asUser($this->staff);
+        $this->assertStringContainsString('study_attempts.completion_threshold_applied',
+            $this->getJson("{$this->base}/audit")->assertOk()->getContent());
+        $this->grant([$this->north => ['registration', 'branch_auditor']]);
+        $this->asUser($this->staff);
+        $this->assertStringNotContainsString('study_attempts.completion_threshold_applied',
+            $this->getJson("{$this->base}/audit")->assertOk()->getContent());
+    }
+
     public function test_enrollment_snapshots_price_plan_and_late_join_without_allocating_advance(): void
     {
         $group = $this->group($this->north, '1500.00');
@@ -1838,6 +1937,29 @@ class StudyEnrollmentTest extends TestCase
         $coverage = $this->getJson("{$this->base}/groups/{$target['id']}/coverage")
             ->assertOk()->assertJsonPath('students.0.covered_count', 1)->assertJsonPath('students.0.missing_numbers', []);
         $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
+        $thresholdGroup = $this->patchJson("{$this->base}/groups/{$target['id']}/settings", [
+            'revision' => $target['revision'], 'approved_price' => '250.00',
+            'completion_threshold' => 60, 'instructor_ids' => array_column($target['instructors'], 'id'),
+        ])->assertOk()->json('group');
+        $thresholdPath = "{$this->base}/groups/{$target['id']}/completion-threshold";
+        $thresholdChange = ['attempt_ids' => [$attempt['id']], 'reason' => 'اعتماد الحد الجديد بعد تغطية منقولة'];
+        $thresholdImpact = $this->postJson("{$thresholdPath}/preview", $thresholdChange)->assertOk()
+            ->assertJsonPath('students.0.covered_count', 1)
+            ->assertJsonPath('students.0.open_credited_count', 0)
+            ->assertJsonPath('students.0.before_provisional', false)
+            ->assertJsonPath('students.0.after_provisional', false)
+            ->assertJsonPath('students.0.before_threshold', 75)
+            ->assertJsonPath('students.0.after_threshold', 60)->json();
+        $this->postJson($thresholdPath, [...$thresholdChange,
+            'preview_token' => $thresholdImpact['preview_token'], 'request_id' => (string) Str::uuid()])
+            ->assertOk()->assertJsonPath('students.0.covered_count', 1);
+        $this->patchJson("{$this->base}/groups/{$target['id']}/settings", [
+            'revision' => $thresholdGroup['revision'], 'approved_price' => '250.00',
+            'completion_threshold' => 80, 'instructor_ids' => array_column($target['instructors'], 'id'),
+        ])->assertOk();
+        $staleChange = ['attempt_ids' => [$attempt['id']], 'reason' => 'رفع الحد بعد نقل التغطية'];
+        $staleImpact = $this->postJson("{$thresholdPath}/preview", $staleChange)->assertOk()
+            ->assertJsonPath('students.0.covered_count', 1)->json();
         $sourceSessionPath = "{$this->base}/groups/{$source['id']}/sessions/{$sessionId}";
         $revokePreview = $this->getJson("{$sourceSessionPath}/revoke-preview")->assertOk()
             ->assertJsonPath('attendance.potential_coverage_records', 1)->json();
@@ -1847,6 +1969,9 @@ class StudyEnrollmentTest extends TestCase
             'group_revision' => $revokePreview['group_revision'],
             'preview_token' => $revokePreview['preview_token'], 'request_id' => (string) Str::uuid(),
         ])->assertOk();
+        $this->postJson($thresholdPath, [...$staleChange,
+            'preview_token' => $staleImpact['preview_token'], 'request_id' => (string) Str::uuid()])
+            ->assertConflict()->assertJsonPath('code', 'threshold_preview_changed');
         $this->getJson("{$this->base}/groups/{$target['id']}/coverage")
             ->assertOk()->assertJsonPath('students.0.covered_count', 0);
         $this->center->run(function () use ($attempt, $target): void {
@@ -2086,12 +2211,15 @@ class StudyEnrollmentTest extends TestCase
             });
     }
 
-    private function group(int $branchId, string $price): array
+    private function group(int $branchId, string $price, int $lectureCount = 1): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => 'Course '.Str::random(5), 'request_id' => (string) Str::uuid()])->assertCreated()->json('course');
         $stage = $this->postJson("{$this->base}/courses/{$course['id']}/stages", ['name' => 'Stage', 'request_id' => (string) Str::uuid()])->assertCreated()->json('stage');
         $level = $this->postJson("{$this->base}/stages/{$stage['id']}/levels", [
-            'name' => 'Level', 'request_id' => (string) Str::uuid(), 'lectures' => [['number' => 1, 'content' => 'Required', 'planned_hours' => 2]],
+            'name' => 'Level', 'request_id' => (string) Str::uuid(),
+            'lectures' => array_map(fn (int $number): array => [
+                'number' => $number, 'content' => "Required {$number}", 'planned_hours' => 2,
+            ], range(1, $lectureCount)),
         ])->assertCreated()->json('level');
         $instructor = $this->postJson("{$this->base}/instructors", [
             'name' => 'Teacher '.Str::random(5), 'branch_ids' => [$branchId], 'request_id' => (string) Str::uuid(),

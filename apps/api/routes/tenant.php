@@ -30,6 +30,7 @@ use App\Http\Controllers\CenterStudyCoverageController;
 use App\Http\Controllers\CenterStudyEnrollmentController;
 use App\Http\Controllers\CenterStudyTransferController;
 use App\Http\Controllers\CenterStudyGroupController;
+use App\Http\Controllers\CenterAttemptThresholdController;
 use App\Http\Controllers\CenterStudySessionController;
 use App\Http\Controllers\CenterStudyTeachingController;
 use App\Http\Controllers\CenterStudyWaitlistController;
@@ -181,6 +182,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::patch('groups/{groupId}/settings', [CenterStudyGroupController::class, 'updateSettings']);
         Route::get('groups/{groupId}/sessions', [CenterStudySessionController::class, 'workspace']);
         Route::get('groups/{groupId}/coverage', [CenterStudyCoverageController::class, 'workspace']);
+        Route::post('groups/{groupId}/completion-threshold/preview', [CenterAttemptThresholdController::class, 'preview']);
+        Route::post('groups/{groupId}/completion-threshold', [CenterAttemptThresholdController::class, 'store']);
         Route::post('groups/{groupId}/sessions/preview', [CenterStudySessionController::class, 'preview']);
         Route::post('groups/{groupId}/sessions', [CenterStudySessionController::class, 'store']);
         Route::patch('groups/{groupId}/sessions/{sessionId}/postpone', [CenterStudySessionController::class, 'postpone']);

@@ -1,6 +1,6 @@
 import type { AuditEntry } from '@/lib/server-context';
 export function CurriculumAuditDetails({ entry }: { entry: AuditEntry }) {
-  if (!entry.event.startsWith('curriculum.') && !entry.event.startsWith('study_group.')) return null;
+  if (!entry.event.startsWith('curriculum.') && !entry.event.startsWith('study_group.') && entry.event !== 'study_attempts.completion_threshold_applied') return null;
   let details = entry.details;
   if (typeof details === 'string') { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== 'object' || Array.isArray(details)) return null;
@@ -13,6 +13,18 @@ export function CurriculumAuditDetails({ entry }: { entry: AuditEntry }) {
       <p>المصدر: {typeof data.source_course_name === 'string' && typeof data.source_branch_name === 'string'
         ? `${data.source_course_name} · ${data.source_branch_name}` : 'فرع غير متاح ضمن صلاحيتك'}</p>
       <p>نُسخ {Number(counts.stages ?? 0).toLocaleString('ar-EG')} مرحلة، {Number(counts.levels ?? 0).toLocaleString('ar-EG')} مستوى، {Number(counts.plans ?? 0).toLocaleString('ar-EG')} إصدار خطة.</p>
+    </details>;
+  }
+  if (entry.event === 'study_attempts.completion_threshold_applied') {
+    const students = Array.isArray(data.students) ? data.students.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item))) : [];
+    const eligibility = (eligible: unknown, provisional: unknown) =>
+      eligible === true ? provisional === true ? 'مستوفٍ مبدئيًا' : 'مستوفٍ' : 'غير مستوفٍ';
+    return <details><summary>عرض قرار تطبيق نسبة الإتمام</summary>
+      <p>السبب: {typeof data.reason === 'string' ? data.reason : 'غير مسجل'} · عدد التسجيلات: {students.length.toLocaleString('ar-EG')}</p>
+      <ul>{students.map((student, index) => <li key={typeof student.attempt_id === 'string' ? student.attempt_id : index}>
+        {typeof student.name === 'string' ? student.name : 'طالب'} · {typeof student.student_number === 'number' ? student.student_number.toLocaleString('ar-EG') : 'رقم غير مسجل'}: {typeof student.before_threshold === 'number' ? student.before_threshold.toLocaleString('ar-EG') : '؟'}٪ ← {typeof student.after_threshold === 'number' ? student.after_threshold.toLocaleString('ar-EG') : '؟'}٪؛ المطلوب {typeof student.before_needed === 'number' ? student.before_needed.toLocaleString('ar-EG') : '؟'} ← {typeof student.after_needed === 'number' ? student.after_needed.toLocaleString('ar-EG') : '؟'} محاضرات؛ الأهلية {eligibility(student.before_eligible, student.before_provisional)} ← {eligibility(student.after_eligible, student.after_provisional)}.
+        {typeof student.open_credited_count === 'number' && student.open_credited_count > 0 ? ` يتضمن الرصيد وقت القرار ${student.open_credited_count.toLocaleString('ar-EG')} محاضرة مفتوحة؛ كان احتسابها مبدئيًا حتى إغلاقها.` : null}
+      </li>)}</ul>
     </details>;
   }
   if (entry.event.startsWith('study_group.')) {
