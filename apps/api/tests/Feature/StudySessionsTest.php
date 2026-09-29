@@ -421,8 +421,12 @@ class StudySessionsTest extends TestCase
             'candidate_group_revision' => $scheduled['group_revision'],
             'reason' => 'اعتماد أكاديمي صريح لتعويض المتطلب المضاف',
             'request_id' => (string) Str::uuid()];
-        $this->grant([$this->north => ['branch_viewer']]);
+        $this->grant([$this->north => ['branch_viewer', 'branch_auditor']]);
         $this->asUser($this->staff);
+        $this->assertStringNotContainsString('study_group.requirements_changed',
+            $this->getJson("{$this->base}/audit")->assertOk()->getContent());
+        $this->assertStringNotContainsString('study_group.requirements_changed',
+            $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent());
         $this->getJson("{$equivalencesPath}/options?required_requirement_id={$required['requirement']['id']}")
             ->assertForbidden();
         $this->postJson($equivalencesPath, $approve)->assertForbidden();
