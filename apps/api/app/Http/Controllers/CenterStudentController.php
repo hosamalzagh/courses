@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\ActiveStudentAllocations;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
-use App\Support\ActiveStudentAllocations;
 use App\Support\EffectiveStudyFees;
 use App\Support\StudentAttachments;
 use App\Support\StudentBarcode;
@@ -134,12 +134,16 @@ class CenterStudentController extends Controller
             $absences = DB::connection('tenant')->table('study_attendance_entries as summary_attendance')
                 ->join('study_sessions as summary_sessions', 'summary_sessions.id', '=', 'summary_attendance.session_id')
                 ->join('study_attempts as summary_attempts', 'summary_attempts.id', '=', 'summary_attendance.attempt_id')
+                ->join('study_attempt_group_periods as summary_periods', 'summary_periods.attempt_id', '=', 'summary_attempts.id')
                 ->join('study_groups as summary_groups', 'summary_groups.id', '=', 'summary_sessions.group_id')
                 ->join('levels as summary_levels', 'summary_levels.id', '=', 'summary_groups.level_id')
                 ->join('stages as summary_stages', 'summary_stages.id', '=', 'summary_levels.stage_id')
                 ->join('courses as summary_courses', 'summary_courses.id', '=', 'summary_stages.course_id')
                 ->whereColumn('summary_attempts.student_id', 'students.id')
                 ->whereColumn('summary_sessions.group_id', 'summary_attempts.current_group_id')
+                ->whereColumn('summary_periods.group_id', 'summary_sessions.group_id')
+                ->whereNull('summary_periods.left_on')
+                ->whereRaw("(summary_sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= summary_periods.joined_on")
                 ->whereColumn('summary_courses.branch_id', 'summary_attempts.branch_id')
                 ->where('summary_attempts.status', 'active')
                 ->where('summary_attendance.status', 'absent')

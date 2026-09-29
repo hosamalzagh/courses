@@ -314,7 +314,7 @@ class StudyEnrollmentTest extends TestCase
             $enrolled = $this->postJson("{$this->base}/students/{$student['id']}/enrollments", [
                 'group_id' => $group['id'], 'group_revision' => $group['revision'],
                 'currency_revision' => $workspace->json('student.currency_revision'),
-                'joined_on' => now('Africa/Cairo')->format('Y-m-d'), 'discount' => '0.00',
+                'joined_on' => now('Africa/Cairo')->subDays(2)->format('Y-m-d'), 'discount' => '0.00',
                 'discount_reason' => null, 'version' => $workspace->json('student.version'),
                 'request_id' => (string) Str::uuid(),
             ])->assertCreated();
@@ -383,6 +383,19 @@ class StudyEnrollmentTest extends TestCase
             ->assertJsonPath('summary.current_group_absences', 1);
         $this->assertCount(1, collect($transferred->json('study.attempts'))
             ->where('branch_id', $this->north)->where('status', 'transferred'));
+        $this->center->run(function () use ($southAttemptId, $south): void {
+            $today = now('Africa/Cairo')->toDateString();
+            DB::table('study_attempt_group_periods')->where('attempt_id', $southAttemptId)
+                ->whereNull('left_on')->update(['left_on' => $today]);
+            DB::table('study_attempt_group_periods')->insert([
+                'id' => (string) Str::uuid(), 'attempt_id' => $southAttemptId,
+                'group_id' => $south['id'], 'joined_on' => $today, 'created_at' => now(),
+            ]);
+        });
+        $rejoined = $this->getJson($path)->assertOk()
+            ->assertJsonPath('summary.current_group_absences', 0)
+            ->assertJsonPath('summary.financial.debt', '300.00');
+        $this->assertLessThanOrEqual(6, (int) $rejoined->headers->get('X-Courses-Query-Count'));
         $searched = $this->getJson($path.'&study_q='.urlencode('Northern group'))->assertOk()
             ->assertJsonCount(1, 'study.attempts')->assertJsonPath('study.attempts.0.branch_id', $this->north);
         $this->assertLessThanOrEqual(6, (int) $searched->headers->get('X-Courses-Query-Count'));
