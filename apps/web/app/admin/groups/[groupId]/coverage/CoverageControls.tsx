@@ -189,8 +189,10 @@ export function CoverageControls({ context, search }: { context: CoverageContext
 
   return <>
     <UnsavedChangesGuard dirty={dirty || anyBusy} guardHistory blockDiscard={anyBusy || completionUncertain}
-      blockDiscardTitle="انتظر نتيجة الطلب"
-      blockDiscardDescription="طلب اعتماد قيد التنفيذ. ابق في الصفحة حتى تظهر نتيجته؛ المغادرة الآن قد تترك حالة القرار غير واضحة."
+      blockDiscardTitle={busy ? "انتظر نتيجة اعتماد النسبة" : "انتظر نتيجة اعتماد الإتمام"}
+      blockDiscardDescription={busy
+        ? "طلب اعتماد النسبة قيد التنفيذ. ابق في الصفحة حتى تظهر نتيجته؛ المغادرة الآن قد تترك حالة القرار غير واضحة."
+        : "طلب اعتماد الإتمام قيد التنفيذ. ابق في الصفحة حتى تظهر نتيجته؛ المغادرة الآن قد تترك حالة القرار غير واضحة."}
       onDiscard={() => { setSelected([]); setReason(""); setPreview(null); setError(""); setCompletionSelected({}); setCompletionPreview(null); setCompletionError(""); }} />
     {pendingNavigation ? <ConfirmationDialog title="مغادرة دون تطبيق" description="لديك اختيار أو معاينة لم تُعتمد. هل تريد الانتقال والتخلي عنها؟" confirmLabel="الانتقال دون تطبيق" onCancel={() => { setPendingNavigation(null); requestAnimationFrame(() => navigationFocus.current?.focus()); }} onConfirm={() => { const next = pendingNavigation; setPendingNavigation(null); setSelected([]); setReason(""); setPreview(null); setCompletionSelected({}); setCompletionPreview(null); router.push(next); }} /> : null}
     <CenterPageActions context={context} actions={<>
@@ -259,12 +261,14 @@ export function CoverageControls({ context, search }: { context: CoverageContext
           aria-label={`اختيار تسجيل ${row.name} لتطبيق نسبة الإتمام`} /> }] : []),
         ...(group.can_complete && group.status !== "waiting" ? [{ key: "completion-select", label: "اعتماد", render: (row: CoverageRow) =>
           <Checkbox checked={Object.hasOwn(completionSelected, row.attempt_id)} disabled={anyBusy || row.attempt_status !== "active" || completionSelection.length >= 200 && !Object.hasOwn(completionSelected, row.attempt_id)}
-            aria-label={`اختيار إتمام ${row.name}`} onCheckedChange={checked => setCompletionSelected(current => {
-              const next = { ...current };
-              if (checked) next[row.attempt_id] = ""; else delete next[row.attempt_id];
+            aria-label={`اختيار إتمام ${row.name}`} onCheckedChange={checked => {
+              setCompletionSelected(current => {
+                const next = { ...current };
+                if (checked) next[row.attempt_id] = ""; else delete next[row.attempt_id];
+                return next;
+              });
               setCompletionPreview(null);
-              return next;
-            })} /> }] : []),
+            }} /> }] : []),
         { key: "student", label: "الطالب", render: row => <Link href={`/admin/students/${row.student_id}`}>{row.name} · {row.student_number.toLocaleString("ar-EG")}</Link> },
         { key: "coverage", label: "التغطية", render: row => `${row.covered_count.toLocaleString("ar-EG")}/${row.required_count.toLocaleString("ar-EG")} · ${row.percentage.toLocaleString("ar-EG")}%` },
         { key: "missing", label: "الناقص", render: row => row.missing_numbers.length.toLocaleString("ar-EG") },
