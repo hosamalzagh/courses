@@ -93,6 +93,11 @@ test('books makeup without granting coverage and hides the attempt from unauthor
     await expect(editor).toBeVisible();
     const options = await optionsResponse;
     expect(Number(options.headers()['x-courses-query-count'])).toBeLessThanOrEqual(6);
+    await owner.getByRole('searchbox', { name: 'بحث في محاضرات التعويض' }).fill(target.name);
+    const filteredResponse = owner.waitForResponse(response => response.url().includes('/makeup?page=1&q='));
+    await owner.getByRole('button', { name: 'بحث في جميع محاضرات التعويض' }).click();
+    expect(Number((await filteredResponse).headers()['x-courses-query-count'])).toBeLessThanOrEqual(6);
+    await expect(editor.getByRole('row').filter({ hasText: target.name })).toBeVisible();
     await owner.getByRole('button', { name: 'القائمة' }).click();
     await owner.getByRole('button', { name: 'تفعيل الوضع الداكن' }).click();
     await expect(owner.locator('html')).toHaveAttribute('data-theme', 'dark');

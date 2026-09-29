@@ -34,6 +34,7 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
   const submitting = useRef(false);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [page, setPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [sourceId, setSourceId] = useState("");
   const [sourceAbsences, setSourceAbsences] = useState<Absence[]>([]);
@@ -49,17 +50,18 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
   const selected = workspace?.sessions.find(session => session.id === selectedId);
   const dirty = Boolean(selectedId || sourceId || reason);
   const endpoint = `students/${studentId}/enrollments/${attempt.id}/makeup`;
+  const workspacePath = `${endpoint}?page=${page}${searchTerm ? `&q=${encodeURIComponent(searchTerm)}` : ""}`;
 
   useEffect(() => { onDirtyChange(dirty); return () => onDirtyChange(false); }, [dirty, onDirtyChange]);
   useEffect(() => {
     let cancelled = false;
-    centerRequest(`${endpoint}?page=${page}`, "GET").then(async response => {
+    centerRequest(workspacePath, "GET").then(async response => {
       if (!response.ok) throw new Error(await responseMessage(response));
       return response.json() as Promise<Workspace>;
     }).then(data => { if (!cancelled) { setWorkspace(data); setLoading(false); setConflict(false); } })
       .catch(cause => { if (!cancelled) { setError(cause instanceof Error ? cause.message : "تعذر تحميل التعويضات."); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [endpoint, page]);
+  }, [workspacePath]);
   useEffect(() => {
     if (!selectedId) return;
     let cancelled = false;
@@ -80,7 +82,7 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
   async function reload() {
     setLoading(true); setError("");
     try {
-      const response = await centerRequest(`${endpoint}?page=${page}`, "GET");
+      const response = await centerRequest(workspacePath, "GET");
       if (!response.ok) throw new Error(await responseMessage(response));
       setWorkspace(await response.json() as Workspace);
       setConflict(false); setUncertain(false);
@@ -129,6 +131,11 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
     {workspace && !loading ? <>
       <DataTable id={`${prefix}-sessions`} title="محاضرات التعويض" rows={workspace.sessions} rowKey={row => row.id}
         pageSize={20} searchText={row => `${row.group_name} ${row.number} ${row.title ?? ""}`}
+        serverSearch={{ value: searchTerm, onSearch: value => {
+          if (busy || dirty || uncertain) { setError("ألغِ اختيار المحاضرة أو تحقق من نتيجة الطلب قبل البحث."); return; }
+          if (value === searchTerm && page === 1) return;
+          setError(""); setLoading(true); setPage(1); setSearchTerm(value);
+        } }}
         emptyMessage="لا توجد محاضرات في هذه الدفعة." description="تظهر حتى ٢٠ محاضرة في كل دفعة. يمكن اختيار محاضرة مفتوحة للحجز أو مغلقة لإثبات حضور سابق."
         columns={[
           { key: "group", label: "المجموعة", render: row => row.group_name },

@@ -15,11 +15,13 @@ class CenterStudyMakeupController extends Controller
 {
     public function workspace(Request $request, string $studentId, string $attemptId): JsonResponse
     {
-        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
+        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'q' => ['nullable', 'string', 'max:255']]);
         $permissions = $request->attributes->get('center_permissions');
         $attempt = $this->attempt($studentId, $attemptId, $permissions);
         $page = (int) ($data['page'] ?? 1);
         $branches = $this->branches($permissions, 'read');
+        $search = trim($data['q'] ?? '');
         $sessions = DB::connection('tenant')->table('study_sessions as sessions')
             ->join('study_groups as groups', 'groups.id', '=', 'sessions.group_id')
             ->join('levels', 'levels.id', '=', 'groups.level_id')
@@ -38,6 +40,11 @@ class CenterStudyMakeupController extends Controller
             ->leftJoin('courses as source_courses', 'source_courses.id', '=', 'source_stages.course_id')
             ->where(fn ($query) => $query->where('groups.id', '<>', $attempt->current_group_id)->orWhereNotNull('bookings.id'))
             ->where(fn ($query) => $query->whereIn('sessions.status', ['planned', 'held'])->orWhereNotNull('bookings.id'))
+            ->when($search !== '', fn ($query) => $query->where(function ($matches) use ($search): void {
+                $matches->where('groups.name', 'ilike', '%'.$search.'%')
+                    ->orWhere('sessions.title', 'ilike', '%'.$search.'%')
+                    ->orWhereRaw('sessions.number::text LIKE ?', ['%'.$search.'%']);
+            }))
             ->when(! $permissions->isCenterManager(), fn ($query) => $query->whereIn('courses.branch_id', $branches))
             ->select(['sessions.id', 'sessions.group_id', 'sessions.number', 'sessions.title', 'sessions.scheduled_at',
                 'sessions.status', 'sessions.revision', 'sessions.plan_lecture_id', 'groups.name as group_name',
@@ -205,7 +212,7 @@ class CenterStudyMakeupController extends Controller
             ->whereExists(DB::connection('tenant')->table('student_branches')
                 ->whereColumn('student_branches.student_id', 'students.id')
                 ->whereColumn('student_branches.branch_id', 'attempts.branch_id')->selectRaw('1'))
-            ->select(['attempts.id', 'attempts.branch_id', 'attempts.current_group_id', 'attempts.plan_version_id',
+            ->select(['attempts.id', 'attempts.student_id', 'attempts.branch_id', 'attempts.current_group_id', 'attempts.plan_version_id',
                 'attempts.status', 'attempts.revision', 'students.status as student_status', 'students.name as student_name']);
         if ($lock) {
             $query->lockForUpdate();
@@ -224,7 +231,7 @@ class CenterStudyMakeupController extends Controller
             ->join('stages', 'stages.id', '=', 'levels.stage_id')
             ->join('courses', 'courses.id', '=', 'stages.course_id')
             ->where('sessions.id', $sessionId)
-            ->select(['sessions.id', 'sessions.group_id', 'sessions.plan_lecture_id', 'sessions.status',
+            ->select(['sessions.id', 'sessions.group_id', 'sessions.plan_lecture_id', 'sessions.scheduled_at', 'sessions.status',
                 'sessions.revision', 'sessions.closed_at', 'groups.plan_version_id', 'courses.branch_id'])
             ->lockForUpdate()->first();
         abort_unless($session && $permissions->can($action, (int) $session->branch_id), 404);
@@ -241,6 +248,10 @@ class CenterStudyMakeupController extends Controller
 
     private function eligible(object $attempt, object $session, CenterPermissions $permissions, ?string $sourceSessionId): void
     {
+        abort_if(DB::connection('tenant')->table('student_suspensions')->where('student_id', $attempt->student_id)
+            ->where('suspended_at', '<=', $session->scheduled_at)
+            ->where(fn ($query) => $query->whereNull('lifted_at')->orWhere('lifted_at', '>', $session->scheduled_at))
+            ->exists(), 409, 'كان ملف الطالب موقوفًا وقت محاضرة التعويض.');
         abort_if($session->group_id === $attempt->current_group_id || ! $session->plan_lecture_id, 422,
             'اختر محاضرة تعويض من مجموعة أخرى لها محتوى معتمد.');
         $sourceLectureId = $sourceSessionId === null ? null
