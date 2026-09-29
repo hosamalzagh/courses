@@ -23,11 +23,14 @@ return new class extends Migration
             $table->unsignedSmallInteger('before_threshold');
             $table->unsignedSmallInteger('after_threshold');
             $table->unsignedSmallInteger('covered_count');
+            $table->unsignedSmallInteger('open_credited_count');
             $table->unsignedSmallInteger('required_count');
             $table->unsignedSmallInteger('before_needed');
             $table->unsignedSmallInteger('after_needed');
             $table->boolean('before_eligible');
             $table->boolean('after_eligible');
+            $table->boolean('before_provisional');
+            $table->boolean('after_provisional');
             $table->timestampTz('created_at');
             $table->primary(['request_id', 'attempt_id']);
             $table->index(['attempt_id', 'created_at']);

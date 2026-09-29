@@ -16,8 +16,9 @@ import { centerRequest, newSubmissionId, responseMessage } from "@/lib/client-ap
 import type { CoverageContext, CoverageRow } from "@/lib/groups";
 
 type Impact = { attempt_id: string; name: string; student_number: number; before_threshold: number;
-  after_threshold: number; covered_count: number; required_count: number; before_needed: number;
-  after_needed: number; before_eligible: boolean; after_eligible: boolean };
+  after_threshold: number; covered_count: number; open_credited_count: number; required_count: number;
+  before_needed: number; after_needed: number; before_eligible: boolean; after_eligible: boolean;
+  before_provisional: boolean; after_provisional: boolean };
 type Preview = { target_threshold: number; required_count: number; students: Impact[]; preview_token: string };
 
 export function CoverageControls({ context, search }: { context: CoverageContext; search: string }) {
@@ -102,6 +103,8 @@ export function CoverageControls({ context, search }: { context: CoverageContext
     const requirement = group.requirements.find(item => item.number === number);
     return `${number.toLocaleString("ar-EG")} · ${requirement?.title || requirement?.content || "محاضرة مطلوبة"}`;
   }).join("، ") : "لا يوجد";
+  const eligibility = (eligible: boolean, provisional: boolean) =>
+    eligible ? provisional ? "مستوفٍ مبدئيًا" : "مستوفٍ" : "غير مستوفٍ";
   const result = (row: CoverageRow) => {
     if (row.student_status === "suspended") return "تحتاج مراجعة: الطالب موقوف";
     if (row.attempt_status === "withdrawn") return "تحتاج مراجعة: المحاولة منسحب منها";
@@ -130,7 +133,8 @@ export function CoverageControls({ context, search }: { context: CoverageContext
       {preview ? <div className="space-y-2" role="status">
         <p><strong>معاينة التطبيق:</strong> {preview.students.length.toLocaleString("ar-EG")} تسجيلات · الحد الجديد {preview.target_threshold.toLocaleString("ar-EG")}٪ · المطلوب {preview.required_count.toLocaleString("ar-EG")} محاضرات.</p>
         <ul className="list-disc ps-6">{preview.students.map(student => <li key={student.attempt_id}>
-          {student.name} · {student.student_number.toLocaleString("ar-EG")}: {student.before_threshold.toLocaleString("ar-EG")}٪ ({student.before_needed.toLocaleString("ar-EG")} محاضرات) ← {student.after_threshold.toLocaleString("ar-EG")}٪ ({student.after_needed.toLocaleString("ar-EG")} محاضرات)؛ الأهلية {student.before_eligible ? "مستوفٍ" : "غير مستوفٍ"} ← {student.after_eligible ? "مستوفٍ" : "غير مستوفٍ"}.
+          {student.name} · {student.student_number.toLocaleString("ar-EG")}: {student.before_threshold.toLocaleString("ar-EG")}٪ ({student.before_needed.toLocaleString("ar-EG")} محاضرات) ← {student.after_threshold.toLocaleString("ar-EG")}٪ ({student.after_needed.toLocaleString("ar-EG")} محاضرات)؛ الأهلية {eligibility(student.before_eligible, student.before_provisional)} ← {eligibility(student.after_eligible, student.after_provisional)}.
+          {student.open_credited_count > 0 ? ` يتضمن الرصيد ${student.open_credited_count.toLocaleString("ar-EG")} محاضرة مفتوحة؛ احتسابها مبدئي حتى إغلاقها.` : null}
         </li>)}</ul>
         <p className="muted">تُراجع بيانات المجموعة والحضور والصلاحية مجددًا عند الاعتماد. بلوغ الحد لا يعتمد إتمام الدراسة تلقائيًا.</p>
       </div> : null}

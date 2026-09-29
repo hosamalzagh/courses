@@ -76,13 +76,31 @@ class StudyEnrollmentTest extends TestCase
             'revision' => $group['revision'], 'approved_price' => '0.00',
             'completion_threshold' => 60, 'instructor_ids' => array_column($group['instructors'], 'id'),
         ])->assertOk()->json('group');
+        $this->center->run(function () use ($group, $attempts): void {
+            $lectures = DB::table('plan_lectures')->where('plan_version_id', $group['plan_version_id'])
+                ->orderBy('number')->limit(6)->get(['id', 'number']);
+            foreach ($lectures as $lecture) {
+                $sessionId = (string) Str::uuid();
+                DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $group['id'],
+                    'plan_lecture_id' => $lecture->id, 'number' => $lecture->number,
+                    'scheduled_at' => now()->addHours((int) $lecture->number), 'status' => 'planned', 'created_by' => $this->owner->id,
+                    'created_by_name' => $this->owner->name, 'created_at' => now(), 'updated_at' => now()]);
+                DB::table('study_attendance_entries')->insert(['id' => (string) Str::uuid(),
+                    'session_id' => $sessionId, 'attempt_id' => $attempts[0]['id'], 'status' => 'counted',
+                    'recorded_by' => $this->owner->id, 'recorded_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+            }
+        });
         $path = "{$this->base}/groups/{$group['id']}/completion-threshold";
         $change = ['attempt_ids' => [$attempts[0]['id']], 'reason' => 'تطبيق الحد الجديد على المحاولة المختارة'];
         $preview = $this->postJson("{$path}/preview", $change)->assertOk()
             ->assertJsonPath('students.0.before_threshold', 80)
             ->assertJsonPath('students.0.after_threshold', 60)
             ->assertJsonPath('students.0.before_needed', 8)
-            ->assertJsonPath('students.0.after_needed', 6)->json();
+            ->assertJsonPath('students.0.after_needed', 6)
+            ->assertJsonPath('students.0.open_credited_count', 6)
+            ->assertJsonPath('students.0.before_eligible', false)
+            ->assertJsonPath('students.0.after_eligible', true)
+            ->assertJsonPath('students.0.after_provisional', true)->json();
         $confirmation = [...$change, 'preview_token' => $preview['preview_token'],
             'request_id' => (string) Str::uuid()];
         $this->grant([$this->north => ['branch_viewer']]);
@@ -104,6 +122,8 @@ class StudyEnrollmentTest extends TestCase
             $this->assertSame(60, DB::table('study_attempts')->where('id', $attempts[0]['id'])->value('completion_threshold'));
             $this->assertSame(80, DB::table('study_attempts')->where('id', $attempts[1]['id'])->value('completion_threshold'));
             $this->assertSame(1, DB::table('study_attempt_threshold_history')->count());
+            $this->assertSame(6, DB::table('study_attempt_threshold_history')->value('open_credited_count'));
+            $this->assertTrue(DB::table('study_attempt_threshold_history')->value('after_provisional'));
             try {
                 (require database_path('migrations/tenant/2026_09_29_045000_create_attempt_threshold_decisions.php'))->down();
                 $this->fail('Rollback must preserve recorded threshold decisions.');
@@ -1725,6 +1745,9 @@ class StudyEnrollmentTest extends TestCase
         $thresholdChange = ['attempt_ids' => [$attempt['id']], 'reason' => 'اعتماد الحد الجديد بعد تغطية منقولة'];
         $thresholdImpact = $this->postJson("{$thresholdPath}/preview", $thresholdChange)->assertOk()
             ->assertJsonPath('students.0.covered_count', 1)
+            ->assertJsonPath('students.0.open_credited_count', 0)
+            ->assertJsonPath('students.0.before_provisional', false)
+            ->assertJsonPath('students.0.after_provisional', false)
             ->assertJsonPath('students.0.before_threshold', 75)
             ->assertJsonPath('students.0.after_threshold', 60)->json();
         $this->postJson($thresholdPath, [...$thresholdChange,

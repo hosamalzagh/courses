@@ -70,9 +70,13 @@ class CenterAttemptThresholdController extends Controller
                     'request_id' => $confirmation['request_id'], 'attempt_id' => $student['attempt_id'],
                     'before_threshold' => $student['before_threshold'],
                     'after_threshold' => $student['after_threshold'],
-                    'covered_count' => $student['covered_count'], 'required_count' => $impact['required_count'],
+                    'covered_count' => $student['covered_count'],
+                    'open_credited_count' => $student['open_credited_count'],
+                    'required_count' => $impact['required_count'],
                     'before_needed' => $student['before_needed'], 'after_needed' => $student['after_needed'],
                     'before_eligible' => $student['before_eligible'], 'after_eligible' => $student['after_eligible'],
+                    'before_provisional' => $student['before_provisional'],
+                    'after_provisional' => $student['after_provisional'],
                     'created_at' => $now,
                 ], $impact['students']));
             $db->table('center_audit_logs')->insert([
@@ -158,19 +162,26 @@ SQL)
         $students = $rows->map(function (object $row) use ($requiredIds, $required, $target): array {
             $credits = StudyCoverageCredits::resolve(
                 json_decode($row->attendance_rows, true), json_decode($row->approvals, true));
-            $covered = count(array_intersect($requiredIds, array_keys($credits['lectures'])));
+            $coveredIds = array_intersect($requiredIds, array_keys($credits['lectures']));
+            $covered = count($coveredIds);
+            $finalCovered = count(array_filter($coveredIds,
+                fn (string $id): bool => $credits['lectures'][$id] === true));
             $before = (int) $row->completion_threshold;
+            $beforeEligible = $covered * 100 >= $before * $required;
+            $afterEligible = $covered * 100 >= $target * $required;
 
             return ['attempt_id' => $row->id, 'name' => $row->name,
                 'student_number' => (int) $row->student_number,
                 'attempt_revision' => (int) $row->revision,
                 'before_threshold' => $before, 'after_threshold' => $target,
-                'covered_count' => $covered, 'required_count' => $required,
+                'covered_count' => $covered, 'open_credited_count' => $covered - $finalCovered,
+                'required_count' => $required,
                 'percentage' => round($covered * 100 / $required, 2),
                 'before_needed' => (int) ceil($before * $required / 100),
                 'after_needed' => (int) ceil($target * $required / 100),
-                'before_eligible' => $covered * 100 >= $before * $required,
-                'after_eligible' => $covered * 100 >= $target * $required];
+                'before_eligible' => $beforeEligible, 'after_eligible' => $afterEligible,
+                'before_provisional' => $beforeEligible && $finalCovered * 100 < $before * $required,
+                'after_provisional' => $afterEligible && $finalCovered * 100 < $target * $required];
         })->all();
         abort_if(collect($students)->contains(fn (array $student): bool => $student['before_threshold'] === $target),
             422, 'إحدى المحاولات المختارة تستخدم النسبة الحالية بالفعل. أعد اختيار التسجيلات القديمة.');
