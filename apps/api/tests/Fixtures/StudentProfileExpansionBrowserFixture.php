@@ -53,7 +53,11 @@ if ($sharedOwner->email !== $credentials['alpha']['email']) {
 }
 $staff = User::findOrFail($credentials['staff']['id']);
 $alpha->run(static function () use ($staff): void {
-    DB::table('branch_grants')->insertOrIgnore([
+    // Other isolated finance journeys may have promoted this reusable fixture user.
+    // Restore the exact registration scope before checking finance privacy.
+    DB::table('center_grants')->where('user_id', $staff->id)->delete();
+    DB::table('branch_grants')->where('user_id', $staff->id)->delete();
+    DB::table('branch_grants')->insert([
         'user_id' => $staff->id, 'branch_id' => DB::table('branches')->where('slug', 'north')->value('id'),
         'role' => 'registration',
     ]);

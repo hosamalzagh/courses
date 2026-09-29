@@ -242,7 +242,15 @@ class StudentProfilesTest extends TestCase
 
     public function test_center_databases_are_independent_and_existing_centers_can_receive_the_migration(): void
     {
-        $this->createStudent('Alpha only', [$this->north]);
+        $legacyPayload = ['name' => 'Migrated', 'phone' => '0000123456', 'branch_ids' => [$this->north, $this->south], 'request_id' => (string) Str::uuid()];
+        $student = $this->postJson("{$this->base}/students", $legacyPayload)->assertCreated()->json('student');
+        $snapshot = $this->center->run(fn () => [
+            'student' => DB::table('students')->where('id', $student['id'])->first(['id', 'student_number', 'phone', 'request_id', 'created_by', 'created_at']),
+            'branches' => DB::table('student_branches')->where('student_id', $student['id'])->orderBy('branch_id')->get()->all(),
+            'audit' => DB::table('center_audit_logs')->where('event', 'like', 'student.%')->orderBy('id')->get()->all(),
+        ]);
+        $this->assertCount(2, $snapshot['branches']);
+        $this->assertNotEmpty($snapshot['audit']);
         $this->center->run(function (): void {
             foreach (['*_snapshot_opening_study_period_requirements.php',
                 '*_snapshot_waitlist_period_requirements.php'] as $pattern) {
@@ -328,17 +336,31 @@ class StudentProfilesTest extends TestCase
             $migration = glob(database_path('migrations/tenant/*_add_student_cross_branch_sharing.php'))[0];
             (require $migration)->down();
             DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
-            DB::statement('DROP TABLE student_suspensions');
-            DB::table('migrations')->where('migration', '2026_09_27_140230_add_student_suspension_history')->delete();
-            DB::statement('DROP TABLE student_branches');
-            DB::statement('DROP TABLE students');
-            DB::table('migrations')->whereIn('migration', ['2026_09_26_193307_create_student_profiles', '2026_09_27_140402_add_general_student_profile_fields'])->delete();
+            $suspensionsMigration = glob(database_path('migrations/tenant/*_add_student_suspension_history.php'))[0];
+            (require $suspensionsMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($suspensionsMigration, PATHINFO_FILENAME))->delete();
+            $generalMigration = glob(database_path('migrations/tenant/*_add_general_student_profile_fields.php'))[0];
+            (require $generalMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($generalMigration, PATHINFO_FILENAME))->delete();
         });
-        $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
-        $this->center->run(fn () => $this->assertTrue(DB::getSchemaBuilder()
-            ->hasColumn('study_attempt_group_periods', 'opening_required_credit_ids')));
-        $student = $this->createStudent('Migrated', [$this->north]);
-        $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->center->run(function (): void {
+            $this->assertTrue(DB::getSchemaBuilder()->hasTable('student_branches'));
+            $this->assertFalse(DB::getSchemaBuilder()->hasColumn('students', 'school'));
+        });
+        for ($run = 1; $run <= 2; $run++) {
+            $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+            $this->center->run(function () use ($student, $snapshot): void {
+                $this->assertTrue(DB::getSchemaBuilder()->hasColumn('study_attempt_group_periods', 'opening_required_credit_ids'));
+                $this->assertEquals($snapshot['student'], DB::table('students')->where('id', $student['id'])->first(['id', 'student_number', 'phone', 'request_id', 'created_by', 'created_at']));
+                $this->assertEquals($snapshot['branches'], DB::table('student_branches')->where('student_id', $student['id'])->orderBy('branch_id')->get()->all());
+                $this->assertEquals($snapshot['audit'], DB::table('center_audit_logs')->where('event', 'like', 'student.%')->orderBy('id')->get()->all());
+            });
+        }
+        $this->postJson("{$this->base}/students", $legacyPayload)->assertOk()->assertJsonPath('student.id', $student['id']);
+        $this->center->run(function () use ($snapshot): void {
+            $this->assertEquals($snapshot['audit'], DB::table('center_audit_logs')->where('event', 'like', 'student.%')->orderBy('id')->get()->all());
+            $this->assertSame(1, DB::table('students')->count());
+        });
         $this->getJson("{$this->base}/student-workspace")->assertOk()->assertJsonCount(1, 'students')->assertJsonCount(2, 'branches');
         $this->actingAs(User::factory()->platformOwner()->create(), 'platform')->postJson('http://courses.test/api/v1/platform/centers', [
             'name' => 'Beta', 'slug' => 'beta', 'subdomain' => 'beta', 'plan' => 'starter', 'owner_email' => 'owner@beta.test',
