@@ -35,6 +35,7 @@ export function PlanApplicationEditor({ context, onSaved, onReload, onClose }: {
   const [versionSearch, setVersionSearch] = useState("");
   const [hasMore, setHasMore] = useState(false);
   const [targetId, setTargetId] = useState("");
+  const [selectedVersion, setSelectedVersion] = useState<Version | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [reason, setReason] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -48,6 +49,8 @@ export function PlanApplicationEditor({ context, onSaved, onReload, onClose }: {
   const groupId = context.group.id;
   const editable = context.students.filter(row => ["active", "completed"].includes(row.attempt_status));
   const draft = selected.length > 0 || targetId !== "" || reason !== "" || preview !== null;
+  const visibleVersions = selectedVersion && !versions.some(version => version.id === selectedVersion.id)
+    ? [selectedVersion, ...versions] : versions;
 
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
 
@@ -112,9 +115,13 @@ export function PlanApplicationEditor({ context, onSaved, onReload, onClose }: {
     <Field>
       <FieldLabel htmlFor={`${formId}-version`}>الإصدار الجديد</FieldLabel>
       <NativeSelect id={`${formId}-version`} value={targetId} disabled={busy || !loaded || conflict}
-        onChange={event => { setTargetId(event.target.value); invalidate(); }}>
+        onChange={event => {
+          setTargetId(event.target.value);
+          setSelectedVersion(visibleVersions.find(version => version.id === event.target.value) ?? null);
+          invalidate();
+        }}>
         <NativeSelectOption value="">اختر إصدارًا أحدث</NativeSelectOption>
-        {versions.map(version => <NativeSelectOption key={version.id} value={version.id}>
+        {visibleVersions.map(version => <NativeSelectOption key={version.id} value={version.id}>
           الإصدار {version.version.toLocaleString("ar-EG")} · {version.required_count.toLocaleString("ar-EG")} محاضرات
         </NativeSelectOption>)}
       </NativeSelect>

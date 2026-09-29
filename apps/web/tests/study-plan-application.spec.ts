@@ -84,6 +84,10 @@ test("academic staff applies a newer plan to a selected attempt without changing
     await expect(launch).toBeFocused();
     await launch.click();
     await owner.getByLabel("الإصدار الجديد").selectOption(plan.body.plan.id);
+    await owner.getByLabel("ابحث عن رقم إصدار الخطة").fill("999999");
+    await owner.locator("header.center-topbar").getByRole("button", { name: "بحث في الإصدارات" }).click();
+    await expect(owner.getByLabel("الإصدار الجديد")).toHaveValue(plan.body.plan.id);
+    await expect(owner.getByLabel("الإصدار الجديد").locator(`option[value="${plan.body.plan.id}"]`)).toHaveCount(1);
     await owner.getByRole("checkbox", { name: `اختيار محاولة ${student.body.student.name} لتطبيق إصدار الخطة` }).check();
     await owner.getByLabel("سبب التطبيق").fill("اعتماد إصدار الخطة الجديد بعد المراجعة");
     await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة أثر الإصدار" }).click();
