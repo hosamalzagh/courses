@@ -154,6 +154,303 @@ class StudyEnrollmentTest extends TestCase
             $this->getJson("{$this->base}/audit")->assertOk()->getContent());
     }
 
+    public function test_profile_study_tab_preserves_attempts_during_suspension_and_hides_other_branches(): void
+    {
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $north = $this->group($this->north, '0.00');
+        $south = $this->group($this->south, '0.00');
+        $transferTarget = $this->group($this->south, '0.00');
+        $this->center->run(fn () => DB::table('study_groups')->where('id', $north['id'])
+            ->update(['name' => 'Northern group']));
+        $student = $this->student([$this->north, $this->south]);
+        $northAttemptId = null;
+        foreach ([$north, $south] as $group) {
+            $workspace = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")->assertOk();
+            $enrolled = $this->postJson("{$this->base}/students/{$student['id']}/enrollments", [
+                'group_id' => $group['id'], 'group_revision' => $group['revision'],
+                'currency_revision' => $workspace->json('student.currency_revision'),
+                'joined_on' => now('Africa/Cairo')->format('Y-m-d'), 'discount' => '0.00',
+                'discount_reason' => null, 'version' => $workspace->json('student.version'),
+                'request_id' => (string) Str::uuid(),
+            ])->assertCreated();
+            if ($group['id'] === $north['id']) {
+                $northAttemptId = $enrolled->json('attempt.id');
+            }
+        }
+        $path = "{$this->base}/students/{$student['id']}?tab=study";
+        $before = $this->getJson($path)->assertOk()->assertJsonCount(2, 'study.attempts')
+            ->assertJsonPath('study.attempts.0.status', 'active');
+        $this->assertLessThanOrEqual(6, (int) $before->headers->get('X-Courses-Query-Count'));
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'suspended', 'reason' => 'مراجعة ملف الطالب', 'status_revision' => 1,
+            'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $suspended = $this->getJson($path)->assertOk()->assertJsonPath('students.0.status', 'suspended')
+            ->assertJsonCount(2, 'study.attempts')->assertJsonPath('study.attempts.0.status', 'active');
+        $this->assertLessThanOrEqual(6, (int) $suspended->headers->get('X-Courses-Query-Count'));
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'active', 'reason' => 'انتهت المراجعة', 'status_revision' => 2,
+            'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->getJson($path)->assertOk()->assertJsonPath('students.0.status', 'active')
+            ->assertJsonCount(2, 'study.attempts');
+
+        $this->center->run(function () use ($northAttemptId, $transferTarget): void {
+            DB::table('study_attempt_group_periods')->where('attempt_id', $northAttemptId)
+                ->update(['left_on' => now('Africa/Cairo')->toDateString()]);
+            DB::table('study_attempt_group_periods')->insert([
+                'id' => (string) Str::uuid(), 'attempt_id' => $northAttemptId,
+                'group_id' => $transferTarget['id'], 'joined_on' => now('Africa/Cairo')->toDateString(),
+                'created_at' => now(),
+            ]);
+            DB::table('study_attempts')->where('id', $northAttemptId)->update([
+                'branch_id' => $this->south, 'level_id' => $transferTarget['level_id'],
+                'plan_version_id' => $transferTarget['plan_version_id'], 'current_group_id' => $transferTarget['id'],
+            ]);
+        });
+        $transferred = $this->getJson($path)->assertOk()->assertJsonCount(3, 'study.attempts');
+        $this->assertCount(1, collect($transferred->json('study.attempts'))
+            ->where('branch_id', $this->north)->where('status', 'transferred'));
+        $searched = $this->getJson($path.'&study_q='.urlencode('Northern group'))->assertOk()
+            ->assertJsonCount(1, 'study.attempts')->assertJsonPath('study.attempts.0.branch_id', $this->north);
+        $this->assertLessThanOrEqual(6, (int) $searched->headers->get('X-Courses-Query-Count'));
+
+        $this->center->run(fn () => DB::table('student_branches')
+            ->where('student_id', $student['id'])->where('branch_id', $this->south)->delete());
+        $this->getJson($path)->assertOk()->assertJsonCount(1, 'study.attempts')
+            ->assertJsonPath('study.attempts.0.branch_id', $this->north);
+
+        $this->grant([$this->north => ['branch_viewer']]);
+        $this->asUser($this->staff);
+        $visible = $this->getJson($path)->assertOk()->assertJsonCount(1, 'study.attempts')
+            ->assertJsonPath('study.attempts.0.branch_id', $this->north);
+        $this->assertLessThanOrEqual(6, (int) $visible->headers->get('X-Courses-Query-Count'));
+        $this->assertStringNotContainsString('South', $visible->getContent());
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=study&study_page=2")->assertOk()
+            ->assertJsonCount(0, 'study.attempts');
+    }
+
+    public function test_profile_study_search_reaches_history_beyond_the_first_page(): void
+    {
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $first = $this->group($this->north, '0.00');
+        $later = $this->group($this->north, '0.00');
+        $student = $this->student([$this->north]);
+        $this->center->run(fn () => DB::table('study_groups')->where('id', $first['id'])
+            ->update(['name' => 'Original searchable group']));
+        $workspace = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")->assertOk();
+        $attempt = $this->postJson("{$this->base}/students/{$student['id']}/enrollments", [
+            'group_id' => $first['id'], 'group_revision' => $first['revision'],
+            'currency_revision' => $workspace->json('student.currency_revision'),
+            'joined_on' => now('Africa/Cairo')->subDays(30)->toDateString(),
+            'discount' => '0.00', 'discount_reason' => null,
+            'version' => $workspace->json('student.version'), 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $this->center->run(function () use ($attempt, $later): void {
+            DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])
+                ->update(['left_on' => now('Africa/Cairo')->subDays(22)->toDateString()]);
+            $periods = [];
+            for ($index = 1; $index <= 21; $index++) {
+                $joined = now('Africa/Cairo')->subDays(21 - $index)->toDateString();
+                $periods[] = ['id' => (string) Str::uuid(), 'attempt_id' => $attempt['id'],
+                    'group_id' => $later['id'], 'joined_on' => $joined,
+                    'left_on' => $index === 21 ? null : $joined, 'created_at' => now()];
+            }
+            DB::table('study_attempt_group_periods')->insert($periods);
+            DB::table('study_attempts')->where('id', $attempt['id'])->update([
+                'level_id' => $later['level_id'], 'plan_version_id' => $later['plan_version_id'],
+                'current_group_id' => $later['id'],
+            ]);
+        });
+        $today = now('Africa/Cairo')->toDateString();
+        $this->center->run(function () use ($attempt, $later, $today): void {
+            DB::table('branches')->where('id', $this->north)->update(['name' => 'Study branch sentinel']);
+            DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])
+                ->whereNull('left_on')->update(['left_on' => $today]);
+            DB::table('study_attempts')->where('id', $attempt['id'])->update(['current_group_id' => null]);
+            $originPeriodId = DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])
+                ->where('group_id', $later['id'])->where('left_on', $today)
+                ->orderByDesc('joined_on')->orderByDesc('created_at')->value('id');
+            DB::table('study_attempt_waitlists')->insert([
+                'id' => (string) Str::uuid(), 'attempt_id' => $attempt['id'],
+                'from_group_id' => $later['id'], 'branch_id' => $this->north,
+                'origin_period_id' => $originPeriodId,
+                'entered_on' => $today, 'reason' => 'انتظار بعد المجموعة الأخيرة',
+                'entered_by' => $this->owner->id, 'entered_by_name' => $this->owner->name,
+                'entry_request_id' => (string) Str::uuid(), 'entry_request_hash' => str_repeat('a', 64),
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        });
+        $path = "{$this->base}/students/{$student['id']}?tab=study";
+        $firstPage = $this->getJson($path)->assertOk()->assertJsonCount(20, 'study.attempts')
+            ->assertJsonPath('study.pagination.has_more', true)
+            ->assertJsonPath('study.attempts.0.latest_waitlist.entered_on', $today)
+            ->assertJsonPath('study.attempts.0.status', 'active')
+            ->assertJsonPath('study.attempts.1.latest_waitlist', null)
+            ->assertJsonPath('study.attempts.1.status', 'transferred');
+        $this->assertLessThanOrEqual(6, (int) $firstPage->headers->get('X-Courses-Query-Count'));
+        $this->getJson($path.'&study_page=2')->assertOk()->assertJsonCount(2, 'study.attempts');
+        $byBranch = $this->getJson($path.'&study_q='.urlencode('Study branch sentinel'))->assertOk()
+            ->assertJsonCount(20, 'study.attempts')->assertJsonPath('study.pagination.has_more', true)
+            ->assertJsonPath('study.attempts.0.branch_name', 'Study branch sentinel');
+        $this->assertLessThanOrEqual(6, (int) $byBranch->headers->get('X-Courses-Query-Count'));
+        $searched = $this->getJson($path.'&study_q=Original%20searchable%20group')->assertOk()
+            ->assertJsonCount(1, 'study.attempts')
+            ->assertJsonPath('study.attempts.0.previous_group_name', 'Original searchable group');
+        $this->assertLessThanOrEqual(6, (int) $searched->headers->get('X-Courses-Query-Count'));
+
+        $enrollmentUrl = "{$this->base}/students/{$student['id']}/enrollments";
+        $waiting = $this->getJson($enrollmentUrl)->assertOk()->json('attempts.0');
+        $this->postJson("{$enrollmentUrl}/{$attempt['id']}/withdraw", [
+            'withdrawn_on' => $today, 'reason' => 'انسحاب بعد الانتظار',
+            'revision' => $waiting['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $withdrawn = $this->getJson($path)->assertOk()
+            ->assertJsonPath('study.attempts.0.status', 'withdrawn')
+            ->assertJsonPath('study.attempts.0.withdrawn_on', $today)
+            ->assertJsonPath('study.attempts.0.current_group_name', null)
+            ->assertJsonPath('study.attempts.1.status', 'transferred')
+            ->assertJsonPath('study.attempts.1.withdrawn_on', null);
+        $this->assertLessThanOrEqual(6, (int) $withdrawn->headers->get('X-Courses-Query-Count'));
+    }
+
+    public function test_profile_study_history_keeps_withdrawal_on_the_waitlist_origin_period(): void
+    {
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $group = $this->group($this->north, '0.00');
+        $student = $this->student([$this->north]);
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($url)->assertOk();
+        $attempt = $this->postJson($url, [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $workspace->json('student.currency_revision'),
+            'joined_on' => now('Africa/Cairo')->toDateString(), 'discount' => '0.00',
+            'discount_reason' => null, 'version' => $workspace->json('student.version'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $today = now('Africa/Cairo')->toDateString();
+        $this->postJson("{$url}/{$attempt['id']}/waitlist", [
+            'entered_on' => $today, 'reason' => 'الانتظار الأول',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $waiting = $this->getJson($url)->assertOk()->json('attempts.0');
+        $this->postJson("{$url}/{$attempt['id']}/reattach", [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'joined_on' => $today, 'revision' => $waiting['revision'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $reattached = $this->getJson($url)->assertOk()->json('attempts.0');
+        $reattachedHistory = $this->getJson("{$this->base}/students/{$student['id']}?tab=study")->assertOk()
+            ->assertJsonCount(2, 'study.attempts');
+        $reattachedRows = collect($reattachedHistory->json('study.attempts'));
+        $this->assertNotSame(
+            $reattachedRows->firstWhere('status', 'transferred')['period_id'] ?? null,
+            $reattachedRows->firstWhere('status', 'active')['period_id'] ?? null,
+        );
+        $this->assertSame('الانتظار الأول', $reattachedRows->firstWhere('status', 'transferred')['latest_waitlist']['reason'] ?? null);
+        $this->assertNull($reattachedRows->firstWhere('status', 'active')['latest_waitlist'] ?? null);
+        $this->assertLessThanOrEqual(6, (int) $reattachedHistory->headers->get('X-Courses-Query-Count'));
+        $this->postJson("{$url}/{$attempt['id']}/waitlist", [
+            'entered_on' => $today, 'reason' => 'الانتظار الثاني',
+            'revision' => $reattached['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $waiting = $this->getJson($url)->assertOk()->json('attempts.0');
+        $originPeriods = $this->center->run(fn () => DB::table('study_attempt_waitlists')
+            ->where('attempt_id', $attempt['id'])->pluck('origin_period_id', 'reason')->all());
+        $this->assertCount(2, array_unique(array_values($originPeriods)));
+        $waitingHistory = $this->getJson("{$this->base}/students/{$student['id']}?tab=study")->assertOk()
+            ->assertJsonCount(2, 'study.attempts');
+        $waitingRows = collect($waitingHistory->json('study.attempts'));
+        $activePeriod = $waitingRows->firstWhere('status', 'active');
+        $formerPeriod = $waitingRows->firstWhere('status', 'transferred');
+        $this->assertSame($originPeriods['الانتظار الثاني'], $activePeriod['period_id'] ?? null);
+        $this->assertSame('الانتظار الثاني', $activePeriod['latest_waitlist']['reason'] ?? null);
+        $this->assertSame($originPeriods['الانتظار الأول'], $formerPeriod['period_id'] ?? null);
+        $this->assertSame('الانتظار الأول', $formerPeriod['latest_waitlist']['reason'] ?? null);
+        $this->assertLessThanOrEqual(6, (int) $waitingHistory->headers->get('X-Courses-Query-Count'));
+        $this->postJson("{$url}/{$attempt['id']}/withdraw", [
+            'withdrawn_on' => $today, 'reason' => 'انسحب أثناء الانتظار',
+            'revision' => $waiting['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+
+        $response = $this->getJson("{$this->base}/students/{$student['id']}?tab=study")->assertOk()
+            ->assertJsonCount(2, 'study.attempts');
+        $withdrawnRows = collect($response->json('study.attempts'));
+        $withdrawnPeriod = $withdrawnRows->firstWhere('status', 'withdrawn');
+        $formerPeriod = $withdrawnRows->firstWhere('status', 'transferred');
+        $this->assertSame($originPeriods['الانتظار الثاني'], $withdrawnPeriod['period_id'] ?? null);
+        $this->assertSame($today, $withdrawnPeriod['withdrawn_on'] ?? null);
+        $this->assertSame($today, $withdrawnPeriod['latest_waitlist']['left_on'] ?? null);
+        $this->assertSame($originPeriods['الانتظار الأول'], $formerPeriod['period_id'] ?? null);
+        $this->assertNull($formerPeriod['withdrawn_on'] ?? null);
+        $this->assertSame('الانتظار الأول', $formerPeriod['latest_waitlist']['reason'] ?? null);
+        $this->assertLessThanOrEqual(6, (int) $response->headers->get('X-Courses-Query-Count'));
+    }
+
+    public function test_waitlist_period_migration_links_repeated_same_day_history_when_timestamps_disambiguate(): void
+    {
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $group = $this->group($this->north, '0.00');
+        $student = $this->student([$this->north]);
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($url)->assertOk();
+        $attempt = $this->postJson($url, [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $workspace->json('student.currency_revision'),
+            'joined_on' => now('Africa/Cairo')->toDateString(), 'discount' => '0.00',
+            'discount_reason' => null, 'version' => $workspace->json('student.version'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $this->postJson("{$url}/{$attempt['id']}/waitlist", [
+            'entered_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'انتظار قديم',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $waiting = $this->getJson($url)->assertOk()->json('attempts.0');
+        $this->postJson("{$url}/{$attempt['id']}/reattach", [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'joined_on' => now('Africa/Cairo')->toDateString(), 'revision' => $waiting['revision'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $reattached = $this->getJson($url)->assertOk()->json('attempts.0');
+        $this->postJson("{$url}/{$attempt['id']}/waitlist", [
+            'entered_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'انتظار أحدث',
+            'revision' => $reattached['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+
+        $this->center->run(function () use ($attempt): void {
+            $migration = require database_path('migrations/tenant/2026_09_29_090000_link_waitlists_to_group_periods.php');
+            $origins = DB::table('study_attempt_waitlists')->where('attempt_id', $attempt['id'])
+                ->pluck('origin_period_id', 'reason')->all();
+            $firstTime = now()->subMinutes(3);
+            $secondTime = now()->subMinute();
+            foreach (['انتظار قديم' => $firstTime, 'انتظار أحدث' => $secondTime] as $reason => $time) {
+                DB::table('study_attempt_group_periods')->where('id', $origins[$reason])
+                    ->update(['created_at' => $time]);
+                DB::table('study_attempt_waitlists')->where('attempt_id', $attempt['id'])
+                    ->where('reason', $reason)->update(['created_at' => $time->copy()->addSecond()]);
+            }
+            $migration->down();
+            $migration->up();
+            $this->assertSame($origins, DB::table('study_attempt_waitlists')->where('attempt_id', $attempt['id'])
+                ->pluck('origin_period_id', 'reason')->all());
+
+            $sameSecond = now()->subMinute()->startOfSecond();
+            DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])
+                ->update(['created_at' => $sameSecond]);
+            DB::table('study_attempt_waitlists')->where('attempt_id', $attempt['id'])
+                ->update(['created_at' => $sameSecond]);
+            $migration->down();
+            $migration->up();
+            $this->assertSame([null, null], DB::table('study_attempt_waitlists')
+                ->where('attempt_id', $attempt['id'])->pluck('origin_period_id')->all());
+        });
+        $history = $this->getJson("{$this->base}/students/{$student['id']}?tab=study")->assertOk();
+        $active = collect($history->json('study.attempts'))->firstWhere('status', 'active');
+        $this->assertSame('انتظار أحدث', $active['latest_waitlist']['reason'] ?? null);
+        $this->assertTrue($active['latest_waitlist']['origin_uncertain'] ?? false);
+        $this->assertLessThanOrEqual(6, (int) $history->headers->get('X-Courses-Query-Count'));
+    }
+
     public function test_enrollment_snapshots_price_plan_and_late_join_without_allocating_advance(): void
     {
         $group = $this->group($this->north, '1500.00');

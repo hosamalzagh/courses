@@ -5,7 +5,8 @@ import { CenterPageActions } from '@/components/CenterShell';
 import type { StudentContext } from '@/lib/server-context';
 import { StudentNavigationLink } from './StudentNavigationLink';
 
-export function StudentProfileActions({ context }: { context: StudentContext }) {
+export function StudentProfileActions({ context, tab }: { context: StudentContext; tab?: string }) {
   const student = context.students[0];
-  return <CenterPageActions context={context} actions={<>{student.can_manage ? <StudentNavigationLink focusKey='edit' href={`/admin/students/${student.id}/edit`}>تعديل ملف الطالب</StudentNavigationLink> : null}<a className={buttonVariants({ variant: 'outline' })} href={`/api/v1/center/students/${student.id}/barcode`} target='_blank' rel='noopener'>طباعة الباركود الأساسي</a></>} />;
+  const canEnroll = context.permissions.can_manage_center || student.branch_ids.some(id => context.permissions.branch_actions?.[String(id)]?.includes('enrollment.manage'));
+  return <CenterPageActions context={context} actions={<>{student.can_manage ? <StudentNavigationLink focusKey='edit' href={`/admin/students/${student.id}/edit`}>تعديل ملف الطالب</StudentNavigationLink> : null}{tab === 'study' && canEnroll ? <StudentNavigationLink focusKey='enrollments' href={`/admin/students/${student.id}/enrollments`}>فتح التسجيل ومحاولات الدراسة</StudentNavigationLink> : null}<a className={buttonVariants({ variant: 'outline' })} href={`/api/v1/center/students/${student.id}/barcode`} target='_blank' rel='noopener'>طباعة الباركود الأساسي</a></>} />;
 }

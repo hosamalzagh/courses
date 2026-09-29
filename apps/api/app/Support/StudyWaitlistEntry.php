@@ -68,6 +68,8 @@ class StudyWaitlistEntry
         ]);
         DB::connection('tenant')->table('study_attempt_waitlists')->insert([
             'id' => $waitlistId, 'attempt_id' => $attemptId, 'from_group_id' => $period->group_id,
+            'origin_period_id' => $period->id,
+            'entry_revision' => $attempt->revision + 1,
             'branch_id' => $attempt->branch_id, 'entered_on' => $enteredOn, 'reason' => $reason,
             'entered_by' => $actorId, 'entered_by_name' => $actorName,
             'entry_request_id' => $requestId, 'entry_request_hash' => $hash,
