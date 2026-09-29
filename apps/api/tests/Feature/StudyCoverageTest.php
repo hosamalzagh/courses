@@ -209,7 +209,10 @@ class StudyCoverageTest extends TestCase
             $lectures = DB::table('plan_lectures')->where('plan_version_id', $visible['plan_version_id'])->orderBy('number')->limit(8)->get();
             foreach ($lectures as $lecture) {
                 $sessionId = (string) Str::uuid();
+                $requirementId = DB::table('study_group_requirements')->where('group_id', $visible['id'])
+                    ->where('plan_lecture_id', $lecture->id)->value('id');
                 DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $visible['id'], 'plan_lecture_id' => $lecture->id,
+                    'group_requirement_id' => $requirementId,
                     'number' => $lecture->number, 'scheduled_at' => now()->subDays((int) $lecture->number), 'status' => 'held',
                     'revision' => 2, 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
                     'closed_at' => now(), 'closed_by' => $this->owner->id, 'created_at' => now(), 'updated_at' => now()]);
@@ -227,7 +230,10 @@ class StudyCoverageTest extends TestCase
         $this->center->run(function () use ($visible, $attempt): void {
             $lecture = DB::table('plan_lectures')->where('plan_version_id', $visible['plan_version_id'])->where('number', 9)->firstOrFail();
             $sessionId = (string) Str::uuid();
+            $requirementId = DB::table('study_group_requirements')->where('group_id', $visible['id'])
+                ->where('plan_lecture_id', $lecture->id)->value('id');
             DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $visible['id'], 'plan_lecture_id' => $lecture->id,
+                'group_requirement_id' => $requirementId,
                 'number' => 9, 'scheduled_at' => now()->subDays(9), 'status' => 'held', 'revision' => 2,
                 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
                 'closed_at' => now(), 'closed_by' => $this->owner->id, 'created_at' => now(), 'updated_at' => now()]);
@@ -392,6 +398,18 @@ class StudyCoverageTest extends TestCase
                 $this->assertSame('23514', $exception->getCode());
             }
         });
+        // A closed attempt keeps its approved requirement set even if legacy data changes later.
+        $this->center->run(fn () => DB::table('study_group_requirements')
+            ->where('group_id', $group['id'])->where('number', 2)
+            ->update(['retired_at' => now()]));
+        $coverage = $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk()
+            ->assertJsonPath('students.0.required_count', 2)
+            ->assertJsonPath('students.0.covered_count', 2)
+            ->assertJsonPath('students.1.required_count', 2)
+            ->assertJsonPath('students.1.missing_numbers', [1, 2]);
+        $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$this->base}/students/{$first['id']}/enrollments")->assertOk()
+            ->assertJsonPath('attempts.0.requirements_count', 2);
     }
 
     public function test_completion_rejects_a_period_that_has_not_started_even_after_an_earlier_preview(): void
@@ -468,9 +486,12 @@ class StudyCoverageTest extends TestCase
         $attempt = $this->enroll($student['id'], $first, now('Africa/Cairo')->format('Y-m-d'));
         $this->center->run(function () use ($first, $attempt): void {
             $lecture = DB::table('plan_lectures')->where('plan_version_id', $first['plan_version_id'])->firstOrFail();
+            $requirementId = DB::table('study_group_requirements')->where('group_id', $first['id'])
+                ->where('plan_lecture_id', $lecture->id)->value('id');
             $sessionId = (string) Str::uuid();
             DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $first['id'],
-                'plan_lecture_id' => $lecture->id, 'number' => 1, 'scheduled_at' => now()->subDay(),
+                'plan_lecture_id' => $lecture->id, 'group_requirement_id' => $requirementId,
+                'number' => 1, 'scheduled_at' => now()->subDay(),
                 'status' => 'held', 'revision' => 2, 'created_by' => $this->owner->id,
                 'created_by_name' => $this->owner->name, 'closed_at' => now(), 'closed_by' => $this->owner->id,
                 'created_at' => now(), 'updated_at' => now()]);
@@ -530,9 +551,12 @@ class StudyCoverageTest extends TestCase
         $this->center->run(function () use ($first, $second, $firstAttempt): void {
             DB::table('study_groups')->whereIn('id', [$first['id'], $second['id']])->update(['status' => 'started']);
             $lecture = DB::table('plan_lectures')->where('plan_version_id', $first['plan_version_id'])->firstOrFail();
+            $requirementId = DB::table('study_group_requirements')->where('group_id', $first['id'])
+                ->where('plan_lecture_id', $lecture->id)->value('id');
             $sessionId = (string) Str::uuid();
             DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $first['id'],
-                'plan_lecture_id' => $lecture->id, 'number' => 1, 'scheduled_at' => now()->subDay(),
+                'plan_lecture_id' => $lecture->id, 'group_requirement_id' => $requirementId,
+                'number' => 1, 'scheduled_at' => now()->subDay(),
                 'status' => 'held', 'revision' => 2, 'created_by' => $this->owner->id,
                 'created_by_name' => $this->owner->name, 'closed_at' => now(), 'closed_by' => $this->owner->id,
                 'created_at' => now(), 'updated_at' => now()]);
@@ -620,6 +644,67 @@ class StudyCoverageTest extends TestCase
         $this->assertLessThanOrEqual(6, (int) $found->headers->get('X-Courses-Query-Count'));
         $this->getJson("{$path}?q=missing")->assertOk()->assertJsonCount(0, 'levels')
             ->assertJsonPath('course.required_levels', 52);
+    }
+
+    public function test_historical_group_requirements_are_paged_and_searchable_after_a_frozen_withdrawal(): void
+    {
+        $group = $this->group($this->north, 1);
+        $student = $this->student();
+        $attempt = $this->enroll($student['id'], $group, now('Africa/Cairo')->toDateString());
+        $ids = $this->center->run(function () use ($group): array {
+            $requirements = array_map(fn (int $number): array => [
+                'id' => (string) Str::uuid(), 'group_id' => $group['id'], 'number' => $number,
+                'content' => "Historical requirement {$number}", 'created_at' => now(),
+            ], range(2, 24));
+            DB::table('study_group_requirements')->insert($requirements);
+
+            return array_column($requirements, 'id');
+        });
+        $this->postJson("{$this->base}/students/{$student['id']}/enrollments/{$attempt['id']}/withdraw", [
+            'withdrawn_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'حفظ المتطلبات قبل الإيقاف',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->center->run(function () use ($group, $ids): void {
+            $snapshot = json_decode(DB::table('study_attempt_group_periods')
+                ->where('group_id', $group['id'])->value('required_credit_ids'), true);
+            $this->assertCount(24, $snapshot);
+            foreach ($ids as $id) {
+                $this->assertContains($id, $snapshot);
+            }
+            DB::table('study_group_requirements')->whereIn('id', $ids)->update(['retired_at' => now()]);
+            DB::table('study_group_requirements')->insert(array_map(fn (int $number): array => [
+                'id' => (string) Str::uuid(), 'group_id' => $group['id'], 'number' => $number,
+                'content' => "Later retired requirement {$number}", 'created_at' => now(), 'retired_at' => now(),
+            ], range(25, 225)));
+        });
+
+        $coverage = $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk()
+            ->assertJsonPath('group.required_count', 1)
+            ->assertJsonPath('students.0.required_count', 24)
+            ->assertJsonPath('students.0.missing_numbers', range(1, 24));
+        $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
+
+        $sessions = $this->getJson("{$this->base}/groups/{$group['id']}/sessions")->assertOk()
+            ->assertJsonCount(20, 'group.historical_requirements')
+            ->assertJsonPath('group.historical_requirements_has_more', true);
+        $this->assertLessThanOrEqual(6, (int) $sessions->headers->get('X-Courses-Query-Count'));
+        $path = "{$this->base}/groups/{$group['id']}/requirement-equivalences/requirements";
+        $first = $this->getJson($path)->assertOk()->assertJsonCount(20, 'requirements')
+            ->assertJsonPath('pagination.has_more', true);
+        $this->assertLessThanOrEqual(6, (int) $first->headers->get('X-Courses-Query-Count'));
+        $second = $this->getJson("{$path}?page=2")->assertOk()->assertJsonCount(3, 'requirements')
+            ->assertJsonPath('pagination.has_more', false);
+        $this->assertLessThanOrEqual(6, (int) $second->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$path}?q=Historical%20requirement%2023")->assertOk()
+            ->assertJsonCount(1, 'requirements')->assertJsonPath('requirements.0.number', 23);
+        $hidden = $this->group($this->south, 1);
+        $this->putJson("{$this->base}/members/{$this->viewerMembership->id}/grants", [
+            'center_roles' => [], 'branch_roles' => [$this->north => ['branch_viewer']],
+        ])->assertOk();
+        $this->asUser($this->viewer);
+        $this->getJson($path)->assertForbidden();
+        $this->getJson("{$this->base}/groups/{$hidden['id']}/requirement-equivalences/requirements")
+            ->assertNotFound();
     }
 
     private function group(int $branchId, int $lectureCount): array

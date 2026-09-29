@@ -6,11 +6,12 @@ use App\Support\ActiveStudentAllocations;
 use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
-use App\Support\EffectiveStudyFees;
 use App\Support\EffectiveStudentPayments;
+use App\Support\EffectiveStudyFees;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
 use App\Support\StudyCoverageCredits;
+use App\Support\StudyPeriodRequirements;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
@@ -124,8 +125,7 @@ class CenterStudyTransferController extends Controller
             $id = (string) Str::uuid();
             $now = now();
             if ($period !== null) {
-                DB::connection('tenant')->table('study_attempt_group_periods')->where('id', $period->id)
-                    ->update(['left_on' => $data['transferred_on']]);
+                StudyPeriodRequirements::close($period->id, $period->group_id, $data['transferred_on']);
             } else {
                 DB::connection('tenant')->table('study_attempt_waitlists')->where('id', $waitlist->id)->update([
                     'to_group_id' => $data['group_id'], 'left_on' => $data['transferred_on'],
@@ -219,12 +219,14 @@ EXISTS (SELECT 1 FROM student_branches WHERE student_id = attempts.student_id AN
 EXISTS (SELECT 1 FROM study_attempts AS other WHERE other.student_id = attempts.student_id AND other.level_id = groups.level_id AND other.status = 'active' AND other.id <> attempts.id) AS level_occupied,
 COALESCE((SELECT joined_on::text FROM study_attempt_group_periods WHERE attempt_id = attempts.id AND left_on IS NULL),
     (SELECT entered_on::text FROM study_attempt_waitlists WHERE attempt_id = attempts.id AND left_on IS NULL)) AS current_start,
-COALESCE((SELECT json_agg(json_build_object('id', lectures.id, 'final', sessions.closed_at IS NOT NULL) ORDER BY lectures.id)
+COALESCE((SELECT json_agg(json_build_object('id', COALESCE(sessions.plan_lecture_id, sessions.group_requirement_id),
+    'final', sessions.closed_at IS NOT NULL) ORDER BY entries.id)
     FROM study_attendance_entries AS entries JOIN study_sessions AS sessions ON sessions.id = entries.session_id
-    JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id
     WHERE entries.attempt_id = attempts.id AND entries.status = 'counted' AND sessions.status <> 'cancelled'), '[]'::json) AS source_rows,
-COALESCE((SELECT json_agg(json_build_object('id', id, 'number', number) ORDER BY number)
-    FROM plan_lectures WHERE plan_version_id = groups.plan_version_id), '[]'::json) AS target_lectures,
+COALESCE((SELECT json_agg(json_build_object('id', COALESCE(requirements.plan_lecture_id, requirements.id),
+    'number', requirements.number) ORDER BY requirements.number)
+    FROM study_group_requirements AS requirements
+    WHERE requirements.group_id = groups.id AND requirements.retired_at IS NULL), '[]'::json) AS target_lectures,
 COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     'source_plan_version_id', approvals.source_plan_version_id,
     'target_plan_version_id', approvals.target_plan_version_id,
@@ -233,7 +235,13 @@ COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     WHERE approvals.target_plan_version_id = groups.plan_version_id
       OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
           WHERE transfers.attempt_id = attempts.id
-            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json) AS approvals
+            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
+COALESCE((SELECT json_agg(json_build_object('id', mappings.id,
+    'source_plan_version_id', NULL, 'target_plan_version_id', NULL,
+    'source_lecture_ids', json_build_array(mappings.candidate_requirement_id),
+    'target_lecture_ids', json_build_array(mappings.required_requirement_id)) ORDER BY mappings.id)
+    FROM study_group_requirement_equivalences AS mappings
+    WHERE mappings.required_group_id = groups.id AND mappings.revoked_at IS NULL), '[]'::json)::jsonb AS approvals
 SQL)
             ->selectRaw(<<<'SQL'
 EXISTS (SELECT 1 FROM study_attendance_entries AS entries

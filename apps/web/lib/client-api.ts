@@ -59,6 +59,7 @@ export async function responseMessage(response: Response): Promise<string> {
     if (data.code === "student_numbering_exhausted") return "وصل ترقيم الطلاب إلى الحد الأقصى. تواصل مع مسؤول المركز قبل إنشاء ملف جديد.";
     if (data.code === "student_suspended_for_session") return "ملف الطالب موقوف حاليًا أو كان موقوفًا وقت المحاضرة؛ لا يمكن تسجيل حضوره. حمّل أحدث كشف.";
     if (data.code === "student_suspended_for_makeup") return "ملف الطالب موقوف حاليًا أو كان موقوفًا وقت محاضرة التعويض؛ حمّل أحدث البيانات.";
+    if (data.code === "makeup_booking_exists") return "هذه المحاضرة مرتبطة بحجز تعويض محفوظ؛ راجع الحجز قبل محاولة خفض العدد المعتمد.";
     if (data.code === "last_active_owner") {
       return "لا يمكن إيقاف آخر مالك نشط للمركز أو إزالة دوره. أضف مالكًا آخر أولًا.";
     }

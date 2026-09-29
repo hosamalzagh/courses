@@ -91,10 +91,12 @@ test("selected existing attempts keep their threshold until reviewed and approve
     for (const id of [centerId, groupId, attemptId, completedAttemptId, planId]) expect(id).toMatch(/^[a-f0-9-]{36}$/);
     execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_THRESHOLD_DB_PORT!, "-U", "postgres",
       "-d", `courses_center_${centerId}`, "-v", "ON_ERROR_STOP=1", "-c", `
-INSERT INTO study_sessions (id, group_id, plan_lecture_id, number, scheduled_at, status, revision, created_by, created_by_name, created_at, updated_at)
-SELECT gen_random_uuid(), '${groupId}', lectures.id, lectures.number, now() + lectures.number * interval '1 hour', 'planned', 1,
+INSERT INTO study_sessions (id, group_id, plan_lecture_id, group_requirement_id, number, scheduled_at, status, revision, created_by, created_by_name, created_at, updated_at)
+SELECT gen_random_uuid(), '${groupId}', lectures.id, requirements.id, lectures.number, now() + lectures.number * interval '1 hour', 'planned', 1,
   (SELECT user_id FROM center_grants WHERE role = 'center_owner' LIMIT 1), 'اختبار المتصفح', now(), now()
-FROM plan_lectures AS lectures WHERE lectures.plan_version_id = '${planId}' ORDER BY lectures.number LIMIT 6;
+FROM plan_lectures AS lectures
+JOIN study_group_requirements AS requirements ON requirements.group_id = '${groupId}' AND requirements.plan_lecture_id = lectures.id
+WHERE lectures.plan_version_id = '${planId}' ORDER BY lectures.number LIMIT 6;
 INSERT INTO study_attendance_entries (id, session_id, attempt_id, status, revision, recorded_by, recorded_at, created_at, updated_at)
 SELECT gen_random_uuid(), sessions.id, '${attemptId}', 'counted', 1,
   (SELECT user_id FROM center_grants WHERE role = 'center_owner' LIMIT 1), now(), now(), now()

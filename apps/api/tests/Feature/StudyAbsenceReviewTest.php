@@ -313,8 +313,11 @@ class StudyAbsenceReviewTest extends TestCase
             foreach ($statuses as $index => $status) {
                 $id = (string) Str::uuid();
                 $scheduled = now('Africa/Cairo')->subDays($status === 'outside' ? 25 : 12 - $index)->setTime(12, 0);
+                $requirementId = DB::table('study_group_requirements')->where('group_id', $scope['group']['id'])
+                    ->where('plan_lecture_id', $lectures[$index])->value('id');
                 DB::table('study_sessions')->insert([
-                    'id' => $id, 'group_id' => $scope['group']['id'], 'plan_lecture_id' => $lectures[$index], 'number' => $index + 1,
+                    'id' => $id, 'group_id' => $scope['group']['id'], 'plan_lecture_id' => $lectures[$index],
+                    'group_requirement_id' => $requirementId, 'number' => $index + 1,
                     'scheduled_at' => $scheduled, 'status' => $status === 'cancelled' ? 'cancelled' : 'held',
                     'closed_at' => $status === 'open' ? null : now(), 'revision' => 1,
                     'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,

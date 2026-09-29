@@ -249,7 +249,7 @@ export function GroupControls({ context }: { context: GroupContext }) {
             <h3>محاضرات إصدار الخطة {chosenGroup.plan_version.toLocaleString("ar-EG")}</h3>
             <p>عدد المحاضرات المعتمد: {chosenGroup.approved_lecture_count.toLocaleString("ar-EG")}</p>
             {loadingDetails ? <p role="status">جارٍ تحميل المحاضرات المطلوبة…</p> : groupDetails?.approved_lectures ? <ol className="form-stack">
-              {groupDetails.approved_lectures.map(lecture => <li key={lecture.number}>المحاضرة {lecture.number.toLocaleString("ar-EG")}: {lecture.content}{lecture.title ? ` · ${lecture.title}` : ""} · {lecture.planned_hours.toLocaleString("ar-EG")} ساعة مخططة</li>)}
+              {groupDetails.approved_lectures.map(lecture => <li key={lecture.number}>المحاضرة {lecture.number.toLocaleString("ar-EG")}: {lecture.content}{lecture.title ? ` · ${lecture.title}` : ""}{lecture.planned_hours === null ? " · الساعات المخططة غير محددة" : ` · ${lecture.planned_hours.toLocaleString("ar-EG")} ساعة مخططة`}</li>)}
             </ol> : null}
             {detailError ? <><InlineNotice tone="error">{detailError}</InlineNotice><Button type="button" onClick={() => void loadDetails(chosenGroup.id)}>إعادة تحميل المحاضرات</Button></> : null}
           </section> : null}

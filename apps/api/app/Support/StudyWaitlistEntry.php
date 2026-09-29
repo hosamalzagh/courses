@@ -61,8 +61,7 @@ class StudyWaitlistEntry
 
         $now = now();
         $waitlistId = (string) Str::uuid();
-        DB::connection('tenant')->table('study_attempt_group_periods')->where('id', $period->id)
-            ->update(['left_on' => $enteredOn]);
+        StudyPeriodRequirements::close($period->id, $period->group_id, $enteredOn);
         DB::connection('tenant')->table('study_attempts')->where('id', $attemptId)->update([
             'current_group_id' => null, 'revision' => $attempt->revision + 1, 'updated_at' => $now,
         ]);

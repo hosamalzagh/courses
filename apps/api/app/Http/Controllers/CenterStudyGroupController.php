@@ -136,6 +136,13 @@ class CenterStudyGroupController extends Controller
                 'created_by' => $request->user()->id, 'request_id' => $data['request_id'], 'request_hash' => $hash,
                 'created_at' => now(), 'updated_at' => now(),
             ]);
+            DB::connection('tenant')->insert(<<<'SQL'
+INSERT INTO study_group_requirements
+    (id, group_id, plan_lecture_id, number, content, title, planned_hours, created_at)
+SELECT gen_random_uuid(), ?, lectures.id, lectures.number, lectures.content,
+    lectures.title, lectures.planned_hours, ?
+FROM plan_lectures AS lectures WHERE lectures.plan_version_id = ?
+SQL, [$id, now(), $data['plan_version_id']]);
             DB::connection('tenant')->table('study_group_instructors')->insert(array_map(
                 fn (string $instructorId): array => ['group_id' => $id, 'instructor_id' => $instructorId], $data['instructor_ids']
             ));
@@ -247,7 +254,7 @@ class CenterStudyGroupController extends Controller
                 'plans.version as plan_version',
             ])->selectRaw(<<<'SQL'
 COALESCE(study_groups.completion_threshold, levels.completion_threshold, stages.completion_threshold, courses.completion_threshold) AS completion_threshold,
-(SELECT count(*) FROM plan_lectures WHERE plan_version_id = plans.id) AS approved_lecture_count,
+(SELECT count(*) FROM study_group_requirements WHERE group_id = study_groups.id AND retired_at IS NULL) AS approved_lecture_count,
 COALESCE((SELECT json_agg(json_build_object('id', instructors.id, 'name', instructors.name) ORDER BY instructors.name)
 FROM study_group_instructors JOIN instructors ON instructors.id = study_group_instructors.instructor_id
 WHERE study_group_instructors.group_id = study_groups.id), '[]'::json) AS instructors
@@ -255,7 +262,7 @@ SQL);
         if ($includeLectures) {
             $query->selectRaw(<<<'SQL'
 COALESCE((SELECT json_agg(json_build_object('number', lecture.number, 'content', lecture.content, 'title', lecture.title, 'planned_hours', lecture.planned_hours::float) ORDER BY lecture.number)
-FROM (SELECT number, content, title, planned_hours FROM plan_lectures WHERE plan_version_id = plans.id ORDER BY number LIMIT 200) lecture), '[]'::json) AS approved_lectures
+FROM (SELECT number, content, title, planned_hours FROM study_group_requirements WHERE group_id = study_groups.id AND retired_at IS NULL ORDER BY number LIMIT 200) lecture), '[]'::json) AS approved_lectures
 SQL);
         }
         if (! $permissions->isCenterManager()) {

@@ -162,7 +162,7 @@ export function TeachingControls({ context }: { context: TeachingContext }) {
     </>} />
     <section className="data-panel form-stack" aria-labelledby={`${prefix}-title`}>
       <h2 ref={headingRef} id={`${prefix}-title`} tabIndex={-1}>المحاضرة {session.number.toLocaleString("ar-EG")} · {session.group_name}</h2>
-      <p>{session.title ?? "محاضرة الخطة"} · {formatSessionTime(session.scheduled_at)}</p>
+      <p>{session.title ?? "المحاضرة المعتمدة"} · {formatSessionTime(session.scheduled_at)}</p>
       <p className="muted">سجّل وقت بداية كل محاضر بالدقائق من بداية الموعد، ثم مدة تدريسه. إذا بدأ اثنان في الدقيقة نفسها فهي مشاركة متزامنة؛ وإذا بدأ الثاني لاحقًا فهي متتابعة. حضور الطالب يبقى للمحاضرة كاملة.</p>
       {session.status === "cancelled" ? <InlineNotice>المحاضرة ملغاة، وسجل التدريس للقراءة فقط.</InlineNotice> : null}
       {!current.can_record && session.status !== "cancelled" ? <InlineNotice>يمكن تسجيل التدريس بعد بدء المجموعة وحلول موعد المحاضرة، ضمن صلاحية تسجيل الحضور للفرع.</InlineNotice> : null}

@@ -6,12 +6,19 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
   const attendance = entry.event.startsWith("study_attendance.");
   const teaching = entry.event === "study_session.teaching_recorded" || entry.event === "study_session.teaching_corrected";
   const makeup = entry.event.startsWith("study_makeup.");
-  if (!attendance && !teaching && !makeup && !["study_sessions.scheduled", "study_session.postponed", "study_session.revoked", "study_session.cancelled", "study_session.replacement_scheduled"].includes(entry.event)) return null;
+  if (!attendance && !teaching && !makeup && !["study_sessions.scheduled", "study_session.postponed", "study_session.revoked", "study_session.cancelled", "study_session.replacement_scheduled", "study_group.requirements_changed", "study_group.requirement_equivalence_approved", "study_group.requirement_equivalence_revoked"].includes(entry.event)) return null;
   let details = entry.details;
   if (typeof details === "string") { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;
   const data = details as Record<string, unknown>;
   const date = (value: unknown) => typeof value === "string" ? formatSessionTime(value) : "غير مسجل";
+  if (entry.event.startsWith("study_group.requirement_equivalence_")) return <details>
+    <summary>تفاصيل تكافؤ المحاضرات المضافة</summary>
+    <p>{entry.event.endsWith("_revoked") ? "سُحب الاعتماد" : "اعتُمد التكافؤ"} · السبب: {typeof data.reason === "string" ? data.reason : "غير مسجل"}.</p>
+    {typeof data.required_group_id === "string" ? <p><Link href={`/admin/groups/${encodeURIComponent(data.required_group_id)}/sessions`}>فتح مجموعة المتطلب المطلوب</Link></p> : null}
+    {typeof data.candidate_group_id === "string" ? <p><Link href={`/admin/groups/${encodeURIComponent(data.candidate_group_id)}/sessions`}>فتح مجموعة المحاضرة المقابلة</Link></p> : null}
+    {typeof data.required_requirement_id === "string" && typeof data.candidate_requirement_id === "string" ? <p>الربط: <bdi dir="ltr">{data.candidate_requirement_id}</bdi> ← <bdi dir="ltr">{data.required_requirement_id}</bdi>.</p> : null}
+  </details>;
   if (teaching) {
     const groupId = typeof data.group_id === "string" ? data.group_id : "";
     const sessionId = typeof data.session_id === "string" ? data.session_id : "";
@@ -67,7 +74,7 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
     {entry.event === "study_sessions.scheduled" && Array.isArray(data.sessions) ? <ul>{data.sessions.map((value, index) => {
       if (!value || typeof value !== "object" || Array.isArray(value)) return null;
       const item = value as Record<string, unknown>;
-      return <li key={index}>الموعد {typeof item.number === "number" ? item.number.toLocaleString("ar-EG") : "—"} · محاضرة الخطة {typeof item.plan_lecture_number === "number" ? item.plan_lecture_number.toLocaleString("ar-EG") : "—"} · {date(item.scheduled_at)}{typeof item.title === "string" ? ` · ${item.title}` : ""}</li>;
+      return <li key={index}>الموعد {typeof item.number === "number" ? item.number.toLocaleString("ar-EG") : "—"} · المحاضرة المعتمدة {typeof item.plan_lecture_number === "number" ? item.plan_lecture_number.toLocaleString("ar-EG") : "—"} · {date(item.scheduled_at)}{typeof item.title === "string" ? ` · ${item.title}` : ""}</li>;
     })}</ul> : null}
     {entry.event === "study_session.postponed" ? <>
       <p>الموعد: <bdi>{typeof data.session_id === "string" ? data.session_id : "غير مسجل"}</bdi></p>
@@ -85,13 +92,21 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
     </> : null}
     {entry.event === "study_session.cancelled" ? <>
       <p>الموعد الملغى: <bdi dir="ltr">{typeof data.session_id === "string" ? data.session_id : "غير مسجل"}</bdi> · الوقت الأصلي: {date(data.scheduled_at)}</p>
-      <p>قرار التعويض: {data.decision === "academic" ? "بديل أكاديمي" : data.decision === "financial" ? "مراجعة مالية" : "دون تعويض"} · يبقى متطلب الخطة معتمدًا.</p>
+      <p>قرار التعويض: {data.decision === "academic" ? "بديل أكاديمي" : data.decision === "financial" ? "مراجعة مالية" : "دون تعويض"} · يبقى متطلب المحاضرة معتمدًا.</p>
       {typeof data.reason === "string" ? <p>السبب: {data.reason}</p> : null}
     </> : null}
     {entry.event === "study_session.replacement_scheduled" ? <>
       <p>الموعد الملغى: <bdi dir="ltr">{typeof data.cancelled_session_id === "string" ? data.cancelled_session_id : "غير مسجل"}</bdi></p>
       <p>الموعد البديل: <bdi dir="ltr">{typeof data.replacement_session_id === "string" ? data.replacement_session_id : "غير مسجل"}</bdi> · {date(data.scheduled_at)}</p>
-      <p>بقي متطلب الخطة نفسه والقرار الأكاديمي محفوظًا دون إجراء مالي آلي.</p>
+      <p>بقي متطلب المحاضرة نفسه والقرار الأكاديمي محفوظًا دون إجراء مالي آلي.</p>
+    </> : null}
+    {entry.event === "study_group.requirements_changed" ? <>
+      <p>القرار: {data.kind === "add" ? "محاضرة إضافية" : "إلغاء نهائي وخفض العدد"} · السبب: {typeof data.reason === "string" ? data.reason : "غير مسجل"}</p>
+      <p>العدد المعتمد: {typeof (data.before as { required_count?: number } | null)?.required_count === "number" ? (data.before as { required_count: number }).required_count.toLocaleString("ar-EG") : "—"} ← {typeof (data.after as { required_count?: number } | null)?.required_count === "number" ? (data.after as { required_count: number }).required_count.toLocaleString("ar-EG") : "—"}</p>
+      {typeof data.group_id === "string" ? <p><Link href={`/admin/groups/${encodeURIComponent(data.group_id)}/sessions`}>فتح جدول المجموعة</Link></p> : null}
+      {typeof data.session_id === "string" ? <p>الموعد الملغى: <bdi dir="ltr">{data.session_id}</bdi></p> : null}
+      {data.previous_decision === "academic" ? <p>قرار التعويض السابق: بديل أكاديمي · القرار النهائي: {data.decision === "financial" ? "مراجعة مالية" : "دون تعويض"}.</p> : null}
+      {typeof data.affected_attempts === "number" ? <p>عدد المحاولات المتأثرة وقت الاعتماد: {data.affected_attempts.toLocaleString("ar-EG")}.</p> : null}
     </> : null}
   </details>;
 }

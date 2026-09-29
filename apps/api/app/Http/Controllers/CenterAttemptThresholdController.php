@@ -118,7 +118,7 @@ class CenterAttemptThresholdController extends Controller
                 'stages.completion_revision as stage_completion_revision',
                 'courses.completion_revision as course_completion_revision', 'courses.branch_id'])
             ->selectRaw('COALESCE(groups.completion_threshold, levels.completion_threshold, stages.completion_threshold, courses.completion_threshold) AS target_threshold')
-            ->selectRaw('(SELECT count(*) FROM plan_lectures WHERE plan_version_id = groups.plan_version_id) AS required_count');
+            ->selectRaw('(SELECT count(*) FROM study_group_requirements WHERE group_id = groups.id AND retired_at IS NULL) AS required_count');
         if ($lock) {
             $query->lockForUpdate();
         }
@@ -139,24 +139,31 @@ class CenterAttemptThresholdController extends Controller
             ->select(['attempts.id', 'attempts.revision', 'attempts.completion_threshold',
                 'students.name', 'students.student_number'])
             ->selectRaw(<<<'SQL'
-COALESCE((SELECT json_agg(json_build_object('id', sessions.plan_lecture_id,
+COALESCE((SELECT json_agg(json_build_object('id', COALESCE(sessions.plan_lecture_id, sessions.group_requirement_id),
     'final', sessions.closed_at IS NOT NULL) ORDER BY entries.id)
     FROM study_attendance_entries AS entries
     JOIN study_sessions AS sessions ON sessions.id = entries.session_id
     WHERE entries.attempt_id = attempts.id AND entries.status = 'counted'
-      AND sessions.status <> 'cancelled' AND sessions.plan_lecture_id IS NOT NULL), '[]'::json) AS attendance_rows,
+      AND sessions.status <> 'cancelled'), '[]'::json) AS attendance_rows,
 COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     'source_lecture_ids', approvals.source_lecture_ids, 'target_lecture_ids', approvals.target_lecture_ids) ORDER BY approvals.id)
     FROM content_equivalences AS approvals
     WHERE approvals.target_plan_version_id = attempts.plan_version_id
       OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
           WHERE transfers.attempt_id = attempts.id
-            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json) AS approvals
+            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
+COALESCE((SELECT json_agg(json_build_object('id', mappings.id,
+    'source_lecture_ids', json_build_array(mappings.candidate_requirement_id),
+    'target_lecture_ids', json_build_array(mappings.required_requirement_id)) ORDER BY mappings.id)
+    FROM study_group_requirement_equivalences AS mappings
+    WHERE mappings.required_group_id = attempts.current_group_id AND mappings.revoked_at IS NULL), '[]'::json)::jsonb AS approvals
 SQL)
             ->orderBy('attempts.id')->get();
         abort_unless($rows->count() === count($change['attempt_ids']), 404);
-        $requiredIds = DB::connection('tenant')->table('plan_lectures')
-            ->where('plan_version_id', $group->plan_version_id)->orderBy('id')->pluck('id')->all();
+        $requiredIds = DB::connection('tenant')->table('study_group_requirements')
+            ->where('group_id', $group->id)->whereNull('retired_at')
+            ->orderBy('number')->get(['id', 'plan_lecture_id'])
+            ->map(fn (object $row): string => $row->plan_lecture_id ?? $row->id)->all();
         $required = count($requiredIds);
         abort_if($required === 0, 409, 'لا توجد محاضرات معتمدة للمجموعة.');
         $target = (int) $group->target_threshold;

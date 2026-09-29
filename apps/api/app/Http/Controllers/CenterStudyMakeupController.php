@@ -270,7 +270,18 @@ class CenterStudyMakeupController extends Controller
             ->select(['attempts.id', 'attempts.student_id', 'attempts.branch_id', 'attempts.current_group_id', 'attempts.plan_version_id',
                 'attempts.joined_on',
                 'attempts.status', 'attempts.revision', 'withdrawals.withdrawn_on',
-                'students.status as student_status', 'students.name as student_name']);
+                'students.status as student_status', 'students.name as student_name'])
+            ->selectRaw('(SELECT row_to_json(origin) FROM (SELECT waitlists.from_group_id, periods.required_credit_ids
+                FROM study_attempt_waitlists AS waitlists
+                JOIN study_attempt_group_periods AS periods ON periods.id = waitlists.origin_period_id
+                WHERE waitlists.attempt_id = attempts.id
+                ORDER BY waitlists.entry_revision DESC NULLS LAST, waitlists.entered_on DESC,
+                    waitlists.created_at DESC, waitlists.id DESC LIMIT 1) AS origin) AS waitlist_origin')
+            ->selectRaw('(SELECT periods.required_credit_ids FROM study_attempt_group_periods AS periods
+                WHERE periods.attempt_id = attempts.id AND periods.group_id = attempts.current_group_id
+                    AND periods.left_on IS NOT NULL
+                ORDER BY periods.left_on DESC, periods.created_at DESC, periods.id DESC LIMIT 1)
+                AS closed_period_requirements');
         if ($lock) {
             $query->lock('FOR UPDATE OF students, attempts');
         }
@@ -288,7 +299,8 @@ class CenterStudyMakeupController extends Controller
             ->join('stages', 'stages.id', '=', 'levels.stage_id')
             ->join('courses', 'courses.id', '=', 'stages.course_id')
             ->where('sessions.id', $sessionId)
-            ->select(['sessions.id', 'sessions.group_id', 'sessions.plan_lecture_id', 'sessions.scheduled_at', 'sessions.status',
+            ->select(['sessions.id', 'sessions.group_id', 'sessions.plan_lecture_id', 'sessions.group_requirement_id',
+                'sessions.scheduled_at', 'sessions.status',
                 'sessions.revision', 'sessions.closed_at', 'groups.plan_version_id', 'courses.branch_id'])
             ->lockForUpdate()->first();
         abort_unless($session && $permissions->can($action, (int) $session->branch_id), 404);
@@ -327,19 +339,33 @@ class CenterStudyMakeupController extends Controller
             ->exists()) {
             $this->suspended();
         }
-        abort_if($primaryAtSession || ! $session->plan_lecture_id, 422,
+        $candidateCreditId = $session->plan_lecture_id ?? $session->group_requirement_id;
+        abort_if($primaryAtSession || $candidateCreditId === null, 422,
             'اختر محاضرة تعويض من مجموعة أخرى لها محتوى معتمد.');
-        $sourceLectureId = $sourceSessionId === null ? null
-            : $this->sourceAbsence($attempt->id, $sourceSessionId, $permissions)->plan_lecture_id;
-        $requirements = DB::connection('tenant')->table('plan_lectures')
-            ->where('plan_version_id', $attempt->plan_version_id)->pluck('id')->all();
+        $sourceRequirement = $sourceSessionId === null ? null
+            : $this->sourceAbsence($attempt->id, $sourceSessionId, $permissions);
+        $sourceLectureId = $sourceRequirement === null ? null
+            : ($sourceRequirement->plan_lecture_id ?? $sourceRequirement->group_requirement_id);
+        $origin = $attempt->current_group_id === null && $attempt->waitlist_origin !== null
+            ? json_decode($attempt->waitlist_origin, true) : null;
+        $requiredGroupId = $attempt->current_group_id ?? ($origin['from_group_id'] ?? null);
+        $requirements = in_array($attempt->status, ['withdrawn', 'completed'], true) && $attempt->current_group_id !== null
+            && $attempt->closed_period_requirements !== null
+            ? json_decode($attempt->closed_period_requirements, true)
+            : ($attempt->current_group_id === null
+            ? ($origin['required_credit_ids'] ?? DB::connection('tenant')->table('plan_lectures')
+                ->where('plan_version_id', $attempt->plan_version_id)->pluck('id')->all())
+            : DB::connection('tenant')->table('study_group_requirements')
+                ->where('group_id', $attempt->current_group_id)->whereNull('retired_at')
+                ->get(['id', 'plan_lecture_id'])
+                ->map(fn (object $row): string => $row->plan_lecture_id ?? $row->id)->all());
         $attendance = DB::connection('tenant')->table('study_attendance_entries as entries')
             ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
             ->where('entries.attempt_id', $attempt->id)->where('entries.status', 'counted')
             ->where('sessions.status', '<>', 'cancelled')
-            ->get(['sessions.plan_lecture_id as id', 'sessions.closed_at'])
-            ->filter(fn ($row): bool => $row->id !== null)
-            ->map(fn ($row): array => ['id' => $row->id, 'final' => $row->closed_at !== null])->all();
+            ->get(['sessions.plan_lecture_id', 'sessions.group_requirement_id', 'sessions.closed_at'])
+            ->map(fn ($row): array => ['id' => $row->plan_lecture_id ?? $row->group_requirement_id,
+                'final' => $row->closed_at !== null])->all();
         $approvals = DB::connection('tenant')->table('content_equivalences as approvals')
             ->where(function ($query) use ($attempt): void {
                 $query->where('approvals.target_plan_version_id', $attempt->plan_version_id)
@@ -352,9 +378,16 @@ class CenterStudyMakeupController extends Controller
             ->map(fn ($row): array => ['id' => $row->id,
                 'source_lecture_ids' => json_decode($row->source_lecture_ids, true),
                 'target_lecture_ids' => json_decode($row->target_lecture_ids, true)])->all();
+        $groupApprovals = DB::connection('tenant')->table('study_group_requirement_equivalences')
+            ->where('required_group_id', $requiredGroupId)->whereNull('revoked_at')
+            ->get(['id', 'candidate_requirement_id', 'required_requirement_id'])
+            ->map(fn ($row): array => ['id' => $row->id,
+                'source_lecture_ids' => [$row->candidate_requirement_id],
+                'target_lecture_ids' => [$row->required_requirement_id]])->all();
+        $approvals = [...$approvals, ...$groupApprovals];
         $before = StudyCoverageCredits::resolve($attendance, $approvals)['lectures'];
         $after = StudyCoverageCredits::resolve([...$attendance,
-            ['id' => $session->plan_lecture_id, 'final' => $session->closed_at !== null]], $approvals)['lectures'];
+            ['id' => $candidateCreditId, 'final' => $session->closed_at !== null]], $approvals)['lectures'];
         $new = array_diff(array_intersect($requirements, array_keys($after)), array_keys($before));
         abort_if($new === [], 422, 'لا يغطي التعويض محتوى ناقصًا من خطة المحاولة بمعادلة معتمدة.');
         if ($sourceLectureId !== null) {
@@ -382,7 +415,7 @@ class CenterStudyMakeupController extends Controller
             ->where('entries.attempt_id', $attemptId)->where('entries.session_id', $sessionId)
             ->when($mustBeAbsent, fn ($query) => $query->where('entries.status', 'absent')
                 ->where('sessions.status', '<>', 'cancelled'))
-            ->first(['sessions.plan_lecture_id', 'courses.branch_id']);
+            ->first(['sessions.plan_lecture_id', 'sessions.group_requirement_id', 'courses.branch_id']);
         abort_unless($source && $permissions->can('read', (int) $source->branch_id), 404);
 
         return $source;

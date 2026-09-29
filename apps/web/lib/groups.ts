@@ -7,7 +7,7 @@ export type StudyGroup = {
   approved_lecture_count: number; revision: number; started_at: string | null;
   branch_id: number; branch_name: string; course_name: string; stage_name: string; level_name: string;
   instructors: { id: string; name: string }[]; can_manage: boolean;
-  approved_lectures?: { number: number; content: string; title: string | null; planned_hours: number }[];
+  approved_lectures?: { number: number; content: string; title: string | null; planned_hours: number | null }[];
 };
 export type GroupPlanChoice = {
   plan_version_id: string; plan_version: number; level_id: string; level_name: string;
@@ -34,7 +34,9 @@ export type StudySession = {
 export type SessionContext = CenterContext & {
   group: { id: string; name: string; status: StudyGroup["status"]; revision: number;
     plan_version_id: string; branch_id: number; level_name: string; can_manage: boolean;
-    requirements: { number: number; title: string | null; content: string }[];
+    requirements: { id: string; plan_lecture_id: string | null; number: number; title: string | null; content: string }[];
+    historical_requirements: { id: string; plan_lecture_id: null; number: number; title: string | null; content: string }[];
+    historical_requirements_has_more: boolean;
     scheduled_requirements: number[]; required_count: number };
   sessions: StudySession[];
   pagination: { page: number; has_more: boolean };
