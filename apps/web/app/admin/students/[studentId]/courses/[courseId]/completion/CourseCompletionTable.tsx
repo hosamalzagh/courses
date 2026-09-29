@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { DataTable } from "@/components/DataTable";
+import { PrefetchLink as Link } from "@/components/PrefetchLink";
 import type { CourseCompletionContext } from "@/lib/server-context";
 
 type Level = CourseCompletionContext["levels"][number];
@@ -53,10 +54,18 @@ export function CourseCompletionTable({ context, search }: { context: CourseComp
         { key: "status", label: "حالة الإتمام", render: status },
         { key: "approval", label: "القرار وتاريخه", render: approval },
       ]}
-      expanded={level => level.attempt?.approved_at && level.attempt.status === "completed" ? <div className="form-stack">
-        <p>الاستيفاء المعتمد: {level.attempt.covered_count?.toLocaleString("ar-EG") ?? "٠"} من {level.attempt.required_count?.toLocaleString("ar-EG") ?? "٠"} محاضرة · الحد المطلوب {level.attempt.completion_threshold?.toLocaleString("ar-EG") ?? "٠"}%.</p>
-        {level.attempt.exceptional ? <p><strong>سبب الإتمام الاستثنائي:</strong> {level.attempt.reason}</p> : null}
+      expanded={level => level.attempt && ((level.attempt.approved_at && level.attempt.status === "completed")
+        || (level.attempt.status === "active" && level.attempt.current_group_id)) ? <div className="form-stack">
+        {level.attempt.approved_at && level.attempt.status === "completed" ? <>
+          <p>الاستيفاء المعتمد: {level.attempt.covered_count?.toLocaleString("ar-EG") ?? "٠"} من {level.attempt.required_count?.toLocaleString("ar-EG") ?? "٠"} محاضرة
+            {level.attempt.required_count ? ` · ${Number((100 * (level.attempt.covered_count ?? 0) / level.attempt.required_count).toFixed(2)).toLocaleString("ar-EG")}%` : ""}
+            {` · الحد المطلوب ${level.attempt.completion_threshold?.toLocaleString("ar-EG") ?? "٠"}%`}.</p>
+          <p><strong>النواقص وقت القرار:</strong> {level.attempt.missing_numbers?.length ? level.attempt.missing_numbers.map(number => number.toLocaleString("ar-EG")).join("، ") : "لا يوجد"}.</p>
+          {level.attempt.exceptional ? <p><strong>سبب الإتمام الاستثنائي:</strong> {level.attempt.reason}</p> : null}
+        </> : null}
         {level.attempt.group_name ? <p className="muted">المجموعة: {level.attempt.group_name}</p> : null}
+        {level.attempt.status === "active" && level.attempt.current_group_id ?
+          <p><Link href={`/admin/groups/${level.attempt.current_group_id}/coverage`}>تقرير التغطية والنواقص الحالية</Link></p> : null}
       </div> : null} />
   </>;
 }

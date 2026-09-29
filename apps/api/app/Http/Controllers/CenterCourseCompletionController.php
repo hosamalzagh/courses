@@ -55,7 +55,8 @@ SQL, [$studentId, $course->branch_id]);
 (SELECT row_to_json(chosen) FROM (
     SELECT attempts.id, attempts.status, attempts.current_group_id, groups.name AS group_name,
         decisions.approved_at, decisions.approved_by_name, decisions.exceptional, decisions.reason,
-        decisions.covered_count, decisions.required_count, decisions.completion_threshold
+        decisions.covered_count, decisions.required_count, decisions.completion_threshold,
+        decisions.missing_numbers
     FROM study_attempts AS attempts
     LEFT JOIN study_attempt_completion_decisions AS decisions ON decisions.attempt_id = attempts.id
         AND decisions.student_id = attempts.student_id AND decisions.branch_id = attempts.branch_id
