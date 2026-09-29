@@ -784,6 +784,76 @@ class StudyCoverageTest extends TestCase
             $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent());
     }
 
+    public function test_plan_applied_attempt_can_rejoin_its_original_group_after_waitlist(): void
+    {
+        $group = $this->group($this->north, 1);
+        $student = $this->student();
+        $today = now('Africa/Cairo')->toDateString();
+        $attempt = $this->enroll($student['id'], $group, $today);
+        $level = $this->getJson("{$this->base}/levels/{$group['level_id']}")->assertOk()->json('levels.0');
+        $newPlan = $this->postJson("{$this->base}/levels/{$group['level_id']}/plan-versions", [
+            'base_plan_version_id' => $group['plan_version_id'], 'base_revision' => $level['plan']['revision'],
+            'lectures' => [['number' => 1, 'content' => 'المحاضرة الأولى', 'planned_hours' => 1],
+                ['number' => 2, 'content' => 'المحاضرة الثانية', 'planned_hours' => 1]],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('plan');
+        $path = "{$this->base}/groups/{$group['id']}/plan-applications";
+        foreach (['٢', '۲'] as $digit) {
+            $options = $this->getJson("{$path}/options?q=".rawurlencode($digit))->assertOk()
+                ->assertJsonPath('versions.0.id', $newPlan['id'])->assertJsonCount(1, 'versions');
+            $this->assertLessThanOrEqual(6, (int) $options->headers->get('X-Courses-Query-Count'));
+        }
+        $change = ['target_plan_version_id' => $newPlan['id'], 'attempt_ids' => [$attempt['id']],
+            'reason' => 'تطبيق الإصدار الأحدث قبل الانتظار'];
+        $preview = $this->postJson("{$path}/preview", $change)->assertOk()->json();
+        $this->postJson($path, [...$change, 'group_revision' => $preview['group_revision'],
+            'preview_token' => $preview['preview_token'], 'request_id' => (string) Str::uuid()])->assertCreated();
+        $instructorId = $this->center->run(fn () => DB::table('study_group_instructors')
+            ->where('group_id', $group['id'])->value('instructor_id'));
+        $otherGroup = $this->postJson("{$this->base}/groups", [
+            'level_id' => $group['level_id'], 'plan_version_id' => $group['plan_version_id'],
+            'name' => 'مجموعة قديمة أخرى', 'approved_price' => '100.00',
+            'instructor_ids' => [$instructorId], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $enrollmentPath = "{$this->base}/students/{$student['id']}/enrollments";
+        $revision = $this->getJson($enrollmentPath)->assertOk()->json('attempts.0.revision');
+        $waitlistPath = "{$enrollmentPath}/{$attempt['id']}/waitlist";
+        $this->postJson($waitlistPath, ['entered_on' => $today, 'reason' => 'انتظار مؤقت',
+            'revision' => $revision, 'request_id' => (string) Str::uuid()])->assertCreated();
+        $choices = $this->getJson($waitlistPath)->assertOk()->assertJsonCount(1, 'groups')
+            ->assertJsonPath('groups.0.id', $group['id']);
+        $this->assertLessThanOrEqual(6, (int) $choices->headers->get('X-Courses-Query-Count'));
+        $reattach = ['group_id' => $group['id'], 'group_revision' => $choices->json('groups.0.revision'),
+            'joined_on' => $today, 'revision' => $choices->json('attempt_revision'),
+            'request_id' => (string) Str::uuid()];
+        $this->postJson("{$enrollmentPath}/{$attempt['id']}/reattach", [
+            ...$reattach, 'group_id' => $otherGroup['id'],
+            'group_revision' => $otherGroup['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertUnprocessable();
+        $this->postJson("{$enrollmentPath}/{$attempt['id']}/reattach", $reattach)->assertCreated()
+            ->assertJsonPath('waitlist.to_group_id', $group['id']);
+        $this->getJson($enrollmentPath)->assertOk()
+            ->assertJsonPath('attempts.0.plan_version_id', $newPlan['id'])
+            ->assertJsonPath('attempts.0.requirements_count', 2);
+        $coverage = $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk()
+            ->assertJsonPath('students.0.required_count', 2);
+        $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
+        $this->center->run(function () use ($attempt, $group, $newPlan): void {
+            $periods = DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])
+                ->orderBy('created_at')->orderBy('id')->get();
+            $this->assertCount(2, $periods);
+            $this->assertSame($group['id'], $periods[0]->group_id);
+            $this->assertNotNull($periods[0]->left_on);
+            $this->assertCount(2, json_decode($periods[0]->required_credit_ids, true));
+            $this->assertSame($group['id'], $periods[1]->group_id);
+            $this->assertNull($periods[1]->left_on);
+            $this->assertSame($newPlan['id'], DB::table('study_attempts')
+                ->where('id', $attempt['id'])->value('plan_version_id'));
+            $this->assertSame(1, DB::table('study_attempt_plan_applications')
+                ->where('attempt_id', $attempt['id'])->count());
+        });
+    }
+
     public function test_repeated_plan_application_keeps_approved_equivalence_chain_and_both_snapshots(): void
     {
         $group = $this->group($this->north, 1);

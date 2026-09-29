@@ -49,7 +49,15 @@ class CenterStudyWaitlistController extends Controller
                 ->join('stages', 'stages.id', '=', 'levels.stage_id')
                 ->join('courses', 'courses.id', '=', 'stages.course_id')
                 ->where('groups.level_id', $attempt->level_id)
-                ->where('groups.plan_version_id', $attempt->plan_version_id)
+                ->where(function ($query) use ($attempt): void {
+                    $query->where('groups.plan_version_id', $attempt->plan_version_id)
+                        ->orWhereExists(function ($applications) use ($attempt): void {
+                            $applications->selectRaw('1')->from('study_attempt_plan_applications as applications')
+                                ->whereColumn('applications.group_id', 'groups.id')
+                                ->where('applications.attempt_id', $attempt->id)
+                                ->where('applications.to_plan_version_id', $attempt->plan_version_id);
+                        });
+                })
                 ->where('courses.branch_id', $attempt->branch_id)
                 ->where('groups.status', '!=', 'completed')
                 ->when($search !== '', fn ($query) => $query->where('groups.name', 'ILIKE', '%'.addcslashes($search, '%_\\').'%'))
@@ -137,8 +145,12 @@ class CenterStudyWaitlistController extends Controller
                 ->first(['groups.id', 'groups.level_id', 'groups.plan_version_id', 'groups.status',
                     'groups.revision', 'courses.branch_id']);
             abort_unless($group && $permissions->can('enrollment.manage', (int) $group->branch_id), 404);
+            $appliedInGroup = $group->plan_version_id !== $attempt->plan_version_id
+                && DB::connection('tenant')->table('study_attempt_plan_applications')
+                    ->where('attempt_id', $attemptId)->where('group_id', $group->id)
+                    ->where('to_plan_version_id', $attempt->plan_version_id)->exists();
             abort_unless($group->branch_id === $attempt->branch_id && $group->level_id === $attempt->level_id
-                && $group->plan_version_id === $attempt->plan_version_id, 422,
+                && ($group->plan_version_id === $attempt->plan_version_id || $appliedInGroup), 422,
                 'اختر مجموعة في الفرع والمستوى وإصدار الخطة نفسها.');
             abort_unless(DB::connection('tenant')->table('student_branches')->where('student_id', $studentId)
                 ->where('branch_id', $group->branch_id)->exists(), 404);

@@ -24,7 +24,8 @@ class CenterStudyPlanApplicationController extends Controller
         $group = $this->group($groupId, $permissions);
         abort_unless($permissions->can('curriculum.manage', (int) $group->branch_id), 403);
         $page = (int) ($filters['page'] ?? 1);
-        $search = trim($filters['q'] ?? '');
+        $search = str_replace('٬', '', strtr(trim($filters['q'] ?? ''),
+            array_combine(mb_str_split('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹'), str_split('01234567890123456789'))));
         $rows = DB::connection('tenant')->table('study_plan_versions as plans')
             ->where('plans.level_id', $group->level_id)
             ->where('plans.version', '>', (int) $group->plan_version)
