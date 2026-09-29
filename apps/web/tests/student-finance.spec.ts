@@ -463,6 +463,20 @@ test("records a real refund and corrects its amount without changing the receipt
     await owner.goto(`${origin}/admin/audit`);
     await owner.getByText("تفاصيل تصحيح سجل الاسترداد").first().click();
     await expect(owner.getByText("كان الرد الفعلي مئة فقط")).toBeVisible();
+    await staff.getByRole("button", { name: "تصحيح المبلغ" }).click();
+    await staff.getByRole("textbox", { name: "المبلغ الذي أُعيد فعليًا (EGP)" }).fill("75.00");
+    await staff.getByRole("textbox", { name: "سبب التصحيح" }).fill("معاينة قديمة");
+    const refundHistory = await (await owner.request.get(`${origin}/api/v1/center/${refundPath}`)).json();
+    const activeRefund = refundHistory.history.find((entry: { reversal_id: string | null }) => !entry.reversal_id);
+    expect((await write(owner, `students/${studentId}/refunds/${activeRefund.id}/corrections`, {
+      correct_amount: "50.00", reason: "تصحيح متزامن", version: refundHistory.version,
+      request_id: crypto.randomUUID(),
+    })).status).toBe(201);
+    await staff.getByRole("button", { name: "معاينة التصحيح" }).click();
+    await expect(staff.getByText("تغير الرصيد أو سجل الاسترداد", { exact: false })).toBeVisible();
+    await staff.getByRole("button", { name: "تحميل أحدث الرصيد" }).click();
+    await expect(staff.getByRole("region", { name: "تصحيح مبلغ الاسترداد" })).toHaveCount(0);
+    await expect(staff.getByRole("button", { name: "إغلاق سجل الاسترداد" })).toBeEnabled();
     await staff.setViewportSize({ width: 390, height: 844 });
     expect(await staff.locator("html").getAttribute("dir")).toBe("rtl");
     await staff.getByRole("button", { name: "القائمة" }).click();

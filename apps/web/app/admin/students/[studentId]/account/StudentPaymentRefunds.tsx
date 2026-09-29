@@ -60,23 +60,16 @@ export function StudentPaymentRefunds({ studentId, payment, onClose, onChanged, 
   const path = `students/${studentId}/payments/${payment.id}/refunds`;
   const dirty = Boolean(amount || refundedOn || reason || correctAmount || correctionReason);
 
-  const load = useCallback(async (page = 1, afterConflict = false): Promise<boolean> => {
+  const load = useCallback(async (page = 1): Promise<RefundOptions | null> => {
     setLoading(true);
     try {
       const response = await centerRequest(`${path}?page=${page}`, "GET");
-      if (!response.ok) { setError(await responseMessage(response)); return false; }
+      if (!response.ok) { setError(await responseMessage(response)); return null; }
       const next = await response.json() as RefundOptions;
       setOptions(next);
-      if (afterConflict) {
-        setRefundPreview(null);
-        setCorrectionPreview(null);
-        setCorrecting(current => next.history.find(row => row.id === current?.id && !row.reversal_id) ?? null);
-        requestId.current = null;
-        setError("");
-      }
       setConflict(false);
-      return true;
-    } catch { setError("تعذر تحميل سجل الاسترداد. تحقق من الاتصال وأعد المحاولة."); return false; }
+      return next;
+    } catch { setError("تعذر تحميل سجل الاسترداد. تحقق من الاتصال وأعد المحاولة."); return null; }
     finally { setLoading(false); }
   }, [path]);
 
@@ -87,6 +80,20 @@ export function StudentPaymentRefunds({ studentId, payment, onClose, onChanged, 
   function focus(id: string) { requestAnimationFrame(() => document.getElementById(id)?.focus()); }
   function changeRefund() { setRefundPreview(null); setError(""); requestId.current = null; }
   function changeCorrection() { setCorrectionPreview(null); setError(""); requestId.current = null; }
+
+  async function reloadAfterConflict() {
+    const latest = await load(options?.pagination.page);
+    if (!latest) return;
+    setRefundPreview(null);
+    setCorrectionPreview(null);
+    requestId.current = null;
+    setError("");
+    if (correcting) {
+      const active = latest.history.find(row => row.id === correcting.id && !row.reversal_id);
+      setCorrecting(active ?? null);
+      if (!active) { setCorrectAmount(""); setCorrectionReason(""); }
+    }
+  }
 
   async function previewRefund(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -135,7 +142,7 @@ export function StudentPaymentRefunds({ studentId, payment, onClose, onChanged, 
     finally { submitting.current = false; setBusy(false); }
     if (committed) {
       const refreshed = await Promise.allSettled([load(options.pagination.page), onChanged()]);
-      setNotice(refreshed.some(result => result.status === "rejected" || result.value === false)
+      setNotice(refreshed.some(result => result.status === "rejected" || result.value === null)
         ? "حُفظ الاسترداد، لكن تعذر تحديث الحساب. حمّل أحدث البيانات." : "سُجل المبلغ المعاد فعليًا مع السبب والفاعل.");
       focus(`${prefix}-amount`);
     }
@@ -187,7 +194,7 @@ export function StudentPaymentRefunds({ studentId, payment, onClose, onChanged, 
     finally { submitting.current = false; setBusy(false); }
     if (committed) {
       const refreshed = await Promise.allSettled([load(options.pagination.page), onChanged()]);
-      setNotice(refreshed.some(result => result.status === "rejected" || result.value === false)
+      setNotice(refreshed.some(result => result.status === "rejected" || result.value === null)
         ? "حُفظ التصحيح، لكن تعذر تحديث الحساب. حمّل أحدث البيانات." : "حُفظ عكس الاسترداد وبديله المرتبطان دون رد نقدي جديد.");
       focus(`${prefix}-title`);
     }
@@ -200,7 +207,7 @@ export function StudentPaymentRefunds({ studentId, payment, onClose, onChanged, 
     <p className="muted">يمكن إبقاء الرصيد متاحًا لتسجيل لاحق. الاسترداد يسجل مالًا أُعيد فعليًا للطالب ولا يتبع الانسحاب أو تسوية الرسوم تلقائيًا.</p>
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-    {conflict ? <CenterHeaderActions><Button disabled={busy} onClick={() => { void load(options?.pagination.page, true); }}>تحميل أحدث الرصيد</Button></CenterHeaderActions> : null}
+    {conflict ? <CenterHeaderActions><Button disabled={busy} onClick={() => { void reloadAfterConflict(); }}>تحميل أحدث الرصيد</Button></CenterHeaderActions> : null}
     {options?.can_refund && !correcting ? <section className="form-stack" aria-label="تسجيل رد نقدي">
       <h3>تسجيل مبلغ أُعيد فعليًا</h3>
       <form id={refundForm} noValidate onSubmit={previewRefund}><FieldSet disabled={busy || uncertain || conflict} className="border-0 p-0"><FieldGroup>
