@@ -19,13 +19,13 @@ http.createServer((request, response) => {
     response.writeHead(upstreamResponse.statusCode, upstreamResponse.headers);
     if (api && request.method === 'GET' && request.url.startsWith('/api/v1/center/')) {
       const raw = upstreamResponse.headers['x-courses-query-count'];
-      const count = raw === undefined ? null : Number(raw);
+      const count = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : null;
       fs.appendFileSync(log, JSON.stringify({
         at: new Date().toISOString(),
         host: request.headers.host,
         path: request.url,
         status: upstreamResponse.statusCode,
-        count: Number.isInteger(count) ? count : null,
+        count: Number.isSafeInteger(count) ? count : null,
       }) + '\n');
     }
     upstreamResponse.pipe(response);
