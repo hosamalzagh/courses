@@ -216,17 +216,18 @@ class CenterStudentPaymentCorrectionController extends Controller
                 ->orderBy('allocations.created_at')->orderBy('allocations.id')
                 ->offset(($page - 1) * 20)->limit(21)
                 ->select(['allocations.id', 'allocations.fee_id', 'allocations.target_branch_id', 'allocations.created_at',
-                    'target_branches.name as target_branch_name', 'allocations.amount', 'fees.attempt_id'])
-                ->selectRaw(EffectiveStudyFees::amount('fees').' AS fee_due')
+                    'target_branches.name as target_branch_name', 'fees.attempt_id'])
+                ->selectRaw('allocations.amount::text AS amount')
+                ->selectRaw(EffectiveStudyFees::amount('fees').'::text AS fee_due')
                 ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.fee_id', 'fees.id')
-                    ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'fee_paid');
+                    ->selectRaw('COALESCE(SUM(allocations.amount), 0)::text'), 'fee_paid');
             $historyRows = DB::connection('tenant')->table('student_payment_reversals as reversals')
                 ->join('student_payment_replacements as replacements', 'replacements.reversal_id', '=', 'reversals.id')
                 ->whereColumn('reversals.payment_id', 'payments.id')
                 ->orderByDesc('reversals.created_at')->orderByDesc('reversals.id')
                 ->offset(($historyPage - 1) * 20)->limit(21)
-                ->select(['reversals.id', 'reversals.reason', 'reversals.actor_name', 'reversals.created_at',
-                    'replacements.amount']);
+                ->select(['reversals.id', 'reversals.reason', 'reversals.actor_name', 'reversals.created_at'])
+                ->selectRaw('replacements.amount::text AS amount');
             $query->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'payments.id')
                 ->selectRaw("COALESCE(json_agg(DISTINCT allocations.target_branch_id), '[]'::json)"), 'affected_branches')
                 ->selectSub(DB::connection('tenant')->query()->fromSub($allocationRows, 'allocation_rows')

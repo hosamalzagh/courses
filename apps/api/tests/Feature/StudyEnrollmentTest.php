@@ -2361,7 +2361,10 @@ class StudyEnrollmentTest extends TestCase
         }
         $correctionUrl = "{$paymentUrl}/corrections";
         $options = $this->getJson($correctionUrl)->assertOk()->assertJsonCount(2, 'allocations')
-            ->assertJsonPath('payment.received_before', '1000.00')->json();
+            ->assertJsonPath('payment.received_before', '1000.00')
+            ->assertJsonPath('allocations.0.amount', '400.00')
+            ->assertJsonPath('allocations.0.fee_due', '1000.00')
+            ->assertJsonPath('allocations.0.fee_paid', '700.00')->json();
         $this->assertLessThanOrEqual(6, (int) $this->getJson($accountUrl)->headers->get('X-Courses-Query-Count'));
         $changes = [['id' => $allocations[0]['id'], 'amount' => '300.00'],
             ['id' => $allocations[1]['id'], 'amount' => '200.00']];
@@ -2386,6 +2389,7 @@ class StudyEnrollmentTest extends TestCase
             $this->assertSame(2, DB::table('student_payment_allocations')->count());
         });
         $saved = $this->postJson($correctionUrl, $request)->assertCreated()->json();
+        $this->getJson($correctionUrl)->assertJsonPath('history.0.amount', '500.00');
         $this->postJson($correctionUrl, $request)->assertOk()->assertJsonPath('replacement.id', $saved['replacement']['id']);
         $this->postJson($correctionUrl, [...$request, 'reason' => 'سبب مختلف'])->assertConflict()
             ->assertJsonPath('code', 'payment_correction_request_changed');
