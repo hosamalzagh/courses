@@ -563,6 +563,8 @@ class StudySessionsTest extends TestCase
             ...$reduce, 'group_revision' => $reducePreview['group_revision'],
             'preview_token' => $reducePreview['preview_token'], 'request_id' => (string) Str::uuid(),
         ])->assertOk()->json();
+        $this->getJson("{$this->base}/groups/{$source['id']}/sessions")
+            ->assertOk()->assertJsonPath('group.historical_requirements.0.id', $sourceAdded['requirement']['id']);
         $this->getJson("{$equivalencePath}/options?required_requirement_id={$sourceAdded['requirement']['id']}")
             ->assertOk()->assertJsonPath('candidates.0.id', $targetAdded['requirement']['id']);
         $this->postJson($equivalencePath, [

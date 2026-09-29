@@ -35,7 +35,10 @@ export function GroupRequirementEquivalenceEditor({ group, onClose }: {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [conflict, setConflict] = useState(false);
-  const required = group.requirements.filter(item => item.plan_lecture_id === null);
+  const required = [
+    ...group.requirements.filter(item => item.plan_lecture_id === null).map(item => ({ ...item, historical: false })),
+    ...group.historical_requirements.map(item => ({ ...item, historical: true })),
+  ];
   const selected = required.find(item => item.id === requiredId);
   const prefix = `groups/${group.id}/requirement-equivalences`;
 
@@ -94,7 +97,7 @@ export function GroupRequirementEquivalenceEditor({ group, onClose }: {
         onChange={event => { setRequiredId(event.target.value); setSearch(""); setCandidates([]); setDecision(null); setError(""); setNotice(""); }}>
         <NativeSelectOption value="">اختر محاضرة مضافة</NativeSelectOption>
         {required.map(item => <NativeSelectOption key={item.id} value={item.id}>
-          {item.number.toLocaleString("ar-EG")} · {item.title || item.content}
+          {item.number.toLocaleString("ar-EG")} · {item.title || item.content}{item.historical ? " · اعتماد تاريخي" : ""}
         </NativeSelectOption>)}
       </NativeSelect>
       <FieldDescription>لا يظهر محتوى الخطة الأصلي هنا؛ له مسار المعادلات المعتمدة بين إصدارات الخطط.</FieldDescription>

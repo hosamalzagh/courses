@@ -85,7 +85,8 @@ SQL);
         $rows = $students->orderBy('students.student_number')->orderBy('attempts.id')
             ->offset(($page - 1) * 20)->limit(21)->get();
         $report = $rows->take(20)->map(function (object $row) use ($requirements, $requirementHistory): array {
-            $effectiveRequirements = $row->attempt_status === 'withdrawn' && $row->closed_period_requirements !== null
+            $effectiveRequirements = in_array($row->attempt_status, ['withdrawn', 'completed'], true)
+                && $row->closed_period_requirements !== null
                 ? array_values(array_filter($requirementHistory,
                     fn (array $entry): bool => in_array($entry['id'], json_decode($row->closed_period_requirements, true), true)))
                 : $requirements;

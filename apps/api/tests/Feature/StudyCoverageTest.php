@@ -398,6 +398,18 @@ class StudyCoverageTest extends TestCase
                 $this->assertSame('23514', $exception->getCode());
             }
         });
+        // A closed attempt keeps its approved requirement set even if legacy data changes later.
+        $this->center->run(fn () => DB::table('study_group_requirements')
+            ->where('group_id', $group['id'])->where('number', 2)
+            ->update(['retired_at' => now()]));
+        $coverage = $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk()
+            ->assertJsonPath('students.0.required_count', 2)
+            ->assertJsonPath('students.0.covered_count', 2)
+            ->assertJsonPath('students.1.required_count', 2)
+            ->assertJsonPath('students.1.missing_numbers', [1, 2]);
+        $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$this->base}/students/{$first['id']}/enrollments")->assertOk()
+            ->assertJsonPath('attempts.0.requirements_count', 2);
     }
 
     public function test_completion_rejects_a_period_that_has_not_started_even_after_an_earlier_preview(): void

@@ -373,7 +373,7 @@ CASE WHEN study_attempts.current_group_id IS NULL
         ORDER BY waitlists.entry_revision DESC NULLS LAST, waitlists.entered_on DESC,
             waitlists.created_at DESC, waitlists.id DESC LIMIT 1),
         (SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id))
-    WHEN study_attempts.status = 'withdrawn'
+    WHEN study_attempts.status IN ('withdrawn', 'completed')
     THEN COALESCE((SELECT jsonb_array_length(periods.required_credit_ids)
         FROM study_attempt_group_periods AS periods
         WHERE periods.attempt_id = study_attempts.id

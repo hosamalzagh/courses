@@ -255,7 +255,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
   return <>
     <CenterPageActions context={context} actions={<>
       {group.can_manage && group.status !== "completed" ? <Button id="add-group-requirement" disabled={busy || Boolean(selected || cancelTarget || replacementTarget || requirementEditor || equivalenceEditor)} onClick={() => { setRequirementEditor({ kind: "add" }); setError(""); }}>محاضرة إضافية</Button> : null}
-      {group.can_manage && group.requirements.some(item => item.plan_lecture_id === null) ? <Button id="group-requirement-equivalence" disabled={busy || Boolean(selected || cancelTarget || replacementTarget || requirementEditor || equivalenceEditor)} onClick={() => { setEquivalenceEditor(true); setError(""); }}>تكافؤ المحاضرات المضافة</Button> : null}
+      {group.can_manage && (group.requirements.some(item => item.plan_lecture_id === null) || group.historical_requirements.length > 0) ? <Button id="group-requirement-equivalence" disabled={busy || Boolean(selected || cancelTarget || replacementTarget || requirementEditor || equivalenceEditor)} onClick={() => { setEquivalenceEditor(true); setError(""); }}>تكافؤ المحاضرات المضافة</Button> : null}
       <Link href={`/admin/groups/${group.id}/coverage`}>تقرير تغطية المحتوى وأهلية الإتمام</Link><Link href="/admin/groups">العودة للمجموعات</Link>
     </>} />
     <UnsavedChangesGuard dirty={dirty} guardHistory />

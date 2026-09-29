@@ -349,7 +349,7 @@ class CenterStudyMakeupController extends Controller
         $origin = $attempt->current_group_id === null && $attempt->waitlist_origin !== null
             ? json_decode($attempt->waitlist_origin, true) : null;
         $requiredGroupId = $attempt->current_group_id ?? ($origin['from_group_id'] ?? null);
-        $requirements = $attempt->status === 'withdrawn' && $attempt->current_group_id !== null
+        $requirements = in_array($attempt->status, ['withdrawn', 'completed'], true) && $attempt->current_group_id !== null
             && $attempt->closed_period_requirements !== null
             ? json_decode($attempt->closed_period_requirements, true)
             : ($attempt->current_group_id === null
