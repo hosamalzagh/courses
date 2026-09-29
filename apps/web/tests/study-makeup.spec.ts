@@ -197,6 +197,42 @@ test('books makeup without granting coverage and hides the attempt from unauthor
     const completed = await owner.request.get(`${origin}/api/v1/center/groups/${source.id}/coverage`);
     expect(Number(completed.headers()['x-courses-query-count'])).toBeLessThanOrEqual(6);
     expect((await completed.json()).students[0].covered_count).toBe(1);
+    const attendancePath = `/admin/students/${studentId}?tab=attendance`;
+    const attendanceStart = queryRows().length;
+    await owner.goto(`${origin}/admin/students/${studentId}`);
+    await owner.getByRole('link', { name: 'الحضور والغياب', exact: true }).click();
+    await expect(owner).toHaveURL(new RegExp('tab=attendance'));
+    await expect(owner.getByRole('heading', { name: 'الحضور والغياب والتعويض' })).toBeVisible();
+    await expect(owner.locator('html')).toHaveAttribute('data-theme', 'dark');
+    expect(await owner.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    const attendanceRows = owner.getByRole('table', { name: 'سجل المحاضرات' });
+    await expect(attendanceRows).toContainText('غياب مسجل');
+    await expect(attendanceRows).toContainText('حضور تعويض محتسب');
+    await owner.getByRole('searchbox', { name: 'بحث في سجل المحاضرات' }).fill(target.name);
+    await owner.getByRole('button', { name: 'بحث في جميع سجل المحاضرات' }).click();
+    await expect(owner).toHaveURL(/attendance_q=/);
+    await expect(attendanceRows).toContainText('حضور تعويض محتسب');
+    await expect(attendanceRows).not.toContainText('غياب مسجل');
+    await owner.getByRole('searchbox', { name: 'بحث في سجل المحاضرات' }).fill('');
+    await owner.getByRole('button', { name: 'بحث في جميع سجل المحاضرات' }).click();
+    await expect(attendanceRows).toContainText('غياب مسجل');
+    await owner.goto(`${origin}/admin/students/${studentId}?status_page=2`);
+    await owner.getByRole('link', { name: 'الحضور والغياب', exact: true }).click();
+    await expect(owner).toHaveURL(/status_page=2&tab=attendance/);
+    await owner.getByRole('searchbox', { name: 'بحث في سجل المحاضرات' }).fill(target.name);
+    await owner.getByRole('button', { name: 'بحث في جميع سجل المحاضرات' }).click();
+    await expect(owner).toHaveURL(/status_page=2.*attendance_q=/);
+    await owner.goto(`${origin}/admin/students/${studentId}?tab=attendance`);
+    const scopedReads = queryRows().slice(attendanceStart)
+      .filter(read => read.path === `/api/v1/center/students/${studentId}?tab=attendance`);
+    expect(scopedReads.length).toBeGreaterThan(0);
+    expect(scopedReads.every(read => Number.isInteger(read.count) && read.count! <= 6)).toBe(true);
+    const makeupRow = attendanceRows.getByRole('row').filter({ hasText: 'حضور تعويض محتسب' });
+    await makeupRow.getByRole('link', { name: 'فتح سجل المحاضرة' }).click();
+    await expect(owner).toHaveURL(new RegExp(`/groups/${target.id}/sessions/${sessionId}/attendance`));
+    await owner.goBack();
+    await expect(owner).toHaveURL(new RegExp(attendancePath.replace('?', '\\?')));
+    await expect(attendanceRows).toContainText('غياب مسجل');
     const revokePath = `groups/${target.id}/sessions/${sessionId}`;
     const previewResponse = await owner.request.get(`${origin}/api/v1/center/${revokePath}/revoke-preview`);
     expect(previewResponse.status()).toBe(200);
@@ -212,6 +248,9 @@ test('books makeup without granting coverage and hides the attempt from unauthor
     await expect(revokedRow.getByRole('button', { name: 'إثبات تعويض' })).toHaveCount(0);
     const excluded = await owner.request.get(`${origin}/api/v1/center/groups/${source.id}/coverage`);
     expect((await excluded.json()).students[0].covered_count).toBe(0);
+    await owner.goto(`${origin}/admin/students/${studentId}?tab=attendance`);
+    await expect(owner.getByRole('table', { name: 'سجل المحاضرات' }))
+      .toContainText('حضور محفوظ في محاضرة ملغاة — لا يُحتسب');
     await signIn(staff, 'staff');
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/makeup`)).status()).toBe(404);
   } finally { await owner.close(); await staff.close(); }
