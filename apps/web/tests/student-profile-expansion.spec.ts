@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
 const origin = process.env.COURSES_PROFILE_EXPANSION_ORIGIN;
 const credentialsFile = process.env.COURSES_PROFILE_EXPANSION_CREDENTIALS;
@@ -10,6 +11,8 @@ const image = { name: "student.png", mimeType: "image/png", buffer: Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAIAAAAC64paAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAAHUlEQVQ4jWMUSbFhIBcwka1zVPOo5lHNo5qpohkAvIEA3Cu5xEYAAAAASUVORK5CYII=",
   "base64",
 ) };
+const replacementPdf = { name: "updated.pdf", mimeType: "application/pdf",
+  buffer: Buffer.from("%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF") };
 test.skip(!origin || !credentialsFile || !queryLog || databasePort !== "5558",
   "Requires an isolated two-center PostgreSQL fixture on port 5558 and measured Next.js proxy.");
 test.setTimeout(120_000);
@@ -41,6 +44,38 @@ async function write(page: Page, route: string, payload: object, method = "POST"
 
 function cursor(): number {
   return readFileSync(queryLog!, "utf8").trim().split("\n").filter(Boolean).length;
+}
+
+function clearColdCache(): void {
+  const apiDirectory = realpathSync(process.env.COURSES_PROFILE_EXPANSION_API_DIR ?? resolve(process.cwd(), "../api"));
+  const fixtureApiDirectory = realpathSync(resolve(dirname(credentialsFile!), "../../.."));
+  const cacheDirectory = resolve(apiDirectory, "storage/framework/cache/data");
+  const expected = {
+    DB_HOST: "127.0.0.1",
+    DB_PORT: "5558",
+    DB_DATABASE: "courses_issue35_browser",
+    CACHE_STORE: "file",
+    CACHE_PREFIX: "courses_issue82_final_",
+  };
+  if (apiDirectory !== fixtureApiDirectory || !apiDirectory.includes("/.codex/worktrees/")
+    || databasePort !== expected.DB_PORT
+    || process.env.COURSES_PROFILE_EXPANSION_DB_HOST !== expected.DB_HOST
+    || process.env.COURSES_PROFILE_EXPANSION_DB_DATABASE !== expected.DB_DATABASE
+    || process.env.COURSES_PROFILE_EXPANSION_CACHE_STORE !== expected.CACHE_STORE
+    || process.env.COURSES_PROFILE_EXPANSION_CACHE_PREFIX !== expected.CACHE_PREFIX
+    || existsSync(resolve(apiDirectory, "bootstrap/cache/config.php"))
+    || !lstatSync(cacheDirectory).isDirectory()
+    || lstatSync(cacheDirectory).isSymbolicLink()
+    || realpathSync(cacheDirectory) !== cacheDirectory) {
+    throw new Error("Cold cache clear requires the isolated #82 browser API, PostgreSQL database and local file cache.");
+  }
+  execFileSync(process.env.COURSES_PROFILE_EXPANSION_PHP ?? "php85", ["artisan", "cache:clear", "--no-interaction"],
+    { cwd: apiDirectory, env: { ...process.env, APP_ENV: "local", DB_CONNECTION: "pgsql", ...expected }, stdio: "pipe" });
+}
+
+function coldCursor(): number {
+  clearColdCache();
+  return cursor();
 }
 
 function assertMeasuredPage(after: number, studentId: string, requireStudentRead = true) {
@@ -142,7 +177,7 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
   for (const { path, text } of paths) {
     const url = `${origin}/admin/students/${studentId}${path}`;
     for (const state of ["cold", "warm"]) {
-      const before = cursor();
+      const before = state === "cold" ? coldCursor() : cursor();
       await page.goto(url, { waitUntil: "networkidle" });
       await expect(page.getByText(text, { exact: false }).first(), `${state} ${path}`).toBeVisible();
       if (!path) {
@@ -187,21 +222,21 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
   const paymentWhileSuspended = await write(page, `students/${studentId}/payments`, { branch_id: branch, method: "cash",
     received_on: "2026-09-28", amount: "5.00", version: suspendedAccount.account.version, request_id: crypto.randomUUID() });
   expect(paymentWhileSuspended.status).toBe(201);
-  let before = cursor();
+  let before = coldCursor();
   await page.goto(`${origin}/admin/students/${studentId}?tab=attendance`, { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { name: "حالة ملف الطالب: موقوف" })).toBeVisible();
   await expect(page.getByText("حضور محتسب", { exact: false }).first()).toBeVisible();
   await expect(page.getByText("غياب مسجل", { exact: false }).first()).toBeVisible();
   await expect(page.getByRole("region", { name: "ملخص الطالب" }).getByText("مديونية في الفروع المالية المصرح بها: 100.00 EGP", { exact: false })).toBeVisible();
   measurements.push({ route: "suspended:attendance", state: "cold", reads: assertMeasuredPage(before, studentId) });
-  before = cursor();
+  before = coldCursor();
   await page.goto(`${origin}/admin/students/${studentId}/account`, { waitUntil: "networkidle" });
   await expect(page.getByText("35.00 EGP", { exact: false }).first()).toBeVisible();
   measurements.push({ route: "suspended:account", state: "cold", reads: assertMeasuredPage(before, studentId) });
   const lifted = await write(page, statusRoute, { status: "active", reason: `قبول فك ${unique}`,
     status_revision: 2, request_id: crypto.randomUUID() });
   expect(lifted.status).toBe(200);
-  before = cursor();
+  before = coldCursor();
   await page.goto(`${origin}/admin/students/${studentId}`, { waitUntil: "networkidle" });
   await expect(page.getByText(`السبب: قبول إيقاف ${unique}`, { exact: true })).toBeVisible();
   await expect(page.getByText(`السبب: قبول فك ${unique}`, { exact: true })).toBeVisible();
@@ -252,11 +287,11 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
   const coverage = await (await page.request.get(`${origin}/api/v1/center/groups/${groupId}/coverage`)).json();
   expect(coverage.group.required_count).toBe(3);
   expect(coverage.students.find((row: { attempt_id: string }) => row.attempt_id === attempt.body.attempt.id).required_count).toBe(4);
-  before = cursor();
+  before = coldCursor();
   await page.goto(`${origin}/admin/students/${studentId}?tab=study`, { waitUntil: "networkidle" });
   await expect(page.getByText("انسحب من المحاولة")).toBeVisible();
   measurements.push({ route: "withdrawn:study", state: "cold", reads: assertMeasuredPage(before, studentId) });
-  before = cursor();
+  before = coldCursor();
   await page.goto(`${origin}/admin/students/${studentId}/enrollments`, { waitUntil: "networkidle" });
   const historicalRow = page.getByRole("table", { name: "محاولات الدراسة" }).getByRole("row", { name: new RegExp(`Group ${unique}`) });
   await expect(historicalRow.getByRole("cell").nth(4)).toHaveText("٤");
@@ -293,16 +328,16 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
   expect(afterMoney.account.available_balance).toBe("35.00");
   expect(afterMoney.account.due_total).toBe("80.00");
   expect(afterMoney.account.debt).toBe("80.00");
-  before = cursor();
+  before = coldCursor();
   await page.goto(`${origin}/admin/students/${studentId}`, { waitUntil: "networkidle" });
   await expect(page.getByRole("region", { name: "ملخص الطالب" }).getByText("مديونية في الفروع المالية المصرح بها: 80.00 EGP", { exact: false })).toBeVisible();
   await expect(page.getByRole("link", { name: correctionNote })).toBeVisible();
   measurements.push({ route: "settled:profile", state: "cold", reads: assertMeasuredPage(before, studentId) });
-  before = cursor();
+  before = coldCursor();
   await page.goto(`${origin}/admin/students/${studentId}?tab=notes`, { waitUntil: "networkidle" });
   await expect(page.getByRole("region", { name: "ملاحظات أحداث الطالب" }).getByText(correctionNote)).toBeVisible();
   measurements.push({ route: "corrected:notes", state: "cold", reads: assertMeasuredPage(before, studentId) });
-  before = cursor();
+  before = coldCursor();
   await page.goto(`${origin}/admin/students/${studentId}/account`, { waitUntil: "networkidle" });
   await expect(page.getByText("80.00 EGP", { exact: false }).first()).toBeVisible();
   measurements.push({ route: "corrected:account", state: "cold", reads: assertMeasuredPage(before, studentId) });
@@ -312,7 +347,7 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
     version: allocationOptions.version, request_id: crypto.randomUUID() });
   expect(allocated.status, JSON.stringify(allocated.body)).toBe(201);
   expect((await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json()).account.debt).toBe("60.00");
-  before = cursor();
+  before = coldCursor();
   await page.goto(`${origin}/admin/students/${studentId}`, { waitUntil: "networkidle" });
   await expect(page.getByRole("region", { name: "ملخص الطالب" }).getByText("مديونية في الفروع المالية المصرح بها: 60.00 EGP", { exact: false })).toBeVisible();
   measurements.push({ route: "allocated:profile", state: "cold", reads: assertMeasuredPage(before, studentId) });
@@ -325,7 +360,7 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
   const correctedAccount = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
   expect(correctedAccount.account.debt).toBe("80.00");
   expect(correctedAccount.account.available_balance).toBe("35.00");
-  before = cursor();
+  before = coldCursor();
   await page.goto(`${origin}/admin/students/${studentId}`, { waitUntil: "networkidle" });
   await expect(page.getByRole("region", { name: "ملخص الطالب" }).getByText("مديونية في الفروع المالية المصرح بها: 80.00 EGP", { exact: false })).toBeVisible();
   measurements.push({ route: "allocation-corrected:profile", state: "cold", reads: assertMeasuredPage(before, studentId) });
@@ -334,7 +369,7 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
     await signIn(registration, origin!, "staff");
     expect((await registration.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).status()).toBe(404);
     expect((await registration.request.get(`${origin}/api/v1/center/students/${studentId}/financial-events/payment_correction/${corrected.body.reversal.id}/note`)).status()).toBe(404);
-    before = cursor();
+    before = coldCursor();
     await registration.goto(`${origin}/admin/students/${studentId}`, { waitUntil: "networkidle" });
     await expect(registration.getByText(`قبول التوسعة ${unique}`, { exact: false }).first()).toBeVisible();
     await expect(registration.getByText(correctionNote)).toHaveCount(0);
@@ -389,9 +424,24 @@ test("one central employee identity keeps alpha and beta profiles, values and se
     await alpha.getByRole("button", { name: "رفع المرفقات", exact: true }).click();
     await expect(alpha.getByRole("button", { name: "نسخ وإجراءات student" })).toBeVisible();
     const alphaAttachments = await (await alpha.request.get(`${origin}/api/v1/center/students/${alphaId}?tab=attachments`)).json();
-    const attachmentUrl = alphaAttachments.attachments.entries[0].download_url as string;
+    const attachment = alphaAttachments.attachments.entries[0] as { id: string; download_url: string };
+    const attachmentUrl = attachment.download_url;
     expect((await alpha.request.get(`${origin}${attachmentUrl}`)).status()).toBe(200);
     expect((await beta.request.get(`${betaOrigin}${attachmentUrl}`)).status()).toBe(404);
+    const versionsRoute = `students/${alphaId}/attachments/${attachment.id}/versions`;
+    const firstVersions = await alpha.request.get(`${origin}/api/v1/center/${versionsRoute}`);
+    expect(firstVersions.status()).toBe(200);
+    const historicalUrl = (await firstVersions.json()).versions[0].download_url as string;
+    await alpha.getByRole("button", { name: "نسخ وإجراءات student" }).click();
+    await alpha.getByLabel("ملف النسخة الجديدة").setInputFiles(replacementPdf);
+    await alpha.getByRole("button", { name: "حفظ نسخة جديدة" }).click();
+    await expect(alpha.getByText("نسخة ٢", { exact: false })).toBeVisible();
+    const updatedVersions = await alpha.request.get(`${origin}/api/v1/center/${versionsRoute}`);
+    expect(updatedVersions.status()).toBe(200);
+    expect((await updatedVersions.json()).versions).toHaveLength(2);
+    expect((await alpha.request.get(`${origin}${historicalUrl}`)).status()).toBe(200);
+    expect((await beta.request.get(`${betaOrigin}${historicalUrl}`)).status()).toBe(404);
+    expect((await beta.request.get(`${betaOrigin}/api/v1/center/${versionsRoute}`)).status()).toBe(404);
 
     for (const [page, host, ownId, ownValue, foreignId] of [
       [alpha, origin!, alphaId, "مدرسة ألفا", betaId],
@@ -547,7 +597,7 @@ test("long histories keep every student tab measured on cold and warm opens", as
   ];
   for (const { path, text, table, batch, visible, second } of longRoutes) {
     for (const state of ["cold", "warm"]) {
-      const before = cursor();
+      const before = state === "cold" ? coldCursor() : cursor();
       await page.goto(`${origin}/admin/students/${studentId}${path}`, { waitUntil: "networkidle" });
       await expect(page.getByText(text, { exact: false }).first(), `${state} long ${path}`).toBeVisible();
       if (table && batch) {
@@ -567,7 +617,7 @@ test("long histories keep every student tab measured on cold and warm opens", as
     await page.goto(`${origin}/admin/students/${studentId}?tab=notes`, { waitUntil: "networkidle" });
     const notes = page.getByRole("region", { name: "ملاحظات أحداث الطالب" });
     await expect(notes.getByRole("article")).toHaveCount(20);
-    const before = cursor();
+    const before = state === "cold" ? coldCursor() : cursor();
     const pageTwo = page.waitForResponse(response => response.url().includes(`/api/v1/center/students/${studentId}/notes?page=2`));
     await page.getByRole("navigation", { name: "صفحات ملاحظات الأحداث" }).getByRole("button", { name: "التالي" }).click();
     const response = await pageTwo;
