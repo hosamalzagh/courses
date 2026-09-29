@@ -151,7 +151,12 @@ COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     WHERE approvals.target_plan_version_id = attempts.plan_version_id
       OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
           WHERE transfers.attempt_id = attempts.id
-            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json) AS approvals
+            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
+COALESCE((SELECT json_agg(json_build_object('id', mappings.id,
+    'source_lecture_ids', json_build_array(mappings.candidate_requirement_id),
+    'target_lecture_ids', json_build_array(mappings.required_requirement_id)) ORDER BY mappings.id)
+    FROM study_group_requirement_equivalences AS mappings
+    WHERE mappings.required_group_id = attempts.current_group_id AND mappings.revoked_at IS NULL), '[]'::json)::jsonb AS approvals
 SQL)
             ->orderBy('attempts.id')->get();
         abort_unless($rows->count() === count($change['attempt_ids']), 404);

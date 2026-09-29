@@ -10,6 +10,7 @@ use App\Http\Controllers\CenterCourseCompletionController;
 use App\Http\Controllers\CenterCurriculumController;
 use App\Http\Controllers\CenterCurriculumCopyController;
 use App\Http\Controllers\CenterGroupRequirementController;
+use App\Http\Controllers\CenterGroupRequirementEquivalenceController;
 use App\Http\Controllers\CenterInstructorController;
 use App\Http\Controllers\CenterMemberController;
 use App\Http\Controllers\CenterSecurityController;
@@ -210,6 +211,9 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::post('groups/{groupId}/sessions/preview', [CenterStudySessionController::class, 'preview']);
         Route::post('groups/{groupId}/requirements/preview', [CenterGroupRequirementController::class, 'preview']);
         Route::post('groups/{groupId}/requirements', [CenterGroupRequirementController::class, 'store']);
+        Route::get('groups/{groupId}/requirement-equivalences/options', [CenterGroupRequirementEquivalenceController::class, 'options']);
+        Route::post('groups/{groupId}/requirement-equivalences', [CenterGroupRequirementEquivalenceController::class, 'approve']);
+        Route::post('groups/{groupId}/requirement-equivalences/{approvalId}/revoke', [CenterGroupRequirementEquivalenceController::class, 'revoke']);
         Route::post('groups/{groupId}/sessions', [CenterStudySessionController::class, 'store']);
         Route::patch('groups/{groupId}/sessions/{sessionId}/postpone', [CenterStudySessionController::class, 'postpone']);
         Route::get('groups/{groupId}/sessions/{sessionId}/cancel-preview', [CenterStudySessionController::class, 'cancelPreview']);

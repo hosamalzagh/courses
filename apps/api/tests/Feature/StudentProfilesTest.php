@@ -247,7 +247,7 @@ class StudentProfilesTest extends TestCase
             $completionMigration = glob(database_path('migrations/tenant/*_create_study_completion_decisions.php'))[0];
             (require $completionMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($completionMigration, PATHINFO_FILENAME))->delete();
-            foreach (['*_create_study_makeup_bookings.php', '*_create_group_requirement_impacts.php', '*_create_group_requirements.php'] as $pattern) {
+            foreach (['*_create_study_makeup_bookings.php', '*_create_group_requirement_equivalences.php', '*_create_group_requirement_impacts.php', '*_create_group_requirements.php'] as $pattern) {
                 foreach (glob(database_path('migrations/tenant/'.$pattern)) as $migration) {
                     (require $migration)->down();
                     DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();

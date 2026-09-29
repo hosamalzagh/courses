@@ -81,6 +81,8 @@ const eventNames: Record<string, string> = {
   "study_session.cancelled": "إلغاء موعد محاضرة قبل انعقادها",
   "study_session.replacement_scheduled": "جدولة بديل لموعد ملغى",
   "study_group.requirements_changed": "اعتماد تغيير عدد محاضرات المجموعة",
+  "study_group.requirement_equivalence_approved": "اعتماد تكافؤ محاضرتين مضافتين",
+  "study_group.requirement_equivalence_revoked": "سحب تكافؤ محاضرتين مضافتين",
   "study_attendance.recorded": "تسجيل حضور طالب",
   "study_attendance.undone": "التراجع عن حضور طالب",
   "study_attendance.closed": "إغلاق كشف حضور محاضرة",

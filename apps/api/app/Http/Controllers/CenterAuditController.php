@@ -27,7 +27,8 @@ class CenterAuditController extends Controller
         'student.study_waitlisted', 'student.study_reattached', 'student.study_transferred', 'student.study_bulk_waitlist_skipped',
         'student.study_attempt_note_created', 'student.study_attempt_note_updated'];
 
-    public const ACADEMIC_EVENTS = ['study_attempts.completion_threshold_applied'];
+    public const ACADEMIC_EVENTS = ['study_attempts.completion_threshold_applied',
+        'study_group.requirement_equivalence_approved', 'study_group.requirement_equivalence_revoked'];
 
     public function index(Request $request): JsonResponse
     {

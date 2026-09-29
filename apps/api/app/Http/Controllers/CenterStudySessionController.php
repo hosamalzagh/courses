@@ -476,7 +476,7 @@ class CenterStudySessionController extends Controller
             ->where('groups.id', $groupId)
             ->select(['groups.id', 'groups.name', 'groups.status', 'groups.revision', 'groups.plan_version_id',
                 'courses.branch_id', 'levels.name as level_name'])
-            ->selectRaw("COALESCE((SELECT json_agg(json_build_object('number', number, 'title', title, 'content', content) ORDER BY number) FROM (SELECT number, title, content FROM study_group_requirements WHERE group_id = groups.id AND retired_at IS NULL ORDER BY number LIMIT 200) AS plan), '[]'::json) AS requirements");
+            ->selectRaw("COALESCE((SELECT json_agg(json_build_object('id', id, 'plan_lecture_id', plan_lecture_id, 'number', number, 'title', title, 'content', content) ORDER BY number) FROM (SELECT id, plan_lecture_id, number, title, content FROM study_group_requirements WHERE group_id = groups.id AND retired_at IS NULL ORDER BY number LIMIT 200) AS plan), '[]'::json) AS requirements");
         $query->selectRaw("COALESCE((SELECT json_agg(lecture_number ORDER BY lecture_number) FROM (SELECT DISTINCT lectures.number AS lecture_number FROM study_sessions AS sessions JOIN study_group_requirements AS lectures ON lectures.id = sessions.group_requirement_id WHERE sessions.group_id = groups.id AND lectures.retired_at IS NULL AND (sessions.status <> 'cancelled' OR sessions.cancelled_at IS NOT NULL) ORDER BY lecture_number LIMIT 200) AS scheduled), '[]'::json) AS scheduled_requirements");
         $query->selectRaw('(SELECT count(*) FROM study_group_requirements WHERE group_id = groups.id AND retired_at IS NULL) AS required_count');
         if ($lock) {

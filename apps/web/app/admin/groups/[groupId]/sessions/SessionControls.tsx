@@ -15,6 +15,7 @@ import { centerRequest, newSubmissionId, responseFieldErrors, responseMessage } 
 import type { SessionContext, StudySession } from "@/lib/groups";
 import { formatSessionTime, parseSessionTime } from "@/lib/session-time";
 import { GroupRequirementEditor } from "./GroupRequirementEditor";
+import { GroupRequirementEquivalenceEditor } from "./GroupRequirementEquivalenceEditor";
 
 type Draft = { kind: "single" | "weekly"; start_at: string; count: string; interval_weeks: string; plan_lecture_number: string; title: string };
 type Preview = { group_revision: number; sessions: { number: number; plan_lecture_number: number; title: string | null; local_at: string }[] };
@@ -47,6 +48,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
   const [replacementPreview, setReplacementPreview] = useState<ReplacementPreview | null>(null);
   const [replacementId, setReplacementId] = useState(newSubmissionId);
   const [requirementEditor, setRequirementEditor] = useState<{ kind: "add" } | { kind: "reduce"; session: StudySession } | null>(null);
+  const [equivalenceEditor, setEquivalenceEditor] = useState(false);
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState("");
@@ -63,7 +65,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
     setCancelPreview(null); setReplacementPreview(null);
     setConflict(false);
   }
-  const dirty = Boolean(preview || JSON.stringify(draft) !== JSON.stringify(initialDraft) || selected || postponeAt || reason || cancelTarget || replacementTarget || requirementEditor);
+  const dirty = Boolean(preview || JSON.stringify(draft) !== JSON.stringify(initialDraft) || selected || postponeAt || reason || cancelTarget || replacementTarget || requirementEditor || equivalenceEditor);
   const prefix = `groups/${group.id}/sessions`;
   const available = group.requirements.filter(requirement => !group.scheduled_requirements.includes(requirement.number));
 
@@ -251,7 +253,11 @@ export function SessionControls({ context }: { context: SessionContext }) {
   }
 
   return <>
-    <CenterPageActions context={context} actions={<>{group.can_manage && group.status !== "completed" ? <Button id="add-group-requirement" disabled={busy || Boolean(selected || cancelTarget || replacementTarget || requirementEditor)} onClick={() => { setRequirementEditor({ kind: "add" }); setError(""); }}>محاضرة إضافية</Button> : null}<Link href={`/admin/groups/${group.id}/coverage`}>تقرير تغطية المحتوى وأهلية الإتمام</Link><Link href="/admin/groups">العودة للمجموعات</Link></>} />
+    <CenterPageActions context={context} actions={<>
+      {group.can_manage && group.status !== "completed" ? <Button id="add-group-requirement" disabled={busy || Boolean(selected || cancelTarget || replacementTarget || requirementEditor || equivalenceEditor)} onClick={() => { setRequirementEditor({ kind: "add" }); setError(""); }}>محاضرة إضافية</Button> : null}
+      {group.can_manage && group.requirements.some(item => item.plan_lecture_id === null) ? <Button id="group-requirement-equivalence" disabled={busy || Boolean(selected || cancelTarget || replacementTarget || requirementEditor || equivalenceEditor)} onClick={() => { setEquivalenceEditor(true); setError(""); }}>تكافؤ المحاضرات المضافة</Button> : null}
+      <Link href={`/admin/groups/${group.id}/coverage`}>تقرير تغطية المحتوى وأهلية الإتمام</Link><Link href="/admin/groups">العودة للمجموعات</Link>
+    </>} />
     <UnsavedChangesGuard dirty={dirty} guardHistory />
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
@@ -259,7 +265,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
     <section className="context-card form-stack" aria-labelledby={`${formId}-heading`}>
       <h2 id={`${formId}-heading`} tabIndex={-1}>{group.name} · {group.level_name}</h2>
       <p>المحاضرات المعتمدة: {group.required_count.toLocaleString("ar-EG")} · غير المجدولة: {available.length.toLocaleString("ar-EG")}.</p>
-      {group.can_manage && group.status !== "completed" && available.length ? <form id={`${formId}-schedule`} noValidate className="form-stack" onSubmit={event => { event.preventDefault(); if (preview) void confirm(); else void review(); }}>
+      {group.can_manage && group.status !== "completed" && available.length && !equivalenceEditor ? <form id={`${formId}-schedule`} noValidate className="form-stack" onSubmit={event => { event.preventDefault(); if (preview) void confirm(); else void review(); }}>
         <h3>إضافة مواعيد</h3>
         <Field>
           <FieldLabel htmlFor={`${formId}-kind`}>طريقة الإضافة</FieldLabel>
@@ -301,6 +307,8 @@ export function SessionControls({ context }: { context: SessionContext }) {
     </form> : null}
     {requirementEditor ? <GroupRequirementEditor key={requirementEditor.kind === "add" ? "add" : requirementEditor.session.id} group={group} mode={requirementEditor}
       onSaved={requirementSaved} onReload={reload} onClose={() => { const id = requirementEditor.kind === "reduce" ? `reduce-${requirementEditor.session.id}` : "add-group-requirement"; setRequirementEditor(null); requestAnimationFrame(() => document.getElementById(id)?.focus()); }} /> : null}
+    {equivalenceEditor ? <GroupRequirementEquivalenceEditor group={group}
+      onClose={() => { setEquivalenceEditor(false); requestAnimationFrame(() => document.getElementById("group-requirement-equivalence")?.focus()); }} /> : null}
     {cancelTarget ? <form id={`${formId}-cancel-form`} noValidate className="context-card form-stack" aria-label={`إلغاء الموعد ${cancelTarget.number}`} onSubmit={event => { event.preventDefault(); if (cancelPreview) void confirmCancellation(); else void reviewCancellation(); }}>
       <h2>إلغاء الموعد {cancelTarget.number.toLocaleString("ar-EG")} قبل انعقاده</h2>
       <p>المحاضرة المعتمدة {cancelTarget.plan_lecture_number.toLocaleString("ar-EG")} · الوقت الأصلي {formatSessionTime(cancelTarget.scheduled_at)}.</p>
@@ -342,10 +350,10 @@ export function SessionControls({ context }: { context: SessionContext }) {
           {item.status !== "cancelled" ? <Link href={`/admin/groups/${group.id}/sessions/${item.id}/attendance`}>كشف الحضور</Link> : null}
           <Link href={`/admin/groups/${group.id}/sessions/${item.id}/teaching`}>التدريس الفعلي</Link>
           {group.can_manage && group.status !== "completed" && item.status === "planned" && parseSessionTime(item.scheduled_at).getTime() > Date.now()
-            ? <Button id={`postpone-${item.id}`} disabled={busy || Boolean(cancelTarget || replacementTarget || selected || requirementEditor)} onClick={() => { setSelected(item); setPostponeAt(""); setReason(""); setPostponeId(newSubmissionId()); setError(""); }}>تأجيل</Button> : null}
-          {group.can_manage && group.status !== "completed" && item.status === "planned" ? <Button id={`cancel-${item.id}`} disabled={busy || Boolean(cancelTarget || replacementTarget || selected || requirementEditor)} onClick={() => { setCancelTarget(item); setCancelReason(""); setCancelDecision("academic"); setCancelPreview(null); setCancelId(newSubmissionId()); setError(""); }}>إلغاء الموعد</Button> : null}
-          {group.can_manage && group.status !== "completed" && item.status === "cancelled" && ((Boolean(item.cancelled_at) && item.compensation_decision === "academic") || (Boolean(item.revoked_at) && Boolean(item.replaces_session_id))) && !item.replacement_id ? <Button id={`replacement-${item.id}`} disabled={busy || Boolean(cancelTarget || replacementTarget || selected || requirementEditor)} onClick={() => { setReplacementTarget(item); setReplacementAt(""); setReplacementTitle(""); setReplacementPreview(null); setReplacementId(newSubmissionId()); setError(""); }}>جدولة البديل</Button> : null}
-          {group.can_manage && group.status !== "completed" && group.required_count > 1 && group.requirements.some(requirement => requirement.number === item.plan_lecture_number) && !item.replacement_id && (item.status === "planned" || (item.status === "cancelled" && Boolean(item.cancelled_at) && (item.compensation_decision === "academic" || item.compensation_decision === "financial" || item.compensation_decision === "none"))) ? <Button id={`reduce-${item.id}`} disabled={busy || Boolean(cancelTarget || replacementTarget || selected || requirementEditor)} onClick={() => { setRequirementEditor({ kind: "reduce", session: item }); setError(""); }}>إلغاء نهائي وخفض العدد</Button> : null}
+            ? <Button id={`postpone-${item.id}`} disabled={busy || Boolean(cancelTarget || replacementTarget || selected || requirementEditor || equivalenceEditor)} onClick={() => { setSelected(item); setPostponeAt(""); setReason(""); setPostponeId(newSubmissionId()); setError(""); }}>تأجيل</Button> : null}
+          {group.can_manage && group.status !== "completed" && item.status === "planned" ? <Button id={`cancel-${item.id}`} disabled={busy || Boolean(cancelTarget || replacementTarget || selected || requirementEditor || equivalenceEditor)} onClick={() => { setCancelTarget(item); setCancelReason(""); setCancelDecision("academic"); setCancelPreview(null); setCancelId(newSubmissionId()); setError(""); }}>إلغاء الموعد</Button> : null}
+          {group.can_manage && group.status !== "completed" && item.status === "cancelled" && ((Boolean(item.cancelled_at) && item.compensation_decision === "academic") || (Boolean(item.revoked_at) && Boolean(item.replaces_session_id))) && !item.replacement_id ? <Button id={`replacement-${item.id}`} disabled={busy || Boolean(cancelTarget || replacementTarget || selected || requirementEditor || equivalenceEditor)} onClick={() => { setReplacementTarget(item); setReplacementAt(""); setReplacementTitle(""); setReplacementPreview(null); setReplacementId(newSubmissionId()); setError(""); }}>جدولة البديل</Button> : null}
+          {group.can_manage && group.status !== "completed" && group.required_count > 1 && group.requirements.some(requirement => requirement.number === item.plan_lecture_number) && !item.replacement_id && (item.status === "planned" || (item.status === "cancelled" && Boolean(item.cancelled_at) && (item.compensation_decision === "academic" || item.compensation_decision === "financial" || item.compensation_decision === "none"))) ? <Button id={`reduce-${item.id}`} disabled={busy || Boolean(cancelTarget || replacementTarget || selected || requirementEditor || equivalenceEditor)} onClick={() => { setRequirementEditor({ kind: "reduce", session: item }); setError(""); }}>إلغاء نهائي وخفض العدد</Button> : null}
         </span> },
       ]}
       serverPagination={{ page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 20,

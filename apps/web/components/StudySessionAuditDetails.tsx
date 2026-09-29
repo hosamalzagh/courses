@@ -6,12 +6,19 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
   const attendance = entry.event.startsWith("study_attendance.");
   const teaching = entry.event === "study_session.teaching_recorded" || entry.event === "study_session.teaching_corrected";
   const makeup = entry.event.startsWith("study_makeup.");
-  if (!attendance && !teaching && !makeup && !["study_sessions.scheduled", "study_session.postponed", "study_session.revoked", "study_session.cancelled", "study_session.replacement_scheduled", "study_group.requirements_changed"].includes(entry.event)) return null;
+  if (!attendance && !teaching && !makeup && !["study_sessions.scheduled", "study_session.postponed", "study_session.revoked", "study_session.cancelled", "study_session.replacement_scheduled", "study_group.requirements_changed", "study_group.requirement_equivalence_approved", "study_group.requirement_equivalence_revoked"].includes(entry.event)) return null;
   let details = entry.details;
   if (typeof details === "string") { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;
   const data = details as Record<string, unknown>;
   const date = (value: unknown) => typeof value === "string" ? formatSessionTime(value) : "غير مسجل";
+  if (entry.event.startsWith("study_group.requirement_equivalence_")) return <details>
+    <summary>تفاصيل تكافؤ المحاضرات المضافة</summary>
+    <p>{entry.event.endsWith("_revoked") ? "سُحب الاعتماد" : "اعتُمد التكافؤ"} · السبب: {typeof data.reason === "string" ? data.reason : "غير مسجل"}.</p>
+    {typeof data.required_group_id === "string" ? <p><Link href={`/admin/groups/${encodeURIComponent(data.required_group_id)}/sessions`}>فتح مجموعة المتطلب المطلوب</Link></p> : null}
+    {typeof data.candidate_group_id === "string" ? <p><Link href={`/admin/groups/${encodeURIComponent(data.candidate_group_id)}/sessions`}>فتح مجموعة المحاضرة المقابلة</Link></p> : null}
+    {typeof data.required_requirement_id === "string" && typeof data.candidate_requirement_id === "string" ? <p>الربط: <bdi dir="ltr">{data.candidate_requirement_id}</bdi> ← <bdi dir="ltr">{data.required_requirement_id}</bdi>.</p> : null}
+  </details>;
   if (teaching) {
     const groupId = typeof data.group_id === "string" ? data.group_id : "";
     const sessionId = typeof data.session_id === "string" ? data.session_id : "";

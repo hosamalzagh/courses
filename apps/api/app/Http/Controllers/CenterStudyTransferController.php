@@ -6,8 +6,8 @@ use App\Support\ActiveStudentAllocations;
 use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
-use App\Support\EffectiveStudyFees;
 use App\Support\EffectiveStudentPayments;
+use App\Support\EffectiveStudyFees;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
 use App\Support\StudyCoverageCredits;
@@ -235,7 +235,13 @@ COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     WHERE approvals.target_plan_version_id = groups.plan_version_id
       OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
           WHERE transfers.attempt_id = attempts.id
-            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json) AS approvals
+            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
+COALESCE((SELECT json_agg(json_build_object('id', mappings.id,
+    'source_plan_version_id', NULL, 'target_plan_version_id', NULL,
+    'source_lecture_ids', json_build_array(mappings.candidate_requirement_id),
+    'target_lecture_ids', json_build_array(mappings.required_requirement_id)) ORDER BY mappings.id)
+    FROM study_group_requirement_equivalences AS mappings
+    WHERE mappings.required_group_id = groups.id AND mappings.revoked_at IS NULL), '[]'::json)::jsonb AS approvals
 SQL)
             ->selectRaw(<<<'SQL'
 EXISTS (SELECT 1 FROM study_attendance_entries AS entries

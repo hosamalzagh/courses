@@ -243,6 +243,8 @@ class StudySessionsTest extends TestCase
             ->assertConflict();
         $saved = $this->postJson("{$path}/requirements", $confirmation)->assertCreated()
             ->assertJsonPath('requirement.number', 11)->assertJsonPath('group_revision', 4)->json();
+        $this->getJson("{$this->base}/students/{$student['id']}/enrollments")->assertOk()
+            ->assertJsonPath('attempts.0.requirements_count', 11);
         $this->center->run(function () use ($confirmation): void {
             $history = DB::table('study_group_requirement_impacts')
                 ->where('request_id', $confirmation['request_id'])->firstOrFail();
@@ -351,6 +353,8 @@ class StudySessionsTest extends TestCase
             ->assertJsonCount(1, 'group.requirements');
         $this->getJson("{$path}/sessions")->assertOk()->assertJsonPath('group.required_count', 1)
             ->assertJsonPath('sessions.0.cancellation_reason', $change['reason']);
+        $this->getJson("{$this->base}/students/{$student['id']}/enrollments")->assertOk()
+            ->assertJsonPath('attempts.0.requirements_count', 1);
         $makeupPath = "{$this->base}/students/{$student['id']}/enrollments/{$attempt['id']}/makeup/book";
         $this->postJson($makeupPath, ['session_id' => $makeupSession['id'],
             'attempt_revision' => $attempt['revision'], 'session_revision' => $makeupSession['revision'],
@@ -367,6 +371,100 @@ class StudySessionsTest extends TestCase
         $this->center->run(fn () => DB::table('study_groups')->where('id', $group['id'])->update(['status' => 'completed']));
         $this->postJson("{$path}/requirements", $confirmation)->assertOk()
             ->assertJsonPath('after.required_count', 1);
+    }
+
+    public function test_added_requirement_makeup_needs_explicit_group_approval_and_loses_credit_after_revocation(): void
+    {
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $requiredGroup = $this->group($this->north, 'Required added content', 1);
+        $instructorId = $this->center->run(fn () => DB::table('study_group_instructors')
+            ->where('group_id', $requiredGroup['id'])->value('instructor_id'));
+        $candidateGroup = $this->postJson("{$this->base}/groups", [
+            'level_id' => $requiredGroup['level_id'], 'plan_version_id' => $requiredGroup['plan_version_id'],
+            'name' => 'Candidate added content', 'approved_price' => '100.00',
+            'instructor_ids' => [$instructorId], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $add = function (array $group, string $content): array {
+            $path = "{$this->base}/groups/{$group['id']}/requirements";
+            $change = ['kind' => 'add', 'content' => $content,
+                'reason' => 'اعتماد محاضرة إضافية كاملة'];
+            $preview = $this->postJson("{$path}/preview", $change)->assertOk()->json();
+
+            return $this->postJson($path, [...$change, 'group_revision' => $preview['group_revision'],
+                'preview_token' => $preview['preview_token'], 'request_id' => (string) Str::uuid(),
+            ])->assertCreated()->json();
+        };
+        $required = $add($requiredGroup, 'محتوى مضاف يحتاج تعويضًا');
+        $candidate = $add($candidateGroup, 'محتوى مضاف معتمد كتعويض');
+        $student = $this->student();
+        $this->enroll($student['id'], [...$requiredGroup,
+            'revision' => $required['group_revision']], now('Africa/Cairo')->toDateString());
+        $attempt = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")
+            ->assertOk()->json('attempts.0');
+        $scheduled = $this->postJson("{$this->base}/groups/{$candidateGroup['id']}/sessions", [
+            'kind' => 'single', 'revision' => $candidate['group_revision'],
+            'start_at' => now('Africa/Cairo')->addDays(3)->setTime(16, 0)->format('Y-m-d\\TH:i'),
+            'plan_lecture_number' => 2, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json();
+        $session = $scheduled['sessions'][0];
+        $makeupPath = "{$this->base}/students/{$student['id']}/enrollments/{$attempt['id']}/makeup";
+        $booking = ['session_id' => $session['id'], 'attempt_revision' => $attempt['revision'],
+            'session_revision' => $session['revision'], 'request_id' => (string) Str::uuid()];
+        $this->postJson("{$makeupPath}/book", $booking)->assertUnprocessable();
+        $equivalencesPath = "{$this->base}/groups/{$requiredGroup['id']}/requirement-equivalences";
+        $this->getJson("{$equivalencesPath}/options?required_requirement_id={$required['requirement']['id']}")
+            ->assertOk()->assertJsonPath('candidates.0.id', $candidate['requirement']['id']);
+        $this->getJson("{$equivalencesPath}/options?required_requirement_id=".Str::uuid())->assertNotFound();
+        $approve = ['required_requirement_id' => $required['requirement']['id'],
+            'candidate_requirement_id' => $candidate['requirement']['id'],
+            'required_group_revision' => $required['group_revision'],
+            'candidate_group_revision' => $scheduled['group_revision'],
+            'reason' => 'اعتماد أكاديمي صريح لتعويض المتطلب المضاف',
+            'request_id' => (string) Str::uuid()];
+        $this->grant([$this->north => ['branch_viewer']]);
+        $this->asUser($this->staff);
+        $this->getJson("{$equivalencesPath}/options?required_requirement_id={$required['requirement']['id']}")
+            ->assertForbidden();
+        $this->postJson($equivalencesPath, $approve)->assertForbidden();
+        $this->asUser($this->owner);
+        $this->postJson($equivalencesPath, [...$approve,
+            'candidate_group_revision' => $candidate['group_revision'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertConflict()->assertJsonPath('code', 'requirement_group_changed');
+        $this->center->run(fn () => DB::statement("ALTER TABLE center_audit_logs ADD CONSTRAINT requirement_equivalence_audit_failure CHECK (event <> 'study_group.requirement_equivalence_approved') NOT VALID"));
+        try {
+            $this->postJson($equivalencesPath, $approve)->assertServerError();
+        } finally {
+            $this->center->run(fn () => DB::statement('ALTER TABLE center_audit_logs DROP CONSTRAINT requirement_equivalence_audit_failure'));
+        }
+        $this->center->run(fn () => $this->assertSame(0,
+            DB::table('study_group_requirement_equivalences')->count()));
+        $approval = $this->postJson($equivalencesPath, $approve)->assertCreated()->json('approval');
+        $this->postJson($equivalencesPath, $approve)->assertOk()->assertJsonPath('approval.id', $approval['id']);
+        $this->postJson($equivalencesPath, [...$approve,
+            'reason' => 'سبب مختلف'])->assertConflict()->assertJsonPath('code', 'requirement_equivalence_request_changed');
+        $this->postJson("{$makeupPath}/book", $booking)->assertCreated();
+        $this->center->run(fn () => DB::table('study_sessions')->where('id', $session['id'])->update([
+            'status' => 'held', 'closed_at' => now(), 'closed_by' => $this->owner->id,
+            'revision' => DB::raw('revision + 1')]));
+        $this->postJson("{$makeupPath}/prove", [...$booking,
+            'session_revision' => $session['revision'] + 1,
+            'reason' => 'إثبات تعويض المحتوى المضاف بعد الإغلاق', 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $coveragePath = "{$this->base}/groups/{$requiredGroup['id']}/coverage";
+        $this->getJson($coveragePath)->assertOk()->assertJsonPath('students.0.covered_count', 1);
+        $revokePath = "{$equivalencesPath}/{$approval['id']}/revoke";
+        $revoke = ['revision' => $approval['revision'], 'reason' => 'سحب الاعتماد بعد المراجعة',
+            'request_id' => (string) Str::uuid()];
+        $this->postJson($revokePath, $revoke)->assertOk()->assertJsonPath('approval.revision', 2);
+        $this->postJson($revokePath, $revoke)->assertOk()->assertJsonPath('replayed', true);
+        $this->postJson($revokePath, [...$revoke, 'request_id' => (string) Str::uuid()])
+            ->assertConflict()->assertJsonPath('code', 'requirement_equivalence_revoked');
+        $this->getJson($coveragePath)->assertOk()->assertJsonPath('students.0.covered_count', 0);
+        $this->center->run(fn () => $this->assertSame('counted', DB::table('study_attendance_entries')
+            ->where('attempt_id', $attempt['id'])->where('session_id', $session['id'])->value('status')));
+        $this->assertStringContainsString('study_group.requirement_equivalence_revoked',
+            $this->getJson("{$this->base}/audit")->assertOk()->getContent());
     }
 
     public function test_final_reduction_rejects_a_booked_makeup_session_without_partial_changes(): void

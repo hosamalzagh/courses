@@ -6,8 +6,8 @@ use App\Support\ActiveStudentAllocations;
 use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
-use App\Support\EffectiveStudyFees;
 use App\Support\EffectiveStudentPayments;
+use App\Support\EffectiveStudyFees;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
@@ -363,7 +363,13 @@ class CenterStudyEnrollmentController extends Controller
                 'study_attempts.created_at', 'study_groups.name as group_name', 'levels.name as level_name',
                 'courses.id as course_id', 'courses.name as course_name',
                 'withdrawal.withdrawn_on', 'withdrawal.reason as withdrawal_reason', 'withdrawal.actor_name as withdrawal_actor_name'])
-            ->selectRaw('(SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id) AS requirements_count')
+            ->selectRaw(<<<'SQL'
+CASE WHEN study_attempts.current_group_id IS NULL
+    THEN (SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id)
+    ELSE (SELECT count(*) FROM study_group_requirements AS requirements
+        WHERE requirements.group_id = study_attempts.current_group_id AND requirements.retired_at IS NULL)
+END AS requirements_count
+SQL)
             ->selectRaw('CASE WHEN EXISTS (SELECT 1 FROM study_attempts AS repeated WHERE repeated.repeated_from_attempt_id = study_attempts.id) THEN 1 ELSE 0 END AS has_repeat')
             ->selectRaw('(SELECT row_to_json(waitlist) FROM (SELECT id, from_group_id, to_group_id, entered_on, left_on, reason, entered_by_name, left_by_name FROM study_attempt_waitlists WHERE attempt_id = study_attempts.id AND branch_id = study_attempts.branch_id ORDER BY entered_on DESC, created_at DESC LIMIT 1) AS waitlist) AS latest_waitlist')
             ->selectRaw(EffectiveStudyFees::amount('fees').' AS current_due')
