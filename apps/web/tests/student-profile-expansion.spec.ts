@@ -43,18 +43,19 @@ function cursor(): number {
   return readFileSync(queryLog!, "utf8").trim().split("\n").filter(Boolean).length;
 }
 
-function assertMeasuredPage(after: number, studentId: string) {
+function assertMeasuredPage(after: number, studentId: string, requireStudentRead = true) {
   const reads = readFileSync(queryLog!, "utf8").trim().split("\n").filter(Boolean).slice(after)
-    .map(row => JSON.parse(row) as { path: string; count: number | null })
+    .map(row => JSON.parse(row) as { path: string; count: number | null; ms: number | null })
     .filter(row => row.path.startsWith("/api/v1/center/"));
-  expect(reads.some(read => read.path.startsWith(`/api/v1/center/students/${studentId}`)),
+  if (requireStudentRead) expect(reads.some(read => read.path.startsWith(`/api/v1/center/students/${studentId}`)),
     "SSR must make a measured student read").toBe(true);
   for (const read of reads) {
     expect(Number.isInteger(read.count), `Missing SQL counter for ${read.path}`).toBe(true);
     expect(read.count!, `SQL count for ${read.path}`).toBeLessThanOrEqual(6);
+    expect(Number.isFinite(read.ms) && read.ms! >= 0, `Missing SQL duration for ${read.path}`).toBe(true);
   }
   expect(reads.reduce((total, read) => total + read.count!, 0), "Combined center SSR reads").toBeLessThanOrEqual(6);
-  return reads.map(read => ({ path: read.path, count: read.count! }));
+  return reads.map(read => ({ path: read.path, count: read.count!, ms: read.ms! }));
 }
 
 test("one authorized profile keeps study, attendance, suspension and finance together across measured tabs", async ({ page }) => {
@@ -69,7 +70,7 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
   const stage = await write(page, `courses/${course.body.course.id}/stages`, { name: "Stage", request_id: crypto.randomUUID() });
   expect(stage.status).toBe(201);
   const level = await write(page, `stages/${stage.body.stage.id}/levels`, { name: "Level", request_id: crypto.randomUUID(),
-    lectures: [{ number: 1, content: "Required", planned_hours: 1 }] });
+    lectures: [{ number: 1, content: "Required", planned_hours: 1 }, { number: 2, content: "Required next", planned_hours: 1 }] });
   expect(level.status).toBe(201);
   const instructor = await write(page, "instructors", { name: `Teacher ${unique}`, branch_ids: [branch], request_id: crypto.randomUUID() });
   expect(instructor.status).toBe(201);
@@ -101,14 +102,24 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
     start_at: scheduled, plan_lecture_number: 1, request_id: crypto.randomUUID() });
   expect(session.status).toBe(201);
   const sessionId = session.body.sessions[0].id as string;
-  expect((await write(page, `groups/${groupId}/start`, { revision: session.body.group_revision })).status).toBe(200);
-  for (const id of [centerId, groupId, sessionId]) expect(id).toMatch(/^[a-f0-9-]{36}$/);
+  const nextScheduled = new Date(Date.now() + 15 * 86_400_000).toLocaleString("sv-SE", { timeZone: "Africa/Cairo" }).slice(0, 16).replace(" ", "T");
+  const secondSession = await write(page, `groups/${groupId}/sessions`, { kind: "single", revision: session.body.group_revision,
+    start_at: nextScheduled, plan_lecture_number: 2, request_id: crypto.randomUUID() });
+  expect(secondSession.status).toBe(201);
+  const secondSessionId = secondSession.body.sessions[0].id as string;
+  expect((await write(page, `groups/${groupId}/start`, { revision: secondSession.body.group_revision })).status).toBe(200);
+  for (const id of [centerId, groupId, sessionId, secondSessionId]) expect(id).toMatch(/^[a-f0-9-]{36}$/);
   execFileSync("psql", ["-h", "127.0.0.1", "-p", databasePort!, "-U", "postgres", "-d", `courses_center_${centerId}`,
-    "-c", `UPDATE study_groups SET started_at = now() - interval '1 day' WHERE id = '${groupId}'; UPDATE study_sessions SET scheduled_at = now() - interval '1 hour' WHERE id = '${sessionId}'`], { stdio: "ignore" });
+    "-c", `UPDATE study_groups SET started_at = now() - interval '1 day' WHERE id = '${groupId}'; UPDATE study_sessions SET scheduled_at = now() - interval '2 hours' WHERE id = '${sessionId}'; UPDATE study_sessions SET scheduled_at = now() - interval '1 hour' WHERE id = '${secondSessionId}'`], { stdio: "ignore" });
   const attendanceRoute = `groups/${groupId}/sessions/${sessionId}/attendance`;
   const roster = await (await page.request.get(`${origin}/api/v1/center/${attendanceRoute}`)).json();
   expect((await write(page, attendanceRoute, { attempt_id: attempt.body.attempt.id, status: "counted",
     revision: roster.session.revision, request_id: crypto.randomUUID() })).status).toBe(201);
+  const secondAttendanceRoute = `groups/${groupId}/sessions/${secondSessionId}/attendance`;
+  const secondRoster = await (await page.request.get(`${origin}/api/v1/center/${secondAttendanceRoute}`)).json();
+  expect((await write(page, `groups/${groupId}/sessions/${secondSessionId}/close`, {
+    revision: secondRoster.session.revision, request_id: crypto.randomUUID(),
+  })).status).toBe(200);
   const account = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
   const payment = await write(page, `students/${studentId}/payments`, { branch_id: branch, method: "cash", received_on: "2026-09-28",
     amount: "30.00", version: account.account.version, request_id: crypto.randomUUID() });
@@ -127,13 +138,20 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
     { path: "/enrollments", text: `Group ${unique}` },
     { path: "/account", text: "30.00 EGP" },
   ];
-  const measurements: { route: string; state: string; reads: { path: string; count: number }[] }[] = [];
+  const measurements: { route: string; state: string; reads: { path: string; count: number; ms: number }[] }[] = [];
   for (const { path, text } of paths) {
     const url = `${origin}/admin/students/${studentId}${path}`;
     for (const state of ["cold", "warm"]) {
       const before = cursor();
       await page.goto(url, { waitUntil: "networkidle" });
       await expect(page.getByText(text, { exact: false }).first(), `${state} ${path}`).toBeVisible();
+      if (!path) {
+        const summary = page.getByRole("region", { name: "ملخص الطالب" });
+        await expect(summary.getByRole("heading", { name: "الدراسة الحالية" })).toBeVisible();
+        await expect(summary.getByText(`Group ${unique}`, { exact: false })).toBeVisible();
+        await expect(summary.getByText("مديونية في الفروع المالية المصرح بها: 100.00 EGP", { exact: false })).toBeVisible();
+        await expect(summary.getByText("غيابات مسجلة في المجموعات الحالية: ١", { exact: false })).toBeVisible();
+      }
       measurements.push({ route: path || "profile", state, reads: assertMeasuredPage(before, studentId) });
     }
   }
@@ -150,12 +168,14 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
     if (request.resourceType() === "document") documentRequests++;
   };
   page.on("request", countDocuments);
-  for (const [label, expected] of [["الدراسة", `Group ${unique}`], ["الحضور والغياب", "حضور محتسب"], ["الحساب المالي", "30.00 EGP"]] as const) {
+  for (const [label, expected, path] of [["الدراسة", `Group ${unique}`, "?tab=study"],
+    ["الحضور والغياب", "حضور محتسب", "?tab=attendance"], ["الحساب المالي", "30.00 EGP", "/account"]] as const) {
     const before = cursor();
     await page.getByRole("navigation", { name: "أقسام ملف الطالب" }).getByRole("link", { name: label, exact: true }).click();
+    await expect(page).toHaveURL(`${origin}/admin/students/${studentId}${path}`);
     await expect(page.getByText(expected, { exact: false }).first()).toBeVisible();
     await page.waitForLoadState("networkidle");
-    measurements.push({ route: `client:${label}`, state: "navigation", reads: assertMeasuredPage(before, studentId) });
+    measurements.push({ route: `client:${label}`, state: "navigation", reads: assertMeasuredPage(before, studentId, false) });
   }
   page.off("request", countDocuments);
   expect(documentRequests, "Client navigation keeps the page shell").toBe(0);
@@ -171,6 +191,8 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
   await page.goto(`${origin}/admin/students/${studentId}?tab=attendance`, { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { name: "حالة ملف الطالب: موقوف" })).toBeVisible();
   await expect(page.getByText("حضور محتسب", { exact: false }).first()).toBeVisible();
+  await expect(page.getByText("غياب مسجل", { exact: false }).first()).toBeVisible();
+  await expect(page.getByRole("region", { name: "ملخص الطالب" }).getByText("مديونية في الفروع المالية المصرح بها: 100.00 EGP", { exact: false })).toBeVisible();
   measurements.push({ route: "suspended:attendance", state: "cold", reads: assertMeasuredPage(before, studentId) });
   before = cursor();
   await page.goto(`${origin}/admin/students/${studentId}/account`, { waitUntil: "networkidle" });
@@ -183,6 +205,7 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
   await page.goto(`${origin}/admin/students/${studentId}`, { waitUntil: "networkidle" });
   await expect(page.getByText(`السبب: قبول إيقاف ${unique}`, { exact: true })).toBeVisible();
   await expect(page.getByText(`السبب: قبول فك ${unique}`, { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "ملخص الطالب" }).getByText(`Group ${unique}`, { exact: false })).toBeVisible();
   measurements.push({ route: "active:history", state: "cold", reads: assertMeasuredPage(before, studentId) });
   console.log(`Profile expansion SSR: ${JSON.stringify(measurements)}`);
 });
