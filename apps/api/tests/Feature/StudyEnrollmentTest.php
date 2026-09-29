@@ -387,7 +387,7 @@ class StudyEnrollmentTest extends TestCase
         $this->assertLessThanOrEqual(6, (int) $response->headers->get('X-Courses-Query-Count'));
     }
 
-    public function test_waitlist_period_migration_links_unambiguous_existing_history(): void
+    public function test_waitlist_period_migration_links_repeated_same_day_history_when_timestamps_disambiguate(): void
     {
         $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
         $group = $this->group($this->north, '0.00');
@@ -405,15 +405,50 @@ class StudyEnrollmentTest extends TestCase
             'entered_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'انتظار قديم',
             'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
         ])->assertCreated();
+        $waiting = $this->getJson($url)->assertOk()->json('attempts.0');
+        $this->postJson("{$url}/{$attempt['id']}/reattach", [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'joined_on' => now('Africa/Cairo')->toDateString(), 'revision' => $waiting['revision'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $reattached = $this->getJson($url)->assertOk()->json('attempts.0');
+        $this->postJson("{$url}/{$attempt['id']}/waitlist", [
+            'entered_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'انتظار أحدث',
+            'revision' => $reattached['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
 
         $this->center->run(function () use ($attempt): void {
             $migration = require database_path('migrations/tenant/2026_09_29_090000_link_waitlists_to_group_periods.php');
-            $periodId = DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])->value('id');
+            $origins = DB::table('study_attempt_waitlists')->where('attempt_id', $attempt['id'])
+                ->pluck('origin_period_id', 'reason')->all();
+            $firstTime = now()->subMinutes(3);
+            $secondTime = now()->subMinute();
+            foreach (['انتظار قديم' => $firstTime, 'انتظار أحدث' => $secondTime] as $reason => $time) {
+                DB::table('study_attempt_group_periods')->where('id', $origins[$reason])
+                    ->update(['created_at' => $time]);
+                DB::table('study_attempt_waitlists')->where('attempt_id', $attempt['id'])
+                    ->where('reason', $reason)->update(['created_at' => $time->copy()->addSecond()]);
+            }
             $migration->down();
             $migration->up();
-            $this->assertSame($periodId, DB::table('study_attempt_waitlists')
-                ->where('attempt_id', $attempt['id'])->value('origin_period_id'));
+            $this->assertSame($origins, DB::table('study_attempt_waitlists')->where('attempt_id', $attempt['id'])
+                ->pluck('origin_period_id', 'reason')->all());
+
+            $sameSecond = now()->subMinute()->startOfSecond();
+            DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])
+                ->update(['created_at' => $sameSecond]);
+            DB::table('study_attempt_waitlists')->where('attempt_id', $attempt['id'])
+                ->update(['created_at' => $sameSecond]);
+            $migration->down();
+            $migration->up();
+            $this->assertSame([null, null], DB::table('study_attempt_waitlists')
+                ->where('attempt_id', $attempt['id'])->pluck('origin_period_id')->all());
         });
+        $history = $this->getJson("{$this->base}/students/{$student['id']}?tab=study")->assertOk();
+        $active = collect($history->json('study.attempts'))->firstWhere('status', 'active');
+        $this->assertSame('انتظار أحدث', $active['latest_waitlist']['reason'] ?? null);
+        $this->assertTrue($active['latest_waitlist']['origin_uncertain'] ?? false);
+        $this->assertLessThanOrEqual(6, (int) $history->headers->get('X-Courses-Query-Count'));
     }
 
     public function test_enrollment_snapshots_price_plan_and_late_join_without_allocating_advance(): void

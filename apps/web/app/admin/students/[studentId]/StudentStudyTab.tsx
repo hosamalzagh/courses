@@ -54,6 +54,7 @@ export function StudentStudyTab({ context, search }: { context: StudentContext; 
         <p>بدأت المشاركة في المجموعة: {attempt.joined_on}.</p>
         {attempt.left_on ? <p>انتهت المشاركة في المجموعة: {attempt.left_on}.</p> : null}
         {attempt.latest_waitlist ? <p>{attempt.latest_waitlist.left_on ? "انتظار سابق" : "في الانتظار منذ"}: {attempt.latest_waitlist.entered_on}{attempt.latest_waitlist.left_on ? ` · انتهى ${attempt.latest_waitlist.left_on}` : ""}.</p> : null}
+        {attempt.latest_waitlist?.origin_uncertain ? <p className="muted">ارتباط سجل الانتظار القديم بفترة المجموعة تقريبي.</p> : null}
         {attempt.last_visible_transfer_on ? <p>آخر نقل ظاهر بين فروعك: {attempt.last_visible_transfer_on}.</p> : null}
         {attempt.withdrawn_on ? <p>تاريخ الانسحاب: {attempt.withdrawn_on}.</p> : null}
         {attempt.approved_at ? <p>قرار إتمام محفوظ: {new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium", timeZone: "Africa/Cairo" }).format(new Date(attempt.approved_at))}{attempt.exceptional ? " · استثنائي" : ""}.</p> : null}

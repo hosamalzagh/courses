@@ -15,8 +15,8 @@ return new class extends Migration
             $table->index('origin_period_id');
         });
 
-        // Historical rows are linked only when their group and date identify one
-        // period. Same-second repeat visits cannot be reconstructed reliably.
+        // Use the most recent preceding period when its timestamp identifies it.
+        // Same-second repeat visits cannot be reconstructed reliably.
         DB::statement(<<<'SQL'
             UPDATE study_attempt_waitlists AS waitlists
             SET origin_period_id = periods.id
@@ -31,6 +31,7 @@ return new class extends Migration
                         AND other.group_id = waitlists.from_group_id
                         AND other.left_on = waitlists.entered_on
                         AND other.created_at <= waitlists.created_at
+                        AND other.created_at >= periods.created_at
                         AND other.id <> periods.id
                 )
             SQL);

@@ -64,7 +64,7 @@ export type StudentSuspension = { id: string; suspended_by: number; suspended_by
 export type StudentStudyAttempt = { id: string; period_id: string; branch_id: number; branch_name: string; course_id: string; course_name: string; level_name: string;
   status: "active" | "withdrawn" | "completed" | "transferred"; joined_on: string; left_on: string | null; created_at: string;
   current_group_name: string | null; previous_group_name: string | null;
-  latest_waitlist: { entered_on: string; left_on: string | null; reason: string } | null;
+  latest_waitlist: { entered_on: string; left_on: string | null; reason: string; origin_uncertain: boolean } | null;
   last_visible_transfer_on: string | null; withdrawn_on: string | null; approved_at: string | null; exceptional: boolean | null };
 export type StudentContext = CenterContext & {custom_history?:StudentCustomHistory;attachments?:StudentAttachmentPage;enrollment_notes?:StudentEnrollmentNotePage;student_notes?:StudentEventNotePage;study?:{attempts:StudentStudyAttempt[];pagination:{page:number;has_more:boolean}};important_notes?:StudentEventNote[];custom_fields:StudentCustomFieldList; student_code_settings: {enabled:boolean;label:string;revision:number}; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type Instructor = { id: string; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
