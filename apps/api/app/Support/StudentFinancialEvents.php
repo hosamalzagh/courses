@@ -14,9 +14,15 @@ final class StudentFinancialEvents
         $db = DB::connection('tenant');
         $readable = self::readableBranches($permissions);
 
-        $fee = $db->table('study_fee_adjustments as event')->where('event.student_id', $studentId)
+        $fee = $db->table('study_fee_adjustments as event')
+            ->leftJoin('study_fee_adjustments as successor', 'successor.replaces_id', '=', 'event.id')
+            ->leftJoin('study_fee_adjustments as correction', function ($join): void {
+                $join->on('correction.submission_id', '=', 'event.submission_id')
+                    ->where('event.kind', 'reversal')->where('correction.kind', 'settlement');
+            })
+            ->where('event.student_id', $studentId)
             ->when($readable !== null, fn (Builder $query) => $query->whereIn('event.branch_id', $readable))
-            ->selectRaw("'fee_adjustment'::text AS event_type, event.id AS event_id, event.branch_id, event.branch_id AS related_branch_id, NULL::bigint AS second_related_branch_id, NULL::uuid AS payment_id, event.fee_id, event.before_due::text AS amount_before, event.after_due::text AS amount_after, event.reason, event.actor_name, event.created_at, event.reverses_id AS original_id, event.replaces_id AS replacement_id, NULL::jsonb AS related_branch_ids");
+            ->selectRaw("'fee_adjustment'::text AS event_type, event.id AS event_id, event.branch_id, event.branch_id AS related_branch_id, NULL::bigint AS second_related_branch_id, NULL::uuid AS payment_id, event.fee_id, event.before_due::text AS amount_before, event.after_due::text AS amount_after, event.reason, event.actor_name, event.created_at, COALESCE(event.reverses_id, event.replaces_id) AS original_id, COALESCE(successor.id, correction.id) AS replacement_id, NULL::jsonb AS related_branch_ids");
 
         $refund = $db->table('student_refunds as event')->where('event.student_id', $studentId)
             ->when($readable !== null, fn (Builder $query) => $query->whereIn('event.branch_id', $readable))

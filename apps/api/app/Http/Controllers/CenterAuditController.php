@@ -16,11 +16,17 @@ class CenterAuditController extends Controller
         'student.refund_recorded', 'student.refund_corrected',
         'student.fee_settled', 'student.fee_settlement_corrected',
         'student.payment_note_created', 'student.payment_note_updated',
-        'student.allocation_note_created', 'student.allocation_note_updated'];
+        'student.allocation_note_created', 'student.allocation_note_updated',
+        'student.allocation_correction_note_created', 'student.allocation_correction_note_updated',
+        'student.fee_adjustment_note_created', 'student.fee_adjustment_note_updated',
+        'student.refund_note_created', 'student.refund_note_updated',
+        'student.refund_correction_note_created', 'student.refund_correction_note_updated',
+        'student.payment_correction_note_created', 'student.payment_correction_note_updated'];
 
     public const ENROLLMENT_EVENTS = ['student.enrolled', 'student.study_repeated', 'student.study_withdrawn',
         'student.study_waitlisted', 'student.study_reattached', 'student.study_transferred', 'student.study_bulk_waitlist_skipped',
         'student.study_attempt_note_created', 'student.study_attempt_note_updated'];
+
     public const ACADEMIC_EVENTS = ['study_attempts.completion_threshold_applied'];
 
     public function index(Request $request): JsonResponse
@@ -70,6 +76,8 @@ class CenterAuditController extends Controller
             ->whereNotIn('event', ['student.payment_corrected', 'student.payment_allocated', 'student.payment_allocation_reversed',
                 'student.payment_allocation_corrected',
                 'student.allocation_note_created', 'student.allocation_note_updated',
+                'student.allocation_correction_note_created', 'student.allocation_correction_note_updated',
+                'student.payment_correction_note_created', 'student.payment_correction_note_updated',
                 'student.fee_settled', 'student.fee_settlement_corrected'])
             ->orWhereNull('details->related_branch_ids')
             ->orWhereRaw("(details->'related_branch_ids')::jsonb <@ ?::jsonb",

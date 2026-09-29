@@ -1174,6 +1174,9 @@ test("corrects a receipt and two allocations together, and rejects stale or hidd
     expect(await owner.locator("html").getAttribute("dir")).toBe("rtl");
     expect(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await owner.goto(`${origin}/admin/audit`);
+    await expect(owner.getByText("إضافة ملاحظة على تصحيح الدفعة")).toBeVisible();
+    await owner.getByText("تفاصيل ملاحظة الحركة المالية").first().click();
+    await expect(owner.getByText(financialEvent.event_id).first()).toBeVisible();
     await owner.getByText("تفاصيل تصحيح الدفعة وتخصيصاتها").first().click();
     await expect(owner.getByText("تصحيح المقبوض وتخصيصين").first()).toBeVisible();
 
@@ -1188,6 +1191,9 @@ test("corrects a receipt and two allocations together, and rejects stale or hidd
     expect(staffAccount.payments[0]).not.toHaveProperty("hidden_allocation_count");
     expect(staffAccount.events).toHaveLength(0);
     expect((await staff.request.get(`${origin}/api/v1/center/${eventNotePath}`)).status()).toBe(404);
+    const restrictedAudit = await (await staff.request.get(`${origin}/api/v1/center/branches/${north.id}/audit`)).text();
+    expect(restrictedAudit).not.toContain("student.payment_correction_note_created");
+    expect(restrictedAudit).not.toContain(financialEvent.event_id);
     await staff.goto(`${origin}/admin/students/${studentId}/account`);
     await expect(staff.getByRole("button", { name: "تصحيح الدفعة" })).toHaveCount(0);
     expect((await write(staff, `${paymentPath}/corrections/preview`, {

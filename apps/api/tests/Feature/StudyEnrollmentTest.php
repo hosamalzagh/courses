@@ -1966,6 +1966,17 @@ class StudyEnrollmentTest extends TestCase
         $replacement = $this->postJson($url, $correction)->assertCreated()->assertJsonCount(2, 'adjustments')
             ->assertJsonPath('preview.account_after.due_total', '1000.00')
             ->assertJsonPath('preview.account_after.debt', '200.00')->json('adjustments.1');
+        $reversalId = $this->center->run(fn () => DB::table('study_fee_adjustments')
+            ->where('reverses_id', $settlement['id'])->value('id'));
+        $this->getJson("{$accountUrl}?financial_event_type=fee_adjustment&financial_event_id={$settlement['id']}")
+            ->assertJsonPath('events.0.original_id', null)
+            ->assertJsonPath('events.0.replacement_id', $replacement['id']);
+        $this->getJson("{$accountUrl}?financial_event_type=fee_adjustment&financial_event_id={$reversalId}")
+            ->assertJsonPath('events.0.original_id', $settlement['id'])
+            ->assertJsonPath('events.0.replacement_id', $replacement['id']);
+        $this->getJson("{$accountUrl}?financial_event_type=fee_adjustment&financial_event_id={$replacement['id']}")
+            ->assertJsonPath('events.0.original_id', $settlement['id'])
+            ->assertJsonPath('events.0.replacement_id', null);
         $olderPage = $this->getJson("{$url}?history_page=2")->assertOk()->assertJsonCount(0, 'history')
             ->assertJsonPath('latest_active_adjustment_id', $replacement['id']);
         $this->assertLessThanOrEqual(6, (int) $olderPage->headers->get('X-Courses-Query-Count'));
@@ -2948,8 +2959,10 @@ class StudyEnrollmentTest extends TestCase
         $this->getJson($eventUrl)->assertNotFound();
         $this->getJson("{$this->base}/students/{$student['id']}?tab=notes")
             ->assertJsonCount(0, 'student_notes.entries');
-        $this->assertStringNotContainsString('student.payment_corrected',
-            $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent());
+        $audit = $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent();
+        $this->assertStringNotContainsString('student.payment_corrected', $audit);
+        $this->assertStringNotContainsString('student.payment_correction_note_created', $audit);
+        $this->assertStringNotContainsString($eventId, $audit);
     }
 
     private function group(int $branchId, string $price, int $lectureCount = 1): array
