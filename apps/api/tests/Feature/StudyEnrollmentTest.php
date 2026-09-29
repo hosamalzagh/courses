@@ -3289,12 +3289,20 @@ class StudyEnrollmentTest extends TestCase
             'instructor_ids' => array_column($source['instructors'], 'id'),
             'request_id' => (string) Str::uuid(),
         ])->assertCreated()->json('group');
+        $sourceRequirementsUrl = "{$this->base}/groups/{$source['id']}/requirements";
+        $sourceChange = ['kind' => 'add', 'content' => 'متطلب المصدر عند النقل',
+            'reason' => 'حفظ متطلب المصدر التاريخي'];
+        $sourcePreview = $this->postJson("{$sourceRequirementsUrl}/preview", $sourceChange)->assertOk()->json();
+        $sourceAdded = $this->postJson($sourceRequirementsUrl, [...$sourceChange,
+            'group_revision' => $sourcePreview['group_revision'], 'preview_token' => $sourcePreview['preview_token'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json();
         $student = $this->student([$this->north]);
         $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
         $url = "{$this->base}/students/{$student['id']}/enrollments";
         $workspace = $this->getJson($url)->assertOk()->json();
         $attempt = $this->postJson($url, [
-            'group_id' => $source['id'], 'group_revision' => $source['revision'],
+            'group_id' => $source['id'], 'group_revision' => $sourceAdded['group_revision'],
             'currency_revision' => $workspace['student']['currency_revision'],
             'joined_on' => '2026-09-28', 'discount' => '0.00', 'discount_reason' => null,
             'version' => $workspace['student']['version'], 'request_id' => (string) Str::uuid(),
@@ -3324,6 +3332,21 @@ class StudyEnrollmentTest extends TestCase
             ->assertConflict()->assertJsonPath('code', 'transfer_preview_changed');
         $this->postJson($transferUrl, [...$payload, 'preview_hash' => $after['hash']])
             ->assertCreated()->assertJsonPath('transfer.required_count', 2);
+        $this->center->run(function () use ($attempt, $sourceAdded): void {
+            $snapshot = json_decode(DB::table('study_attempt_group_periods')
+                ->where('attempt_id', $attempt['id'])->where('group_id', $sourceAdded['requirement']['group_id'])
+                ->value('required_credit_ids'), true);
+            $this->assertCount(2, $snapshot);
+            $this->assertContains($sourceAdded['requirement']['id'], $snapshot);
+        });
+        $laterPreview = $this->postJson("{$sourceRequirementsUrl}/preview", $sourceChange)->assertOk()->json();
+        $this->postJson($sourceRequirementsUrl, [...$sourceChange,
+            'group_revision' => $laterPreview['group_revision'], 'preview_token' => $laterPreview['preview_token'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->center->run(fn () => $this->assertCount(2, json_decode(DB::table('study_attempt_group_periods')
+            ->where('attempt_id', $attempt['id'])->where('group_id', $source['id'])
+            ->value('required_credit_ids'), true)));
     }
 
     private function group(int $branchId, string $price, int $lectureCount = 1): array

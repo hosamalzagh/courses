@@ -11,6 +11,7 @@ use App\Support\EffectiveStudyFees;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
 use App\Support\StudyCoverageCredits;
+use App\Support\StudyPeriodRequirements;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
@@ -124,8 +125,7 @@ class CenterStudyTransferController extends Controller
             $id = (string) Str::uuid();
             $now = now();
             if ($period !== null) {
-                DB::connection('tenant')->table('study_attempt_group_periods')->where('id', $period->id)
-                    ->update(['left_on' => $data['transferred_on']]);
+                StudyPeriodRequirements::close($period->id, $period->group_id, $data['transferred_on']);
             } else {
                 DB::connection('tenant')->table('study_attempt_waitlists')->where('id', $waitlist->id)->update([
                     'to_group_id' => $data['group_id'], 'left_on' => $data['transferred_on'],

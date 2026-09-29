@@ -529,13 +529,13 @@ class StudySessionsTest extends TestCase
             'session_revision' => $scheduled['revision'], 'request_id' => (string) Str::uuid()];
         $this->postJson("{$makeup}/book", $booking)->assertUnprocessable();
         $equivalencePath = "{$this->base}/groups/{$source['id']}/requirement-equivalences";
-        $this->postJson($equivalencePath, [
+        $approval = $this->postJson($equivalencePath, [
             'required_requirement_id' => $sourceAdded['requirement']['id'],
             'candidate_requirement_id' => $targetAdded['requirement']['id'],
             'required_group_revision' => $sourceAdded['group_revision'] + 1,
             'candidate_group_revision' => $targetAdded['group_revision'] + 1,
             'reason' => 'المحتوى البديل معتمد صراحة', 'request_id' => (string) Str::uuid(),
-        ])->assertCreated();
+        ])->assertCreated()->json('approval');
         $add($source, 'متطلب أضيف بعد خروج الطالب');
         $this->getJson($attemptPath)->assertOk()->assertJsonPath('attempts.0.requirements_count', 2);
         $this->postJson("{$makeup}/book", $booking)->assertCreated();
@@ -553,6 +553,25 @@ class StudySessionsTest extends TestCase
         ])->assertOk();
         $withdrawn = $this->getJson($attemptPath)->assertOk()
             ->assertJsonPath('attempts.0.requirements_count', 2)->json('attempts.0');
+        $this->postJson("{$equivalencePath}/{$approval['id']}/revoke", [
+            'revision' => $approval['revision'], 'reason' => 'إعادة مراجعة المعادلة التاريخية',
+            'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $reducePreview = $this->postJson("{$this->base}/groups/{$source['id']}/requirements/preview", $reduce)
+            ->assertOk()->assertJsonPath('affected_total', 0)->json();
+        $reduced = $this->postJson("{$this->base}/groups/{$source['id']}/requirements", [
+            ...$reduce, 'group_revision' => $reducePreview['group_revision'],
+            'preview_token' => $reducePreview['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk()->json();
+        $this->getJson("{$equivalencePath}/options?required_requirement_id={$sourceAdded['requirement']['id']}")
+            ->assertOk()->assertJsonPath('candidates.0.id', $targetAdded['requirement']['id']);
+        $this->postJson($equivalencePath, [
+            'required_requirement_id' => $sourceAdded['requirement']['id'],
+            'candidate_requirement_id' => $targetAdded['requirement']['id'],
+            'required_group_revision' => $reduced['group_revision'],
+            'candidate_group_revision' => $targetAdded['group_revision'] + 1,
+            'reason' => 'معادلة تاريخية بعد تقاعد المتطلب', 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
         $this->postJson("{$makeup}/prove", [
             'session_id' => $scheduled['id'], 'attempt_revision' => $withdrawn['revision'],
             'session_revision' => $scheduled['revision'] + 1,
@@ -601,6 +620,54 @@ class StudySessionsTest extends TestCase
             $this->assertSame('planned', DB::table('study_sessions')->where('id', $session['id'])->value('status'));
             $this->assertSame(1, DB::table('study_makeup_bookings')->where('session_id', $session['id'])->count());
         });
+    }
+
+    public function test_backdated_withdrawal_keeps_requirements_from_its_period_and_excludes_later_changes(): void
+    {
+        $baseline = now('Africa/Cairo')->subDays(6)->setTime(10, 0);
+        $this->travelTo($baseline);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $group = $this->group($this->north, 'Backdated period requirements', 2);
+        $student = $this->student();
+        $session = $this->postJson("{$this->base}/groups/{$group['id']}/sessions", [
+            'kind' => 'single', 'revision' => $group['revision'],
+            'start_at' => $baseline->copy()->addDays(12)->setTime(16, 0)->format('Y-m-d\\TH:i'),
+            'plan_lecture_number' => 2, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
+        $this->enroll($student['id'], [...$group, 'revision' => $group['revision'] + 1],
+            $baseline->toDateString());
+        $attemptPath = "{$this->base}/students/{$student['id']}/enrollments";
+        $attempt = $this->getJson($attemptPath)->assertOk()->json('attempts.0');
+        $initialIds = $this->center->run(fn () => DB::table('study_group_requirements')
+            ->where('group_id', $group['id'])->orderBy('number')->pluck('plan_lecture_id')->all());
+        $this->travelTo($baseline->copy()->addDays(3));
+        $requirementsPath = "{$this->base}/groups/{$group['id']}/requirements";
+        $reduce = ['kind' => 'reduce', 'session_id' => $session['id'], 'decision' => 'none',
+            'reason' => 'خفض المحاضرة بعد تاريخ الانسحاب الفعلي'];
+        $preview = $this->postJson("{$requirementsPath}/preview", $reduce)->assertOk()->json();
+        $this->postJson($requirementsPath, [...$reduce, 'group_revision' => $preview['group_revision'],
+            'preview_token' => $preview['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $add = ['kind' => 'add', 'content' => 'محتوى جاء بعد المغادرة الفعلية',
+            'reason' => 'إضافة بعد تاريخ الانسحاب الفعلي'];
+        $preview = $this->postJson("{$requirementsPath}/preview", $add)->assertOk()->json();
+        $this->postJson($requirementsPath, [...$add, 'group_revision' => $preview['group_revision'],
+            'preview_token' => $preview['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->travelTo($baseline->copy()->addDays(4));
+        $this->postJson("{$attemptPath}/{$attempt['id']}/withdraw", [
+            'withdrawn_on' => $baseline->copy()->addDays(2)->toDateString(),
+            'reason' => 'اعتماد تاريخ الانسحاب الصحيح', 'revision' => $attempt['revision'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->center->run(fn () => $this->assertSame($initialIds, json_decode(DB::table('study_attempt_group_periods')
+            ->where('attempt_id', $attempt['id'])->value('required_credit_ids'), true)));
+        $this->getJson($attemptPath)->assertOk()->assertJsonPath('attempts.0.requirements_count', 2);
+        $coverage = $this->getJson("{$this->base}/groups/{$group['id']}/coverage")
+            ->assertOk()->assertJsonPath('students.0.required_count', 2)
+            ->assertJsonPath('students.0.missing_numbers', [1, 2]);
+        $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
+        $this->postJson("{$requirementsPath}/preview", $add)->assertOk()->assertJsonPath('affected_total', 0);
     }
 
     public function test_final_reduction_rejects_a_session_with_recorded_teaching(): void
@@ -2153,6 +2220,10 @@ class StudySessionsTest extends TestCase
         ])->assertCreated();
         $this->getJson("{$this->base}/students/{$student['id']}/enrollments")
             ->assertOk()->assertJsonPath('attempts.0.requirements_count', 1);
+        $coverage = $this->getJson("{$this->base}/groups/{$source['id']}/coverage")
+            ->assertOk()->assertJsonPath('students.0.required_count', 1)
+            ->assertJsonPath('students.0.missing_numbers', [1]);
+        $this->assertLessThanOrEqual(6, (int) $coverage->headers->get('X-Courses-Query-Count'));
         $this->getJson($makeupPath)->assertOk()
             ->assertJsonPath('sessions.0.can_book', false)
             ->assertJsonPath('sessions.0.can_prove', true);

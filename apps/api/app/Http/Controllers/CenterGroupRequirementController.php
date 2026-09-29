@@ -295,6 +295,7 @@ class CenterGroupRequirementController extends Controller
         return DB::connection('tenant')->table('study_attempts as attempts')
             ->join('students', 'students.id', '=', 'attempts.student_id')
             ->where('attempts.current_group_id', $group->id)
+            ->where('attempts.status', 'active')
             ->where('attempts.plan_version_id', $group->plan_version_id)
             ->select(['attempts.id', 'attempts.completion_threshold', 'students.name', 'students.student_number'])
             ->selectRaw(<<<'SQL'

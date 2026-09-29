@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -41,6 +42,10 @@ class CenterGroupRequirementEquivalenceController extends Controller
             })
             ->where('groups.level_id', $group->level_id)->where('groups.id', '<>', $groupId)
             ->whereNull('candidates.plan_lecture_id')->whereNull('candidates.retired_at')
+            ->when($required->retired_at !== null, fn (Builder $query) => $query->whereExists(
+                $this->historicalMakeupSession($groupId, $required->id)
+                    ->whereColumn('sessions.group_requirement_id', 'candidates.id')
+                    ->whereColumn('sessions.group_id', 'candidates.group_id')->selectRaw('1')))
             ->when(! $permissions->isCenterManager(), fn ($query) => $query->whereIn('courses.branch_id', $branches))
             ->when($search !== '', fn ($query) => $query->where(function ($matches) use ($search): void {
                 $matches->where('groups.name', 'ilike', '%'.$search.'%')
@@ -107,10 +112,16 @@ class CenterGroupRequirementEquivalenceController extends Controller
             }
             $requirements = $db->table('study_group_requirements')
                 ->whereIn('id', [$data['required_requirement_id'], $data['candidate_requirement_id']])
-                ->whereNull('plan_lecture_id')->whereNull('retired_at')->get(['id', 'group_id'])->keyBy('id');
+                ->whereNull('plan_lecture_id')->get(['id', 'group_id', 'retired_at'])->keyBy('id');
             abort_unless($requirements->count() === 2
                 && $requirements[$data['required_requirement_id']]->group_id === $groupId
-                && $requirements[$data['candidate_requirement_id']]->group_id === $candidateGroupId, 404);
+                && $requirements[$data['candidate_requirement_id']]->group_id === $candidateGroupId
+                && $requirements[$data['candidate_requirement_id']]->retired_at === null, 404);
+            $historicalOnly = $requirements[$data['required_requirement_id']]->retired_at !== null;
+            abort_if($historicalOnly && ! $this->historicalMakeupSession($groupId, $data['required_requirement_id'])
+                ->where('sessions.group_requirement_id', $data['candidate_requirement_id'])
+                ->where('sessions.group_id', $candidateGroupId)->exists(), 422,
+                'المعادلة التاريخية تتطلب محاضرة تعويض قبل الانسحاب ومتطلبًا محفوظًا في الفترة.');
             if ($db->table('study_group_requirement_equivalences')
                 ->where('required_requirement_id', $data['required_requirement_id'])
                 ->where('candidate_requirement_id', $data['candidate_requirement_id'])
@@ -133,7 +144,8 @@ class CenterGroupRequirementEquivalenceController extends Controller
                     'candidate_group_id' => $candidateGroupId,
                     'required_requirement_id' => $data['required_requirement_id'],
                     'candidate_requirement_id' => $data['candidate_requirement_id'],
-                    'reason' => $data['reason'], 'request_id' => $data['request_id'],
+                    'reason' => $data['reason'], 'historical_only' => $historicalOnly,
+                    'request_id' => $data['request_id'],
                 ]);
 
             return response()->json(['approval' => $this->record((object) $approval)], 201)
@@ -213,8 +225,8 @@ class CenterGroupRequirementEquivalenceController extends Controller
         if ($requiredRequirementId !== null) {
             $query->selectRaw(<<<'SQL'
 (SELECT row_to_json(required) FROM (
-    SELECT id, number, content, title FROM study_group_requirements
-    WHERE id = ? AND group_id = groups.id AND plan_lecture_id IS NULL AND retired_at IS NULL
+    SELECT id, number, content, title, retired_at FROM study_group_requirements
+    WHERE id = ? AND group_id = groups.id AND plan_lecture_id IS NULL
 ) AS required) AS required_requirement
 SQL, [$requiredRequirementId]);
         }
@@ -236,6 +248,26 @@ SQL, [$requiredRequirementId]);
             'candidate_group_id' => $approval->candidate_group_id,
             'reason' => $approval->reason, 'approved_at' => $approval->approved_at,
             'revision' => (int) $approval->revision, 'revoked_at' => $approval->revoked_at ?? null];
+    }
+
+    private function historicalMakeupSession(string $groupId, string $requiredId): Builder
+    {
+        return DB::connection('tenant')->table('study_attempts as attempts')
+            ->join('study_attempt_withdrawals as withdrawals', 'withdrawals.attempt_id', '=', 'attempts.id')
+            ->join('study_attempt_group_periods as periods', 'periods.attempt_id', '=', 'attempts.id')
+            ->crossJoin('study_sessions as sessions')
+            ->where('attempts.status', 'withdrawn')->where('periods.group_id', $groupId)
+            ->whereNotNull('periods.left_on')
+            ->where('sessions.status', 'held')->whereNotNull('sessions.closed_at')
+            ->whereRaw("(sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date < withdrawals.withdrawn_on")
+            ->whereRaw("(sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= attempts.joined_on")
+            ->whereRaw('periods.required_credit_ids @> ?::jsonb', [json_encode([$requiredId])])
+            ->whereRaw(<<<'SQL'
+COALESCE(attempts.current_group_id, (SELECT waitlists.from_group_id
+    FROM study_attempt_waitlists AS waitlists WHERE waitlists.attempt_id = attempts.id
+    ORDER BY waitlists.entry_revision DESC NULLS LAST, waitlists.entered_on DESC,
+        waitlists.created_at DESC, waitlists.id DESC LIMIT 1)) = ?
+SQL, [$groupId]);
     }
 
     private function audit(int $actorId, array $branches, string $event, array $details): void

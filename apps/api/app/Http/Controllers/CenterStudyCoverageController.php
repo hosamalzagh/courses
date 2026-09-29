@@ -28,10 +28,12 @@ class CenterStudyCoverageController extends Controller
                 'courses.id as course_id', 'courses.branch_id'])
             ->selectRaw('COALESCE(groups.completion_threshold, levels.completion_threshold, stages.completion_threshold, courses.completion_threshold) AS completion_threshold')
             ->selectRaw("COALESCE((SELECT json_agg(json_build_object('id', COALESCE(plan_lecture_id, id), 'number', number, 'title', title, 'content', content) ORDER BY number) FROM study_group_requirements WHERE group_id = groups.id AND retired_at IS NULL), '[]'::json) AS requirements")
+            ->selectRaw("COALESCE((SELECT json_agg(json_build_object('id', COALESCE(plan_lecture_id, id), 'number', number, 'title', title, 'content', content) ORDER BY number) FROM study_group_requirements WHERE group_id = groups.id), '[]'::json) AS requirement_history")
             ->first();
         abort_unless($group && $permissions->can('read', (int) $group->branch_id), 404);
 
         $requirements = json_decode($group->requirements, true);
+        $requirementHistory = json_decode($group->requirement_history, true);
         $requiredNumbers = array_column($requirements, 'number');
         $requiredCount = count($requiredNumbers);
         $threshold = (int) $group->completion_threshold;
@@ -45,6 +47,11 @@ class CenterStudyCoverageController extends Controller
                 'attempts.completion_threshold',
                 'students.id as student_id', 'students.name', 'students.student_number', 'students.status as student_status',
                 'decisions.approved_at', 'decisions.exceptional', 'decisions.reason as completion_reason'])
+            ->selectRaw('(SELECT periods.required_credit_ids FROM study_attempt_group_periods AS periods
+                WHERE periods.attempt_id = attempts.id AND periods.group_id = attempts.current_group_id
+                    AND periods.left_on IS NOT NULL
+                ORDER BY periods.left_on DESC, periods.created_at DESC, periods.id DESC LIMIT 1)
+                AS closed_period_requirements')
             ->selectRaw(<<<'SQL'
 COALESCE((SELECT json_agg(json_build_object('id', COALESCE(sessions.plan_lecture_id, sessions.group_requirement_id),
     'final', sessions.closed_at IS NOT NULL) ORDER BY entries.id)
@@ -77,9 +84,15 @@ SQL);
         }
         $rows = $students->orderBy('students.student_number')->orderBy('attempts.id')
             ->offset(($page - 1) * 20)->limit(21)->get();
-        $report = $rows->take(20)->map(function (object $row) use ($requirements, $requiredNumbers, $requiredCount): array {
+        $report = $rows->take(20)->map(function (object $row) use ($requirements, $requirementHistory): array {
+            $effectiveRequirements = $row->attempt_status === 'withdrawn' && $row->closed_period_requirements !== null
+                ? array_values(array_filter($requirementHistory,
+                    fn (array $entry): bool => in_array($entry['id'], json_decode($row->closed_period_requirements, true), true)))
+                : $requirements;
+            $effectiveNumbers = array_column($effectiveRequirements, 'number');
+            $effectiveCount = count($effectiveNumbers);
             $credits = StudyCoverageCredits::resolve(json_decode($row->attendance_rows, true), json_decode($row->approvals, true));
-            $coverage = array_values(array_filter($requirements, fn (array $entry): bool => array_key_exists($entry['id'], $credits['lectures'])));
+            $coverage = array_values(array_filter($effectiveRequirements, fn (array $entry): bool => array_key_exists($entry['id'], $credits['lectures'])));
             $coveredNumbers = array_column($coverage, 'number');
             $openNumbers = array_values(array_column(array_filter($coverage,
                 fn (array $entry): bool => ! $credits['lectures'][$entry['id']]), 'number'));
@@ -92,12 +105,12 @@ SQL);
                 'student_status' => $row->student_status,
                 'completion_threshold' => (int) $row->completion_threshold,
                 'covered_numbers' => $coveredNumbers,
-                'missing_numbers' => array_values(array_diff($requiredNumbers, $coveredNumbers)),
+                'missing_numbers' => array_values(array_diff($effectiveNumbers, $coveredNumbers)),
                 'open_numbers' => $openNumbers,
                 'covered_count' => $coveredCount,
-                'required_count' => $requiredCount,
-                'percentage' => $requiredCount === 0 ? 0 : round($coveredCount * 100 / $requiredCount, 2),
-                'eligible' => $requiredCount > 0 && $coveredCount * 100 >= (int) $row->completion_threshold * $requiredCount,
+                'required_count' => $effectiveCount,
+                'percentage' => $effectiveCount === 0 ? 0 : round($coveredCount * 100 / $effectiveCount, 2),
+                'eligible' => $effectiveCount > 0 && $coveredCount * 100 >= (int) $row->completion_threshold * $effectiveCount,
                 'approved_at' => $row->approved_at, 'exceptional' => $row->exceptional,
                 'completion_reason' => $row->completion_reason,
             ];

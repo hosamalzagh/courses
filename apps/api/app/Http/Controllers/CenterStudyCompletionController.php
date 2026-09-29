@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\StudyCoverageCredits;
+use App\Support\StudyPeriodRequirements;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -71,11 +72,11 @@ class CenterStudyCompletionController extends Controller
             }
             $completionDate = now('Africa/Cairo')->toDateString();
             foreach ($snapshot['students'] as $student) {
-                $closed = $db->table('study_attempt_group_periods')
+                $period = $db->table('study_attempt_group_periods')
                     ->where('attempt_id', $student['attempt_id'])->where('group_id', $groupId)
                     ->whereNull('left_on')->whereDate('joined_on', '<=', $completionDate)
-                    ->update(['left_on' => $completionDate]);
-                if ($closed !== 1) {
+                    ->lockForUpdate()->first(['id']);
+                if ($period === null || ! StudyPeriodRequirements::close($period->id, $groupId, $completionDate)) {
                     $this->conflict('completion_attempt_changed');
                 }
                 $db->table('study_attempt_completion_decisions')->insert([
