@@ -140,6 +140,12 @@ test("coverage is provisional until closure and hidden branch data stays denied"
     await owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` }).check();
     await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" }).click();
     await expect(owner.getByRole("heading", { name: "معاينة قرار الإتمام" })).toBeFocused();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "إلغاء المعاينة" }).click();
+    await expect(owner.getByRole("heading", { name: "معاينة قرار الإتمام" })).toHaveCount(0);
+    await expect(owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` })).not.toBeChecked();
+    await expect(owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" })).toBeFocused();
+    await owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` }).check();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" }).click();
     await expect(owner.getByText("ستصبح المجموعة مكتملة.")).toBeVisible();
     await owner.locator("header.center-topbar").getByRole("button", { name: "تأكيد الاعتماد" }).click();
     await expect(owner.getByText("اكتملت المجموعة، وحُفظت قرارات الطلاب المختارين.")).toBeVisible();

@@ -58,6 +58,8 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   const completionFormId = useId();
   const completionErrorRef = useRef<HTMLDivElement>(null);
   const completionPreviewRef = useRef<HTMLHeadingElement>(null);
+  const completionReviewRef = useRef<HTMLButtonElement>(null);
+  const completionFallbackRef = useRef<HTMLParagraphElement>(null);
   const [completionSelected, setCompletionSelected] = useState<Record<string, string>>({});
   const [completionPreview, setCompletionPreview] = useState<{ data: CompletionPreview; draftKey: string; requestId: string } | null>(null);
   const [completionBusy, setCompletionBusy] = useState(false);
@@ -193,16 +195,20 @@ export function CoverageControls({ context, search }: { context: CoverageContext
     {pendingNavigation ? <ConfirmationDialog title="مغادرة دون تطبيق" description="لديك اختيار أو معاينة لم تُعتمد. هل تريد الانتقال والتخلي عنها؟" confirmLabel="الانتقال دون تطبيق" onCancel={() => { setPendingNavigation(null); requestAnimationFrame(() => navigationFocus.current?.focus()); }} onConfirm={() => { const next = pendingNavigation; setPendingNavigation(null); setSelected([]); setReason(""); setPreview(null); setCompletionSelected({}); setCompletionPreview(null); router.push(next); }} /> : null}
     <CenterPageActions context={context} actions={<>
       {group.can_complete && group.status !== "waiting" ? <>
-        <Button type="button" disabled={anyBusy || completionUncertain || (!completeGroup && !completionSelection.length)} busy={completionBusy && !completionPreview} onClick={() => void reviewCompletion()}>
+        <Button ref={completionReviewRef} type="button" disabled={anyBusy || completionUncertain || (!completeGroup && !completionSelection.length)} busy={completionBusy && !completionPreview} onClick={() => void reviewCompletion()}>
           {completeGroup ? "معاينة إكمال المجموعة" : "معاينة اعتماد الطلاب"}
         </Button>
+        {completionPreview ? <Button type="button" disabled={anyBusy || completionUncertain} onClick={() => {
+          setCompletionSelected({}); setCompletionPreview(null); setCompletionError("");
+          requestAnimationFrame(() => (completeGroup ? completionReviewRef.current : completionFallbackRef.current)?.focus());
+        }}>إلغاء المعاينة</Button> : null}
         {completionPreview ? <Button type="button" variant="primary" disabled={anyBusy || completionPreview.draftKey !== completionDraftKey ||
           completionPreview.data.open_sessions.length > 0 || completionPreview.data.students.some(student => student.open_numbers.length > 0)}
           busy={completionBusy} onClick={() => void confirmCompletion()}>تأكيد الاعتماد</Button> : null}
       </> : null}
       <Link href={`/admin/groups/${group.id}/sessions`}>جدول محاضرات المجموعة</Link><Link href="/admin/groups">العودة للمجموعات</Link>
     </>} />
-    <p className="muted">{group.name} · المطلوب {group.required_count.toLocaleString("ar-EG")} محاضرة · حد التسجيلات الجديدة {group.completion_threshold.toLocaleString("ar-EG")}%.</p>
+    <p ref={completionFallbackRef} tabIndex={-1} className="muted">{group.name} · المطلوب {group.required_count.toLocaleString("ar-EG")} محاضرة · حد التسجيلات الجديدة {group.completion_threshold.toLocaleString("ar-EG")}%.</p>
     <p className="muted">المحاضرات السابقة لانضمام الطالب تبقى ضمن المطلوب، لكنها ليست غيابًا عليه. النسبة هنا لتغطية المحتوى فقط؛ بلوغ الحد لا يعتمد إتمام الدراسة تلقائيًا.</p>
     {group.can_complete && group.status !== "waiting" ? <p className="muted">اختر الطلاب الذين ستعتمد إتمامهم. يمكن إكمال المجموعة دون اختيار طالب، ثم اعتماد من يستوفي لاحقًا من هذا التقرير. الإتمام دون بلوغ الحد يحتاج سببًا.</p> : null}
     {completionError ? <div ref={completionErrorRef} tabIndex={-1}><InlineNotice tone="error">{completionError}</InlineNotice></div> : null}
