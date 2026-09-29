@@ -209,29 +209,43 @@ SQL)
         abort_unless($rows->count() === count($change['attempt_ids']), 404);
         abort_if($rows->contains(fn (object $row): bool => (int) $row->source_version >= (int) $target->version),
             422, 'اختر إصدارًا أحدث من الإصدار الحالي لكل محاولة مختارة.');
-        $sourcePlanIds = $rows->pluck('plan_version_id')->all();
-        $transferPlanIds = $db->table('study_attempt_transfers')->whereIn('attempt_id', $change['attempt_ids'])
-            ->pluck('to_plan_version_id')->all();
-        $appliedPlanIds = $db->table('study_attempt_plan_applications')->whereIn('attempt_id', $change['attempt_ids'])
-            ->pluck('to_plan_version_id')->all();
+        $transferPlans = $db->table('study_attempt_transfers')->whereIn('attempt_id', $change['attempt_ids'])
+            ->get(['attempt_id', 'to_plan_version_id']);
+        $appliedPlans = $db->table('study_attempt_plan_applications')->whereIn('attempt_id', $change['attempt_ids'])
+            ->get(['attempt_id', 'to_plan_version_id']);
+        $allowedPlans = [];
+        foreach ($rows as $row) {
+            $allowedPlans[$row->id] = [$row->plan_version_id => true, $target->id => true];
+        }
+        foreach ([$transferPlans, $appliedPlans] as $history) {
+            foreach ($history as $entry) {
+                $allowedPlans[$entry->attempt_id][$entry->to_plan_version_id] = true;
+            }
+        }
         $approvalRows = $db->table('content_equivalences')
-            ->whereIn('target_plan_version_id', array_unique([...$sourcePlanIds, ...$transferPlanIds,
-                ...$appliedPlanIds, $target->id]))
-            ->orderBy('id')->get(['id', 'source_lecture_ids', 'target_lecture_ids']);
-        $approvals = $approvalRows->map(fn (object $row): array => ['id' => $row->id,
-            'source_lecture_ids' => json_decode($row->source_lecture_ids, true),
-            'target_lecture_ids' => json_decode($row->target_lecture_ids, true)])->all();
+            ->whereIn('target_plan_version_id', array_unique(array_merge(...array_map(
+                'array_keys', array_values($allowedPlans)))))
+            ->orderBy('id')->get(['id', 'target_plan_version_id', 'source_lecture_ids', 'target_lecture_ids']);
         $groupApprovals = $db->table('study_group_requirement_equivalences')
             ->where('required_group_id', $group->id)->whereNull('revoked_at')->orderBy('id')
             ->get(['id', 'candidate_requirement_id', 'required_requirement_id'])
             ->map(fn (object $row): array => ['id' => $row->id,
                 'source_lecture_ids' => [$row->candidate_requirement_id],
                 'target_lecture_ids' => [$row->required_requirement_id]])->all();
-        $approvals = [...$approvals, ...$groupApprovals];
-        $students = $rows->map(function (object $row) use ($groupRequirements, $targetRequirements, $approvals): array {
+        $approvalsByAttempt = [];
+        foreach ($rows as $row) {
+            $approvalsByAttempt[$row->id] = [...$approvalRows
+                ->filter(fn (object $approval): bool => isset($allowedPlans[$row->id][$approval->target_plan_version_id]))
+                ->map(fn (object $approval): array => ['id' => $approval->id,
+                    'source_lecture_ids' => json_decode($approval->source_lecture_ids, true),
+                    'target_lecture_ids' => json_decode($approval->target_lecture_ids, true)])->all(),
+                ...$groupApprovals];
+        }
+        $students = $rows->map(function (object $row) use ($groupRequirements, $targetRequirements, $approvalsByAttempt): array {
             $beforeRequirements = $row->required_lectures === null
                 ? $groupRequirements : json_decode($row->required_lectures, true);
-            $credits = StudyCoverageCredits::resolve(json_decode($row->attendance_rows, true), $approvals);
+            $credits = StudyCoverageCredits::resolve(json_decode($row->attendance_rows, true),
+                $approvalsByAttempt[$row->id]);
             $before = $this->coverage($beforeRequirements, $credits, (int) $row->completion_threshold);
             $after = $this->coverage($targetRequirements, $credits, (int) $row->completion_threshold);
             $approvalIds = collect([...$beforeRequirements, ...$targetRequirements])
@@ -256,7 +270,7 @@ SQL)
             $target->id, $target->version, $targetRequirements, $groupRequirements,
             $rows->map(fn (object $row): array => [$row->id, $row->revision,
                 $row->plan_version_id, $row->required_lectures, $row->completion_threshold,
-                $row->attendance_rows, $row->decision_id, $row->approved_at])->all(), $approvals]));
+                $row->attendance_rows, $row->decision_id, $row->approved_at])->all(), $approvalsByAttempt]));
 
         return ['group_revision' => (int) $group->revision,
             'target_plan_version_id' => $target->id, 'target_plan_version' => (int) $target->version,
