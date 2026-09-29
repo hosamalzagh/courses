@@ -139,6 +139,47 @@ class StudentAttachmentTest extends TestCase
         $this->get('http://alpha.courses.test'.$identity['download_url'])->assertForbidden();
     }
 
+    public function test_historical_download_and_open_replacement_recheck_branch_and_center_membership(): void
+    {
+        $student = $this->student();
+        $attachment = $this->upload($student['id']);
+        $url = "{$this->base}/students/{$student['id']}/attachments/{$attachment['id']}";
+        $this->post("{$url}/replace", [
+            'request_id' => (string) Str::uuid(), 'attachment_revision' => 2,
+            'title' => 'نسخة ثانية', 'file' => $this->pdf(),
+        ], ['Accept' => 'application/json'])->assertOk();
+        $oldVersion = $this->getJson("{$url}/versions")->assertOk()->json('versions.1');
+        $this->assertSame(1, $oldVersion['version']);
+        $oldDownload = 'http://alpha.courses.test'.$oldVersion['download_url'];
+        $pendingRequest = [
+            'request_id' => (string) Str::uuid(), 'attachment_revision' => 3,
+            'title' => 'طلب مفتوح قبل سحب الصلاحية', 'file' => $this->image(),
+        ];
+
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $this->get($oldDownload)->assertOk()->assertHeader('Cache-Control', 'no-store, private');
+        $this->getJson("{$url}/versions")->assertOk()->assertJsonCount(2, 'versions');
+
+        $this->grant([$this->south => ['registration']]);
+        $this->asUser($this->staff);
+        $this->get($oldDownload)->assertNotFound();
+        $this->getJson("{$url}/versions")->assertNotFound();
+        $this->post("{$url}/replace", $pendingRequest, ['Accept' => 'application/json'])->assertNotFound();
+
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $this->get($oldDownload)->assertOk();
+        $this->membership->update(['status' => 'suspended']);
+        $this->asUser($this->staff);
+        $this->get($oldDownload)->assertForbidden();
+        $this->getJson("{$url}/versions")->assertForbidden();
+        $this->post("{$url}/replace", $pendingRequest, ['Accept' => 'application/json'])->assertForbidden();
+
+        $this->center->run(fn () => $this->assertSame(2,
+            DB::table('student_attachment_versions')->where('attachment_id', $attachment['id'])->count()));
+    }
+
     public function test_upload_retry_rechecks_current_identity_and_archive_visibility(): void
     {
         $student = $this->student();
