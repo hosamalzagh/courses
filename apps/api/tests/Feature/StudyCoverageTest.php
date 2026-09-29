@@ -851,6 +851,30 @@ class StudyCoverageTest extends TestCase
             $this->assertSame(1, DB::table('study_attempt_plan_applications')
                 ->where('attempt_id', $attempt['id'])->count());
         });
+        $withdrawnOn = now('Africa/Cairo')->addDay()->toDateString();
+        $this->travelTo(now('Africa/Cairo')->addDay()->setTime(12, 0));
+        $rejoinedRevision = $this->getJson($enrollmentPath)->assertOk()->json('attempts.0.revision');
+        $this->postJson("{$enrollmentPath}/{$attempt['id']}/withdraw", [
+            'withdrawn_on' => $withdrawnOn, 'reason' => 'إغلاق فترة العودة مع حفظ الإصدار المطبق',
+            'revision' => $rejoinedRevision, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->center->run(function () use ($attempt, $newPlan): void {
+            $newIds = DB::table('plan_lectures')->where('plan_version_id', $newPlan['id'])
+                ->orderBy('number')->pluck('id')->all();
+            $periods = DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])->get();
+            $this->assertCount(2, $periods);
+            foreach ($periods as $period) {
+                $this->assertNotNull($period->left_on);
+                $this->assertSame($newIds, json_decode($period->required_credit_ids, true));
+            }
+        });
+        $withdrawnEnrollment = $this->getJson($enrollmentPath)->assertOk()
+            ->assertJsonPath('attempts.0.status', 'withdrawn')
+            ->assertJsonPath('attempts.0.requirements_count', 2);
+        $this->assertLessThanOrEqual(6, (int) $withdrawnEnrollment->headers->get('X-Courses-Query-Count'));
+        $withdrawnCoverage = $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk()
+            ->assertJsonPath('students.0.required_count', 2);
+        $this->assertLessThanOrEqual(6, (int) $withdrawnCoverage->headers->get('X-Courses-Query-Count'));
     }
 
     public function test_repeated_plan_application_keeps_approved_equivalence_chain_and_both_snapshots(): void
