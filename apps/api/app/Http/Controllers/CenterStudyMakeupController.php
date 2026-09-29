@@ -8,6 +8,7 @@ use App\Support\StudentPhotos;
 use App\Support\StudyCoverageCredits;
 use DateTimeImmutable;
 use DateTimeZone;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -65,6 +66,11 @@ class CenterStudyMakeupController extends Controller
                 'entries.status as attendance_status', 'source_courses.branch_id as source_branch_id',
                 'source_groups.name as source_group_name', 'source_sessions.number as source_number',
                 'source_sessions.scheduled_at as source_scheduled_at'])
+            ->selectRaw('CASE WHEN EXISTS (SELECT 1 FROM student_suspensions AS suspensions WHERE suspensions.student_id = ?
+                AND suspensions.suspended_at <= sessions.scheduled_at
+                AND (suspensions.lifted_at IS NULL OR suspensions.lifted_at > sessions.scheduled_at))
+                THEN 1 ELSE 0 END AS suspended_at_session',
+                [$attempt->student_id])
             ->orderByRaw('CASE WHEN bookings.id IS NULL THEN 1 ELSE 0 END')
             ->orderByDesc('sessions.scheduled_at')->orderBy('sessions.id')
             ->offset(($page - 1) * 20)->limit(21)->get();
@@ -77,6 +83,7 @@ class CenterStudyMakeupController extends Controller
                 return [
                     ...array_diff_key((array) $session, ['source_branch_id' => true,
                         'source_group_name' => true, 'source_number' => true, 'source_scheduled_at' => true]),
+                    'suspended_at_session' => (bool) $session->suspended_at_session,
                     'source_session_id' => $canReadSource ? $session->source_session_id : null,
                     'booked_source' => $canReadSource && $session->source_session_id !== null ? [
                         'id' => $session->source_session_id, 'group_name' => $session->source_group_name,
@@ -84,9 +91,11 @@ class CenterStudyMakeupController extends Controller
                         'branch_id' => $session->source_branch_id,
                     ] : null,
                     'can_book' => $attempt->status !== 'withdrawn' && $attempt->student_status === 'active'
+                        && ! $session->suspended_at_session
                         && $permissions->can('attendance.record', (int) $session->branch_id)
                         && new DateTimeImmutable($session->scheduled_at) > now()->toImmutable(),
                     'can_prove' => $attempt->student_status === 'active'
+                        && ! $session->suspended_at_session
                         && ($session->source_session_id === null || $canReadSource)
                         && ($attempt->withdrawn_on === null || $attempt->withdrawn_on > (new DateTimeImmutable($session->scheduled_at))
                             ->setTimezone(new DateTimeZone('Africa/Cairo'))->format('Y-m-d'))
@@ -133,6 +142,7 @@ class CenterStudyMakeupController extends Controller
         return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $studentId, $attemptId, $data, $hash): JsonResponse {
             $attempt = $this->attempt($studentId, $attemptId, $permissions, true);
             $session = $this->session($data['session_id'], $permissions, 'attendance.record');
+            $this->requireActiveStudent($attempt);
             if ($prior = DB::connection('tenant')->table('study_makeup_bookings')->where('request_id', $data['request_id'])->first()) {
                 abort_unless($prior->attempt_id === $attemptId && $prior->session_id === $session->id
                     && (int) $prior->booked_by === (int) $request->user()->id, 404);
@@ -178,6 +188,7 @@ class CenterStudyMakeupController extends Controller
         return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $studentId, $attemptId, $data, $reason, $hash): JsonResponse {
             $attempt = $this->attempt($studentId, $attemptId, $permissions, true);
             $session = $this->session($data['session_id'], $permissions, 'attendance.correct');
+            $this->requireActiveStudent($attempt);
             $prior = DB::connection('tenant')->table('study_makeup_bookings')->where('proof_request_id', $data['request_id'])->first();
             if ($prior) {
                 abort_unless($prior->attempt_id === $attemptId && $prior->session_id === $session->id
@@ -287,7 +298,7 @@ class CenterStudyMakeupController extends Controller
 
     private function validAttempt(object $attempt, int $revision, ?object $historicalSession = null): void
     {
-        abort_if($attempt->student_status !== 'active', 409, 'الطالب أو المحاولة غير متاحين للتعويض.');
+        $this->requireActiveStudent($attempt);
         if ($historicalSession === null) {
             abort_if($attempt->status === 'withdrawn', 409, 'الطالب أو المحاولة غير متاحين للتعويض.');
         } elseif ($attempt->status === 'withdrawn') {
@@ -310,10 +321,12 @@ class CenterStudyMakeupController extends Controller
             ->where('joined_on', '<=', $sessionDate)
             ->where(fn ($query) => $query->whereNull('left_on')->orWhere('left_on', '>', $sessionDate))
             ->exists();
-        abort_if(DB::connection('tenant')->table('student_suspensions')->where('student_id', $attempt->student_id)
+        if (DB::connection('tenant')->table('student_suspensions')->where('student_id', $attempt->student_id)
             ->where('suspended_at', '<=', $session->scheduled_at)
             ->where(fn ($query) => $query->whereNull('lifted_at')->orWhere('lifted_at', '>', $session->scheduled_at))
-            ->exists(), 409, 'كان ملف الطالب موقوفًا وقت محاضرة التعويض.');
+            ->exists()) {
+            $this->suspended();
+        }
         abort_if($primaryAtSession || ! $session->plan_lecture_id, 422,
             'اختر محاضرة تعويض من مجموعة أخرى لها محتوى معتمد.');
         $sourceLectureId = $sourceSessionId === null ? null
@@ -379,5 +392,17 @@ class CenterStudyMakeupController extends Controller
     {
         DB::connection('tenant')->table('center_audit_logs')->insert(['actor_id' => $actorId, 'branch_id' => $branchId,
             'event' => $event, 'details' => json_encode($details), 'created_at' => now()]);
+    }
+
+    private function suspended(): never
+    {
+        throw new HttpResponseException(response()->json(['code' => 'student_suspended_for_makeup'], 409));
+    }
+
+    private function requireActiveStudent(object $attempt): void
+    {
+        if ($attempt->student_status !== 'active') {
+            $this->suspended();
+        }
     }
 }

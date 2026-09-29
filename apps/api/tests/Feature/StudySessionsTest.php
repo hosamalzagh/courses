@@ -1180,14 +1180,37 @@ class StudySessionsTest extends TestCase
             'request_id' => (string) Str::uuid()])->assertConflict();
         $this->postJson("{$makeupPath}/book", [...$payload, 'session_revision' => $session['revision'] + 1,
             'request_id' => (string) Str::uuid()])->assertConflict();
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'suspended', 'reason' => 'إيقاف التعويض بين المعاينة والتنفيذ',
+            'status_revision' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $suspended = $this->getJson($makeupPath)->assertOk()->assertJsonPath('attempt.student_status', 'suspended');
+        $this->assertFalse(collect($suspended->json('sessions'))->firstWhere('id', $session['id'])['can_book']);
+        $this->assertLessThanOrEqual(6, (int) $suspended->headers->get('X-Courses-Query-Count'));
         $this->grant([$this->north => ['registration'], $this->south => ['branch_viewer']]);
         $this->asUser($this->staff);
         $this->getJson($makeupPath)->assertOk();
         $this->postJson("{$makeupPath}/book", $payload)->assertNotFound();
         $this->asUser($this->owner);
+        $this->postJson("{$makeupPath}/book", $payload)->assertConflict()
+            ->assertJsonPath('code', 'student_suspended_for_makeup');
+        $this->center->run(fn () => $this->assertSame(0, DB::table('study_makeup_bookings')
+            ->where('attempt_id', $attempt['id'])->count()));
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'active', 'reason' => 'فك الإيقاف قبل التعويض',
+            'status_revision' => 2, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
         $this->postJson("{$makeupPath}/book", $payload)->assertCreated();
         $this->getJson("{$this->base}/groups/{$source['id']}/coverage")
             ->assertOk()->assertJsonPath('students.0.covered_count', 0);
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'suspended', 'reason' => 'إيقاف بعد الحجز قبل إعادة الطلب',
+            'status_revision' => 3, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->postJson("{$makeupPath}/book", $payload)->assertConflict()
+            ->assertJsonPath('code', 'student_suspended_for_makeup');
+        $this->center->run(fn () => $this->assertSame(1, DB::table('study_makeup_bookings')
+            ->where('attempt_id', $attempt['id'])->count()));
     }
 
     public function test_booked_student_who_joins_target_group_before_session_is_marked_absent_on_close(): void
@@ -1353,11 +1376,15 @@ class StudySessionsTest extends TestCase
             'status' => 'active', 'reason' => 'انتهاء الإيقاف بعد المحاضرة',
             'status_revision' => 2, 'request_id' => (string) Str::uuid(),
         ])->assertOk();
+        $workspace = $this->getJson("{$this->base}/students/{$student['id']}/enrollments/{$attempt['id']}/makeup")
+            ->assertOk()->assertJsonPath('sessions.0.suspended_at_session', true)
+            ->assertJsonPath('sessions.0.can_prove', false);
+        $this->assertLessThanOrEqual(6, (int) $workspace->headers->get('X-Courses-Query-Count'));
         $this->postJson("{$this->base}/students/{$student['id']}/enrollments/{$attempt['id']}/makeup/prove", [
             'session_id' => $session['id'], 'attempt_revision' => $attempt['revision'],
             'session_revision' => 2, 'reason' => 'ادعاء حضور التعويض بعد الإغلاق',
             'request_id' => (string) Str::uuid(),
-        ])->assertConflict();
+        ])->assertConflict()->assertJsonPath('code', 'student_suspended_for_makeup');
         $this->center->run(function () use ($attempt, $session): void {
             $this->assertSame(0, DB::table('study_attendance_entries')->where('attempt_id', $attempt['id'])
                 ->where('session_id', $session['id'])->count());
@@ -1409,11 +1436,33 @@ class StudySessionsTest extends TestCase
         $this->assertLessThanOrEqual(6, (int) $workspace->headers->get('X-Courses-Query-Count'));
         $current = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")
             ->assertOk()->json('attempts.0');
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'suspended', 'reason' => 'إيقاف بعد محاضرة التعويض وقبل إثباتها',
+            'status_revision' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
         $this->postJson("{$makeupPath}/prove", [
+            'session_id' => $session['id'], 'attempt_revision' => $current['revision'],
+            'session_revision' => 2, 'reason' => 'محاولة إثبات أثناء الإيقاف',
+            'request_id' => (string) Str::uuid(),
+        ])->assertConflict()->assertJsonPath('code', 'student_suspended_for_makeup');
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'active', 'reason' => 'فك الإيقاف بعد المحاضرة',
+            'status_revision' => 2, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $proof = [
             'session_id' => $session['id'], 'attempt_revision' => $current['revision'],
             'session_revision' => 2, 'reason' => 'تأخر إثبات التعويض بعد النقل',
             'request_id' => (string) Str::uuid(),
-        ])->assertCreated();
+        ];
+        $this->postJson("{$makeupPath}/prove", $proof)->assertCreated();
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'suspended', 'reason' => 'إيقاف بعد إثبات التعويض قبل إعادة الطلب',
+            'status_revision' => 3, 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->postJson("{$makeupPath}/prove", $proof)->assertConflict()
+            ->assertJsonPath('code', 'student_suspended_for_makeup');
+        $this->center->run(fn () => $this->assertSame(1, DB::table('study_attendance_events')
+            ->where('session_id', $session['id'])->where('kind', 'makeup_prove')->count()));
         $this->getJson("{$this->base}/groups/{$target['id']}/coverage")
             ->assertOk()->assertJsonPath('students.0.covered_count', 1);
     }

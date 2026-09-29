@@ -123,6 +123,35 @@ test('books makeup without granting coverage and hides the attempt from unauthor
     const row = editor.getByRole('row').filter({ hasText: target.name });
     await row.getByRole('button', { name: 'حجز تعويض' }).click();
     await editor.getByLabel('الغياب الأصلي المرتبط، إن وجد').selectOption(sourceSessionId);
+    const suspended = await write(owner, `students/${studentId}/status`, {
+      status: 'suspended', reason: 'إيقاف بين فتح المحرر وحجز التعويض',
+      status_revision: 1, request_id: crypto.randomUUID(),
+    });
+    expect(suspended.status).toBe(200);
+    await owner.getByRole('button', { name: 'تأكيد حجز التعويض' }).click();
+    await expect(editor.getByText('ملف الطالب موقوف حاليًا أو كان موقوفًا وقت محاضرة التعويض؛ حمّل أحدث البيانات.')).toBeVisible();
+    const directBooking = await write(owner, `students/${studentId}/enrollments/${attemptId}/makeup/book`, {
+      session_id: sessionId, source_session_id: sourceSessionId,
+      attempt_revision: enrolled.body.attempt.revision, session_revision: session.body.sessions[0].revision,
+      request_id: crypto.randomUUID(),
+    });
+    expect(directBooking.status).toBe(409);
+    expect(directBooking.body.code).toBe('student_suspended_for_makeup');
+    await owner.getByRole('button', { name: 'تحميل أحدث البيانات' }).click();
+    await expect(editor.getByText('ملف الطالب موقوف؛ لا يمكن حجز أو إثبات حضور التعويض حتى فك الإيقاف.')).toBeVisible();
+    await expect(row.getByText('الملف موقوف')).toBeVisible();
+    await expect(row.getByRole('button', { name: 'حجز تعويض' })).toHaveCount(0);
+    const blockedWorkspace = await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/makeup?q=${encodeURIComponent(target.name)}`)).json();
+    expect(blockedWorkspace.sessions[0]).toMatchObject({ id: sessionId, can_book: false, booking_id: null });
+    const lifted = await write(owner, `students/${studentId}/status`, {
+      status: 'active', reason: 'فك الإيقاف قبل التعويض',
+      status_revision: suspended.body.status_revision, request_id: crypto.randomUUID(),
+    });
+    expect(lifted.status).toBe(200);
+    await owner.getByRole('button', { name: 'تحميل أحدث البيانات' }).click();
+    await expect(editor.getByText('ملف الطالب موقوف؛ لا يمكن حجز أو إثبات حضور التعويض حتى فك الإيقاف.')).toHaveCount(0);
+    await row.getByRole('button', { name: 'حجز تعويض' }).click();
+    await editor.getByLabel('الغياب الأصلي المرتبط، إن وجد').selectOption(sourceSessionId);
     await owner.getByRole('button', { name: 'تأكيد حجز التعويض' }).click();
     await expect(editor.getByText('حُجز التعويض. لا تُحسب التغطية حتى تسجيل الحضور المحتسب.')).toBeVisible();
     const coverage = await owner.request.get(`${origin}/api/v1/center/groups/${source.id}/coverage`);
