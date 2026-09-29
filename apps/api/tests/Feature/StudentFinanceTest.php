@@ -161,6 +161,9 @@ class StudentFinanceTest extends TestCase
             'audit_count' => DB::table('center_audit_logs')->count(),
         ]);
         $this->center->run(function (): void {
+            $refundsMigration = glob(database_path('migrations/tenant/*_create_student_refunds.php'))[0];
+            (require $refundsMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($refundsMigration, PATHINFO_FILENAME))->delete();
             $allocationsMigration = glob(database_path('migrations/tenant/*_create_student_payment_allocations.php'))[0];
             (require $allocationsMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($allocationsMigration, PATHINFO_FILENAME))->delete();

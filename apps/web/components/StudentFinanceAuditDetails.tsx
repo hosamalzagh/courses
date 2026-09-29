@@ -4,6 +4,7 @@ import { paymentMethodLabels } from "@/lib/student-finance";
 export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
   if (!['student.payment_recorded', 'student.payment_allocated', 'student.payment_allocation_reversed',
     'student.payment_allocation_corrected',
+    'student.refund_recorded', 'student.refund_corrected',
     'student.fee_settled', 'student.fee_settlement_corrected',
     'student.payment_note_created', 'student.payment_note_updated',
     'student.allocation_note_created', 'student.allocation_note_updated',
@@ -106,6 +107,22 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
       <p>من {String(previous?.branch_name ?? "")} إلى {String(next?.branch_name ?? "الرصيد المتاح")}: <bdi dir="ltr">{String(data.amount ?? "")} {String(data.currency ?? "")}</bdi></p>
       {next ? <p>التخصيص الصحيح: <bdi dir="ltr">{String(data.replacement_allocation_id ?? "")}</bdi> — رسوم: <bdi dir="ltr">{String(next.fee_id ?? "")}</bdi></p> : null}
       <p>رصيد الفروع المعنية: <bdi dir="ltr">{String(before?.available_balance ?? "")}</bdi> ← <bdi dir="ltr">{String(after?.available_balance ?? "")}</bdi>؛ المديونية: <bdi dir="ltr">{String(before?.debt ?? "")}</bdi> ← <bdi dir="ltr">{String(after?.debt ?? "")}</bdi></p>
+      <p>السبب: {String(data.reason ?? "")}</p>
+    </details>;
+  }
+  if (entry.event === "student.refund_recorded") {
+    return <details><summary>تفاصيل رد المبلغ الفعلي</summary>
+      <p>الدفعة: <bdi dir="ltr">{String(data.payment_id ?? "")}</bdi> — الاسترداد: <bdi dir="ltr">{String(data.refund_id ?? "")}</bdi></p>
+      <p>المبلغ المعاد: <bdi dir="ltr">{String(data.amount ?? "")} {String(data.currency ?? "")}</bdi> بتاريخ <bdi dir="ltr">{String(data.refunded_on ?? "")}</bdi>.</p>
+      <p>رصيد الدفعة المتاح: <bdi dir="ltr">{String(data.available_before ?? "")}</bdi> ← <bdi dir="ltr">{String(data.available_after ?? "")}</bdi>.</p>
+      <p>السبب: {String(data.reason ?? "")}</p>
+    </details>;
+  }
+  if (entry.event === "student.refund_corrected") {
+    return <details><summary>تفاصيل تصحيح سجل الاسترداد</summary>
+      <p>الدفعة: <bdi dir="ltr">{String(data.payment_id ?? "")}</bdi> — الأصل: <bdi dir="ltr">{String(data.original_refund_id ?? "")}</bdi> — العكس: <bdi dir="ltr">{String(data.reversal_id ?? "")}</bdi></p>
+      <p>المبلغ الأصلي: <bdi dir="ltr">{String(data.original_amount ?? "")}</bdi> ← المعاد فعليًا: <bdi dir="ltr">{String(data.correct_amount ?? "")} {String(data.currency ?? "")}</bdi>.</p>
+      <p>السجل البديل: <bdi dir="ltr">{String(data.replacement_refund_id ?? "لا يوجد")}</bdi>؛ رصيد الدفعة المتاح بعد التصحيح: <bdi dir="ltr">{String(data.available_after ?? "")}</bdi>.</p>
       <p>السبب: {String(data.reason ?? "")}</p>
     </details>;
   }
