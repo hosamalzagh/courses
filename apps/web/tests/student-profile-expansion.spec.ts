@@ -415,19 +415,109 @@ test("one central employee identity keeps alpha and beta profiles, values and se
   }
 });
 
-test("long financial and note histories stay paged and measured", async ({ page }) => {
-  test.setTimeout(180_000);
+test("long histories keep every student tab measured on cold and warm opens", async ({ page }) => {
+  test.setTimeout(600_000);
   await signIn(page);
   const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
   const branch = workspace.branches[0].id as number;
+  const centerId = workspace.center.id as string;
   const unique = crypto.randomUUID().slice(0, 8);
   const student = await write(page, "students", { name: `تاريخ طويل ${unique}`, branch_ids: [branch], request_id: crypto.randomUUID() });
   expect(student.status).toBe(201);
   const studentId = student.body.student.id as string;
+  const course = await write(page, "courses", { branch_id: branch, name: `Long course ${unique}`, request_id: crypto.randomUUID() });
+  expect(course.status).toBe(201);
+  const stage = await write(page, `courses/${course.body.course.id}/stages`, { name: "Long stage", request_id: crypto.randomUUID() });
+  expect(stage.status).toBe(201);
+  const level = await write(page, `stages/${stage.body.stage.id}/levels`, { name: "Long level", request_id: crypto.randomUUID(),
+    lectures: Array.from({ length: 21 }, (_, index) => ({ number: index + 1, content: `Long lecture ${index + 1}`, planned_hours: 1 })) });
+  expect(level.status, JSON.stringify(level.body)).toBe(201);
+  const instructor = await write(page, "instructors", { name: `Long teacher ${unique}`, branch_ids: [branch], request_id: crypto.randomUUID() });
+  expect(instructor.status).toBe(201);
+  const group = await write(page, "groups", { level_id: level.body.level.id, plan_version_id: level.body.level.plan.id,
+    name: `Long group ${unique}`, approved_price: "1.00", instructor_ids: [instructor.body.instructor.id], request_id: crypto.randomUUID() });
+  expect(group.status, JSON.stringify(group.body)).toBe(201);
+  const groupId = group.body.group.id as string;
   const accountRoute = `students/${studentId}/account`;
   let account = await (await page.request.get(`${origin}/api/v1/center/${accountRoute}`)).json();
   if (!account.account.currency) {
     expect((await write(page, "financial-currency", { currency: "EGP", revision: account.account.currency_revision }, "PATCH")).status).toBe(200);
+  }
+  const enrollmentRoute = `students/${studentId}/enrollments`;
+  let enrollment = await (await page.request.get(`${origin}/api/v1/center/${enrollmentRoute}`)).json();
+  const joinedOn = new Date(Date.now() - 86_400_000).toLocaleDateString("sv-SE", { timeZone: "Africa/Cairo" });
+  const first = await write(page, enrollmentRoute, { group_id: groupId, group_revision: group.body.group.revision,
+    currency_revision: enrollment.student.currency_revision, joined_on: joinedOn, discount: "0.00", discount_reason: null,
+    version: enrollment.student.version, request_id: crypto.randomUUID() });
+  expect(first.status, JSON.stringify(first.body)).toBe(201);
+  let attemptId = first.body.attempt.id as string;
+  for (let index = 1; index < 21; index++) {
+    enrollment = await (await page.request.get(`${origin}/api/v1/center/${enrollmentRoute}`)).json();
+    const previous = enrollment.attempts.find((item: { id: string }) => item.id === attemptId);
+    expect(previous, `repeat source ${index}`).toBeDefined();
+    const withdrawn = await write(page, `${enrollmentRoute}/${attemptId}/withdraw`, { withdrawn_on: joinedOn,
+      reason: `Long study history ${index}`, revision: previous.revision, request_id: crypto.randomUUID() });
+    expect(withdrawn.status, JSON.stringify(withdrawn.body)).toBe(200);
+    enrollment = await (await page.request.get(`${origin}/api/v1/center/${enrollmentRoute}`)).json();
+    const repeated = await write(page, enrollmentRoute, { group_id: groupId, group_revision: group.body.group.revision,
+      currency_revision: enrollment.student.currency_revision, joined_on: joinedOn, discount: "0.00", discount_reason: null,
+      repeated_from_attempt_id: attemptId, version: enrollment.student.version, request_id: crypto.randomUUID() });
+    expect(repeated.status, JSON.stringify(repeated.body)).toBe(201);
+    attemptId = repeated.body.attempt.id as string;
+  }
+  const localDateTime = (days: number) => new Date(Date.now() + days * 86_400_000)
+    .toLocaleString("sv-SE", { timeZone: "Africa/Cairo" }).slice(0, 16).replace(" ", "T");
+  const scheduled = await write(page, `groups/${groupId}/sessions`, { kind: "weekly", revision: group.body.group.revision,
+    start_at: localDateTime(14), count: 20, interval_weeks: 1, request_id: crypto.randomUUID() });
+  expect(scheduled.status, JSON.stringify(scheduled.body)).toBe(201);
+  const last = await write(page, `groups/${groupId}/sessions`, { kind: "single", revision: scheduled.body.group_revision,
+    start_at: localDateTime(154), plan_lecture_number: 21, request_id: crypto.randomUUID() });
+  expect(last.status, JSON.stringify(last.body)).toBe(201);
+  expect((await write(page, `groups/${groupId}/start`, { revision: last.body.group_revision })).status).toBe(200);
+  for (const id of [centerId, groupId, attemptId]) expect(id).toMatch(/^[a-f0-9-]{36}$/);
+  execFileSync("psql", ["-h", "127.0.0.1", "-p", databasePort!, "-U", "postgres", "-d", `courses_center_${centerId}`,
+    "-v", "ON_ERROR_STOP=1", "-c", `UPDATE study_groups SET started_at = now() - interval '2 days' WHERE id = '${groupId}';
+      WITH ordered AS (SELECT id, row_number() OVER (ORDER BY number) AS number FROM study_sessions WHERE group_id = '${groupId}')
+      UPDATE study_sessions AS sessions SET scheduled_at = now() - interval '20 hours' + ordered.number * interval '20 minutes'
+      FROM ordered WHERE sessions.id = ordered.id`], { stdio: "ignore" });
+  for (const session of [...scheduled.body.sessions, ...last.body.sessions] as { id: string; revision: number }[]) {
+    const closed = await write(page, `groups/${groupId}/sessions/${session.id}/close`, { revision: session.revision, request_id: crypto.randomUUID() });
+    expect(closed.status, JSON.stringify(closed.body)).toBe(200);
+  }
+  const field = await write(page, "student-custom-fields", { id: crypto.randomUUID(), label: `Long field ${unique}`,
+    type: "text", required: false, position: 0, options: [] });
+  expect(field.status, JSON.stringify(field.body)).toBe(201);
+  let studentRevision = student.body.student.revision as number;
+  for (let index = 0; index < 51; index++) {
+    const updated = await write(page, `students/${studentId}`, { name: student.body.student.name, branch_ids: [branch],
+      revision: studentRevision, custom_values: { [field.body.field.id]: `Long value ${index}` } }, "PATCH");
+    expect(updated.status, JSON.stringify(updated.body)).toBe(200);
+    studentRevision = updated.body.student.revision;
+  }
+  let attachmentRevision = (await (await page.request.get(`${origin}/api/v1/center/students/${studentId}?tab=attachments`)).json()).students[0].attachment_revision as number;
+  const imageBase64 = image.buffer.toString("base64");
+  for (let batch = 0; batch < 5; batch++) {
+    const count = Math.min(5, 21 - batch * 5);
+    const requestId = crypto.randomUUID();
+    const uploaded = await page.evaluate(async ({ studentId, attachmentRevision, batch, count, imageBase64, requestId }) => {
+      await fetch("/sanctum/csrf-cookie", { credentials: "same-origin", cache: "no-store" });
+      const token = document.cookie.split("; ").find(part => part.startsWith("XSRF-TOKEN="))?.split("=")[1];
+      const bytes = Uint8Array.from(atob(imageBase64), char => char.charCodeAt(0));
+      const form = new FormData();
+      form.set("request_id", requestId);
+      form.set("attachment_revision", String(attachmentRevision));
+      for (let index = 0; index < count; index++) {
+        const position = batch * 5 + index;
+        form.set(`attachments[${index}][file]`, new File([bytes], `long-${position}.png`, { type: "image/png" }));
+        form.set(`attachments[${index}][title]`, `Long attachment ${position}`);
+        form.set(`attachments[${index}][classification]`, "general");
+      }
+      const response = await fetch(`/api/v1/center/students/${studentId}/attachments`, { method: "POST", credentials: "same-origin",
+        headers: { Accept: "application/json", "X-XSRF-TOKEN": decodeURIComponent(token ?? "") }, body: form });
+      return { status: response.status, body: await response.json() };
+    }, { studentId, attachmentRevision, batch, count, imageBase64, requestId });
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(201);
+    attachmentRevision = uploaded.body.attachment_revision;
   }
   for (let index = 0; index < 22; index++) {
     account = await (await page.request.get(`${origin}/api/v1/center/${accountRoute}`)).json();
@@ -439,22 +529,53 @@ test("long financial and note histories stay paged and measured", async ({ page 
     }, "PUT");
     expect(note.status, `note ${index}`).toBe(201);
   }
-  for (const path of ["?tab=notes", "/account", "/account?page=2"]) {
-    const before = cursor();
-    await page.goto(`${origin}/admin/students/${studentId}${path}`, { waitUntil: "networkidle" });
-    assertMeasuredPage(before, studentId);
+  const longRoutes = [
+    { path: "", text: student.body.student.name },
+    { path: "?tab=study", text: `Long group ${unique}`, table: "محاولات الدراسة", batch: 20 },
+    { path: "?tab=study&study_page=2", text: `Long group ${unique}`, table: "محاولات الدراسة", batch: 20, second: true },
+    { path: "?tab=attendance", text: "غياب مسجل", table: "سجل المحاضرات", batch: 20 },
+    { path: "?tab=attendance&attendance_page=2", text: "غياب مسجل", table: "سجل المحاضرات", batch: 20, second: true },
+    { path: "?tab=attachments", text: "Long attachment", table: "مرفقات الطالب", batch: 20, visible: 10 },
+    { path: "?tab=attachments&attachments_page=2", text: "Long attachment", table: "مرفقات الطالب", batch: 20, second: true },
+    { path: "?tab=custom-history", text: "Long value", table: "تاريخ الحقول الإضافية", batch: 50, visible: 10 },
+    { path: "?tab=custom-history&custom_history_page=2", text: "Long value", table: "تاريخ الحقول الإضافية", batch: 50, second: true },
+    { path: "?tab=notes", text: `ملاحظة طويلة ${unique}` },
+    { path: "/enrollments", text: `Long group ${unique}`, table: "محاولات الدراسة", batch: 20, visible: 10 },
+    { path: "/enrollments?page=2", text: `Long group ${unique}`, table: "محاولات الدراسة", batch: 20, second: true },
+    { path: "/account", text: "1.00 EGP", table: "حركات الدفعات المقدمة", batch: 20 },
+    { path: "/account?page=2", text: "1.00 EGP", table: "حركات الدفعات المقدمة", batch: 20, second: true },
+  ];
+  for (const { path, text, table, batch, visible, second } of longRoutes) {
+    for (const state of ["cold", "warm"]) {
+      const before = cursor();
+      await page.goto(`${origin}/admin/students/${studentId}${path}`, { waitUntil: "networkidle" });
+      await expect(page.getByText(text, { exact: false }).first(), `${state} long ${path}`).toBeVisible();
+      if (table && batch) {
+        const rows = page.getByRole("table", { name: table }).locator("tbody > tr:not(.table-detail-row)");
+        if (second) {
+          expect(await rows.count(), `${path} must render a nonempty second batch`).toBeGreaterThan(0);
+          expect(await rows.count(), `${path} second batch must be bounded`).toBeLessThan(batch);
+        } else await expect(rows, `${path} must fill the first visible page`).toHaveCount(visible ?? batch);
+      }
+      if (path === "?tab=notes") await expect(page.getByRole("region", { name: "ملاحظات أحداث الطالب" }).getByRole("article")).toHaveCount(20);
+      console.log(JSON.stringify({ route: path || "profile", state, dataset: "long", reads: assertMeasuredPage(before, studentId) }));
+    }
   }
   const secondPage = page.getByRole("table", { name: "حركات الدفعات المقدمة" });
   await expect(secondPage.getByRole("row")).toHaveCount(3);
-  await page.goto(`${origin}/admin/students/${studentId}?tab=notes`);
-  const notes = page.getByRole("region", { name: "ملاحظات أحداث الطالب" });
-  await expect(notes.getByRole("article")).toHaveCount(20);
-  const pageTwo = page.waitForResponse(response => response.url().includes(`/api/v1/center/students/${studentId}/notes?page=2`));
-  await page.getByRole("navigation", { name: "صفحات ملاحظات الأحداث" }).getByRole("button", { name: "التالي" }).click();
-  const response = await pageTwo;
-  const rawCount = response.headers()["x-courses-query-count"];
-  expect(rawCount).toMatch(/^\d+$/);
-  expect(Number.isSafeInteger(Number(rawCount))).toBe(true);
-  expect(Number(rawCount)).toBeLessThanOrEqual(6);
-  await expect(notes.getByRole("article")).toHaveCount(2);
+  for (const state of ["cold", "warm"]) {
+    await page.goto(`${origin}/admin/students/${studentId}?tab=notes`, { waitUntil: "networkidle" });
+    const notes = page.getByRole("region", { name: "ملاحظات أحداث الطالب" });
+    await expect(notes.getByRole("article")).toHaveCount(20);
+    const before = cursor();
+    const pageTwo = page.waitForResponse(response => response.url().includes(`/api/v1/center/students/${studentId}/notes?page=2`));
+    await page.getByRole("navigation", { name: "صفحات ملاحظات الأحداث" }).getByRole("button", { name: "التالي" }).click();
+    const response = await pageTwo;
+    const rawCount = response.headers()["x-courses-query-count"];
+    expect(rawCount).toMatch(/^\d+$/);
+    expect(Number.isSafeInteger(Number(rawCount))).toBe(true);
+    expect(Number(rawCount)).toBeLessThanOrEqual(6);
+    await expect(notes.getByRole("article")).toHaveCount(2);
+    console.log(JSON.stringify({ route: "notes?page=2", state, dataset: "long", reads: assertMeasuredPage(before, studentId, false) }));
+  }
 });
