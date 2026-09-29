@@ -125,7 +125,7 @@ export function CoverageControls({ context, search }: { context: CoverageContext
       <p className="muted">تغيير نسبة المجموعة يطبّق تلقائيًا على التسجيلات الجديدة. اختر من الجدول التسجيلات الحالية التي تريد تحديثها؛ ستبقى بقية التسجيلات على نسبتها المثبتة.</p>
       <Field>
         <FieldLabel htmlFor={reasonId}>سبب التطبيق</FieldLabel>
-        <Textarea id={reasonId} ref={reasonInput} value={reason} maxLength={1000} onChange={event => { setReason(event.target.value); invalidatePreview(); }} placeholder="سبب تطبيق النسبة الجديدة على التسجيلات المختارة" />
+        <Textarea id={reasonId} ref={reasonInput} value={reason} maxLength={1000} disabled={busy} onChange={event => { setReason(event.target.value); invalidatePreview(); }} placeholder="سبب تطبيق النسبة الجديدة على التسجيلات المختارة" />
         <FieldDescription>المعاينة تعرض الحد القديم والجديد وأثرهما قبل الاعتماد.</FieldDescription>
       </Field>
       {error ? <InlineNotice tone="error">{error}{conflict ? " حدّث الصفحة ثم أعد المعاينة." : ""}</InlineNotice> : null}

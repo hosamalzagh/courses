@@ -122,6 +122,7 @@ FROM study_sessions AS sessions WHERE sessions.group_id = '${groupId}';`], { std
     });
     await owner.locator("header.center-topbar").getByRole("button", { name: "اعتماد التطبيق على المختارين" }).click();
     await expect(owner.locator('header.center-topbar button[aria-busy="true"]').last()).toBeVisible();
+    await expect(owner.getByRole("textbox", { name: "سبب التطبيق" })).toBeDisabled();
     await owner.locator("header.center-topbar").getByRole("link", { name: "جدول محاضرات المجموعة" }).click();
     await expect(owner.getByRole("alertdialog", { name: "انتظر نتيجة اعتماد النسبة" })).toBeVisible();
     await owner.getByRole("button", { name: "العودة للتحقق" }).click();
@@ -130,9 +131,10 @@ FROM study_sessions AS sessions WHERE sessions.group_id = '${groupId}';`], { std
     await expect(owner.getByText("حد هذه المحاولة: ٦٠%", { exact: false })).toBeVisible();
     await owner.goto(`${origin}/admin/audit`);
     await expect(owner.getByRole("heading", { name: "تطبيق نسبة الإتمام على تسجيلات قائمة" }).first()).toBeVisible();
-    await owner.getByText("عرض قرار تطبيق نسبة الإتمام").first().click();
-    await expect(owner.getByText(/الأهلية غير مستوفٍ ← مستوفٍ مبدئيًا/)).toBeVisible();
-    await expect(owner.getByText(/يتضمن الرصيد وقت القرار ٦ محاضرة مفتوحة/)).toBeVisible();
+    const auditDecision = owner.getByText("عرض قرار تطبيق نسبة الإتمام").first().locator("..");
+    await auditDecision.locator("summary").click();
+    await expect(auditDecision.getByText(/الأهلية غير مستوفٍ ← مستوفٍ مبدئيًا/)).toBeVisible();
+    await expect(auditDecision.getByText(/يتضمن الرصيد وقت القرار ٦ محاضرة مفتوحة/)).toBeVisible();
 
     await signIn(staff, "staff");
     await staff.goto(url);
