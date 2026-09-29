@@ -3,12 +3,15 @@ import fs from 'node:fs';
 
 const log = process.env.COURSES_PHASE3_QUERY_LOG;
 if (!log) throw new Error('COURSES_PHASE3_QUERY_LOG is required');
+const apiPort = Number(process.env.COURSES_PHASE3_API_PORT ?? 8154);
+const webPort = Number(process.env.COURSES_PHASE3_WEB_PORT ?? 3054);
+const proxyPort = Number(process.env.COURSES_PHASE3_PROXY_PORT ?? 8054);
 
 http.createServer((request, response) => {
   const api = request.url.startsWith('/api/') || request.url.startsWith('/sanctum/');
   const upstream = http.request({
     hostname: '127.0.0.1',
-    port: api ? 8154 : 3054,
+    port: api ? apiPort : webPort,
     path: request.url,
     method: request.method,
     headers: request.headers,
@@ -32,4 +35,4 @@ http.createServer((request, response) => {
     response.end(error.message);
   });
   request.pipe(upstream);
-}).listen(8054, '127.0.0.1');
+}).listen(proxyPort, '127.0.0.1');

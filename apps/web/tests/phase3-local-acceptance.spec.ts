@@ -300,13 +300,41 @@ test("a missed student makes up content and is approved after the group is compl
       expect(enrollment.status).toBe(201);
       attempts.push(enrollment.body.attempt);
     }
+    const sourcePath = `groups/${source.id}`;
+    const extraChange = { kind: "add", content: "امتداد محلي للشرح", reason: "احتاجت المجموعة لقاء إضافيًا" };
+    const addedPreview = await write(owner, `${sourcePath}/requirements/preview`, extraChange);
+    expect(addedPreview.status, JSON.stringify(addedPreview.body)).toBe(200);
+    expect(addedPreview.body).toMatchObject({ before: { required_count: 1 }, after: { required_count: 2 } });
+    const added = await write(owner, `${sourcePath}/requirements`, {
+      ...extraChange, group_revision: addedPreview.body.group_revision,
+      preview_token: addedPreview.body.preview_token, request_id: crypto.randomUUID(),
+    });
+    expect(added.status, JSON.stringify(added.body)).toBe(201);
+    expect((await read(owner, `${sourcePath}/coverage`)).body.group.required_count).toBe(2);
+    const extraSession = await write(owner, `${sourcePath}/sessions`, {
+      kind: "single", revision: added.body.group_revision,
+      start_at: `${cairoDate(3)}T17:00`, plan_lecture_number: 2, request_id: crypto.randomUUID(),
+    });
+    expect(extraSession.status, JSON.stringify(extraSession.body)).toBe(201);
+    const reduction = { kind: "reduce", session_id: extraSession.body.sessions[0].id,
+      decision: "none", reason: "تعذر عقد اللقاء الإضافي ولا بديل له" };
+    const reducedPreview = await write(owner, `${sourcePath}/requirements/preview`, reduction);
+    expect(reducedPreview.status, JSON.stringify(reducedPreview.body)).toBe(200);
+    expect(reducedPreview.body).toMatchObject({ before: { required_count: 2 }, after: { required_count: 1 } });
+    const reduced = await write(owner, `${sourcePath}/requirements`, {
+      ...reduction, group_revision: reducedPreview.body.group_revision,
+      preview_token: reducedPreview.body.preview_token, request_id: crypto.randomUUID(),
+    });
+    expect(reduced.status, JSON.stringify(reduced.body)).toBe(200);
+    expect(reduced.body.session.status).toBe("cancelled");
+    expect((await read(owner, `${sourcePath}/coverage`)).body.group.required_count).toBe(1);
     const session = async (groupId: string, revision: number) => {
       const result = await write(owner, `groups/${groupId}/sessions`, { kind: "single", revision,
         start_at: `${cairoDate(2)}T17:00`, plan_lecture_number: 1, request_id: crypto.randomUUID() });
       expect(result.status).toBe(201);
       return result.body;
     };
-    const sourceSession = await session(source.id, source.revision);
+    const sourceSession = await session(source.id, reduced.body.group_revision);
     const makeupSession = await session(makeup.id, makeup.revision);
     const sourceSessionId = sourceSession.sessions[0].id as string;
     const makeupSessionId = makeupSession.sessions[0].id as string;
@@ -330,6 +358,8 @@ test("a missed student makes up content and is approved after the group is compl
     const completed = (await read(owner, `groups/${source.id}/coverage`)).body;
     expect(completed.group.status).toBe("completed");
     expect(completed.students.find((row: { attempt_id: string }) => row.attempt_id === attempts[1].id).attempt_status).toBe("active");
+    const firstDecision = (await read(owner, `students/${students[0].id}/courses/${course.body.course.id}/completion`)).body;
+    expect(firstDecision.levels[0].attempt).toMatchObject({ status: "completed", covered_count: 1, required_count: 1 });
 
     const booked = await write(owner, `students/${students[1].id}/enrollments/${attempts[1].id}/makeup/book`, {
       session_id: makeupSessionId, source_session_id: sourceSessionId,
@@ -360,6 +390,19 @@ test("a missed student makes up content and is approved after the group is compl
     const final = (await read(owner, `groups/${source.id}/coverage`)).body;
     expect(final.group.status).toBe("completed");
     expect(final.students.filter((row: { attempt_status: string }) => row.attempt_status === "completed")).toHaveLength(2);
+    const correctionWorkspace = (await read(owner, `groups/${source.id}/sessions/${sourceSessionId}/attendance`)).body;
+    const correctionRow = correctionWorkspace.students.find((row: { attempt_id: string }) => row.attempt_id === attempts[0].id);
+    const corrected = await write(owner, `groups/${source.id}/sessions/${sourceSessionId}/attendance/${correctionRow.entry_id}/correct`, {
+      status: "not_counted", reason: "تصحيح الكشف بعد اعتماد الإتمام",
+      revision: correctionWorkspace.session.revision, entry_revision: correctionRow.entry_revision,
+      request_id: crypto.randomUUID(),
+    });
+    expect(corrected.status, JSON.stringify(corrected.body)).toBe(200);
+    const retained = (await read(owner, `students/${students[0].id}/courses/${course.body.course.id}/completion`)).body;
+    expect(retained.levels[0].attempt).toMatchObject({ status: "completed", covered_count: 1, required_count: 1 });
+    expect((await read(owner, `groups/${source.id}/coverage`)).body.students.find(
+      (row: { attempt_id: string }) => row.attempt_id === attempts[0].id,
+    ).covered_count).toBe(0);
     await owner.goto(`${origin}/admin/audit`);
     await expect(owner.getByRole("heading", { name: "إكمال مجموعة" }).first()).toBeVisible();
     await expect(owner.getByRole("heading", { name: "اعتماد إتمام دراسة طالب" }).first()).toBeVisible();
