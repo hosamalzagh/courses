@@ -150,6 +150,20 @@ test("coverage is provisional until closure and hidden branch data stays denied"
     await expect(owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` })).not.toBeChecked();
     await expect(owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" })).toBeFocused();
     await owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` }).check();
+    await owner.getByRole("checkbox", { name: `اختيار إتمام ${secondStudent.body.student.name}` }).check();
+    execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_COVERAGE_DB_PORT!, "-U", "postgres",
+      "-d", `courses_center_${centerId}`, "-c",
+      `UPDATE study_attempts SET status = 'completed' WHERE id = '${secondSaved.body.attempt.id}'`], { stdio: "ignore" });
+    await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" }).click();
+    await expect(owner.getByText("تغيرت محاولة دراسة أحد الطلاب. حدّث التقرير ثم أعد الاختيار.")).toBeVisible();
+    await expect(owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` })).toBeChecked();
+    await expect(owner.getByRole("checkbox", { name: `اختيار إتمام ${secondStudent.body.student.name}` })).not.toBeChecked();
+    await expect(owner.getByRole("checkbox", { name: `اختيار إتمام ${secondStudent.body.student.name}` })).toBeDisabled();
+    execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_COVERAGE_DB_PORT!, "-U", "postgres",
+      "-d", `courses_center_${centerId}`, "-c",
+      `UPDATE study_attempts SET status = 'active' WHERE id = '${secondSaved.body.attempt.id}'`], { stdio: "ignore" });
+    await owner.reload();
+    await owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` }).check();
     await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" }).click();
     await expect(owner.getByText("ستصبح المجموعة مكتملة.")).toBeVisible();
     execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_COVERAGE_DB_PORT!, "-U", "postgres",
