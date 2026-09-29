@@ -1261,6 +1261,64 @@ class StudySessionsTest extends TestCase
         $this->getJson($attendance)->assertOk()->assertJsonPath('students.0.status', 'absent');
     }
 
+    public function test_closed_makeup_proof_reuses_an_undone_attendance_entry(): void
+    {
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $source = $this->group($this->north, 'Undone makeup source', 1);
+        $instructorId = $this->center->run(fn () => DB::table('study_group_instructors')
+            ->where('group_id', $source['id'])->value('instructor_id'));
+        $target = $this->postJson("{$this->base}/groups", [
+            'level_id' => $source['level_id'], 'plan_version_id' => $source['plan_version_id'],
+            'name' => 'Undone makeup target', 'approved_price' => '100.00',
+            'instructor_ids' => [$instructorId], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $student = $this->student();
+        $this->enroll($student['id'], $source, now('Africa/Cairo')->toDateString());
+        $attempt = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")
+            ->assertOk()->json('attempts.0');
+        $scheduled = now('Africa/Cairo')->addDays(3)->setTime(16, 0);
+        $session = $this->postJson("{$this->base}/groups/{$target['id']}/sessions", [
+            'kind' => 'single', 'revision' => $target['revision'], 'start_at' => $scheduled->format('Y-m-d\TH:i'),
+            'plan_lecture_number' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
+        $this->postJson("{$this->base}/groups/{$target['id']}/start", ['revision' => $target['revision'] + 1])->assertOk();
+        $makeupPath = "{$this->base}/students/{$student['id']}/enrollments/{$attempt['id']}/makeup";
+        $this->postJson("{$makeupPath}/book", [
+            'session_id' => $session['id'], 'attempt_revision' => $attempt['revision'],
+            'session_revision' => $session['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->travelTo($scheduled->copy()->addHour());
+        $attendance = "{$this->base}/groups/{$target['id']}/sessions/{$session['id']}/attendance";
+        $recorded = $this->postJson($attendance, [
+            'attempt_id' => $attempt['id'], 'status' => 'counted', 'revision' => $session['revision'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json();
+        $undone = $this->postJson("{$attendance}/{$recorded['entry']['id']}/undo", [
+            'revision' => $recorded['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk()->assertJsonPath('entry.status', null)->json();
+        $closed = $this->postJson("{$this->base}/groups/{$target['id']}/sessions/{$session['id']}/close", [
+            'revision' => $undone['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk()->json();
+        $proof = [
+            'session_id' => $session['id'], 'attempt_revision' => $attempt['revision'],
+            'session_revision' => $closed['session']['revision'], 'reason' => 'إثبات بعد التراجع السابق',
+            'request_id' => (string) Str::uuid(),
+        ];
+        $this->postJson("{$makeupPath}/prove", $proof)->assertCreated()->assertJsonPath('entry_id', $recorded['entry']['id']);
+        $this->postJson("{$makeupPath}/prove", $proof)->assertOk()->assertJsonPath('replayed', true);
+        $this->center->run(function () use ($attempt, $session, $recorded): void {
+            $entry = DB::table('study_attendance_entries')->where('attempt_id', $attempt['id'])
+                ->where('session_id', $session['id'])->sole();
+            $this->assertSame($recorded['entry']['id'], $entry->id);
+            $this->assertSame('counted', $entry->status);
+            $this->assertSame(3, $entry->revision);
+            $this->assertSame(1, DB::table('study_attendance_events')->where('session_id', $session['id'])
+                ->where('kind', 'makeup_prove')->count());
+        });
+        $this->getJson("{$this->base}/groups/{$source['id']}/coverage")
+            ->assertOk()->assertJsonPath('students.0.covered_count', 1);
+    }
+
     public function test_closed_makeup_proof_rejects_student_suspended_at_target_session_time_after_reactivation(): void
     {
         $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();

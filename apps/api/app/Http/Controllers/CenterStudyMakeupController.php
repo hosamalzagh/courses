@@ -197,8 +197,9 @@ class CenterStudyMakeupController extends Controller
                 ->where('attempt_id', $attemptId)->where('session_id', $session->id)->first();
             abort_if($booking && $booking->source_session_id !== ($data['source_session_id'] ?? null), 409,
                 'تغير مصدر التعويض؛ حمّل أحدث البيانات.');
-            abort_if(DB::connection('tenant')->table('study_attendance_entries')->where('attempt_id', $attemptId)
-                ->where('session_id', $session->id)->exists(), 409, 'سُجل حضور التعويض سابقًا.');
+            $entry = DB::connection('tenant')->table('study_attendance_entries')->where('attempt_id', $attemptId)
+                ->where('session_id', $session->id)->lockForUpdate()->first();
+            abort_if($entry && $entry->status !== null, 409, 'سُجل حضور التعويض سابقًا.');
             $now = now();
             if ($booking) {
                 DB::connection('tenant')->table('study_makeup_bookings')->where('id', $booking->id)->update([
@@ -216,11 +217,17 @@ class CenterStudyMakeupController extends Controller
                     'proof_request_id' => $data['request_id'], 'proof_request_hash' => $hash,
                     'created_at' => $now, 'updated_at' => $now]);
             }
-            $entryId = (string) Str::uuid();
-            DB::connection('tenant')->table('study_attendance_entries')->insert([
-                'id' => $entryId, 'session_id' => $session->id, 'attempt_id' => $attemptId,
-                'status' => 'counted', 'revision' => 1, 'recorded_by' => $request->user()->id,
-                'recorded_at' => $now, 'created_at' => $now, 'updated_at' => $now]);
+            $entryId = $entry?->id ?? (string) Str::uuid();
+            if ($entry) {
+                DB::connection('tenant')->table('study_attendance_entries')->where('id', $entryId)->update([
+                    'status' => 'counted', 'revision' => $entry->revision + 1,
+                    'recorded_by' => $request->user()->id, 'recorded_at' => $now, 'updated_at' => $now]);
+            } else {
+                DB::connection('tenant')->table('study_attendance_entries')->insert([
+                    'id' => $entryId, 'session_id' => $session->id, 'attempt_id' => $attemptId,
+                    'status' => 'counted', 'revision' => 1, 'recorded_by' => $request->user()->id,
+                    'recorded_at' => $now, 'created_at' => $now, 'updated_at' => $now]);
+            }
             DB::connection('tenant')->table('study_attendance_events')->insert([
                 'id' => (string) Str::uuid(), 'session_id' => $session->id, 'attempt_id' => $attemptId,
                 'kind' => 'makeup_prove', 'session_revision' => $session->revision + 1,
