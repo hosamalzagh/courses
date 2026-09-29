@@ -40,6 +40,7 @@ class CenterStudyMakeupController extends Controller
             ->leftJoin('levels as source_levels', 'source_levels.id', '=', 'source_groups.level_id')
             ->leftJoin('stages as source_stages', 'source_stages.id', '=', 'source_levels.stage_id')
             ->leftJoin('courses as source_courses', 'source_courses.id', '=', 'source_stages.course_id')
+            ->whereRaw("(sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= ?", [$attempt->joined_on])
             ->where(function ($query) use ($attemptId): void {
                 $query->whereNotExists(DB::connection('tenant')->table('study_attempt_group_periods as periods')
                     ->where('periods.attempt_id', $attemptId)
@@ -231,6 +232,7 @@ class CenterStudyMakeupController extends Controller
                 ->whereColumn('student_branches.student_id', 'students.id')
                 ->whereColumn('student_branches.branch_id', 'attempts.branch_id')->selectRaw('1'))
             ->select(['attempts.id', 'attempts.student_id', 'attempts.branch_id', 'attempts.current_group_id', 'attempts.plan_version_id',
+                'attempts.joined_on',
                 'attempts.status', 'attempts.revision', 'students.status as student_status', 'students.name as student_name']);
         if ($lock) {
             $query->lockForUpdate();
@@ -268,6 +270,8 @@ class CenterStudyMakeupController extends Controller
     {
         $sessionDate = (new DateTimeImmutable($session->scheduled_at))
             ->setTimezone(new DateTimeZone('Africa/Cairo'))->format('Y-m-d');
+        abort_if($sessionDate < $attempt->joined_on, 422,
+            'لا يمكن احتساب محاضرة سبقت بداية محاولة الدراسة.');
         $primaryAtSession = DB::connection('tenant')->table('study_attempt_group_periods')
             ->where('attempt_id', $attempt->id)->where('group_id', $session->group_id)
             ->where('joined_on', '<=', $sessionDate)
