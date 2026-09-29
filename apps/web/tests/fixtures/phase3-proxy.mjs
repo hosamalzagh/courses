@@ -1,5 +1,5 @@
-const http = require('node:http');
-const fs = require('node:fs');
+import http from 'node:http';
+import fs from 'node:fs';
 
 const log = process.env.COURSES_PHASE3_QUERY_LOG;
 if (!log) throw new Error('COURSES_PHASE3_QUERY_LOG is required');
