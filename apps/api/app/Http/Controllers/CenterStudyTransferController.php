@@ -7,6 +7,7 @@ use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\EffectiveStudyFees;
+use App\Support\EffectiveStudentPayments;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
 use App\Support\StudyCoverageCredits;
@@ -241,7 +242,7 @@ EXISTS (SELECT 1 FROM study_attendance_entries AS entries
       AND entries.status IS NOT NULL AND sessions.status <> 'cancelled'
       AND (sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date >= ?::date) AS recorded_after
 SQL, [$data['transferred_on']]);
-        $query->selectSub($sum('student_payments', 'amount', 'branch_id'), 'received_total')
+        $query->selectSub($sum('student_payments', EffectiveStudentPayments::amount(), 'branch_id'), 'received_total')
             ->selectSub($sum('study_attempt_fees', EffectiveStudyFees::amount('study_attempt_fees'), 'branch_id'), 'due_total')
             ->selectSub($used, 'used_total')->selectSub($refunded, 'refunded_total')->selectSub($paid, 'paid_total');
         $row = ($lock ? $query->lock('FOR UPDATE OF attempts, groups') : $query)->first();

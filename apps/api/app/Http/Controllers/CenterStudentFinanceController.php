@@ -7,6 +7,7 @@ use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\EffectiveStudyFees;
+use App\Support\EffectiveStudentPayments;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
@@ -14,6 +15,7 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -44,7 +46,7 @@ class CenterStudentFinanceController extends Controller
         $balance = DB::connection('tenant')->table('student_payments')
             ->whereColumn('student_payments.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('student_payments.branch_id', $readable))
-            ->selectRaw('COALESCE(SUM(student_payments.amount), 0)');
+            ->selectRaw('COALESCE(SUM('.EffectiveStudentPayments::amount().'), 0)');
         $debt = DB::connection('tenant')->table('study_attempt_fees')
             ->whereColumn('study_attempt_fees.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('study_attempt_fees.branch_id', $readable))
@@ -109,18 +111,24 @@ class CenterStudentFinanceController extends Controller
                         ->orWhere('student_payments.method', 'ILIKE', $pattern)
                         ->orWhereIn('student_payments.method', $matchingMethods)
                         ->orWhereRaw('student_payments.received_on::text ILIKE ?', [$pattern])
-                        ->orWhereRaw('student_payments.amount::text ILIKE ?', [$pattern]);
+                        ->orWhereRaw(EffectiveStudentPayments::amount().'::text ILIKE ?', [$pattern]);
                 });
             })
             ->orderByDesc('student_payments.created_at')->orderByDesc('student_payments.id')
             ->offset((isset($data['payment_id']) ? 0 : ($page - 1) * 20))->limit(21)
             ->select(['student_payments.id', 'student_payments.branch_id', 'branches.name as branch_name',
-                'student_payments.amount', 'student_payments.currency', 'student_payments.method',
+                'student_payments.currency', 'student_payments.method',
                 'student_payments.received_on', 'student_payments.actor_name', 'student_payments.created_at'])
+            ->selectRaw(EffectiveStudentPayments::amount().' AS amount')
+            ->selectRaw('student_payments.amount AS original_amount')
             ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'student_payments.id')
                 ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'allocated_amount')
             ->selectSub(ActiveStudentRefunds::query()->whereColumn('refunds.payment_id', 'student_payments.id')
-                ->selectRaw('COALESCE(SUM(refunds.amount), 0)'), 'refunded_amount')->get();
+                ->selectRaw('COALESCE(SUM(refunds.amount), 0)'), 'refunded_amount')
+            ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'student_payments.id')
+                ->when($permissions->isCenterManager(), fn (Builder $query) => $query->whereRaw('FALSE'))
+                ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereNotIn('allocations.target_branch_id', $readable))
+                ->selectRaw('COUNT(*)'), 'hidden_allocation_count')->get();
 
         $unallocated = StudentMoney::cents($student->received_total) - StudentMoney::cents($student->used_total)
             - StudentMoney::cents($student->refunded_total);
@@ -147,13 +155,14 @@ class CenterStudentFinanceController extends Controller
             ],
             'recordable_branches' => $branches->take(50)->values(),
             'payments' => $payments->take(20)->map(fn (object $row) => [
-                ...(array) $row,
+                ...Arr::except((array) $row, ['hidden_allocation_count']),
                 'allocated_amount' => StudentMoney::format(StudentMoney::cents($row->allocated_amount)),
                 'refunded_amount' => StudentMoney::format(StudentMoney::cents($row->refunded_amount)),
                 'available_amount' => StudentMoney::format(StudentMoney::cents($row->amount) - StudentMoney::cents($row->allocated_amount)
                     - StudentMoney::cents($row->refunded_amount)),
                 'can_refund' => $permissions->can('payments.record', (int) $row->branch_id)
                     && $permissions->can('finance.approve', (int) $row->branch_id),
+                'can_view_corrections' => (int) $row->hidden_allocation_count === 0,
             ])->values(),
             'fees' => $fees->take(20)->map(fn (array $row) => [
                 ...$row,

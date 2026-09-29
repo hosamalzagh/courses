@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\DB;
 
 class CenterAuditController extends Controller
 {
-    public const FINANCIAL_EVENTS = ['student.payment_recorded', 'student.payment_allocated', 'student.payment_allocation_reversed',
+    public const FINANCIAL_EVENTS = ['student.payment_recorded', 'student.payment_corrected', 'student.payment_allocated', 'student.payment_allocation_reversed',
         'student.payment_allocation_corrected',
         'student.refund_recorded', 'student.refund_corrected',
         'student.fee_settled', 'student.fee_settlement_corrected',
@@ -67,7 +67,7 @@ class CenterAuditController extends Controller
     public static function scopeRelatedBranchVisibility(Builder $query, array $financialBranches): void
     {
         $query->where(fn ($scope) => $scope
-            ->whereNotIn('event', ['student.payment_allocated', 'student.payment_allocation_reversed',
+            ->whereNotIn('event', ['student.payment_corrected', 'student.payment_allocated', 'student.payment_allocation_reversed',
                 'student.payment_allocation_corrected',
                 'student.allocation_note_created', 'student.allocation_note_updated',
                 'student.fee_settled', 'student.fee_settlement_corrected'])

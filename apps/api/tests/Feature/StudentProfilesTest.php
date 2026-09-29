@@ -265,6 +265,9 @@ class StudentProfilesTest extends TestCase
             $notesMigration = glob(database_path('migrations/tenant/*_create_student_event_notes.php'))[0];
             (require $notesMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($notesMigration, PATHINFO_FILENAME))->delete();
+            $paymentCorrectionsMigration = glob(database_path('migrations/tenant/*_create_student_payment_corrections.php'))[0];
+            (require $paymentCorrectionsMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($paymentCorrectionsMigration, PATHINFO_FILENAME))->delete();
             $refundsMigration = glob(database_path('migrations/tenant/*_create_student_refunds.php'))[0];
             (require $refundsMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($refundsMigration, PATHINFO_FILENAME))->delete();

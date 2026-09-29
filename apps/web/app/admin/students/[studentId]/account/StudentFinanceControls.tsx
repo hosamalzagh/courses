@@ -17,6 +17,7 @@ import { feeAdjustmentRecoveryPrefix, listPendingFeeAdjustments } from "@/lib/fe
 import type { StudentAccountContext } from "@/lib/server-context";
 import { paymentMethodLabels } from "@/lib/student-finance";
 import { StudentPaymentAllocations } from "./StudentPaymentAllocations";
+import { StudentPaymentCorrections } from "./StudentPaymentCorrections";
 import { StudentPaymentRefunds } from "./StudentPaymentRefunds";
 import { StudentFeeAdjustmentEditor } from "./StudentFeeAdjustmentEditor";
 
@@ -57,9 +58,12 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(
     initial.payments.some(payment => payment.id === paymentId) ? paymentId! : null);
   const [selectedRefundPaymentId, setSelectedRefundPaymentId] = useState<string | null>(null);
+  const [selectedCorrectionPaymentId, setSelectedCorrectionPaymentId] = useState<string | null>(null);
   const [allocationDirty, setAllocationDirty] = useState(false);
   const [refundDirty, setRefundDirty] = useState(false);
   const [refundUncertain, setRefundUncertain] = useState(false);
+  const [correctionDirty, setCorrectionDirty] = useState(false);
+  const [correctionUncertain, setCorrectionUncertain] = useState(false);
   const [selectedFeeId, setSelectedFeeId] = useState<string | null>(null);
   const [selectedRecoveryKey, setSelectedRecoveryKey] = useState<string | null>(null);
   const [pendingFees, setPendingFees] = useState<ReturnType<typeof listPendingFeeAdjustments>>([]);
@@ -93,9 +97,10 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   const paymentForm = `${formPrefix}-payment`;
   const paymentDirty = Boolean(amount || receivedOn || method !== "cash" ||
     (current.recordable_branches[0] && branch !== String(current.recordable_branches[0].id)));
-  const dirty = Boolean((currency && currency !== current.account.currency) || paymentDirty || allocationDirty || refundDirty || feeDirty);
+  const dirty = Boolean((currency && currency !== current.account.currency) || paymentDirty || allocationDirty || refundDirty || correctionDirty || feeDirty);
   const selectedPayment = current.payments.find((item) => item.id === selectedPaymentId);
   const selectedRefundPayment = current.payments.find((item) => item.id === selectedRefundPaymentId);
+  const selectedCorrectionPayment = current.payments.find((item) => item.id === selectedCorrectionPaymentId);
   const selectedFee = current.fees.find((item) => item.id === selectedFeeId) ??
     (pendingFees.some(entry => entry.key === selectedRecoveryKey && entry.pending.fee_id === selectedFeeId) && selectedFeeId
       ? { id: selectedFeeId, group_name: null, currency: current.account.currency ?? "" } : undefined);
@@ -200,9 +205,11 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
 
   return <>
     <CenterPageActions context={current} />
-    <UnsavedChangesGuard dirty={dirty} guardHistory blockDiscard={feeUncertain || refundUncertain}
-      blockDiscardTitle={refundUncertain && !feeUncertain ? "تحقق من اعتماد الاسترداد أولًا" : undefined}
-      blockDiscardDescription={refundUncertain && !feeUncertain
+    <UnsavedChangesGuard dirty={dirty} guardHistory blockDiscard={feeUncertain || refundUncertain || correctionUncertain}
+      blockDiscardTitle={correctionUncertain && !feeUncertain && !refundUncertain ? "تحقق من اعتماد تصحيح الدفعة أولًا" : refundUncertain && !feeUncertain ? "تحقق من اعتماد الاسترداد أولًا" : undefined}
+      blockDiscardDescription={correctionUncertain && !feeUncertain && !refundUncertain
+        ? "نتيجة تصحيح الدفعة غير مؤكدة. عد إلى المحرر وتحقق قبل مغادرة الصفحة."
+        : refundUncertain && !feeUncertain
         ? "تعذر التأكد من حفظ الاسترداد أو تصحيحه. عد إلى سجل الاسترداد وأعد المحاولة بالمفتاح نفسه قبل مغادرة الصفحة."
         : undefined} />
     <section className="context-card form-stack" aria-label="ملخص الحساب المالي">
@@ -256,7 +263,7 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
         { key: "actions", label: "الإجراءات", actions: true, render: row =>
           <Button id={`${formPrefix}-fee-${row.id}`} disabled={busy || dirty} onClick={() => {
             setSelectedRecoveryKey(pendingFees.find(entry => entry.pending.fee_id === row.id)?.key ?? null);
-            setSelectedFeeId(row.id); setSelectedPaymentId(null); setSelectedRefundPaymentId(null);
+            setSelectedFeeId(row.id); setSelectedPaymentId(null); setSelectedRefundPaymentId(null); setSelectedCorrectionPaymentId(null);
           }}>
             {row.can_approve ? "تسوية أو تصحيح" : "عرض سجل الرسوم"}
           </Button> },
@@ -278,7 +285,7 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
     </CenterHeaderActions>
     <DataTable id="student-payments" title="حركات الدفعات المقدمة" rows={current.payments} rowKey={(row) => row.id} pageSize={20}
       serverSearch={{ value: search, onSearch: (value) => {
-        if (!feeUncertain && !refundUncertain) router.push(`/admin/students/${studentId}/account?${new URLSearchParams({ page: "1", branches_page: String(current.pagination.branches_page), fees_page: String(current.pagination.fees_page), ...(value ? { q: value } : {}) })}`);
+        if (!feeUncertain && !refundUncertain && !correctionUncertain) router.push(`/admin/students/${studentId}/account?${new URLSearchParams({ page: "1", branches_page: String(current.pagination.branches_page), fees_page: String(current.pagination.fees_page), ...(value ? { q: value } : {}) })}`);
       } }}
       searchText={(row) => `${row.branch_name ?? ""} ${paymentMethodLabels[row.method] ?? row.method} ${row.amount} ${row.actor_name}`}
       emptyMessage="لا توجد دفعات مقدمة في فروع صلاحيتك." description="آخر ٢٠ حركة في الدفعة المعروضة. الحركات المعتمدة محفوظة دون تعديل أو حذف."
@@ -291,8 +298,9 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
         { key: "available", label: "المتاح", render: (row) => <bdi dir="ltr">{row.available_amount} {row.currency}</bdi> },
         { key: "method", label: "الطريقة", render: (row) => paymentMethodLabels[row.method] ?? row.method },
         { key: "actor", label: "الموظف", render: (row) => row.actor_name },
-        { key: "allocations", label: "التخصيصات", actions: true, render: (row) => <Button id={`${formPrefix}-payment-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedPaymentId(row.id); setSelectedRefundPaymentId(null); setSelectedFeeId(null); requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-payment-allocation-title]")?.focus()); }}>عرض وتخصيص</Button> },
-        { key: "refunds", label: "الاسترداد", actions: true, render: (row) => <Button id={`${formPrefix}-refund-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedRefundPaymentId(row.id); setSelectedPaymentId(null); setSelectedFeeId(null); requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-payment-refund-title]")?.focus()); }}>{row.can_refund ? "رد أو تصحيح" : "سجل الاسترداد"}</Button> },
+        { key: "allocations", label: "التخصيصات", actions: true, render: (row) => <Button id={`${formPrefix}-payment-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedPaymentId(row.id); setSelectedRefundPaymentId(null); setSelectedCorrectionPaymentId(null); setSelectedFeeId(null); requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-payment-allocation-title]")?.focus()); }}>عرض وتخصيص</Button> },
+        { key: "refunds", label: "الاسترداد", actions: true, render: (row) => <Button id={`${formPrefix}-refund-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedRefundPaymentId(row.id); setSelectedPaymentId(null); setSelectedCorrectionPaymentId(null); setSelectedFeeId(null); requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-payment-refund-title]")?.focus()); }}>{row.can_refund ? "رد أو تصحيح" : "سجل الاسترداد"}</Button> },
+        { key: "correction", label: "تصحيح المقبوض", actions: true, render: (row) => row.can_view_corrections ? <Button id={`${formPrefix}-correction-${row.id}`} disabled={busy || dirty} onClick={() => { setSelectedCorrectionPaymentId(row.id); setSelectedPaymentId(null); setSelectedRefundPaymentId(null); setSelectedFeeId(null); requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-payment-correction-title]")?.focus()); }}>تصحيح الدفعة</Button> : null },
       ]} />
     {selectedPayment ? <StudentPaymentAllocations studentId={studentId} payment={selectedPayment}
       focusNote={selectedPayment.id === paymentId ? allocationId ?? "payment" : undefined}
@@ -300,6 +308,9 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
     {selectedRefundPayment ? <StudentPaymentRefunds studentId={studentId} payment={selectedRefundPayment}
       onClose={() => { setSelectedRefundPaymentId(null); focus(`refund-${selectedRefundPayment.id}`); }}
       onChanged={refreshAfterAllocation} onDirtyChange={setRefundDirty} onUncertainChange={setRefundUncertain} /> : null}
+    {selectedCorrectionPayment ? <StudentPaymentCorrections studentId={studentId} payment={selectedCorrectionPayment}
+      onClose={() => { setSelectedCorrectionPaymentId(null); focus(`correction-${selectedCorrectionPayment.id}`); }}
+      onChanged={refreshAfterAllocation} onDirtyChange={setCorrectionDirty} onUncertainChange={setCorrectionUncertain} /> : null}
     <CenterHeaderActions>
       {current.pagination.page > 1 ? <Link className={buttonVariants({ variant: "outline" })} href={paymentPage(current.pagination.page - 1)}>الحركات السابقة</Link> : null}
       {current.pagination.has_more ? <Link className={buttonVariants({ variant: "outline" })} href={paymentPage(current.pagination.page + 1)}>الحركات التالية</Link> : null}
