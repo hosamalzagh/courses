@@ -21,8 +21,11 @@ final class StudentFinancialEvents
                     ->where('event.kind', 'reversal')->where('correction.kind', 'settlement');
             })
             ->where('event.student_id', $studentId)
-            ->when($readable !== null, fn (Builder $query) => $query->whereIn('event.branch_id', $readable))
-            ->selectRaw("'fee_adjustment'::text AS event_type, event.id AS event_id, event.branch_id, event.branch_id AS related_branch_id, NULL::bigint AS second_related_branch_id, NULL::uuid AS payment_id, event.fee_id, event.before_due::text AS amount_before, event.after_due::text AS amount_after, event.reason, event.actor_name, event.created_at, COALESCE(event.reverses_id, event.replaces_id) AS original_id, COALESCE(successor.id, correction.id) AS replacement_id, NULL::jsonb AS related_branch_ids");
+            ->when($readable !== null, fn (Builder $query) => $query->whereIn('event.branch_id', $readable)
+                ->whereNotExists($db->table('study_fee_adjustment_related_branches as related')
+                    ->whereColumn('related.adjustment_id', 'event.id')
+                    ->whereNotIn('related.branch_id', $readable)->selectRaw('1')))
+            ->selectRaw("'fee_adjustment'::text AS event_type, event.id AS event_id, event.branch_id, event.branch_id AS related_branch_id, NULL::bigint AS second_related_branch_id, NULL::uuid AS payment_id, event.fee_id, event.before_due::text AS amount_before, event.after_due::text AS amount_after, event.reason, event.actor_name, event.created_at, COALESCE(event.reverses_id, event.replaces_id) AS original_id, COALESCE(successor.id, correction.id) AS replacement_id, (SELECT COALESCE(jsonb_agg(related.branch_id), '[]'::jsonb) FROM study_fee_adjustment_related_branches AS related WHERE related.adjustment_id = event.id) AS related_branch_ids");
 
         $refund = $db->table('student_refunds as event')->where('event.student_id', $studentId)
             ->when($readable !== null, fn (Builder $query) => $query->whereIn('event.branch_id', $readable))

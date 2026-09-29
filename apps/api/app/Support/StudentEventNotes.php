@@ -80,7 +80,10 @@ final class StudentEventNotes
                     $event->where('notes.event_type', 'fee_adjustment')
                         ->whereColumn('fee_adjustment.student_id', 'notes.student_id')
                         ->whereColumn('fee_adjustment.branch_id', 'notes.branch_id')
-                        ->when($finance !== null, fn (Builder $rows) => $rows->whereIn('notes.branch_id', $finance));
+                        ->when($finance !== null, fn (Builder $rows) => $rows->whereIn('notes.branch_id', $finance)
+                            ->whereNotExists(DB::connection('tenant')->table('study_fee_adjustment_related_branches as related')
+                                ->whereColumn('related.adjustment_id', 'fee_adjustment.id')
+                                ->whereNotIn('related.branch_id', $finance)->selectRaw('1')));
                 })->orWhere(function (Builder $event) use ($finance): void {
                     $event->where('notes.event_type', 'refund')
                         ->whereColumn('refund.student_id', 'notes.student_id')

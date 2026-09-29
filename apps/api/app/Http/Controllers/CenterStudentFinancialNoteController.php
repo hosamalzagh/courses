@@ -272,7 +272,7 @@ class CenterStudentFinancialNoteController extends Controller
                 $event->related_branch_id, $event->second_related_branch_id,
             ]))));
         }
-        if ($type === 'payment_correction') {
+        if ($type === 'payment_correction' || $type === 'fee_adjustment') {
             return array_map('intval', json_decode($event->related_branch_ids ?? '[]', true) ?? []);
         }
 

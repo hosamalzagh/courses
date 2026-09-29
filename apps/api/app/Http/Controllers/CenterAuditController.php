@@ -78,10 +78,16 @@ class CenterAuditController extends Controller
                 'student.allocation_note_created', 'student.allocation_note_updated',
                 'student.allocation_correction_note_created', 'student.allocation_correction_note_updated',
                 'student.payment_correction_note_created', 'student.payment_correction_note_updated',
+                'student.fee_adjustment_note_created', 'student.fee_adjustment_note_updated',
                 'student.fee_settled', 'student.fee_settlement_corrected'])
             ->orWhereNull('details->related_branch_ids')
             ->orWhereRaw("(details->'related_branch_ids')::jsonb <@ ?::jsonb",
                 [json_encode(array_map('intval', $financialBranches))]));
+        // Notes written before related_branch_ids were recorded still need the fee adjustment's source scope.
+        $query->whereNotExists(DB::connection('tenant')->table('study_fee_adjustment_related_branches as related')
+            ->whereIn('center_audit_logs.event', ['student.fee_adjustment_note_created', 'student.fee_adjustment_note_updated'])
+            ->whereRaw("related.adjustment_id::text = center_audit_logs.details->>'event_id'")
+            ->whereNotIn('related.branch_id', $financialBranches)->selectRaw('1'));
     }
 
     public static function redactCopySources(Collection $entries, CenterPermissions $permissions): Collection
