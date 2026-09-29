@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 
-test.skip(!process.env.COURSES_TRANSFER_CREDENTIALS || !process.env.COURSES_TRANSFER_QUERY_LOG,
+test.skip(!process.env.COURSES_TRANSFER_CREDENTIALS || !process.env.COURSES_TRANSFER_QUERY_LOG || !process.env.COURSES_TRANSFER_DB_PORT,
   'Requires the disposable center and SSR query log.');
 test.setTimeout(120_000);
 const origin = process.env.COURSES_TRANSFER_ORIGIN ?? 'http://alpha.courses.test:8658';
@@ -39,6 +40,8 @@ test('books makeup without granting coverage and hides the attempt from unauthor
   const staff = await browser.newPage();
   try {
     await signIn(owner, 'alpha');
+    const centerId = (await (await owner.request.get(`${origin}/api/v1/center/student-workspace`)).json()).center.id as string;
+    expect(centerId).toMatch(/^[a-f0-9-]{36}$/);
     const stamp = Date.now();
     const branch = await write(owner, 'branches', { name: `Makeup branch ${stamp}`, slug: `makeup-${stamp}` });
     expect(branch.status).toBe(201);
@@ -75,7 +78,8 @@ test('books makeup without granting coverage and hides the attempt from unauthor
     const enrollments = await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
     const enrolled = await write(owner, `students/${studentId}/enrollments`, {
       group_id: source.id, group_revision: source.revision, currency_revision: enrollments.student.currency_revision,
-      joined_on: new Date().toISOString().slice(0, 10), discount: '0.00', discount_reason: null,
+      joined_on: new Date(Date.now() - 3 * 86_400_000).toLocaleDateString('sv-SE', { timeZone: 'Africa/Cairo' }),
+      discount: '0.00', discount_reason: null,
       version: enrollments.student.version, request_id: crypto.randomUUID(),
     });
     expect(enrolled.status).toBe(201);
@@ -113,6 +117,35 @@ test('books makeup without granting coverage and hides the attempt from unauthor
     const roster = await owner.request.get(`${origin}/api/v1/center/groups/${target.id}/sessions/${sessionId}/attendance`);
     expect(Number(roster.headers()['x-courses-query-count'])).toBeLessThanOrEqual(6);
     expect((await roster.json()).students[0]).toMatchObject({ attempt_id: attemptId, status: null });
+    expect(sessionId).toMatch(/^[a-f0-9-]{36}$/);
+    expect(target.id).toMatch(/^[a-f0-9-]{36}$/);
+    expect((await write(owner, `groups/${target.id}/start`, { revision: session.body.group_revision })).status).toBe(200);
+    execFileSync('psql', ['-h', '127.0.0.1', '-p', process.env.COURSES_TRANSFER_DB_PORT!, '-U', 'postgres',
+      '-d', `courses_center_${centerId}`, '-c',
+      `UPDATE study_groups SET started_at = now() - interval '2 days' WHERE id = '${target.id}'; UPDATE study_sessions SET scheduled_at = now() - interval '1 day' WHERE id = '${sessionId}'`], { stdio: 'ignore' });
+    expect((await write(owner, `groups/${target.id}/sessions/${sessionId}/close`, {
+      revision: session.body.sessions[0].revision, request_id: crypto.randomUUID(),
+    })).status).toBe(200);
+    const attempt = (await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json()).attempts[0];
+    expect((await write(owner, `students/${studentId}/enrollments/${attemptId}/withdraw`, {
+      withdrawn_on: new Date().toLocaleDateString('sv-SE', { timeZone: 'Africa/Cairo' }),
+      revision: attempt.revision, reason: 'انسحاب بعد محاضرة التعويض', request_id: crypto.randomUUID(),
+    })).status).toBe(200);
+    await owner.goto(`${origin}/admin/students/${studentId}/enrollments`);
+    await expect(owner.locator(`[id$="-makeup-${attemptId}"]`)).toBeVisible();
+    await owner.locator(`[id$="-makeup-${attemptId}"]`).click();
+    const historical = owner.getByRole('region', { name: 'حضور التعويض' });
+    const historicalProof = historical.locator(`[id$="-select-${sessionId}"]`);
+    await expect(historicalProof).toBeVisible();
+    const historicalOptions = await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/makeup`)).json();
+    expect(historicalOptions.sessions[0]).toMatchObject({ id: sessionId, can_book: false, can_prove: true });
+    await historicalProof.click();
+    await historical.getByLabel('سبب إثبات الحضور بعد الإغلاق').fill('إثبات حضور سابق للانسحاب');
+    await owner.getByRole('button', { name: 'حفظ إثبات التعويض' }).click();
+    await expect(historical.getByText('ثُبت حضور التعويض في المحاضرة المغلقة مع السبب وسجل التدقيق.')).toBeVisible();
+    const completed = await owner.request.get(`${origin}/api/v1/center/groups/${source.id}/coverage`);
+    expect(Number(completed.headers()['x-courses-query-count'])).toBeLessThanOrEqual(6);
+    expect((await completed.json()).students[0].covered_count).toBe(1);
     await signIn(staff, 'staff');
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/makeup`)).status()).toBe(404);
   } finally { await owner.close(); await staff.close(); }

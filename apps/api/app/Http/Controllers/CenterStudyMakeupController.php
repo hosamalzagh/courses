@@ -72,9 +72,13 @@ class CenterStudyMakeupController extends Controller
                 ...array_diff_key((array) $session, ['source_branch_id' => true]),
                 'source_session_id' => $session->source_branch_id !== null
                     && $permissions->can('read', (int) $session->source_branch_id) ? $session->source_session_id : null,
-                'can_book' => $permissions->can('attendance.record', (int) $session->branch_id)
+                'can_book' => $attempt->status !== 'withdrawn' && $attempt->student_status === 'active'
+                    && $permissions->can('attendance.record', (int) $session->branch_id)
                     && new DateTimeImmutable($session->scheduled_at) > now()->toImmutable(),
-                'can_prove' => $permissions->can('attendance.correct', (int) $session->branch_id),
+                'can_prove' => $attempt->student_status === 'active'
+                    && ($attempt->withdrawn_on === null || $attempt->withdrawn_on > (new DateTimeImmutable($session->scheduled_at))
+                        ->setTimezone(new DateTimeZone('Africa/Cairo'))->format('Y-m-d'))
+                    && $permissions->can('attendance.correct', (int) $session->branch_id),
             ])->values(),
             'pagination' => ['page' => $page, 'has_more' => $sessions->count() > 20]])
             ->header('Cache-Control', 'private, no-store');

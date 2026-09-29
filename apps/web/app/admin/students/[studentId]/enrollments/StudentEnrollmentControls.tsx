@@ -296,7 +296,7 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
             {canManageAttempt ? <Button id={`${prefix}-transfer-history-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
               transferHistoryOpener.current = event.currentTarget.id; setOpenTransferId(null); setOpenTransferHistoryId(row.id);
             }}>سجل النقل</Button> : null}
-            {canManageAttempt && row.status !== "withdrawn" ? <Button id={`${prefix}-makeup-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
+            {canManageAttempt ? <Button id={`${prefix}-makeup-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {
               makeupOpener.current = event.currentTarget.id; setOpenTransferId(null); setOpenTransferHistoryId(null); setOpenMakeupId(row.id);
             }}>حضور التعويض</Button> : null}
             {canManageAttempt && row.status === "active" ? <Button id={`${prefix}-waitlist-${row.id}`} type="button" disabled={busy || dirty} onClick={event => {

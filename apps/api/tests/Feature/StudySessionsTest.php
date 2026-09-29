@@ -1453,6 +1453,9 @@ class StudySessionsTest extends TestCase
             'withdrawn_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'انسحاب بعد التعويض',
             'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
         ])->assertOk();
+        $this->getJson($makeupPath)->assertOk()
+            ->assertJsonPath('sessions.0.can_book', false)
+            ->assertJsonPath('sessions.0.can_prove', true);
         $attendance = "{$this->base}/groups/{$target['id']}/sessions/{$session['id']}/attendance";
         $this->assertContains($attempt['id'], array_column($this->getJson($attendance)
             ->assertOk()->json('students'), 'attempt_id'));
