@@ -33,7 +33,7 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
   return <CenterPage context={context} path={`/admin/students/${studentId}`}>
     <StudentProfileActions context={context} tab={tab} />
     <StudentSharingControls student={student} inHeader />
-    <StudentStatusPanel context={context} tab={tab} />
+    <StudentStatusPanel context={context} query={query} />
     <Link href='/admin/students'>العودة إلى ملفات الطلاب</Link>
     <section className='context-card form-stack student-summary' aria-label='ملخص الطالب'>
       {student.photo ? <Image src={student.photo.preview} alt={`صورة ${student.name}`} width={96} height={96} unoptimized className='rounded-lg object-cover' /> : <p>لم تُضف صورة للطالب بعد.</p>}

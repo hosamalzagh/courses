@@ -2,12 +2,16 @@ import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import type { StudentContext } from '@/lib/server-context';
 import { StudentStatusControls } from './StudentStatusControls';
 
-export function StudentStatusPanel({ context, tab }: { context: StudentContext; tab?: string }) {
+export function StudentStatusPanel({ context, query }: { context: StudentContext; query?: string }) {
   const student = context.students[0];
   if (!student) return null;
   const date = (value: string) => new Date(value).toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' });
   const pagination = context.status_pagination;
-  const statusHref = (page: number) => `/admin/students/${student.id}?${tab ? `tab=${encodeURIComponent(tab)}&` : ''}status_page=${page}`;
+  const statusHref = (page: number) => {
+    const params = new URLSearchParams(query);
+    params.set('status_page', String(page));
+    return `/admin/students/${student.id}?${params}`;
+  };
   return <section className='context-card form-stack' aria-labelledby='student-status-title'>
     <h2 id='student-status-title'>حالة ملف الطالب: {student.status === 'active' ? 'نشط' : 'موقوف'}</h2>
     {student.can_change_status ? <StudentStatusControls student={student} /> : <p className='muted'>تغيير الحالة متاح لمالك المركز ومسؤول المركز فقط.</p>}
