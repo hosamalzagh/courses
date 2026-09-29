@@ -202,6 +202,16 @@ class CenterGroupRequirementController extends Controller
             abort_unless($row, 404);
             $requirement = $active->firstWhere('id', $row->group_requirement_id);
             abort_unless($requirement, 409, 'متطلب المحاضرة لم يعد معتمدًا.');
+            $creditId = $requirement->plan_lecture_id ?? $requirement->id;
+            $openSnapshot = $db->table('study_attempt_waitlists as waitlists')
+                ->join('study_attempts as attempts', 'attempts.id', '=', 'waitlists.attempt_id')
+                ->join('study_attempt_group_periods as periods', 'periods.id', '=', 'waitlists.origin_period_id')
+                ->where('waitlists.from_group_id', $group->id)->whereNull('waitlists.left_on')
+                ->where('attempts.status', 'active')
+                ->whereRaw('periods.required_credit_ids @> ?::jsonb', [json_encode([$creditId])])->exists();
+            if ($openSnapshot) {
+                $this->conflict('waitlisted_requirement_snapshot_exists');
+            }
             $hasAttendance = $db->table('study_attendance_entries')->where('session_id', $row->id)->exists();
             $hasTeaching = $db->table('study_session_teaching_segments')->where('session_id', $row->id)->exists();
             $hasReplacement = $db->table('study_sessions')->where('replaces_session_id', $row->id)->exists();

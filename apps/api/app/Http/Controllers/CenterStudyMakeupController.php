@@ -274,8 +274,14 @@ class CenterStudyMakeupController extends Controller
             ->selectRaw('(SELECT row_to_json(origin) FROM (SELECT waitlists.from_group_id, periods.required_credit_ids
                 FROM study_attempt_waitlists AS waitlists
                 JOIN study_attempt_group_periods AS periods ON periods.id = waitlists.origin_period_id
-                WHERE waitlists.attempt_id = attempts.id AND waitlists.left_on IS NULL
-                ORDER BY waitlists.created_at DESC, waitlists.id DESC LIMIT 1) AS origin) AS waitlist_origin');
+                WHERE waitlists.attempt_id = attempts.id
+                ORDER BY waitlists.entry_revision DESC NULLS LAST, waitlists.entered_on DESC,
+                    waitlists.created_at DESC, waitlists.id DESC LIMIT 1) AS origin) AS waitlist_origin')
+            ->selectRaw('(SELECT periods.required_credit_ids FROM study_attempt_group_periods AS periods
+                WHERE periods.attempt_id = attempts.id AND periods.group_id = attempts.current_group_id
+                    AND periods.left_on IS NOT NULL
+                ORDER BY periods.left_on DESC, periods.created_at DESC, periods.id DESC LIMIT 1)
+                AS closed_period_requirements');
         if ($lock) {
             $query->lock('FOR UPDATE OF students, attempts');
         }
@@ -343,13 +349,16 @@ class CenterStudyMakeupController extends Controller
         $origin = $attempt->current_group_id === null && $attempt->waitlist_origin !== null
             ? json_decode($attempt->waitlist_origin, true) : null;
         $requiredGroupId = $attempt->current_group_id ?? ($origin['from_group_id'] ?? null);
-        $requirements = $attempt->current_group_id === null
+        $requirements = $attempt->status === 'withdrawn' && $attempt->current_group_id !== null
+            && $attempt->closed_period_requirements !== null
+            ? json_decode($attempt->closed_period_requirements, true)
+            : ($attempt->current_group_id === null
             ? ($origin['required_credit_ids'] ?? DB::connection('tenant')->table('plan_lectures')
                 ->where('plan_version_id', $attempt->plan_version_id)->pluck('id')->all())
             : DB::connection('tenant')->table('study_group_requirements')
                 ->where('group_id', $attempt->current_group_id)->whereNull('retired_at')
                 ->get(['id', 'plan_lecture_id'])
-                ->map(fn (object $row): string => $row->plan_lecture_id ?? $row->id)->all();
+                ->map(fn (object $row): string => $row->plan_lecture_id ?? $row->id)->all());
         $attendance = DB::connection('tenant')->table('study_attendance_entries as entries')
             ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
             ->where('entries.attempt_id', $attempt->id)->where('entries.status', 'counted')

@@ -493,8 +493,13 @@ class StudySessionsTest extends TestCase
         };
         $sourceAdded = $add($source, 'مصدر التعويض');
         $targetAdded = $add($target, 'بديل التعويض');
+        $sourceSession = $this->postJson("{$this->base}/groups/{$source['id']}/sessions", [
+            'kind' => 'single', 'revision' => $sourceAdded['group_revision'],
+            'start_at' => now('Africa/Cairo')->addDays(5)->setTime(16, 0)->format('Y-m-d\\TH:i'),
+            'plan_lecture_number' => 2, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
         $student = $this->student();
-        $this->enroll($student['id'], [...$source, 'revision' => $sourceAdded['group_revision']],
+        $this->enroll($student['id'], [...$source, 'revision' => $sourceAdded['group_revision'] + 1],
             now('Africa/Cairo')->toDateString());
         $attemptPath = "{$this->base}/students/{$student['id']}/enrollments";
         $attempt = $this->getJson($attemptPath)->assertOk()->assertJsonPath('attempts.0.requirements_count', 2)
@@ -515,6 +520,10 @@ class StudySessionsTest extends TestCase
                 ->value('required_credit_ids');
             $this->assertContains($sourceAdded['requirement']['id'], json_decode($snapshot, true));
         });
+        $reduce = ['kind' => 'reduce', 'session_id' => $sourceSession['id'],
+            'decision' => 'none', 'reason' => 'محاولة خفض متطلب لا يزال محفوظًا في الانتظار'];
+        $this->postJson("{$this->base}/groups/{$source['id']}/requirements/preview", $reduce)
+            ->assertConflict()->assertJsonPath('code', 'waitlisted_requirement_snapshot_exists');
         $makeup = "{$attemptPath}/{$attempt['id']}/makeup";
         $booking = ['session_id' => $scheduled['id'], 'attempt_revision' => $waiting['revision'],
             'session_revision' => $scheduled['revision'], 'request_id' => (string) Str::uuid()];
@@ -523,7 +532,7 @@ class StudySessionsTest extends TestCase
         $this->postJson($equivalencePath, [
             'required_requirement_id' => $sourceAdded['requirement']['id'],
             'candidate_requirement_id' => $targetAdded['requirement']['id'],
-            'required_group_revision' => $sourceAdded['group_revision'],
+            'required_group_revision' => $sourceAdded['group_revision'] + 1,
             'candidate_group_revision' => $targetAdded['group_revision'] + 1,
             'reason' => 'المحتوى البديل معتمد صراحة', 'request_id' => (string) Str::uuid(),
         ])->assertCreated();
@@ -532,6 +541,23 @@ class StudySessionsTest extends TestCase
         $this->postJson("{$makeup}/book", $booking)->assertCreated();
         $this->center->run(fn () => $this->assertCount(2, json_decode(DB::table('study_attempt_group_periods')
             ->where('attempt_id', $attempt['id'])->value('required_credit_ids'), true)));
+        $this->travelTo(now('Africa/Cairo')->addDays(4));
+        $this->center->run(fn () => DB::table('study_sessions')->where('id', $scheduled['id'])->update([
+            'status' => 'held', 'closed_at' => now(), 'closed_by' => $this->owner->id,
+            'revision' => DB::raw('revision + 1'),
+        ]));
+        $this->postJson("{$attemptPath}/{$attempt['id']}/withdraw", [
+            'withdrawn_on' => now('Africa/Cairo')->toDateString(),
+            'reason' => 'انسحاب من الانتظار بعد موعد التعويض', 'revision' => $waiting['revision'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $withdrawn = $this->getJson($attemptPath)->assertOk()
+            ->assertJsonPath('attempts.0.requirements_count', 2)->json('attempts.0');
+        $this->postJson("{$makeup}/prove", [
+            'session_id' => $scheduled['id'], 'attempt_revision' => $withdrawn['revision'],
+            'session_revision' => $scheduled['revision'] + 1,
+            'reason' => 'إثبات تعويض سابق للانسحاب', 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
     }
 
     public function test_final_reduction_rejects_a_booked_makeup_session_without_partial_changes(): void
@@ -2118,6 +2144,15 @@ class StudySessionsTest extends TestCase
             'withdrawn_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'انسحاب بعد التعويض',
             'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
         ])->assertOk();
+        $extra = ['kind' => 'add', 'content' => 'محاضرة بعد انسحاب الطالب',
+            'reason' => 'تغيير المجموعة بعد مغادرة الطالب'];
+        $extraPath = "{$this->base}/groups/{$source['id']}/requirements";
+        $preview = $this->postJson("{$extraPath}/preview", $extra)->assertOk()->json();
+        $this->postJson($extraPath, [...$extra, 'group_revision' => $preview['group_revision'],
+            'preview_token' => $preview['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->getJson("{$this->base}/students/{$student['id']}/enrollments")
+            ->assertOk()->assertJsonPath('attempts.0.requirements_count', 1);
         $this->getJson($makeupPath)->assertOk()
             ->assertJsonPath('sessions.0.can_book', false)
             ->assertJsonPath('sessions.0.can_prove', true);

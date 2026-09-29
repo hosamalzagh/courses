@@ -11,6 +11,7 @@ use App\Support\EffectiveStudyFees;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
+use App\Support\StudyPeriodRequirements;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
@@ -283,7 +284,7 @@ class CenterStudyEnrollmentController extends Controller
             }
             abort_if($data['withdrawn_on'] < $attempt->joined_on, 422, 'تاريخ الانسحاب يسبق تاريخ الانضمام.');
             $period = DB::connection('tenant')->table('study_attempt_group_periods')
-                ->where('attempt_id', $attemptId)->whereNull('left_on')->lockForUpdate()->first(['id', 'joined_on']);
+                ->where('attempt_id', $attemptId)->whereNull('left_on')->lockForUpdate()->first(['id', 'group_id', 'joined_on']);
             $waitlist = $attempt->current_group_id === null ? DB::connection('tenant')->table('study_attempt_waitlists')
                 ->where('attempt_id', $attemptId)->whereNull('left_on')->lockForUpdate()->first(['id', 'entered_on', 'from_group_id']) : null;
             abort_unless(($period && $attempt->current_group_id !== null) || $waitlist, 409, 'تغير ارتباط المحاولة بالمجموعة.');
@@ -298,7 +299,7 @@ class CenterStudyEnrollmentController extends Controller
             abort_if($laterAttendance, 422, 'تاريخ الانسحاب يسبق حضورًا مسجلًا أو يوافق يومه.');
             $now = now();
             if ($period) {
-                DB::connection('tenant')->table('study_attempt_group_periods')->where('id', $period->id)->update(['left_on' => $data['withdrawn_on']]);
+                StudyPeriodRequirements::close($period->id, $period->group_id, $data['withdrawn_on']);
             } else {
                 DB::connection('tenant')->table('study_attempt_waitlists')->where('id', $waitlist->id)->update([
                     'left_on' => $data['withdrawn_on'], 'left_by' => $request->user()->id,
@@ -368,9 +369,18 @@ CASE WHEN study_attempts.current_group_id IS NULL
     THEN COALESCE((SELECT jsonb_array_length(periods.required_credit_ids)
         FROM study_attempt_waitlists AS waitlists
         JOIN study_attempt_group_periods AS periods ON periods.id = waitlists.origin_period_id
-        WHERE waitlists.attempt_id = study_attempts.id AND waitlists.left_on IS NULL
-        ORDER BY waitlists.created_at DESC, waitlists.id DESC LIMIT 1),
+        WHERE waitlists.attempt_id = study_attempts.id
+        ORDER BY waitlists.entry_revision DESC NULLS LAST, waitlists.entered_on DESC,
+            waitlists.created_at DESC, waitlists.id DESC LIMIT 1),
         (SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id))
+    WHEN study_attempts.status = 'withdrawn'
+    THEN COALESCE((SELECT jsonb_array_length(periods.required_credit_ids)
+        FROM study_attempt_group_periods AS periods
+        WHERE periods.attempt_id = study_attempts.id
+            AND periods.group_id = study_attempts.current_group_id AND periods.left_on IS NOT NULL
+        ORDER BY periods.left_on DESC, periods.created_at DESC, periods.id DESC LIMIT 1),
+        (SELECT count(*) FROM study_group_requirements AS requirements
+            WHERE requirements.group_id = study_attempts.current_group_id AND requirements.retired_at IS NULL))
     ELSE (SELECT count(*) FROM study_group_requirements AS requirements
         WHERE requirements.group_id = study_attempts.current_group_id AND requirements.retired_at IS NULL)
 END AS requirements_count
