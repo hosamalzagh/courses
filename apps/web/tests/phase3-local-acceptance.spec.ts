@@ -91,12 +91,15 @@ test("one student's academic, finance, permission and tenant history stays linke
   const beta = await browser.newPage();
   try {
     await signIn(owner, "alpha");
-    await signIn(staff, "staff");
-    await signIn(beta, "beta");
     const workspace = (await read(owner, "student-workspace")).body;
     const centerId = workspace.center.id as string;
     const north = workspace.branches.find((branch: { slug: string }) => branch.slug === "north").id as number;
     const south = workspace.branches.find((branch: { slug: string }) => branch.slug === "south").id as number;
+    expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, {
+      center_roles: [], branch_roles: { [north]: ["registration"] },
+    }, "PUT")).status).toBe(200);
+    await signIn(staff, "staff");
+    await signIn(beta, "beta");
     const label = `رحلة قبول ${crypto.randomUUID().slice(0, 6)}`;
 
     const course = await write(owner, "courses", { branch_id: north, name: label, request_id: crypto.randomUUID() });
