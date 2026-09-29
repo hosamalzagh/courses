@@ -143,6 +143,9 @@ class InstructorProfilesTest extends TestCase
                 (require $migration)->down();
                 DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
             }
+            $completionMigration = glob(database_path('migrations/tenant/*_create_study_completion_decisions.php'))[0];
+            (require $completionMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($completionMigration, PATHINFO_FILENAME))->delete();
             $waitlistMigration = glob(database_path('migrations/tenant/*_create_study_attempt_waitlists.php'))[0];
             (require $waitlistMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($waitlistMigration, PATHINFO_FILENAME))->delete();

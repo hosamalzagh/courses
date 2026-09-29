@@ -2073,6 +2073,11 @@ class StudyEnrollmentTest extends TestCase
         $staleChange = ['attempt_ids' => [$attempt['id']], 'reason' => 'رفع الحد بعد نقل التغطية'];
         $staleImpact = $this->postJson("{$thresholdPath}/preview", $staleChange)->assertOk()
             ->assertJsonPath('students.0.covered_count', 1)->json();
+        $this->center->run(fn () => DB::table('study_groups')->where('id', $target['id'])->update(['status' => 'started']));
+        $completion = ['complete_group' => true, 'decisions' => [['attempt_id' => $attempt['id']]]];
+        $this->postJson("{$this->base}/groups/{$target['id']}/completion-preview", $completion)
+            ->assertOk()->assertJsonPath('students.0.covered_count', 1)
+            ->assertJsonPath('students.0.exceptional', false);
         $sourceSessionPath = "{$this->base}/groups/{$source['id']}/sessions/{$sessionId}";
         $revokePreview = $this->getJson("{$sourceSessionPath}/revoke-preview")->assertOk()
             ->assertJsonPath('attendance.potential_coverage_records', 1)->json();
@@ -2087,6 +2092,8 @@ class StudyEnrollmentTest extends TestCase
             ->assertConflict()->assertJsonPath('code', 'threshold_preview_changed');
         $this->getJson("{$this->base}/groups/{$target['id']}/coverage")
             ->assertOk()->assertJsonPath('students.0.covered_count', 0);
+        $this->postJson("{$this->base}/groups/{$target['id']}/completion-preview", $completion)
+            ->assertConflict()->assertJsonPath('code', 'completion_exception_reason_required');
         $this->center->run(function () use ($attempt, $target): void {
             $this->assertSame(1, DB::table('study_attempt_transfers')->where('attempt_id', $attempt['id'])->count());
             $this->assertSame(1, DB::table('study_attempt_fees')->where('attempt_id', $attempt['id'])->count());

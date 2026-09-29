@@ -8,6 +8,7 @@ import { CurriculumAuditDetails } from "@/components/CurriculumAuditDetails";
 import { StudentFinanceAuditDetails } from "@/components/StudentFinanceAuditDetails";
 import { StudentEventNoteAuditDetails } from "@/components/StudentEventNoteAuditDetails";
 import { StudySessionAuditDetails } from "@/components/StudySessionAuditDetails";
+import { StudyCompletionAuditDetails } from "@/components/StudyCompletionAuditDetails";
 import { AbsenceAuditDetails } from "@/components/AbsenceAuditDetails";
 import { ContentEquivalenceAuditDetails } from "@/components/ContentEquivalenceAuditDetails";
 import type { AuditEntry, CenterContext } from "@/lib/server-context";
@@ -62,6 +63,7 @@ const eventNames: Record<string, string> = {
   "curriculum.completion_threshold_changed": "تغيير نسبة إتمام المنهج",
   "study_attempts.completion_threshold_applied": "تطبيق نسبة الإتمام على تسجيلات قائمة",
   "study_group.created": "إنشاء مجموعة", "study_group.started": "بدء مجموعة",
+  "study_group.completed": "إكمال مجموعة", "study_attempt.completed": "اعتماد إتمام دراسة طالب",
   "study_group.settings_updated": "تعديل إعدادات مجموعة",
   "study_sessions.scheduled": "جدولة محاضرات مجموعة",
   "study_session.postponed": "تأجيل محاضرة مجموعة",
@@ -86,7 +88,7 @@ export function AuditWorkspace({ context, initialEntries }: { context: CenterCon
     time: new Date(entry.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" }),
     createdAt: entry.created_at, branch: entry.branch_id !== null,
     search: `${eventNames[entry.event] ?? entry.event} ${entry.branch_id ?? ""} ${entry.actor_id ?? ""}`,
-    details: <><GrantAuditDetails entry={entry} /><StudentAuditDetails entry={entry} /><StudentFinanceAuditDetails entry={entry} /><StudentEventNoteAuditDetails entry={entry} /><InstructorAuditDetails entry={entry} /><StudentSearchAuditDetails entry={entry} /><StudentNumberingAuditDetails entry={entry} /><CurriculumAuditDetails entry={entry} /><ContentEquivalenceAuditDetails entry={entry} /><StudySessionAuditDetails entry={entry} /><AbsenceAuditDetails entry={entry} /></>,
+    details: <><GrantAuditDetails entry={entry} /><StudentAuditDetails entry={entry} /><StudentFinanceAuditDetails entry={entry} /><StudentEventNoteAuditDetails entry={entry} /><InstructorAuditDetails entry={entry} /><StudentSearchAuditDetails entry={entry} /><StudentNumberingAuditDetails entry={entry} /><CurriculumAuditDetails entry={entry} /><ContentEquivalenceAuditDetails entry={entry} /><StudySessionAuditDetails entry={entry} /><StudyCompletionAuditDetails entry={entry} /><AbsenceAuditDetails entry={entry} /></>,
   }));
   return <CenterPage context={context} path="/admin/audit"><AuditControls rows={rows} /></CenterPage>;
 }

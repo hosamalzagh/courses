@@ -24,7 +24,7 @@ class CenterStudyCoverageController extends Controller
             ->join('stages', 'stages.id', '=', 'levels.stage_id')
             ->join('courses', 'courses.id', '=', 'stages.course_id')
             ->where('groups.id', $groupId)
-            ->select(['groups.id', 'groups.name', 'groups.status', 'groups.plan_version_id', 'courses.branch_id'])
+            ->select(['groups.id', 'groups.name', 'groups.status', 'groups.revision', 'groups.plan_version_id', 'courses.branch_id'])
             ->selectRaw('COALESCE(groups.completion_threshold, levels.completion_threshold, stages.completion_threshold, courses.completion_threshold) AS completion_threshold')
             ->selectRaw("COALESCE((SELECT json_agg(json_build_object('id', id, 'number', number, 'title', title, 'content', content) ORDER BY number) FROM plan_lectures WHERE plan_version_id = groups.plan_version_id), '[]'::json) AS requirements")
             ->first();
@@ -37,11 +37,13 @@ class CenterStudyCoverageController extends Controller
         $page = (int) ($data['page'] ?? 1);
         $students = DB::connection('tenant')->table('study_attempts as attempts')
             ->join('students', 'students.id', '=', 'attempts.student_id')
+            ->leftJoin('study_attempt_completion_decisions as decisions', 'decisions.attempt_id', '=', 'attempts.id')
             ->where('attempts.current_group_id', $groupId)
             ->where('attempts.plan_version_id', $group->plan_version_id)
             ->select(['attempts.id as attempt_id', 'attempts.status as attempt_status', 'attempts.joined_on',
                 'attempts.completion_threshold',
-                'students.id as student_id', 'students.name', 'students.student_number', 'students.status as student_status'])
+                'students.id as student_id', 'students.name', 'students.student_number', 'students.status as student_status',
+                'decisions.approved_at', 'decisions.exceptional', 'decisions.reason as completion_reason'])
             ->selectRaw(<<<'SQL'
 COALESCE((SELECT json_agg(json_build_object('id', lectures.id, 'final', sessions.closed_at IS NOT NULL))
     FROM study_attendance_entries AS entries
@@ -90,6 +92,8 @@ SQL);
                 'required_count' => $requiredCount,
                 'percentage' => $requiredCount === 0 ? 0 : round($coveredCount * 100 / $requiredCount, 2),
                 'eligible' => $requiredCount > 0 && $coveredCount * 100 >= (int) $row->completion_threshold * $requiredCount,
+                'approved_at' => $row->approved_at, 'exceptional' => $row->exceptional,
+                'completion_reason' => $row->completion_reason,
             ];
         });
 
@@ -99,6 +103,8 @@ SQL);
             'center' => $request->attributes->get('center')->only(['id', 'name', 'slug']),
             'permissions' => $permissions->toArray(),
             'group' => ['id' => $group->id, 'name' => $group->name, 'status' => $group->status,
+                'revision' => (int) $group->revision,
+                'can_complete' => $permissions->can('study.complete', (int) $group->branch_id),
                 'branch_id' => $group->branch_id, 'completion_threshold' => $threshold,
                 'required_count' => $requiredCount, 'requirements' => $requirements],
             'students' => $report->values(),
