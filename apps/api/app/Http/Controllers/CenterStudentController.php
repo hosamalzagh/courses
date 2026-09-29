@@ -162,7 +162,7 @@ class CenterStudentController extends Controller
             $readableBranches = $permissions->isCenterManager() ? null : $this->branchScope($permissions, 'read');
             $currentPeriod = '(SELECT current_period.id FROM study_attempt_group_periods AS current_period WHERE current_period.attempt_id = attempts.id AND current_period.group_id = attempts.current_group_id ORDER BY current_period.joined_on DESC, current_period.created_at DESC LIMIT 1)';
             $waitlistOriginPeriod = '(SELECT origin.id FROM study_attempt_waitlists AS study_waitlists JOIN study_attempt_group_periods AS origin ON origin.attempt_id = study_waitlists.attempt_id AND origin.group_id = study_waitlists.from_group_id AND origin.left_on = study_waitlists.entered_on WHERE study_waitlists.attempt_id = attempts.id ORDER BY study_waitlists.entered_on DESC, study_waitlists.created_at DESC, origin.created_at DESC, origin.id DESC LIMIT 1)';
-            $terminalPeriod = "(periods.id = {$currentPeriod} OR (attempts.status = 'withdrawn' AND attempts.current_group_id IS NULL AND periods.id = {$waitlistOriginPeriod}))";
+            $terminalPeriod = "(periods.id = {$currentPeriod} OR (attempts.status IN ('active', 'withdrawn') AND attempts.current_group_id IS NULL AND periods.id = {$waitlistOriginPeriod}))";
             $attempts = DB::connection('tenant')->table('study_attempt_group_periods as periods')
                 ->join('study_attempts as attempts', 'attempts.id', '=', 'periods.attempt_id')
                 ->join('study_groups as period_groups', 'period_groups.id', '=', 'periods.group_id')

@@ -281,6 +281,7 @@ class StudyEnrollmentTest extends TestCase
         $firstPage = $this->getJson($path)->assertOk()->assertJsonCount(20, 'study.attempts')
             ->assertJsonPath('study.pagination.has_more', true)
             ->assertJsonPath('study.attempts.0.latest_waitlist.entered_on', $today)
+            ->assertJsonPath('study.attempts.0.status', 'active')
             ->assertJsonPath('study.attempts.1.latest_waitlist', null)
             ->assertJsonPath('study.attempts.1.status', 'transferred');
         $this->assertLessThanOrEqual(6, (int) $firstPage->headers->get('X-Courses-Query-Count'));
