@@ -1367,19 +1367,26 @@ class StudySessionsTest extends TestCase
         $fillerSessionIds = $this->center->run(function () use ($session, $target, $targetAt): array {
             DB::table('study_sessions')->where('id', $session['id'])->update(['title' => 'Unique makeup needle']);
             $template = (array) DB::table('study_groups')->where('id', $target['id'])->first();
+            $requirementTemplate = (array) DB::table('study_group_requirements')
+                ->where('group_id', $target['id'])->where('plan_lecture_id', $session['plan_lecture_id'])->firstOrFail();
             $groups = [];
+            $requirements = [];
             $sessions = [];
             for ($number = 1; $number <= 21; $number++) {
                 $groupId = (string) Str::uuid();
+                $requirementId = (string) Str::uuid();
                 $groups[] = [...$template, 'id' => $groupId, 'name' => "Other makeup group {$number}",
                     'request_id' => (string) Str::uuid()];
+                $requirements[] = [...$requirementTemplate, 'id' => $requirementId, 'group_id' => $groupId];
                 $sessions[] = ['id' => (string) Str::uuid(), 'group_id' => $groupId,
-                    'plan_lecture_id' => $session['plan_lecture_id'], 'number' => 1,
+                    'plan_lecture_id' => $session['plan_lecture_id'], 'group_requirement_id' => $requirementId,
+                    'number' => 1,
                     'title' => "Other lecture {$number}", 'scheduled_at' => $targetAt->copy()->addDays(30 + $number),
                     'status' => 'planned', 'created_by' => $this->owner->id,
                     'created_by_name' => $this->owner->name, 'created_at' => now(), 'updated_at' => now()];
             }
             DB::table('study_groups')->insert($groups);
+            DB::table('study_group_requirements')->insert($requirements);
             DB::table('study_sessions')->insert($sessions);
 
             return array_column($sessions, 'id');

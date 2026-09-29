@@ -2831,8 +2831,11 @@ class StudyEnrollmentTest extends TestCase
         ])->assertCreated();
         $sessionId = (string) Str::uuid();
         $this->center->run(function () use ($makeup, $sourceLecture, $sessionId): void {
+            $requirementId = DB::table('study_group_requirements')->where('group_id', $makeup['id'])
+                ->where('plan_lecture_id', $sourceLecture)->value('id');
             DB::table('study_sessions')->insert([
                 'id' => $sessionId, 'group_id' => $makeup['id'], 'plan_lecture_id' => $sourceLecture,
+                'group_requirement_id' => $requirementId,
                 'number' => 1, 'scheduled_at' => now()->subDay(), 'status' => 'held',
                 'revision' => 2, 'closed_at' => now(), 'closed_by' => $this->owner->id,
                 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
