@@ -13,6 +13,51 @@ use Illuminate\Support\Str;
 
 class CenterGroupRequirementEquivalenceController extends Controller
 {
+    public function historicalRequirements(Request $request, string $groupId): JsonResponse
+    {
+        abort_unless(Str::isUuid($groupId), 404);
+        $data = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'q' => ['nullable', 'string', 'max:100'],
+        ]);
+        $permissions = $request->attributes->get('center_permissions');
+        $group = $this->group($groupId, $permissions);
+        abort_unless($permissions->can('curriculum.manage', (int) $group->branch_id), 403);
+        $page = (int) ($data['page'] ?? 1);
+        $search = trim($data['q'] ?? '');
+        $rows = DB::connection('tenant')->table('study_group_requirements as historical')
+            ->where('historical.group_id', $groupId)
+            ->whereNull('historical.plan_lecture_id')->whereNotNull('historical.retired_at')
+            ->whereExists(function (Builder $query) use ($groupId): void {
+                $query->selectRaw('1')->from('study_attempt_group_periods as periods')
+                    ->join('study_attempts as attempts', 'attempts.id', '=', 'periods.attempt_id')
+                    ->where('periods.group_id', $groupId)->where('attempts.status', 'withdrawn')
+                    ->whereRaw('periods.required_credit_ids @> jsonb_build_array(historical.id)')
+                    ->whereRaw(<<<'SQL'
+COALESCE(attempts.current_group_id, (SELECT waitlists.from_group_id
+    FROM study_attempt_waitlists AS waitlists WHERE waitlists.attempt_id = attempts.id
+    ORDER BY waitlists.entry_revision DESC NULLS LAST, waitlists.entered_on DESC,
+        waitlists.created_at DESC, waitlists.id DESC LIMIT 1)) = ?
+SQL, [$groupId]);
+            })
+            ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $matches) use ($search): void {
+                $matches->where('historical.content', 'ilike', '%'.$search.'%')
+                    ->orWhere('historical.title', 'ilike', '%'.$search.'%');
+                if (ctype_digit($search) && strlen($search) <= 9) {
+                    $matches->orWhere('historical.number', (int) $search);
+                }
+            }))
+            ->select(['historical.id', 'historical.number', 'historical.title', 'historical.content'])
+            ->orderBy('historical.number')->orderBy('historical.id')
+            ->offset(($page - 1) * 20)->limit(21)->get();
+
+        return response()->json(['requirements' => $rows->take(20)->map(fn (object $row): array => [
+            'id' => $row->id, 'plan_lecture_id' => null, 'number' => (int) $row->number,
+            'title' => $row->title, 'content' => $row->content,
+        ]), 'pagination' => ['page' => $page, 'has_more' => $rows->count() > 20]])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
     public function options(Request $request, string $groupId): JsonResponse
     {
         abort_unless(Str::isUuid($groupId), 404);

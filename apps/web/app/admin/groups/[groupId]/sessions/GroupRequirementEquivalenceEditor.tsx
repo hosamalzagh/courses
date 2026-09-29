@@ -15,6 +15,7 @@ import type { SessionContext } from "@/lib/groups";
 type Candidate = { id: string; number: number; content: string; title: string | null;
   group_id: string; group_name: string; group_revision: number;
   approval_id: string | null; approval_revision: number | null };
+type HistoricalRequirement = SessionContext["group"]["historical_requirements"][number];
 type Decision = { kind: "approve" | "revoke"; candidate: Candidate };
 
 export function GroupRequirementEquivalenceEditor({ group, onClose }: {
@@ -22,7 +23,17 @@ export function GroupRequirementEquivalenceEditor({ group, onClose }: {
 }) {
   const formId = useId();
   const busyRef = useRef(false);
+  const historyBusyRef = useRef(false);
+  const historyErrorRef = useRef<HTMLDivElement>(null);
   const [requiredId, setRequiredId] = useState("");
+  const [historical, setHistorical] = useState(group.historical_requirements);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyHasMore, setHistoryHasMore] = useState(group.historical_requirements_has_more);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [retainedHistorical, setRetainedHistorical] = useState<HistoricalRequirement | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [groupRevision, setGroupRevision] = useState(group.revision);
   const [page, setPage] = useState(1);
@@ -35,12 +46,32 @@ export function GroupRequirementEquivalenceEditor({ group, onClose }: {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [conflict, setConflict] = useState(false);
-  const required = [
+  const availableRequired = [
     ...group.requirements.filter(item => item.plan_lecture_id === null).map(item => ({ ...item, historical: false })),
-    ...group.historical_requirements.map(item => ({ ...item, historical: true })),
+    ...historical.map(item => ({ ...item, historical: true })),
   ];
+  const required = retainedHistorical && !availableRequired.some(item => item.id === retainedHistorical.id)
+    ? [...availableRequired, { ...retainedHistorical, historical: true }] : availableRequired;
   const selected = required.find(item => item.id === requiredId);
   const prefix = `groups/${group.id}/requirement-equivalences`;
+
+  const loadHistorical = useCallback(async (nextPage: number, q: string) => {
+    if (historyBusyRef.current) return;
+    historyBusyRef.current = true; setHistoryBusy(true); setHistoryError("");
+    try {
+      const params = new URLSearchParams({ page: String(nextPage) });
+      if (q.trim()) params.set("q", q.trim());
+      const response = await centerRequest(`${prefix}/requirements?${params}`, "GET");
+      if (!response.ok) { setHistoryError(await responseMessage(response)); return; }
+      const result = await response.json() as { requirements: HistoricalRequirement[];
+        pagination: { has_more: boolean } };
+      setHistorical(current => nextPage > 1 ? [...current, ...result.requirements] : result.requirements);
+      setHistoryPage(nextPage); setHistoryHasMore(result.pagination.has_more);
+      if (nextPage === 1) setHistoryQuery(q.trim());
+    } catch { setHistoryError("تعذر تحميل المتطلبات التاريخية. حاول مرة أخرى."); }
+    finally { historyBusyRef.current = false; setHistoryBusy(false); }
+  }, [prefix]);
+  useEffect(() => { if (historyError) historyErrorRef.current?.focus(); }, [historyError]);
 
   const load = useCallback(async (id: string, nextPage: number, q: string) => {
     if (!id || busyRef.current) return;
@@ -92,9 +123,20 @@ export function GroupRequirementEquivalenceEditor({ group, onClose }: {
   return <section className="context-card form-stack" aria-labelledby={`${formId}-heading`}>
     <h2 id={`${formId}-heading`} tabIndex={-1}>اعتماد تكافؤ محاضرتين مضافتين</h2>
     <p>اختر متطلب هذه المجموعة ومحاضرة مضافة من مجموعة أخرى في المستوى نفسه. لا يُحتسب التعويض حتى يعتمد الربط صراحة.</p>
+    {group.historical_requirements.length > 0 ? <>
+      <FormField id={`${formId}-history-search`} label="ابحث عن متطلب تاريخي متقاعد" value={historySearch}
+        onChange={setHistorySearch} disabled={historyBusy} />
+      <CenterHeaderActions>
+        <Button type="button" disabled={historyBusy} onClick={() => void loadHistorical(1, historySearch)}>بحث في المتطلبات التاريخية</Button>
+        {historyHasMore ? <Button type="button" disabled={historyBusy} onClick={() => void loadHistorical(historyPage + 1, historyQuery)}>متطلبات تاريخية أخرى</Button> : null}
+      </CenterHeaderActions>
+      {historyError ? <div ref={historyErrorRef} tabIndex={-1}><InlineNotice tone="error">{historyError}</InlineNotice></div> : null}
+    </> : null}
     <Field><FieldLabel htmlFor={`${formId}-required`}>المتطلب المطلوب من هذه المجموعة</FieldLabel>
       <NativeSelect id={`${formId}-required`} value={requiredId} disabled={busy}
-        onChange={event => { setRequiredId(event.target.value); setSearch(""); setCandidates([]); setDecision(null); setError(""); setNotice(""); }}>
+        onChange={event => { const item = required.find(requirement => requirement.id === event.target.value);
+          setRetainedHistorical(item?.historical ? item as HistoricalRequirement : null);
+          setRequiredId(event.target.value); setSearch(""); setCandidates([]); setDecision(null); setError(""); setNotice(""); }}>
         <NativeSelectOption value="">اختر محاضرة مضافة</NativeSelectOption>
         {required.map(item => <NativeSelectOption key={item.id} value={item.id}>
           {item.number.toLocaleString("ar-EG")} · {item.title || item.content}{item.historical ? " · اعتماد تاريخي" : ""}

@@ -646,6 +646,49 @@ class StudyCoverageTest extends TestCase
             ->assertJsonPath('course.required_levels', 52);
     }
 
+    public function test_historical_group_requirements_are_paged_and_searchable_after_a_frozen_withdrawal(): void
+    {
+        $group = $this->group($this->north, 1);
+        $student = $this->student();
+        $attempt = $this->enroll($student['id'], $group, now('Africa/Cairo')->toDateString());
+        $ids = $this->center->run(function () use ($group): array {
+            $requirements = array_map(fn (int $number): array => [
+                'id' => (string) Str::uuid(), 'group_id' => $group['id'], 'number' => $number,
+                'content' => "Historical requirement {$number}", 'created_at' => now(),
+            ], range(2, 24));
+            DB::table('study_group_requirements')->insert($requirements);
+
+            return array_column($requirements, 'id');
+        });
+        $this->postJson("{$this->base}/students/{$student['id']}/enrollments/{$attempt['id']}/withdraw", [
+            'withdrawn_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'حفظ المتطلبات قبل الإيقاف',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->center->run(function () use ($group, $ids): void {
+            $snapshot = json_decode(DB::table('study_attempt_group_periods')
+                ->where('group_id', $group['id'])->value('required_credit_ids'), true);
+            $this->assertCount(24, $snapshot);
+            foreach ($ids as $id) {
+                $this->assertContains($id, $snapshot);
+            }
+            DB::table('study_group_requirements')->whereIn('id', $ids)->update(['retired_at' => now()]);
+        });
+
+        $sessions = $this->getJson("{$this->base}/groups/{$group['id']}/sessions")->assertOk()
+            ->assertJsonCount(20, 'group.historical_requirements')
+            ->assertJsonPath('group.historical_requirements_has_more', true);
+        $this->assertLessThanOrEqual(6, (int) $sessions->headers->get('X-Courses-Query-Count'));
+        $path = "{$this->base}/groups/{$group['id']}/requirement-equivalences/requirements";
+        $first = $this->getJson($path)->assertOk()->assertJsonCount(20, 'requirements')
+            ->assertJsonPath('pagination.has_more', true);
+        $this->assertLessThanOrEqual(6, (int) $first->headers->get('X-Courses-Query-Count'));
+        $second = $this->getJson("{$path}?page=2")->assertOk()->assertJsonCount(3, 'requirements')
+            ->assertJsonPath('pagination.has_more', false);
+        $this->assertLessThanOrEqual(6, (int) $second->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$path}?q=Historical%20requirement%2023")->assertOk()
+            ->assertJsonCount(1, 'requirements')->assertJsonPath('requirements.0.number', 23);
+    }
+
     private function group(int $branchId, int $lectureCount): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => 'Coverage '.Str::random(5),

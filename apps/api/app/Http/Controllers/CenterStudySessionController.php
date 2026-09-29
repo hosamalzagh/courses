@@ -481,6 +481,7 @@ class CenterStudySessionController extends Controller
 COALESCE((SELECT json_agg(json_build_object('id', historical.id, 'plan_lecture_id', NULL,
     'number', historical.number, 'title', historical.title, 'content', historical.content)
     ORDER BY historical.number)
+    FROM (SELECT historical.id, historical.number, historical.title, historical.content
     FROM study_group_requirements AS historical
     WHERE historical.group_id = groups.id AND historical.plan_lecture_id IS NULL
         AND historical.retired_at IS NOT NULL
@@ -491,7 +492,8 @@ COALESCE((SELECT json_agg(json_build_object('id', historical.id, 'plan_lecture_i
                 AND COALESCE(attempts.current_group_id, (SELECT waitlists.from_group_id
                     FROM study_attempt_waitlists AS waitlists WHERE waitlists.attempt_id = attempts.id
                     ORDER BY waitlists.entry_revision DESC NULLS LAST, waitlists.entered_on DESC,
-                        waitlists.created_at DESC, waitlists.id DESC LIMIT 1)) = groups.id)), '[]'::json)
+                        waitlists.created_at DESC, waitlists.id DESC LIMIT 1)) = groups.id)
+    ORDER BY historical.number, historical.id LIMIT 21) AS historical), '[]'::json)
     AS historical_requirements
 SQL);
         $query->selectRaw("COALESCE((SELECT json_agg(lecture_number ORDER BY lecture_number) FROM (SELECT DISTINCT lectures.number AS lecture_number FROM study_sessions AS sessions JOIN study_group_requirements AS lectures ON lectures.id = sessions.group_requirement_id WHERE sessions.group_id = groups.id AND lectures.retired_at IS NULL AND (sessions.status <> 'cancelled' OR sessions.cancelled_at IS NOT NULL) ORDER BY lecture_number LIMIT 200) AS scheduled), '[]'::json) AS scheduled_requirements");
@@ -502,10 +504,13 @@ SQL);
         $row = $query->first();
         abort_unless($row && $permissions->can('read', (int) $row->branch_id), 404);
 
+        $history = json_decode($row->historical_requirements, true);
+
         return [...(array) $row, 'revision' => (int) $row->revision, 'branch_id' => (int) $row->branch_id,
             'required_count' => (int) $row->required_count,
             'requirements' => json_decode($row->requirements, true),
-            'historical_requirements' => json_decode($row->historical_requirements, true),
+            'historical_requirements' => array_slice($history, 0, 20),
+            'historical_requirements_has_more' => count($history) > 20,
             'scheduled_requirements' => json_decode($row->scheduled_requirements, true),
             'can_manage' => $permissions->can('curriculum.manage', (int) $row->branch_id)];
     }

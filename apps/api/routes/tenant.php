@@ -211,6 +211,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::post('groups/{groupId}/sessions/preview', [CenterStudySessionController::class, 'preview']);
         Route::post('groups/{groupId}/requirements/preview', [CenterGroupRequirementController::class, 'preview']);
         Route::post('groups/{groupId}/requirements', [CenterGroupRequirementController::class, 'store']);
+        Route::get('groups/{groupId}/requirement-equivalences/requirements', [CenterGroupRequirementEquivalenceController::class, 'historicalRequirements']);
         Route::get('groups/{groupId}/requirement-equivalences/options', [CenterGroupRequirementEquivalenceController::class, 'options']);
         Route::post('groups/{groupId}/requirement-equivalences', [CenterGroupRequirementEquivalenceController::class, 'approve']);
         Route::post('groups/{groupId}/requirement-equivalences/{approvalId}/revoke', [CenterGroupRequirementEquivalenceController::class, 'revoke']);

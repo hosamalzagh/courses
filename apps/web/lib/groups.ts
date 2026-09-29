@@ -36,6 +36,7 @@ export type SessionContext = CenterContext & {
     plan_version_id: string; branch_id: number; level_name: string; can_manage: boolean;
     requirements: { id: string; plan_lecture_id: string | null; number: number; title: string | null; content: string }[];
     historical_requirements: { id: string; plan_lecture_id: null; number: number; title: string | null; content: string }[];
+    historical_requirements_has_more: boolean;
     scheduled_requirements: number[]; required_count: number };
   sessions: StudySession[];
   pagination: { page: number; has_more: boolean };
