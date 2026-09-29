@@ -244,6 +244,12 @@ class StudentProfilesTest extends TestCase
     {
         $this->createStudent('Alpha only', [$this->north]);
         $this->center->run(function (): void {
+            foreach (['*_snapshot_opening_study_period_requirements.php',
+                '*_snapshot_waitlist_period_requirements.php'] as $pattern) {
+                $migration = glob(database_path('migrations/tenant/'.$pattern))[0];
+                (require $migration)->down();
+                DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
+            }
             $planApplicationsMigration = glob(database_path('migrations/tenant/*_create_study_attempt_plan_applications.php'))[0];
             (require $planApplicationsMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($planApplicationsMigration, PATHINFO_FILENAME))->delete();
@@ -329,6 +335,8 @@ class StudentProfilesTest extends TestCase
             DB::table('migrations')->whereIn('migration', ['2026_09_26_193307_create_student_profiles', '2026_09_27_140402_add_general_student_profile_fields'])->delete();
         });
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
+        $this->center->run(fn () => $this->assertTrue(DB::getSchemaBuilder()
+            ->hasColumn('study_attempt_group_periods', 'opening_required_credit_ids')));
         $student = $this->createStudent('Migrated', [$this->north]);
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
         $this->getJson("{$this->base}/student-workspace")->assertOk()->assertJsonCount(1, 'students')->assertJsonCount(2, 'branches');
@@ -336,6 +344,8 @@ class StudentProfilesTest extends TestCase
             'name' => 'Beta', 'slug' => 'beta', 'subdomain' => 'beta', 'plan' => 'starter', 'owner_email' => 'owner@beta.test',
         ])->assertCreated();
         $beta = Center::where('slug', 'beta')->firstOrFail();
+        $beta->run(fn () => $this->assertTrue(DB::getSchemaBuilder()
+            ->hasColumn('study_attempt_group_periods', 'opening_required_credit_ids')));
         CenterMembership::create(['tenant_id' => $beta->id, 'user_id' => $this->owner->id, 'status' => 'active']);
         $beta->run(fn () => DB::table('center_grants')->insert(['user_id' => $this->owner->id, 'role' => 'center_owner']));
         $this->actingAs($this->owner, 'web')->withSession(['center_id' => $beta->id]);
