@@ -7,9 +7,11 @@ import { ChoiceField } from "@/components/ChoiceField";
 import { PrefetchLink as Link } from "@/components/PrefetchLink";
 import { FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import type { StudentContext, StudentSearchContext } from "@/lib/server-context";
+import type { StudentChoiceKind, StudentContext, StudentSearchContext } from "@/lib/server-context";
 import { canReadStudents, canSearchCenterStudents } from "@/lib/student-search-access";
+import { studentChoiceLabels } from "@/lib/student-profile-choices";
 import { StudentSharingControls } from "./StudentSharingControls";
+import { StudentRowActions } from "./StudentRowActions";
 
 type Props =
   | { scope: "branches"; context: StudentContext; query: string; identifier: string; mode: "general" | "identifier" }
@@ -90,7 +92,19 @@ export function StudentLookup(props: Props) {
           { key: "status", label: "حالة الملف", filterText: (student) => student.status === "active" ? "نشط" : "موقوف", render: (student) => student.status === "active" ? "نشط" : "موقوف" },
           { key: "phone", label: "رقم التواصل", filterText: (student) => student.phone ?? "", render: (student) => <bdi dir="ltr">{student.phone || "لم يُضف رقم تواصل"}</bdi> },
           { key: "branches", label: "الفروع المصرح بها", filterText: (student) => student.branch_ids.map((id) => branchContext.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join("، "), render: (student) => student.branch_ids.map((id) => branchContext.branches.find((branch) => branch.id === id)?.name ?? `فرع رقم ${id}`).join("، ") },
-          { key: "actions", label: "الإجراءات", actions: true, render: (student) => <div className="student-row-actions">{student.can_manage ? <Link href={`/admin/students/${student.id}/edit`}>تعديل ملف الطالب</Link> : <span className="muted">صلاحية عرض فقط</span>}<StudentSharingControls student={student} compact /></div> },
+          { key: "manual_code", label: branchContext.student_code_settings.label, defaultHidden: true, render: (student) => <bdi dir="ltr">{student.manual_code ?? "—"}</bdi> },
+          { key: "birth", label: "تاريخ الميلاد", defaultHidden: true, render: (student) => student.date_of_birth ?? "—" },
+          { key: "age", label: "العمر", defaultHidden: true, render: (student) => student.age === null ? "—" : `${student.age.toLocaleString("ar-EG")} سنة` },
+          { key: "gender", label: "النوع", defaultHidden: true, render: (student) => student.gender === "male" ? "ذكر" : student.gender === "female" ? "أنثى" : "—" },
+          { key: "email", label: "البريد الإلكتروني", defaultHidden: true, render: (student) => <bdi dir="ltr">{student.email ?? "—"}</bdi> },
+          { key: "address", label: "العنوان", defaultHidden: true, render: (student) => student.address ?? "—" },
+          { key: "school", label: "المدرسة / جهة الدراسة", defaultHidden: true, render: (student) => student.school ?? "—" },
+          { key: "employer", label: "جهة العمل", defaultHidden: true, render: (student) => student.employer ?? "—" },
+          { key: "specialization", label: "التخصص", defaultHidden: true, render: (student) => student.specialization ?? "—" },
+          ...(Object.keys(studentChoiceLabels) as StudentChoiceKind[]).map((kind) => ({ key: kind, label: studentChoiceLabels[kind], defaultHidden: true, render: (student: StudentContext["students"][number]) => student.profile_choices[kind]?.label ?? "—" })),
+          { key: "created_by", label: "أدخل الملف", defaultHidden: true, render: (student) => `موظف رقم ${student.created_by.toLocaleString("ar-EG")}` },
+          { key: "created_at", label: "تاريخ الإنشاء", defaultHidden: true, render: (student) => new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium", timeZone: "Africa/Cairo" }).format(new Date(student.created_at.replace(" ", "T") + "Z")) },
+          { key: "actions", label: "الإجراءات", actions: true, render: (student) => <div className="student-row-actions"><StudentRowActions student={student} permissions={branchContext.permissions} /><StudentSharingControls student={student} compact /></div> },
         ]} /> : <DataTable id={`student-lookup-${scope}`} title="نتائج البحث" description={started && rows.length ? "حتى ٥٠ نتيجة في الدفعة. انتقل إلى الدفعة التالية لمتابعة البحث." : undefined}
         pageSize={50} rows={rows} rowKey={(student) => student.id} searchText={(student) => `${student.student_number} ${student.name} ${student.phone ?? ""}`}
         emptyMessage={!started ? mode === "identifier" ? "أدخل رقم الطالب الداخلي أو الباركود لبدء البحث." : "اكتب الاسم أو رقم الطالب الداخلي أو رقم التواصل لبدء البحث." : scope === "center" ? "لا يوجد طالب مطابق ضمن الملفات المتاحة للبحث." : "لا يوجد طالب مطابق ضمن فروعك."}
@@ -100,9 +114,13 @@ export function StudentLookup(props: Props) {
           { key: "number", label: "رقم الطالب الداخلي", render: (student) => <span className="table-code">{student.student_number.toLocaleString("ar-EG")}</span> },
           { key: "name", label: "الطالب", render: (student) => <h3>{student.name}</h3> },
           { key: "phone", label: "رقم التواصل", render: (student) => <bdi dir="ltr">{student.phone || "لم يُضف رقم تواصل"}</bdi> },
-          { key: "access", label: "إتاحة الملف", actions: true, render: (student) => student.within_scope
-            ? <Link href={`/admin/students/${student.id}`}>فتح ملف الطالب</Link>
-            : <span className="muted">بيانات أساسية فقط · خارج فروعك</span> },
+          { key: "access", label: "إجراءات الملف", actions: true, render: (student) => {
+            if (!student.within_scope) return <span className="muted">بيانات أساسية فقط · خارج فروعك</span>;
+            const profile = branchContext?.students.find((row) => row.id === student.id);
+            return profile && branchContext
+              ? <StudentRowActions student={profile} permissions={branchContext.permissions} />
+              : <Link href={`/admin/students/${student.id}`}>فتح ملف الطالب</Link>;
+          } },
         ]} />}
     </>}
   </div>;

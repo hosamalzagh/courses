@@ -207,7 +207,10 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
   for (const [label, expected, path] of [["الدراسة", `Group ${unique}`, "?tab=study"],
     ["الحضور والغياب", "حضور محتسب", "?tab=attendance"], ["الحساب المالي", "30.00 EGP", "/account"]] as const) {
     const before = cursor();
-    await page.getByRole("navigation", { name: "أقسام ملف الطالب" }).getByRole("link", { name: label, exact: true }).click();
+    const link = label === "الحساب المالي"
+      ? page.getByRole("navigation", { name: "روابط الطالب" }).getByRole("link", { name: label, exact: true })
+      : page.getByRole("tablist", { name: "أقسام ملف الطالب" }).getByRole("tab", { name: label, exact: true });
+    await link.click();
     await expect(page).toHaveURL(`${origin}/admin/students/${studentId}${path}`);
     await expect(page.getByText(expected, { exact: false }).first()).toBeVisible();
     await page.waitForLoadState("networkidle");

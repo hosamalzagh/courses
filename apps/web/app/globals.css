@@ -362,3 +362,78 @@ button, a, input { touch-action: manipulation; }
 .student-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
 .workspace-register { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
 .workspace-register[hidden] { display: none; }
+
+/* Student profile and print report. */
+.student-profile-page { width: min(100%, 80rem); margin-inline: auto; gap: var(--space-4); }
+.student-back-link { width: fit-content; color: var(--accent); font-size: var(--font-table); text-decoration: none; }
+.student-back-link:hover { text-decoration: underline; }
+.student-summary { display: grid; gap: var(--space-4); margin: 0; }
+.student-summary h2, .student-summary h3, .student-summary p { margin: 0; }
+.student-summary-heading { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.student-avatar { display: grid; place-items: center; flex: 0 0 5rem; width: 5rem; height: 5rem; overflow: hidden; border-radius: var(--radius-panel); background: var(--accent-soft); color: var(--accent-strong); font-size: 2rem; font-weight: 600; }
+.student-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.student-summary-name { min-width: 0; }
+.student-summary-name h2 { margin: 0.1rem 0 var(--space-2); font-size: clamp(1.25rem, 2vw, 1.7rem); line-height: 1.35; }
+.student-summary-kicker { color: var(--body); font-size: var(--font-meta); }
+.student-summary-badges { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.student-summary-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-block-start: 1px solid var(--border); padding-block-start: var(--space-3); }
+.student-summary-facts > div { display: grid; align-content: start; gap: 0.2rem; min-width: 0; padding-inline: var(--space-3); }
+.student-summary-facts > div:first-child { padding-inline-start: 0; }
+.student-summary-facts > div:not(:first-child) { border-inline-start: 1px solid var(--border); }
+.student-summary-facts span, .student-summary-facts small { color: var(--body); font-size: var(--font-meta); }
+.student-summary-facts strong { font-size: var(--font-table); font-weight: 600; overflow-wrap: anywhere; }
+.student-summary-facts a { width: fit-content; color: var(--accent); font-size: var(--font-meta); text-decoration: none; }
+.student-summary-facts a:hover { text-decoration: underline; }
+.student-summary-facts .form-stack { margin: 0; gap: 0; font-size: var(--font-table); font-weight: 600; }
+.student-summary-facts .form-stack span { color: var(--ink); font-size: var(--font-table); }
+.student-summary-alerts { display: grid; gap: var(--space-2); }
+.student-profile-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(16rem, 20rem); gap: var(--space-4); align-items: start; }
+.student-profile-main, .student-profile-side { display: grid; min-width: 0; gap: var(--space-3); }
+.student-profile-main > .form-stack, .student-profile-side > .form-stack { margin-top: 0; }
+.student-profile-side .context-card { margin-top: 0; }
+.student-profile-side h2, .student-profile-related h2 { margin: 0; font-size: 1rem; }
+.student-profile-side h3 { margin: 0; font-size: var(--font-table); }
+.student-profile-side p { margin: 0; }
+.student-profile-related { display: grid; gap: var(--space-2); }
+.student-profile-related a { color: var(--accent); font-size: var(--font-table); text-decoration: none; }
+.student-profile-related a:hover { text-decoration: underline; }
+.student-profile-main .student-data > div { min-width: 0; padding-block: var(--space-2); border-block-end: 1px solid var(--border); }
+.student-profile-main .student-data dd { font-weight: 500; }
+.student-empty-value { color: var(--body); font-weight: 400; }
+.student-profile-provenance { padding-block-start: var(--space-3); border-block-start: 1px solid var(--border); color: var(--body); font-size: var(--font-meta); }
+.student-report-page { width: min(100%, 56rem); margin-inline: auto; gap: var(--space-4); }
+.student-report { display: grid; gap: var(--space-5); margin: 0; padding: clamp(1.25rem, 3vw, 2.5rem); }
+.student-report-heading { display: flex; justify-content: space-between; gap: var(--space-4); align-items: start; border-block-end: 1px solid var(--border); padding-block-end: var(--space-4); }
+.student-report-heading h2 { margin: 0.25rem 0; font-size: 1.7rem; }
+.student-report-heading p { margin: 0; }
+.student-report-number { display: grid; gap: 0.25rem; flex: none; color: var(--body); font-size: var(--font-meta); }
+.student-report-number strong { color: var(--ink); font-size: 1.25rem; }
+.student-report section { display: grid; gap: var(--space-3); }
+.student-report section h3 { margin: 0; font-size: 1.05rem; }
+.student-report section p { margin: 0; }
+.student-report-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin: 0; }
+.student-report-facts > div { display: grid; gap: 0.25rem; min-width: 0; }
+.student-report-facts dt { color: var(--body); font-size: var(--font-meta); }
+.student-report-facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.student-report-study { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.student-report-study li { display: grid; gap: 0.2rem; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); }
+.student-report-study span { color: var(--body); font-size: var(--font-table); }
+.student-report footer { padding-block-start: var(--space-3); border-block-start: 1px solid var(--border); color: var(--body); font-size: var(--font-meta); }
+@media (max-width: 900px) { .student-profile-layout { grid-template-columns: minmax(0, 1fr); } .student-profile-side { grid-template-columns: repeat(2, minmax(0, 1fr)); } .student-profile-side > :first-child { grid-column: 1 / -1; } .student-summary-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); } .student-summary-facts > div:nth-child(3) { padding-inline-start: 0; border-inline-start: 0; } }
+@media (max-width: 600px) { .student-summary-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); } .student-summary-facts > div { padding: 0; } .student-summary-facts > div:not(:first-child) { border: 0; } .student-profile-side { grid-template-columns: minmax(0, 1fr); } .student-profile-side > :first-child { grid-column: auto; } .student-avatar { flex-basis: 4rem; width: 4rem; height: 4rem; } }
+@media (max-width: 600px) { .student-report-heading { display: grid; } .student-report-facts { grid-template-columns: minmax(0, 1fr); } }
+@media print {
+  @page { size: A4; margin: 14mm; }
+  .center-shell:has(.student-report-page) .center-sidebar,
+  .center-shell:has(.student-report-page) .center-topbar,
+  .center-shell:has(.student-report-page) .center-footer,
+  .center-shell:has(.student-report-page) .skip-link,
+  .student-report-screen-only { display: none !important; }
+  .center-shell:has(.student-report-page),
+  .center-shell:has(.student-report-page) .center-frame,
+  .center-shell:has(.student-report-page) .center-content,
+  .student-report-page { display: block; width: 100%; max-width: none; min-height: 0; margin: 0; padding: 0; background: white; color: black; }
+  .student-report { display: grid; box-shadow: none; border: 0; padding: 0; gap: 1rem; background: white; color: black; }
+  .student-report * { color: black !important; border-color: #d1d5db !important; }
+  .student-report section, .student-report-study li { break-inside: avoid; }
+}

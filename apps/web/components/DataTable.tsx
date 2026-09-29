@@ -17,7 +17,7 @@ import { FormField } from "./FormField";
 import { TablePopover } from "./TablePopover";
 import { useTablePreferences } from "./TablePreferences";
 
-export type TableColumn<T> = { key: string; label: string; render: (row: T) => ReactNode; actions?: boolean; filterText?: (row: T) => string };
+export type TableColumn<T> = { key: string; label: string; render: (row: T) => ReactNode; actions?: boolean; defaultHidden?: boolean; filterText?: (row: T) => string };
 type Props<T> = {
   id: string; title: string; description?: string; rows: T[]; columns: TableColumn<T>[];
   rowKey: (row: T) => string | number; searchText: (row: T) => string;
