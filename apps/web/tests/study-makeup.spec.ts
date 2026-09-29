@@ -197,6 +197,27 @@ test('books makeup without granting coverage and hides the attempt from unauthor
     const completed = await owner.request.get(`${origin}/api/v1/center/groups/${source.id}/coverage`);
     expect(Number(completed.headers()['x-courses-query-count'])).toBeLessThanOrEqual(6);
     expect((await completed.json()).students[0].covered_count).toBe(1);
+    const attendancePath = `/admin/students/${studentId}?tab=attendance`;
+    const attendanceStart = queryRows().length;
+    await owner.goto(`${origin}/admin/students/${studentId}`);
+    await owner.getByRole('link', { name: 'الحضور والغياب', exact: true }).click();
+    await expect(owner).toHaveURL(new RegExp('tab=attendance'));
+    await expect(owner.getByRole('heading', { name: 'الحضور والغياب والتعويض' })).toBeVisible();
+    await expect(owner.locator('html')).toHaveAttribute('data-theme', 'dark');
+    expect(await owner.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    const attendanceRows = owner.getByRole('table', { name: 'سجل المحاضرات' });
+    await expect(attendanceRows).toContainText('غياب مسجل');
+    await expect(attendanceRows).toContainText('حضور تعويض محتسب');
+    const scopedReads = queryRows().slice(attendanceStart)
+      .filter(read => read.path === `/api/v1/center/students/${studentId}?tab=attendance`);
+    expect(scopedReads.length).toBeGreaterThan(0);
+    expect(scopedReads.every(read => Number.isInteger(read.count) && read.count! <= 6)).toBe(true);
+    const makeupRow = attendanceRows.getByRole('row').filter({ hasText: 'حضور تعويض محتسب' });
+    await makeupRow.getByRole('link', { name: 'فتح سجل المحاضرة' }).click();
+    await expect(owner).toHaveURL(new RegExp(`/groups/${target.id}/sessions/${sessionId}/attendance`));
+    await owner.goBack();
+    await expect(owner).toHaveURL(new RegExp(attendancePath.replace('?', '\\?')));
+    await expect(attendanceRows).toContainText('غياب مسجل');
     const revokePath = `groups/${target.id}/sessions/${sessionId}`;
     const previewResponse = await owner.request.get(`${origin}/api/v1/center/${revokePath}/revoke-preview`);
     expect(previewResponse.status()).toBe(200);
