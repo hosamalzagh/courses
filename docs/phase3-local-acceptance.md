@@ -18,6 +18,8 @@ DB_HOST=127.0.0.1 DB_PORT=5554 DB_DATABASE=courses_issue54_central DB_USERNAME=p
 
 The fixture creates `alpha.courses.test` and `beta.courses.test`; alpha has north/south branches, an owner, and a north registration employee. It writes synthetic credentials to the ignored mode-0600 `apps/api/storage/app/private/phase3-local-acceptance-credentials.json`. Never copy this file into the repository. Both names must resolve to loopback on the test machine. A second fixture run requires a fresh empty cluster.
 
+The browser tests use direct SQL only to move synthetic group/session timestamps into the past, so attendance and closure can run without waiting for the clock. The actual domain writes and reads still go through authenticated HTTP and the employee UI.
+
 Start three Laravel worker processes on 8154–8156 with the same database variables. From `apps/api/public`, use `php85 -S 127.0.0.1:8154 -t . ../vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php` for the first and substitute 8155/8156 for the others. Start the production Next.js server from `apps/web` with `npm run build`, then `COURSES_INTERNAL_API_ORIGIN='http://{host}:8054' PORT=3054 npm run start`. Start `COURSES_PHASE3_QUERY_LOG=/tmp/courses-issue54-queries.jsonl node tests/fixtures/phase3-proxy.mjs` in `apps/web`. The proxy on 8054 preserves Host and cookies, forwards API/CSRF to Laravel and pages to Next.js, and records every center GET SQL count, including server-side Next.js reads. Missing counts remain `null` and fail the test.
 
 From `apps/web`:
