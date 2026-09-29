@@ -278,8 +278,8 @@ export function StudentPaymentAllocations({ studentId, payment, focusNote, onClo
         { key: "group", label: "المحاولة", render: (row) => <>{row.target_branch_name} — {row.group_name ?? "مجموعة غير متاحة"} — <bdi dir="ltr" title={row.attempt_id}>{row.attempt_id.slice(0, 8)}</bdi></> },
         { key: "amount", label: "المبلغ", render: (row) => <bdi dir="ltr">{row.amount} {row.currency}</bdi> },
         { key: "status", label: "الحالة", render: (row) => row.reversal_id
-          ? row.reversal_kind === "correct"
-            ? <>صُحح {row.corrected_allocation_id ? <>إلى تخصيص <bdi dir="ltr" title={row.corrected_allocation_id}>{row.corrected_allocation_id.slice(0, 8)}</bdi></> : "وأُعيد إلى الرصيد"} — {row.reversal_reason}</>
+          ? row.reversal_kind === "correct" || row.reversal_kind === "payment_correct"
+            ? <>{row.reversal_kind === "payment_correct" ? "صُحح مع الدفعة" : "صُحح"} {row.corrected_allocation_id ? <>إلى تخصيص <bdi dir="ltr" title={row.corrected_allocation_id}>{row.corrected_allocation_id.slice(0, 8)}</bdi></> : "وأُعيد إلى الرصيد"} — {row.reversal_reason}</>
             : `معكوس: ${row.reversal_reason}` : "معتمد" },
         { key: "actor", label: "الموظف", render: (row) => row.actor_name },
         { key: "action", label: "إجراءات", actions: true, render: (row) => <span className="flex flex-wrap gap-2">

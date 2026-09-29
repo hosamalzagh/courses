@@ -29,6 +29,7 @@ const eventNames: Record<string, string> = {
   "student.payment_allocated": "تخصيص دفعة مقدمة لرسوم محاولة الدراسة",
   "student.payment_allocation_reversed": "عكس تخصيص دفعة مقدمة",
   "student.payment_allocation_corrected": "تصحيح تخصيص دفعة مقدمة",
+  "student.payment_corrected": "تصحيح الدفعة وتخصيصاتها",
   "student.refund_recorded": "رد مبلغ فعلي للطالب",
   "student.refund_corrected": "تصحيح سجل استرداد الطالب",
   "student.fee_settled": "اعتماد تسوية رسوم محاولة دراسة",

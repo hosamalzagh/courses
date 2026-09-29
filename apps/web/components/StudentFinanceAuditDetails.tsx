@@ -2,7 +2,7 @@ import type { AuditEntry } from "@/lib/server-context";
 import { paymentMethodLabels } from "@/lib/student-finance";
 
 export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
-  if (!['student.payment_recorded', 'student.payment_allocated', 'student.payment_allocation_reversed',
+  if (!['student.payment_recorded', 'student.payment_corrected', 'student.payment_allocated', 'student.payment_allocation_reversed',
     'student.payment_allocation_corrected',
     'student.refund_recorded', 'student.refund_corrected',
     'student.fee_settled', 'student.fee_settlement_corrected',
@@ -107,6 +107,18 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
       <p>من {String(previous?.branch_name ?? "")} إلى {String(next?.branch_name ?? "الرصيد المتاح")}: <bdi dir="ltr">{String(data.amount ?? "")} {String(data.currency ?? "")}</bdi></p>
       {next ? <p>التخصيص الصحيح: <bdi dir="ltr">{String(data.replacement_allocation_id ?? "")}</bdi> — رسوم: <bdi dir="ltr">{String(next.fee_id ?? "")}</bdi></p> : null}
       <p>رصيد الفروع المعنية: <bdi dir="ltr">{String(before?.available_balance ?? "")}</bdi> ← <bdi dir="ltr">{String(after?.available_balance ?? "")}</bdi>؛ المديونية: <bdi dir="ltr">{String(before?.debt ?? "")}</bdi> ← <bdi dir="ltr">{String(after?.debt ?? "")}</bdi></p>
+      <p>السبب: {String(data.reason ?? "")}</p>
+    </details>;
+  }
+  if (entry.event === "student.payment_corrected") {
+    const before = data.account_before as Record<string, unknown> | null;
+    const after = data.account_after as Record<string, unknown> | null;
+    const allocations = Array.isArray(data.allocations) ? data.allocations as Record<string, unknown>[] : [];
+    return <details><summary>تفاصيل تصحيح الدفعة وتخصيصاتها</summary>
+      <p>الدفعة: <bdi dir="ltr">{String(data.payment_id ?? "")}</bdi> — العكس: <bdi dir="ltr">{String(data.reversal_id ?? "")}</bdi> — البديل: <bdi dir="ltr">{String(data.replacement_id ?? "")}</bdi></p>
+      <p>المقبوض: <bdi dir="ltr">{String(data.received_before ?? "")}</bdi> ← <bdi dir="ltr">{String(data.received_after ?? "")}</bdi>؛ المخصص: <bdi dir="ltr">{String(data.allocated_before ?? "")}</bdi> ← <bdi dir="ltr">{String(data.allocated_after ?? "")}</bdi>؛ المعاد فعليًا: <bdi dir="ltr">{String(data.refunded_amount ?? "")}</bdi>.</p>
+      <p>المتاح: <bdi dir="ltr">{String(data.available_before ?? "")}</bdi> ← <bdi dir="ltr">{String(data.available_after ?? "")} {String(data.currency ?? "")}</bdi>؛ دين الفروع المعنية: <bdi dir="ltr">{String(before?.debt ?? "")}</bdi> ← <bdi dir="ltr">{String(after?.debt ?? "")}</bdi>.</p>
+      {allocations.map(row => <p key={String(row.id)}>تخصيص <bdi dir="ltr">{String(row.id ?? "")}</bdi> في فرع <bdi dir="ltr">{String(row.target_branch_id ?? "")}</bdi>: <bdi dir="ltr">{String(row.amount_before ?? "")}</bdi> ← <bdi dir="ltr">{String(row.amount_after ?? "")}</bdi>.</p>)}
       <p>السبب: {String(data.reason ?? "")}</p>
     </details>;
   }

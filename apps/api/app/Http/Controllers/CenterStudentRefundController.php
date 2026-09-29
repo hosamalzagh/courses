@@ -6,6 +6,7 @@ use App\Support\ActiveStudentAllocations;
 use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use App\Support\EffectiveStudentPayments;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
@@ -42,8 +43,9 @@ class CenterStudentRefundController extends Controller
             ->join('student_payments as payments', 'payments.student_id', '=', 'students.id')
             ->join('branches', 'branches.id', '=', 'payments.branch_id')
             ->where('payments.id', $paymentId)
-            ->select(['payments.id', 'payments.branch_id', 'payments.amount', 'payments.currency',
+            ->select(['payments.id', 'payments.branch_id', 'payments.currency',
                 'payments.received_on', 'branches.name as branch_name', 'students.financial_account_revision'])
+            ->selectRaw(EffectiveStudentPayments::amount('payments').' AS amount')
             ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'payments.id')
                 ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'allocated_amount')
             ->selectSub(ActiveStudentRefunds::query()->whereColumn('refunds.payment_id', 'payments.id')
@@ -258,8 +260,10 @@ class CenterStudentRefundController extends Controller
         $payment = DB::connection('tenant')->table('student_payments as payments')
             ->join('branches', 'branches.id', '=', 'payments.branch_id')
             ->where('payments.id', $paymentId)->where('payments.student_id', $studentId)
-            ->select(['payments.*', 'branches.name as branch_name'])->first();
+            ->select(['payments.*', 'branches.name as branch_name'])
+            ->selectRaw(EffectiveStudentPayments::amount('payments').' AS effective_amount')->first();
         abort_unless($payment && $permissions->can('finance.read', (int) $payment->branch_id), 404);
+        $payment->amount = $payment->effective_amount;
 
         return $payment;
     }

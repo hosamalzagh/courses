@@ -7,6 +7,7 @@ use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\EffectiveStudyFees;
+use App\Support\EffectiveStudentPayments;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
@@ -44,7 +45,7 @@ class CenterStudentFinanceController extends Controller
         $balance = DB::connection('tenant')->table('student_payments')
             ->whereColumn('student_payments.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('student_payments.branch_id', $readable))
-            ->selectRaw('COALESCE(SUM(student_payments.amount), 0)');
+            ->selectRaw('COALESCE(SUM('.EffectiveStudentPayments::amount().'), 0)');
         $debt = DB::connection('tenant')->table('study_attempt_fees')
             ->whereColumn('study_attempt_fees.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('study_attempt_fees.branch_id', $readable))
@@ -109,14 +110,16 @@ class CenterStudentFinanceController extends Controller
                         ->orWhere('student_payments.method', 'ILIKE', $pattern)
                         ->orWhereIn('student_payments.method', $matchingMethods)
                         ->orWhereRaw('student_payments.received_on::text ILIKE ?', [$pattern])
-                        ->orWhereRaw('student_payments.amount::text ILIKE ?', [$pattern]);
+                        ->orWhereRaw(EffectiveStudentPayments::amount().'::text ILIKE ?', [$pattern]);
                 });
             })
             ->orderByDesc('student_payments.created_at')->orderByDesc('student_payments.id')
             ->offset((isset($data['payment_id']) ? 0 : ($page - 1) * 20))->limit(21)
             ->select(['student_payments.id', 'student_payments.branch_id', 'branches.name as branch_name',
-                'student_payments.amount', 'student_payments.currency', 'student_payments.method',
+                'student_payments.currency', 'student_payments.method',
                 'student_payments.received_on', 'student_payments.actor_name', 'student_payments.created_at'])
+            ->selectRaw(EffectiveStudentPayments::amount().' AS amount')
+            ->selectRaw('student_payments.amount AS original_amount')
             ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'student_payments.id')
                 ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'allocated_amount')
             ->selectSub(ActiveStudentRefunds::query()->whereColumn('refunds.payment_id', 'student_payments.id')

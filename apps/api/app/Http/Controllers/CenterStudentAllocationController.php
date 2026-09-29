@@ -7,6 +7,7 @@ use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\EffectiveStudyFees;
+use App\Support\EffectiveStudentPayments;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
@@ -55,8 +56,9 @@ class CenterStudentAllocationController extends Controller
             ->join('student_payments as payments', 'payments.student_id', '=', 'students.id')
             ->join('branches as source_branches', 'source_branches.id', '=', 'payments.branch_id')
             ->where('payments.id', $paymentId)
-            ->select(['payments.id', 'payments.branch_id', 'source_branches.name as branch_name', 'payments.amount', 'payments.currency',
+            ->select(['payments.id', 'payments.branch_id', 'source_branches.name as branch_name', 'payments.currency',
                 'students.financial_account_revision'])
+            ->selectRaw(EffectiveStudentPayments::amount('payments').' AS amount')
             ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'payments.id')
                 ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'used_amount')
             ->selectSub(ActiveStudentRefunds::query()->whereColumn('refunds.payment_id', 'payments.id')
@@ -239,7 +241,9 @@ class CenterStudentAllocationController extends Controller
                 $this->conflict('allocation_already_reversed');
             }
             $availableBefore = StudentMoney::cents(DB::connection('tenant')->table('student_payments')
-                ->where('id', $allocation->payment_id)->value('amount')) - $this->used($allocation->payment_id)
+                ->where('id', $allocation->payment_id)
+                ->selectRaw(EffectiveStudentPayments::amount().' AS effective_amount')->firstOrFail()->effective_amount)
+                - $this->used($allocation->payment_id)
                 - $this->refunded($allocation->payment_id);
             $paidBefore = StudentMoney::cents(ActiveStudentAllocations::query()->where('allocations.fee_id', $allocation->fee_id)
                 ->sum('allocations.amount'));
@@ -398,9 +402,10 @@ class CenterStudentAllocationController extends Controller
             ->join('study_attempt_fees as fees', 'fees.id', '=', 'allocations.fee_id')
             ->join('branches as target_branches', 'target_branches.id', '=', 'allocations.target_branch_id')
             ->where('allocations.id', $allocationId)->where('allocations.student_id', $studentId)
-            ->select(['allocations.*', 'payments.amount as received_amount', 'payments.received_on',
+            ->select(['allocations.*', 'payments.received_on',
                 'source_branches.name as source_branch_name', 'target_branches.name as target_branch_name',
                 'fees.attempt_id', 'fees.currency as fee_currency'])
+            ->selectRaw(EffectiveStudentPayments::amount('payments').' AS received_amount')
             ->selectRaw(EffectiveStudyFees::amount('fees').' AS current_due')
             ->selectSub($this->originalFeeGroupName(), 'group_name')
             ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.fee_id', 'fees.id')
@@ -478,7 +483,8 @@ class CenterStudentAllocationController extends Controller
     private function correctionBranchBalance(string $studentId, array $branchIds): array
     {
         $received = DB::connection('tenant')->table('student_payments')->where('student_id', $studentId)
-            ->whereIn('branch_id', $branchIds)->sum('amount');
+            ->whereIn('branch_id', $branchIds)
+            ->selectRaw('COALESCE(SUM('.EffectiveStudentPayments::amount().'), 0) AS total')->first()->total;
         $due = DB::connection('tenant')->table('study_attempt_fees as fees')->where('fees.student_id', $studentId)
             ->whereIn('fees.branch_id', $branchIds)
             ->selectRaw('COALESCE(SUM('.EffectiveStudyFees::amount('fees').'), 0) AS total')->value('total');
@@ -501,8 +507,10 @@ class CenterStudentAllocationController extends Controller
         $payment = DB::connection('tenant')->table('student_payments as payments')
             ->join('branches as source_branches', 'source_branches.id', '=', 'payments.branch_id')
             ->where('payments.id', $paymentId)->where('payments.student_id', $studentId)
-            ->select(['payments.*', 'source_branches.name as branch_name'])->first();
+            ->select(['payments.*', 'source_branches.name as branch_name'])
+            ->selectRaw(EffectiveStudentPayments::amount('payments').' AS effective_amount')->first();
         abort_unless($payment && $permissions->can('finance.read', (int) $payment->branch_id), 404);
+        $payment->amount = $payment->effective_amount;
 
         return $payment;
     }

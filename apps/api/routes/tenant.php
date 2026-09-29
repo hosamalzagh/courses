@@ -20,6 +20,7 @@ use App\Http\Controllers\CenterStudentFeeAdjustmentController;
 use App\Http\Controllers\CenterStudentFinanceController;
 use App\Http\Controllers\CenterStudentFinancialNoteController;
 use App\Http\Controllers\CenterStudentNotesController;
+use App\Http\Controllers\CenterStudentPaymentCorrectionController;
 use App\Http\Controllers\CenterStudentNumberingController;
 use App\Http\Controllers\CenterStudentPhotoController;
 use App\Http\Controllers\CenterStudentProfileChoiceController;
@@ -123,6 +124,9 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('students/{studentId}/payments/{paymentId}/allocation-options', [CenterStudentAllocationController::class, 'options']);
         Route::post('students/{studentId}/payments/{paymentId}/allocations/preview', [CenterStudentAllocationController::class, 'preview']);
         Route::post('students/{studentId}/payments/{paymentId}/allocations', [CenterStudentAllocationController::class, 'allocate']);
+        Route::get('students/{studentId}/payments/{paymentId}/corrections', [CenterStudentPaymentCorrectionController::class, 'index']);
+        Route::post('students/{studentId}/payments/{paymentId}/corrections/preview', [CenterStudentPaymentCorrectionController::class, 'preview']);
+        Route::post('students/{studentId}/payments/{paymentId}/corrections', [CenterStudentPaymentCorrectionController::class, 'correct']);
         Route::get('students/{studentId}/payments/{paymentId}/refunds', [CenterStudentRefundController::class, 'index']);
         Route::post('students/{studentId}/payments/{paymentId}/refunds/preview', [CenterStudentRefundController::class, 'preview']);
         Route::post('students/{studentId}/payments/{paymentId}/refunds', [CenterStudentRefundController::class, 'record']);

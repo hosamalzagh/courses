@@ -7,6 +7,7 @@ use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\EffectiveStudyFees;
+use App\Support\EffectiveStudentPayments;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
@@ -52,7 +53,7 @@ class CenterStudyEnrollmentController extends Controller
         $payments = DB::connection('tenant')->table('student_payments')
             ->whereColumn('student_payments.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('student_payments.branch_id', $scope))
-            ->selectRaw('COALESCE(SUM(student_payments.amount), 0)');
+            ->selectRaw('COALESCE(SUM('.EffectiveStudentPayments::amount().'), 0)');
         $fees = DB::connection('tenant')->table('study_attempt_fees')
             ->whereColumn('study_attempt_fees.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('study_attempt_fees.branch_id', $scope))
