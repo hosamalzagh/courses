@@ -129,6 +129,25 @@ class CenterStudentController extends Controller
                     'summary_levels.name as level_name', 'summary_groups.name as group_name']);
             $query->selectSub(DB::connection('tenant')->query()->fromSub($currentStudy, 'study_summary_rows')
                 ->selectRaw('json_agg(study_summary_rows ORDER BY updated_at DESC, id DESC)'), 'current_study_summary');
+            $absences = DB::connection('tenant')->table('study_attendance_entries as summary_attendance')
+                ->join('study_sessions as summary_sessions', 'summary_sessions.id', '=', 'summary_attendance.session_id')
+                ->join('study_attempts as summary_attempts', 'summary_attempts.id', '=', 'summary_attendance.attempt_id')
+                ->join('study_groups as summary_groups', 'summary_groups.id', '=', 'summary_sessions.group_id')
+                ->join('levels as summary_levels', 'summary_levels.id', '=', 'summary_groups.level_id')
+                ->join('stages as summary_stages', 'summary_stages.id', '=', 'summary_levels.stage_id')
+                ->join('courses as summary_courses', 'summary_courses.id', '=', 'summary_stages.course_id')
+                ->whereColumn('summary_attempts.student_id', 'students.id')
+                ->whereColumn('summary_sessions.group_id', 'summary_attempts.current_group_id')
+                ->whereColumn('summary_courses.branch_id', 'summary_attempts.branch_id')
+                ->where('summary_attempts.status', 'active')
+                ->where('summary_attendance.status', 'absent')
+                ->where('summary_sessions.status', '!=', 'cancelled')
+                ->whereExists(DB::connection('tenant')->table('student_branches as attendance_associations')
+                    ->whereColumn('attendance_associations.student_id', 'students.id')
+                    ->whereColumn('attendance_associations.branch_id', 'summary_courses.branch_id')->selectRaw('1'))
+                ->when(! $permissions->isCenterManager(), fn (Builder $rows) => $rows->whereIn('summary_courses.branch_id', $this->branchScope($permissions, 'read')))
+                ->selectRaw('COUNT(*)');
+            $query->selectSub($absences, 'current_group_absences');
             $financeBranches = $this->branchScope($permissions, 'finance.read');
             if ($permissions->isCenterManager() || $financeBranches !== []) {
                 $due = DB::connection('tenant')->table('study_attempt_fees as summary_fees')
@@ -274,6 +293,7 @@ class CenterStudentController extends Controller
             ...($studentId !== null ? ['summary' => [
                 'current_study' => array_slice(json_decode($students->first()->current_study_summary ?? '[]', true) ?? [], 0, 3),
                 'current_study_has_more' => count(json_decode($students->first()->current_study_summary ?? '[]', true) ?? []) > 3,
+                'current_group_absences' => (int) $students->first()->current_group_absences,
                 'financial' => isset($students->first()->summary_due_total)
                     ? ['debt' => StudentMoney::format(max(0, StudentMoney::cents($students->first()->summary_due_total)
                         - StudentMoney::cents($students->first()->summary_paid_total))), 'currency' => $students->first()->summary_currency]

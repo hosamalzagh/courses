@@ -49,6 +49,7 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
         </li>)}</ul> : <p className='muted'>لا توجد دراسة جارية في الفروع المصرح بها.</p>}
         {context.summary.current_study_has_more ? <p className='muted'>تظهر أحدث ثلاث محاولات فقط في الملخص.</p> : null}
         <Link href={`/admin/students/${student.id}?tab=study`}>عرض الدراسة</Link>
+        {context.summary.current_group_absences > 0 ? <InlineNotice tone='warning'>غيابات مسجلة في المجموعات الحالية: {context.summary.current_group_absences.toLocaleString('ar-EG')}.</InlineNotice> : null}
         {context.summary.financial && Number(context.summary.financial.debt) > 0 ? <InlineNotice tone='warning'>مديونية في الفروع المالية المصرح بها: {context.summary.financial.debt} {context.summary.financial.currency ?? ''}. <Link href={`/admin/students/${student.id}/account`}>فتح الحساب المالي</Link></InlineNotice> : null}
       </div> : null}
     </section>
