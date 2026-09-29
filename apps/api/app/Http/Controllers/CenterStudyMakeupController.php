@@ -7,6 +7,7 @@ use App\Support\CenterWrites;
 use App\Support\StudentPhotos;
 use App\Support\StudyCoverageCredits;
 use DateTimeImmutable;
+use DateTimeZone;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -39,7 +40,16 @@ class CenterStudyMakeupController extends Controller
             ->leftJoin('levels as source_levels', 'source_levels.id', '=', 'source_groups.level_id')
             ->leftJoin('stages as source_stages', 'source_stages.id', '=', 'source_levels.stage_id')
             ->leftJoin('courses as source_courses', 'source_courses.id', '=', 'source_stages.course_id')
-            ->where(fn ($query) => $query->where('groups.id', '<>', $attempt->current_group_id)->orWhereNotNull('bookings.id'))
+            ->where(function ($query) use ($attemptId): void {
+                $query->whereNotExists(DB::connection('tenant')->table('study_attempt_group_periods as periods')
+                    ->where('periods.attempt_id', $attemptId)
+                    ->whereColumn('periods.group_id', 'sessions.group_id')
+                    ->whereRaw("periods.joined_on <= (sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date")
+                    ->where(fn ($period) => $period->whereNull('periods.left_on')
+                        ->orWhereRaw("periods.left_on > (sessions.scheduled_at AT TIME ZONE 'Africa/Cairo')::date"))
+                    ->selectRaw('1'))
+                    ->orWhereNotNull('bookings.id');
+            })
             ->where(fn ($query) => $query->whereIn('sessions.status', ['planned', 'held'])->orWhereNotNull('bookings.id'))
             ->when($search !== '', fn ($query) => $query->where(function ($matches) use ($search): void {
                 $matches->where('groups.name', 'ilike', '%'.$search.'%')
@@ -256,11 +266,18 @@ class CenterStudyMakeupController extends Controller
 
     private function eligible(object $attempt, object $session, CenterPermissions $permissions, ?string $sourceSessionId): void
     {
+        $sessionDate = (new DateTimeImmutable($session->scheduled_at))
+            ->setTimezone(new DateTimeZone('Africa/Cairo'))->format('Y-m-d');
+        $primaryAtSession = DB::connection('tenant')->table('study_attempt_group_periods')
+            ->where('attempt_id', $attempt->id)->where('group_id', $session->group_id)
+            ->where('joined_on', '<=', $sessionDate)
+            ->where(fn ($query) => $query->whereNull('left_on')->orWhere('left_on', '>', $sessionDate))
+            ->exists();
         abort_if(DB::connection('tenant')->table('student_suspensions')->where('student_id', $attempt->student_id)
             ->where('suspended_at', '<=', $session->scheduled_at)
             ->where(fn ($query) => $query->whereNull('lifted_at')->orWhere('lifted_at', '>', $session->scheduled_at))
             ->exists(), 409, 'كان ملف الطالب موقوفًا وقت محاضرة التعويض.');
-        abort_if($session->group_id === $attempt->current_group_id || ! $session->plan_lecture_id, 422,
+        abort_if($primaryAtSession || ! $session->plan_lecture_id, 422,
             'اختر محاضرة تعويض من مجموعة أخرى لها محتوى معتمد.');
         $sourceLectureId = $sourceSessionId === null ? null
             : $this->sourceAbsence($attempt->id, $sourceSessionId, $permissions)->plan_lecture_id;

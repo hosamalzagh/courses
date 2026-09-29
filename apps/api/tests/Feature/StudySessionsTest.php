@@ -1302,6 +1302,58 @@ class StudySessionsTest extends TestCase
         });
     }
 
+    public function test_closed_makeup_remains_available_after_a_later_transfer_into_the_target_group(): void
+    {
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $source = $this->group($this->north, 'Historical makeup source', 1);
+        $instructorId = $this->center->run(fn () => DB::table('study_group_instructors')
+            ->where('group_id', $source['id'])->value('instructor_id'));
+        $target = $this->postJson("{$this->base}/groups", [
+            'level_id' => $source['level_id'], 'plan_version_id' => $source['plan_version_id'],
+            'name' => 'Historical makeup target', 'approved_price' => '100.00',
+            'instructor_ids' => [$instructorId], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $student = $this->student();
+        $this->enroll($student['id'], $source, now('Africa/Cairo')->toDateString());
+        $attempt = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")
+            ->assertOk()->json('attempts.0');
+        $scheduled = now('Africa/Cairo')->addDays(3)->setTime(16, 0);
+        $session = $this->postJson("{$this->base}/groups/{$target['id']}/sessions", [
+            'kind' => 'single', 'revision' => $target['revision'], 'start_at' => $scheduled->format('Y-m-d\TH:i'),
+            'plan_lecture_number' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
+        $this->postJson("{$this->base}/groups/{$target['id']}/start", ['revision' => $target['revision'] + 1])->assertOk();
+        $this->travelTo($scheduled->copy()->addHour());
+        $this->postJson("{$this->base}/groups/{$target['id']}/sessions/{$session['id']}/close", [
+            'revision' => $session['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk()->assertJsonPath('absent_count', 0);
+        $this->travelTo($scheduled->copy()->addDay()->addHour());
+        $transferDate = now('Africa/Cairo')->toDateString();
+        $transferPath = "{$this->base}/students/{$student['id']}/enrollments/{$attempt['id']}/transfer";
+        $preview = $this->getJson("{$transferPath}/preview?".http_build_query([
+            'group_id' => $target['id'], 'transferred_on' => $transferDate,
+        ]))->assertOk()->json('preview');
+        $this->postJson($transferPath, [
+            'group_id' => $target['id'], 'group_revision' => $preview['group_revision'],
+            'transferred_on' => $transferDate, 'revision' => $preview['revision'],
+            'preview_hash' => $preview['hash'], 'reason' => 'نقل بعد حضور التعويض',
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $makeupPath = "{$this->base}/students/{$student['id']}/enrollments/{$attempt['id']}/makeup";
+        $workspace = $this->getJson($makeupPath)->assertOk();
+        $this->assertContains($session['id'], array_column($workspace->json('sessions'), 'id'));
+        $this->assertLessThanOrEqual(6, (int) $workspace->headers->get('X-Courses-Query-Count'));
+        $current = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")
+            ->assertOk()->json('attempts.0');
+        $this->postJson("{$makeupPath}/prove", [
+            'session_id' => $session['id'], 'attempt_revision' => $current['revision'],
+            'session_revision' => 2, 'reason' => 'تأخر إثبات التعويض بعد النقل',
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->getJson("{$this->base}/groups/{$target['id']}/coverage")
+            ->assertOk()->assertJsonPath('students.0.covered_count', 1);
+    }
+
     private function group(int $branchId, string $name, int $lectureCount = 3): array
     {
         $course = $this->postJson("{$this->base}/courses", [
