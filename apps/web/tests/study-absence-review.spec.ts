@@ -7,6 +7,7 @@ test.skip(!process.env.COURSES_ABSENCE_CREDENTIALS || !process.env.COURSES_ABSEN
 const origin = process.env.COURSES_ABSENCE_ORIGIN ?? "http://alpha.courses.test:8066";
 const credentials = process.env.COURSES_ABSENCE_CREDENTIALS
   ? JSON.parse(readFileSync(process.env.COURSES_ABSENCE_CREDENTIALS, "utf8")) : {};
+test.setTimeout(90_000);
 
 async function signIn(page: Page, who: "alpha" | "staff") {
   await page.goto(`${origin}/login`);
@@ -47,7 +48,8 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
     expect(sameName.status).toBe(201);
     const hidden = await write(owner, "courses", { branch_id: south, name: `Hidden ${Date.now()}`, request_id: crypto.randomUUID() });
     expect(hidden.status).toBe(201);
-    const stage = await write(owner, `courses/${course.body.course.id}/stages`, { name: "مرحلة", request_id: crypto.randomUUID() });
+    const stageName = `مرحلة ${crypto.randomUUID().slice(0, 8)}`;
+    const stage = await write(owner, `courses/${course.body.course.id}/stages`, { name: stageName, request_id: crypto.randomUUID() });
     expect(stage.status).toBe(201);
     const level = await write(owner, `stages/${stage.body.stage.id}/levels`, {
       name: "مستوى", request_id: crypto.randomUUID(), lectures: [{ number: 1, content: "المحاضرة", planned_hours: 1 }],
@@ -96,32 +98,43 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
     const html = await (await owner.request.get(`${origin}/admin/absence-review?view=all&${groupFilter}`)).text();
     expect(html).toContain(student.body.student.name);
     const reads = readFileSync(process.env.COURSES_ABSENCE_QUERY_LOG!, "utf8").trim().split("\n").slice(before)
-      .map(line => JSON.parse(line) as { path: string; count: number | null }).filter(row => row.path === "/api/v1/center/absence-review");
+      .map(line => JSON.parse(line) as { path: string; count: number | null }).filter(row => row.path.startsWith("/api/v1/center/absence-review"));
     expect(reads.length).toBeGreaterThan(0);
     expect(reads.every(row => Number.isInteger(row.count) && row.count! <= 6)).toBe(true);
 
     await owner.goto(`${origin}/admin/absence-review?view=all&${groupFilter}`);
-    await expect(owner.getByText(student.body.student.name)).toBeVisible();
+    await expect(owner.getByRole("link", { name: student.body.student.name })).toBeVisible();
     await expect(owner.getByRole("banner").getByRole("button", { name: "تطبيق النطاق" })).toBeVisible();
     await expect(owner.getByRole("banner").getByRole("button", { name: "بحث في النطاقات" })).toBeVisible();
     await expect(owner.locator(`#absence-branch option[value="${north}"]`)).toContainText("north");
     await expect(owner.locator(`#absence-branch option[value="${sameBranchName.body.branch.id}"]`)).toContainText(sameBranchName.body.branch.slug);
+    await owner.getByRole("searchbox", { name: "البحث في الفروع والكورسات والمراحل والمستويات والمجموعات" }).fill(course.body.course.name);
+    await owner.getByRole("button", { name: "بحث في النطاقات" }).click();
     await expect(owner.locator(`#absence-rule-scope option[value="courses:${course.body.course.id}"]`)).toContainText(course.body.course.id);
     await expect(owner.locator(`#absence-rule-scope option[value="courses:${sameName.body.course.id}"]`)).toContainText(sameName.body.course.id);
     await expect(owner.locator(`#absence-rule-scope option[value="study_groups:${group.body.group.id}"]`)).toContainText(course.body.course.name);
+    await owner.getByRole("searchbox", { name: "البحث في الفروع والكورسات والمراحل والمستويات والمجموعات" }).fill(stageName);
+    await owner.getByRole("button", { name: "بحث في النطاقات" }).click();
+    await expect(owner.locator(`#absence-rule-scope option[value="stages:${stage.body.stage.id}"]`)).toHaveCount(1);
     await owner.getByLabel("الفرع", { exact: true }).selectOption(String(south));
     await owner.getByRole("searchbox", { name: "بحث في طلاب الغياب" }).fill(student.body.student.name);
     await owner.getByRole("button", { name: "بحث في جميع طلاب الغياب" }).click();
     await expect(owner).toHaveURL(/group_id=/);
+    await expect(owner).toHaveURL(/q=/);
     await expect(owner).not.toHaveURL(/branch_id=/);
-    await expect(owner.getByText(student.body.student.name)).toBeVisible();
+    await expect(owner.getByRole("link", { name: student.body.student.name })).toBeVisible();
     await owner.getByLabel("الفرع", { exact: true }).selectOption(String(north));
+    await expect(owner.getByLabel("الفرع", { exact: true })).toHaveValue(String(north));
     await owner.getByRole("button", { name: "تطبيق النطاق" }).click();
     await expect(owner).toHaveURL(/branch_id=/);
     await owner.goBack();
     await expect(owner.getByLabel("الفرع", { exact: true })).toHaveValue("");
+    await owner.getByRole("searchbox", { name: "البحث في الفروع والكورسات والمراحل والمستويات والمجموعات" }).fill(stageName);
+    await owner.getByRole("button", { name: "بحث في النطاقات" }).click();
     await owner.getByLabel("النطاق المراد تعديله").selectOption(`stages:${stage.body.stage.id}`);
     await expect(owner.getByText("القيمة الحالية: موروثة")).toBeVisible();
+    await owner.getByRole("searchbox", { name: "البحث في الفروع والكورسات والمراحل والمستويات والمجموعات" }).fill(course.body.course.name);
+    await owner.getByRole("button", { name: "بحث في النطاقات" }).click();
     await owner.getByLabel("النطاق المراد تعديله").selectOption(`courses:${course.body.course.id}`);
     await owner.getByLabel("نوع القاعدة").selectOption("total");
     await owner.getByLabel("الحد").fill("1");
@@ -145,14 +158,14 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
     await owner.getByText("عرض تغيير قاعدة الغياب").first().click();
     await expect(owner.getByText("بعد: ١ غياب متتالٍ").first()).toBeVisible();
     await owner.goto(`${origin}/admin/absence-review?${groupFilter}`);
-    await expect(owner.getByText(student.body.student.name)).toBeVisible();
+    await expect(owner.getByRole("link", { name: student.body.student.name })).toBeVisible();
     await expect(owner.getByRole("row").filter({ hasText: student.body.student.name }).getByRole("cell", { name: "يحتاج مراجعة" })).toBeVisible();
     await expect(owner.locator(`#absence-branch option[value="${south}"]`)).toHaveCount(1);
     const arabicNumber = Number(student.body.student.student_number).toLocaleString("ar-EG");
     await owner.getByRole("searchbox", { name: "بحث في طلاب الغياب" }).fill(arabicNumber);
     await owner.getByRole("button", { name: "بحث في جميع طلاب الغياب" }).click();
     await expect(owner).toHaveURL(/q=/);
-    await expect(owner.getByText(student.body.student.name)).toBeVisible();
+    await expect(owner.getByRole("link", { name: student.body.student.name })).toBeVisible();
     await expect(owner.locator("html")).toHaveAttribute("data-theme", "light");
     await owner.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
     await expect(owner.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -162,7 +175,7 @@ test("authorized absence rule updates the Arabic report and a branch reader cann
 
     await signIn(staff, "staff");
     await staff.goto(`${origin}/admin/absence-review?view=all&${groupFilter}`);
-    await expect(staff.getByText(student.body.student.name)).toBeVisible();
+    await expect(staff.getByRole("link", { name: student.body.student.name })).toBeVisible();
     await expect(staff.getByRole("button", { name: "حفظ قاعدة الغياب" })).toHaveCount(0);
     expect((await write(staff, `absence-rules/courses/${course.body.course.id}`, { mode: "disabled", limit: null, revision: 2 }, "PATCH")).status).toBe(403);
     expect((await staff.request.get(`${origin}/api/v1/center/absence-options?q=Hidden`)).status()).toBe(200);

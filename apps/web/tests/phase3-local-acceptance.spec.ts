@@ -1,0 +1,449 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { expect, test, type Page } from "@playwright/test";
+
+test.skip(!process.env.COURSES_PHASE3_CREDENTIALS || !process.env.COURSES_PHASE3_QUERY_LOG,
+  "Requires the isolated Phase 3 PostgreSQL fixture and its SSR query log.");
+test.setTimeout(180_000);
+
+const origin = process.env.COURSES_PHASE3_ORIGIN ?? "http://alpha.courses.test:8054";
+const queryLog = process.env.COURSES_PHASE3_QUERY_LOG ?? "";
+const credentials = process.env.COURSES_PHASE3_CREDENTIALS
+  ? JSON.parse(readFileSync(process.env.COURSES_PHASE3_CREDENTIALS, "utf8")) : {};
+
+type QueryRow = { host: string; path: string; status: number; count: number | null };
+const measurements: { kind: "api" | "page"; route: string; queries: number }[] = [];
+
+test.afterAll(() => {
+  const folder = path.resolve(process.cwd(), "test-results");
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(path.join(folder, "phase3-local-acceptance.json"), JSON.stringify({
+    measured_at: new Date().toISOString(),
+    measurements,
+  }, null, 2));
+});
+
+function logRows(): QueryRow[] {
+  return existsSync(queryLog) ? readFileSync(queryLog, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
+}
+
+async function signIn(page: Page, who: "alpha" | "beta" | "staff") {
+  const host = who === "beta" ? origin.replace("alpha.", "beta.") : origin;
+  await page.goto(`${host}/login`);
+  await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(credentials[who].email);
+  await page.getByRole("textbox", { name: "كلمة المرور", exact: true }).fill(credentials[who].password);
+  const response = page.waitForResponse(item => item.url().endsWith("/api/v1/center/auth/login") && item.request().method() === "POST");
+  await page.getByRole("button", { name: "دخول المركز", exact: true }).click();
+  const result = await response;
+  expect(result.status(), JSON.stringify(await result.json())).toBe(200);
+  await expect(page).toHaveURL(/\/admin$/);
+}
+
+async function write(page: Page, route: string, payload: object, method = "POST") {
+  return page.evaluate(async ({ route, payload, method }) => {
+    await fetch("/sanctum/csrf-cookie", { credentials: "same-origin", cache: "no-store" });
+    const token = document.cookie.split("; ").find(part => part.startsWith("XSRF-TOKEN="))?.split("=")[1];
+    const response = await fetch(`/api/v1/center/${route}`, {
+      method, credentials: "same-origin",
+      headers: { Accept: "application/json", "Content-Type": "application/json", "X-XSRF-TOKEN": decodeURIComponent(token ?? "") },
+      body: JSON.stringify(payload),
+    });
+    return { status: response.status, body: await response.json() };
+  }, { route, payload, method });
+}
+
+async function read(page: Page, route: string) {
+  const response = await page.request.get(`${origin}/api/v1/center/${route}`);
+  const raw = response.headers()["x-courses-query-count"];
+  expect(raw, `Missing SQL count for ${route}`).toMatch(/^\d+$/);
+  expect(Number(raw), route).toBeLessThanOrEqual(6);
+  measurements.push({ kind: "api", route, queries: Number(raw) });
+  return { status: response.status(), body: await response.json() };
+}
+
+async function measurePage(page: Page, route: string, expected: string) {
+  const before = logRows().length;
+  const response = await page.goto(`${origin}/admin/${route}`);
+  expect(response?.status()).toBe(200);
+  await expect(page.getByText(expected, { exact: false }).first()).toBeVisible();
+  const rows = logRows().slice(before).filter(row => row.host?.startsWith("alpha.courses.test") && row.path.startsWith("/api/v1/center/"));
+  expect(rows.length, `No SSR API reads for ${route}`).toBeGreaterThan(0);
+  expect(rows.every(row => row.status === 200 && Number.isInteger(row.count)), `Missing SQL counts for ${route}`).toBe(true);
+  const total = rows.reduce((sum, row) => sum + row.count!, 0);
+  expect(total, `Whole page SQL budget for ${route}`).toBeLessThanOrEqual(6);
+  measurements.push({ kind: "page", route, queries: total });
+  return total;
+}
+
+function cairoDate(offset = 0): string {
+  return new Date(Date.now() + offset * 86_400_000).toLocaleDateString("sv-SE", { timeZone: "Africa/Cairo" });
+}
+
+function backdate(centerId: string, sql: string) {
+  execFileSync("psql", ["-h", "127.0.0.1", "-p", "5554", "-U", "postgres", "-d", `courses_center_${centerId}`,
+    "-v", "ON_ERROR_STOP=1", "-c", sql], { stdio: "pipe" });
+}
+
+test("one student's academic, finance, permission and tenant history stays linked", async ({ browser }) => {
+  const owner = await browser.newPage();
+  const staff = await browser.newPage();
+  const beta = await browser.newPage();
+  try {
+    await signIn(owner, "alpha");
+    const workspace = (await read(owner, "student-workspace")).body;
+    const centerId = workspace.center.id as string;
+    const north = workspace.branches.find((branch: { slug: string }) => branch.slug === "north").id as number;
+    const south = workspace.branches.find((branch: { slug: string }) => branch.slug === "south").id as number;
+    expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, {
+      center_roles: [], branch_roles: { [north]: ["registration"] },
+    }, "PUT")).status).toBe(200);
+    await signIn(staff, "staff");
+    await signIn(beta, "beta");
+    const label = `رحلة قبول ${crypto.randomUUID().slice(0, 6)}`;
+
+    const course = await write(owner, "courses", { branch_id: north, name: label, request_id: crypto.randomUUID() });
+    expect(course.status).toBe(201);
+    const stage = await write(owner, `courses/${course.body.course.id}/stages`, { name: "مرحلة القبول", request_id: crypto.randomUUID() });
+    expect(stage.status).toBe(201);
+    const level = await write(owner, `stages/${stage.body.stage.id}/levels`, { name: "مستوى القبول", request_id: crypto.randomUUID(),
+      lectures: [1, 2].map(number => ({ number, content: `محتوى ${number}`, planned_hours: 1 })) });
+    expect(level.status).toBe(201);
+    const instructor = await write(owner, "instructors", { name: `محاضر ${label}`, branch_ids: [north], request_id: crypto.randomUUID() });
+    expect(instructor.status).toBe(201);
+    const createGroup = async (name: string) => {
+      const response = await write(owner, "groups", { level_id: level.body.level.id, plan_version_id: level.body.level.plan.id,
+        name, approved_price: "200.00", instructor_ids: [instructor.body.instructor.id], request_id: crypto.randomUUID() });
+      expect(response.status).toBe(201);
+      return response.body.group;
+    };
+    const firstGroup = await createGroup(`مجموعة أولى ${label}`);
+    const secondGroup = await createGroup(`مجموعة ثانية ${label}`);
+    const student = await write(owner, "students", { name: `طالب ${label}`, branch_ids: [north, south], request_id: crypto.randomUUID() });
+    expect(student.status).toBe(201);
+    const studentId = student.body.student.id as string;
+    const account = (await read(owner, `students/${studentId}/account`)).body;
+    if (!account.account.currency) {
+      expect((await write(owner, "financial-currency", { currency: "EGP", revision: account.account.currency_revision }, "PATCH")).status).toBe(200);
+    }
+
+    // A payment before registration remains available credit until staff explicitly allocate it.
+    const firstAccount = (await read(owner, `students/${studentId}/account`)).body;
+    const payment = await write(owner, `students/${studentId}/payments`, { branch_id: north, method: "cash",
+      received_on: cairoDate(), amount: "100.00", version: firstAccount.account.version, request_id: crypto.randomUUID() });
+    expect(payment.status).toBe(201);
+    await measurePage(owner, `students/${studentId}/account`, "100.00 EGP");
+    await measurePage(owner, `students/${studentId}/enrollments`, student.body.student.name);
+    await owner.getByRole("searchbox", { name: "بحث في المجموعات المتاحة للتسجيل" }).fill(firstGroup.name);
+    await owner.getByRole("button", { name: "بحث في جميع المجموعات المتاحة للتسجيل" }).click();
+    await owner.getByRole("combobox", { name: "المجموعة الأساسية" }).selectOption(firstGroup.id);
+    await owner.getByRole("button", { name: "تسجيل الطالب والرسوم" }).click();
+    await owner.getByLabel("تاريخ الانضمام الفعلي").fill(cairoDate());
+    await owner.getByRole("button", { name: "تسجيل الطالب والرسوم" }).click();
+    await expect(owner.getByText("سُجلت المحاولة ورسومها معًا", { exact: false })).toBeVisible();
+    const attempts = (await read(owner, `students/${studentId}/enrollments`)).body.attempts;
+    expect(attempts).toHaveLength(1);
+    const attemptId = attempts[0].id as string;
+    expect(attempts[0].fee.net_amount).toBe("200.00");
+    const allocationOptions = (await read(owner, `students/${studentId}/payments/${payment.body.payment.id}/allocation-options`)).body;
+    const allocated = await write(owner, `students/${studentId}/payments/${payment.body.payment.id}/allocations`, {
+      targets: [{ attempt_id: attemptId, amount: "100.00" }], version: allocationOptions.version, request_id: crypto.randomUUID(),
+    });
+    expect(allocated.status).toBe(201);
+    expect((await read(owner, `students/${studentId}/account`)).body.account).toMatchObject({
+      received_total: "100.00", allocated_total: "100.00", available_balance: "0.00", debt: "100.00",
+    });
+    // Another center cannot dereference the student's stable ID, and a north-only employee cannot read its south finance.
+    expect((await beta.request.get(`${origin.replace("alpha.", "beta.")}/api/v1/center/students/${studentId}`)).status()).toBe(404);
+    expect((await beta.request.get(`${origin.replace("alpha.", "beta.")}/api/v1/center/students/${studentId}/account`)).status()).toBe(404);
+    expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).status()).toBe(404);
+    const southOnly = await write(owner, "students", { name: `طالب الجنوب ${label}`, branch_ids: [south], request_id: crypto.randomUUID() });
+    expect(southOnly.status).toBe(201);
+    expect((await staff.request.get(`${origin}/api/v1/center/students/${southOnly.body.student.id}`)).status()).toBe(404);
+
+    await owner.goto(`${origin}/admin/students/${studentId}/enrollments`);
+    await owner.locator(`[id$="-waitlist-${attemptId}"]`).click();
+    await owner.getByLabel("تاريخ بداية الانتظار").fill(cairoDate());
+    await owner.getByLabel("سبب الانتظار").fill("تغيير وقت الدراسة");
+    await owner.getByRole("button", { name: "نقل إلى الانتظار", exact: true }).first().click();
+    await owner.getByRole("button", { name: "تأكيد الانتظار" }).click();
+    await expect(owner.getByText(`انتظار منذ ${cairoDate()}`)).toBeVisible();
+    const waiting = (await read(owner, `students/${studentId}/enrollments`)).body.attempts[0];
+    expect(waiting.current_group_id).toBeNull();
+    expect(waiting.fee.net_amount).toBe("200.00");
+    await owner.locator(`[id$="-waitlist-${attemptId}"]`).click();
+    await owner.getByRole("combobox", { name: "المجموعة الجديدة" }).selectOption(secondGroup.id);
+    await owner.getByLabel("تاريخ الإلحاق الفعلي").fill(cairoDate());
+    await owner.getByRole("button", { name: "إعادة الإلحاق", exact: true }).first().click();
+    await owner.getByRole("button", { name: "تأكيد الإلحاق" }).click();
+    await expect(owner.getByRole("table", { name: "محاولات الدراسة" }).getByRole("row", { name: new RegExp(secondGroup.name) })).toBeVisible();
+    const reattached = (await read(owner, `students/${studentId}/enrollments`)).body.attempts[0];
+    expect(reattached).toMatchObject({ id: attemptId, current_group_id: secondGroup.id, fee: { net_amount: "200.00" } });
+    expect((await read(owner, `students/${studentId}/account`)).body.account).toMatchObject({
+      received_total: "100.00", allocated_total: "100.00", available_balance: "0.00", debt: "100.00",
+    });
+    await measurePage(owner, `students/${studentId}?tab=study`, student.body.student.name);
+    const studyTable = owner.getByRole("table", { name: "محاولات الدراسة" });
+    await expect(studyTable.getByRole("row", { name: new RegExp(firstGroup.name) })).toContainText("انتقل من هذه المجموعة");
+    await expect(studyTable.getByRole("row", { name: new RegExp(secondGroup.name) })).toContainText("يدرس المستوى");
+
+    const scheduled = await write(owner, `groups/${secondGroup.id}/sessions`, {
+      kind: "single", revision: secondGroup.revision, start_at: `${cairoDate(2)}T17:00`,
+      plan_lecture_number: 1, request_id: crypto.randomUUID(),
+    });
+    expect(scheduled.status).toBe(201);
+    const sessionId = scheduled.body.sessions[0].id as string;
+    expect((await write(owner, `groups/${secondGroup.id}/start`, { revision: scheduled.body.group_revision })).status).toBe(200);
+    backdate(centerId, `UPDATE study_groups SET started_at = now() - interval '2 days' WHERE id = '${secondGroup.id}';
+      UPDATE study_sessions SET scheduled_at = now() - interval '1 hour' WHERE id = '${sessionId}'`);
+    const attendancePath = `groups/${secondGroup.id}/sessions/${sessionId}/attendance`;
+    await measurePage(owner, attendancePath, student.body.student.name);
+    const attendanceRow = owner.getByRole("row", { name: new RegExp(student.body.student.name) });
+    await attendanceRow.getByRole("button", { name: "تسجيل الحضور" }).click();
+    await owner.getByRole("button", { name: "حاضر محتسب" }).click();
+    await expect(attendanceRow).toContainText("حاضر محتسب");
+    await owner.getByRole("button", { name: "إغلاق كشف المحاضرة" }).click();
+    await owner.getByRole("button", { name: "تأكيد الإغلاق" }).click();
+    await owner.waitForLoadState("networkidle");
+    await measurePage(owner, `groups/${secondGroup.id}/coverage`, student.body.student.name);
+    const coverage = (await read(owner, `groups/${secondGroup.id}/coverage`)).body;
+    expect(coverage.students.find((row: { attempt_id: string }) => row.attempt_id === attemptId)).toMatchObject({
+      covered_count: 1, required_count: 2, missing_numbers: [2],
+    });
+
+    await owner.setViewportSize({ width: 390, height: 844 });
+    await measurePage(owner, `students/${studentId}/enrollments`, student.body.student.name);
+    expect(await owner.locator("html").getAttribute("dir")).toBe("rtl");
+    await owner.getByRole("button", { name: "القائمة" }).click();
+    await owner.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
+    await expect(owner.locator("html")).toHaveAttribute("data-theme", "dark");
+    await owner.getByRole("button", { name: "إغلاق القائمة" }).click();
+    expect(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await owner.goto(`${origin}/admin/audit`);
+    await expect(owner.getByText("نقل الطالب إلى انتظار المستوى").first()).toBeVisible();
+    await expect(owner.getByText("إعادة إلحاق الطالب بالمحاولة نفسها").first()).toBeVisible();
+  } finally {
+    await Promise.all([owner.close(), staff.close(), beta.close()]);
+  }
+});
+
+test("student register stays paged and keeps the SQL budget on a longer dataset", async ({ browser }) => {
+  const owner = await browser.newPage();
+  try {
+    await signIn(owner, "alpha");
+    const workspace = (await read(owner, "student-workspace")).body;
+    const north = workspace.branches.find((branch: { slug: string }) => branch.slug === "north").id as number;
+    const stamp = crypto.randomUUID().slice(0, 8);
+    const before = await measurePage(owner, "students", "ملفات الطلاب");
+    for (let index = 0; index < 55; index++) {
+      const saved = await write(owner, "students", { name: `قياس القائمة ${stamp} ${index}`,
+        branch_ids: [north], request_id: crypto.randomUUID() });
+      expect(saved.status).toBe(201);
+    }
+    const firstPage = (await read(owner, "student-workspace?page=1")).body;
+    expect(firstPage.pagination.has_more).toBe(true);
+    expect(firstPage.students).toHaveLength(50);
+    const cold = await measurePage(owner, "students", "ملفات الطلاب");
+    const warm = await measurePage(owner, "students", "ملفات الطلاب");
+    const secondPage = (await read(owner, "student-workspace?page=2")).body;
+    expect(secondPage.students.length).toBeGreaterThan(0);
+    expect(secondPage.students.length).toBeLessThanOrEqual(50);
+    await measurePage(owner, "students?page=2", "ملفات الطلاب");
+    expect([before, cold, warm].every(count => count > 0 && count <= 6)).toBe(true);
+  } finally {
+    await owner.close();
+  }
+});
+
+test("a missed student makes up content and is approved after the group is complete", async ({ browser }) => {
+  const owner = await browser.newPage();
+  try {
+    await signIn(owner, "alpha");
+    const workspace = (await read(owner, "student-workspace")).body;
+    const centerId = workspace.center.id as string;
+    const north = workspace.branches.find((branch: { slug: string }) => branch.slug === "north").id as number;
+    const label = `إتمام متأخر ${crypto.randomUUID().slice(0, 6)}`;
+    const course = await write(owner, "courses", { branch_id: north, name: label, request_id: crypto.randomUUID() });
+    expect(course.status).toBe(201);
+    const stage = await write(owner, `courses/${course.body.course.id}/stages`, { name: "مرحلة القبول", request_id: crypto.randomUUID() });
+    expect(stage.status).toBe(201);
+    const level = await write(owner, `stages/${stage.body.stage.id}/levels`, { name: "مستوى القبول",
+      lectures: [{ number: 1, content: "المحتوى المطلوب", planned_hours: 1 }], request_id: crypto.randomUUID() });
+    expect(level.status).toBe(201);
+    const instructor = await write(owner, "instructors", { name: `محاضر ${label}`, branch_ids: [north], request_id: crypto.randomUUID() });
+    expect(instructor.status).toBe(201);
+    const group = async (name: string) => {
+      const result = await write(owner, "groups", { level_id: level.body.level.id, plan_version_id: level.body.level.plan.id,
+        name, approved_price: "0.00", instructor_ids: [instructor.body.instructor.id], request_id: crypto.randomUUID() });
+      expect(result.status).toBe(201);
+      return result.body.group;
+    };
+    const source = await group(`الأصل ${label}`);
+    const makeup = await group(`التعويض ${label}`);
+    const students = [];
+    for (const name of [`حاضر ${label}`, `متغيب ${label}`]) {
+      const student = await write(owner, "students", { name, branch_ids: [north], request_id: crypto.randomUUID() });
+      expect(student.status).toBe(201);
+      students.push(student.body.student);
+    }
+    const account = (await read(owner, `students/${students[0].id}/account`)).body;
+    if (!account.account.currency) {
+      expect((await write(owner, "financial-currency", { currency: "EGP", revision: account.account.currency_revision }, "PATCH")).status).toBe(200);
+    }
+    const attempts: { id: string; revision: number }[] = [];
+    for (const student of students) {
+      const current = (await read(owner, `students/${student.id}/enrollments`)).body;
+      const enrollment = await write(owner, `students/${student.id}/enrollments`, { group_id: source.id,
+        group_revision: source.revision, currency_revision: current.student.currency_revision,
+        joined_on: cairoDate(-3), discount: "0.00", discount_reason: null,
+        version: current.student.version, request_id: crypto.randomUUID() });
+      expect(enrollment.status).toBe(201);
+      attempts.push(enrollment.body.attempt);
+    }
+    const sourcePath = `groups/${source.id}`;
+    const extraChange = { kind: "add", content: "امتداد محلي للشرح", reason: "احتاجت المجموعة لقاء إضافيًا" };
+    const addedPreview = await write(owner, `${sourcePath}/requirements/preview`, extraChange);
+    expect(addedPreview.status, JSON.stringify(addedPreview.body)).toBe(200);
+    expect(addedPreview.body).toMatchObject({ before: { required_count: 1 }, after: { required_count: 2 } });
+    const added = await write(owner, `${sourcePath}/requirements`, {
+      ...extraChange, group_revision: addedPreview.body.group_revision,
+      preview_token: addedPreview.body.preview_token, request_id: crypto.randomUUID(),
+    });
+    expect(added.status, JSON.stringify(added.body)).toBe(201);
+    expect((await read(owner, `${sourcePath}/coverage`)).body.group.required_count).toBe(2);
+    const extraSession = await write(owner, `${sourcePath}/sessions`, {
+      kind: "single", revision: added.body.group_revision,
+      start_at: `${cairoDate(3)}T17:00`, plan_lecture_number: 2, request_id: crypto.randomUUID(),
+    });
+    expect(extraSession.status, JSON.stringify(extraSession.body)).toBe(201);
+    const reduction = { kind: "reduce", session_id: extraSession.body.sessions[0].id,
+      decision: "none", reason: "تعذر عقد اللقاء الإضافي ولا بديل له" };
+    const reducedPreview = await write(owner, `${sourcePath}/requirements/preview`, reduction);
+    expect(reducedPreview.status, JSON.stringify(reducedPreview.body)).toBe(200);
+    expect(reducedPreview.body).toMatchObject({ before: { required_count: 2 }, after: { required_count: 1 } });
+    const reduced = await write(owner, `${sourcePath}/requirements`, {
+      ...reduction, group_revision: reducedPreview.body.group_revision,
+      preview_token: reducedPreview.body.preview_token, request_id: crypto.randomUUID(),
+    });
+    expect(reduced.status, JSON.stringify(reduced.body)).toBe(200);
+    expect(reduced.body.session.status).toBe("cancelled");
+    expect((await read(owner, `${sourcePath}/coverage`)).body.group.required_count).toBe(1);
+    const session = async (groupId: string, revision: number) => {
+      const result = await write(owner, `groups/${groupId}/sessions`, { kind: "single", revision,
+        start_at: `${cairoDate(2)}T17:00`, plan_lecture_number: 1, request_id: crypto.randomUUID() });
+      expect(result.status).toBe(201);
+      return result.body;
+    };
+    const sourceSession = await session(source.id, reduced.body.group_revision);
+    const makeupSession = await session(makeup.id, makeup.revision);
+    const sourceSessionId = sourceSession.sessions[0].id as string;
+    const makeupSessionId = makeupSession.sessions[0].id as string;
+    expect((await write(owner, `groups/${source.id}/start`, { revision: sourceSession.group_revision })).status).toBe(200);
+    backdate(centerId, `UPDATE study_groups SET started_at = now() - interval '3 days' WHERE id = '${source.id}';
+      UPDATE study_sessions SET scheduled_at = now() - interval '2 days' WHERE id = '${sourceSessionId}'`);
+    expect((await write(owner, `groups/${source.id}/sessions/${sourceSessionId}/attendance`, {
+      attempt_id: attempts[0].id, status: "counted", revision: 1, request_id: crypto.randomUUID(),
+    })).status).toBe(201);
+    const closedSource = await write(owner, `groups/${source.id}/sessions/${sourceSessionId}/close`, {
+      revision: 2, request_id: crypto.randomUUID(),
+    });
+    expect(closedSource.status).toBe(200);
+    expect(closedSource.body.absent_count).toBe(1);
+    await measurePage(owner, `groups/${source.id}/coverage`, students[0].name);
+    await owner.getByRole("checkbox", { name: `اختيار إتمام ${students[0].name}` }).check();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" }).click();
+    await expect(owner.getByRole("heading", { name: "معاينة قرار الإتمام" })).toBeVisible();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "تأكيد الاعتماد" }).click();
+    await expect(owner.getByText("اكتملت المجموعة، وحُفظت قرارات الطلاب المختارين.")).toBeVisible();
+    const completed = (await read(owner, `groups/${source.id}/coverage`)).body;
+    expect(completed.group.status).toBe("completed");
+    expect(completed.students.find((row: { attempt_id: string }) => row.attempt_id === attempts[1].id).attempt_status).toBe("active");
+    const firstDecision = (await read(owner, `students/${students[0].id}/courses/${course.body.course.id}/completion`)).body;
+    expect(firstDecision.levels[0].attempt).toMatchObject({ status: "completed", covered_count: 1, required_count: 1 });
+
+    const booked = await write(owner, `students/${students[1].id}/enrollments/${attempts[1].id}/makeup/book`, {
+      session_id: makeupSessionId, source_session_id: sourceSessionId,
+      attempt_revision: attempts[1].revision, session_revision: makeupSession.sessions[0].revision,
+      request_id: crypto.randomUUID(),
+    });
+    expect(booked.status, JSON.stringify(booked.body)).toBe(201);
+    expect((await write(owner, `groups/${makeup.id}/start`, { revision: makeupSession.group_revision })).status).toBe(200);
+    backdate(centerId, `UPDATE study_groups SET started_at = now() - interval '2 days' WHERE id = '${makeup.id}';
+      UPDATE study_sessions SET scheduled_at = now() - interval '1 hour' WHERE id = '${makeupSessionId}'`);
+    expect((await write(owner, `groups/${makeup.id}/sessions/${makeupSessionId}/attendance`, {
+      attempt_id: attempts[1].id, status: "counted", revision: 1, request_id: crypto.randomUUID(),
+    })).status).toBe(201);
+    expect((await write(owner, `groups/${makeup.id}/sessions/${makeupSessionId}/close`, {
+      revision: 2, request_id: crypto.randomUUID(),
+    })).status).toBe(200);
+    const restored = (await read(owner, `groups/${source.id}/coverage`)).body;
+    expect(restored.students.find((row: { attempt_id: string }) => row.attempt_id === attempts[1].id)).toMatchObject({
+      covered_count: 1, required_count: 1, missing_numbers: [], attempt_status: "active",
+    });
+    await measurePage(owner, `groups/${source.id}/coverage`, students[1].name);
+    await owner.getByRole("checkbox", { name: `اختيار إتمام ${students[1].name}` }).check();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة اعتماد الطلاب" }).click();
+    await expect(owner.getByRole("heading", { name: "معاينة قرار الإتمام" })).toBeVisible();
+    await expect(owner.getByText("المجموعة مكتملة بالفعل. عدد الطلاب المختارين: ١.")).toBeVisible();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "تأكيد الاعتماد" }).click();
+    await expect(owner.getByText("حُفظ اعتماد إتمام الطلاب المختارين.")).toBeVisible();
+    const final = (await read(owner, `groups/${source.id}/coverage`)).body;
+    expect(final.group.status).toBe("completed");
+    expect(final.students.filter((row: { attempt_status: string }) => row.attempt_status === "completed")).toHaveLength(2);
+    const correctionWorkspace = (await read(owner, `groups/${source.id}/sessions/${sourceSessionId}/attendance`)).body;
+    const correctionRow = correctionWorkspace.students.find((row: { attempt_id: string }) => row.attempt_id === attempts[0].id);
+    const corrected = await write(owner, `groups/${source.id}/sessions/${sourceSessionId}/attendance/${correctionRow.entry_id}/correct`, {
+      status: "not_counted", reason: "تصحيح الكشف بعد اعتماد الإتمام",
+      revision: correctionWorkspace.session.revision, entry_revision: correctionRow.entry_revision,
+      request_id: crypto.randomUUID(),
+    });
+    expect(corrected.status, JSON.stringify(corrected.body)).toBe(200);
+    const retained = (await read(owner, `students/${students[0].id}/courses/${course.body.course.id}/completion`)).body;
+    expect(retained.levels[0].attempt).toMatchObject({ status: "completed", covered_count: 1, required_count: 1 });
+    expect((await read(owner, `groups/${source.id}/coverage`)).body.students.find(
+      (row: { attempt_id: string }) => row.attempt_id === attempts[0].id,
+    ).covered_count).toBe(0);
+    const nextPlan = await write(owner, `levels/${level.body.level.id}/plan-versions`, {
+      base_plan_version_id: level.body.level.plan.id, base_revision: 1,
+      lectures: [{ number: 1, content: "المحتوى المطلوب بإصدار جديد", planned_hours: 1 },
+        { number: 2, content: "امتداد الإصدار الجديد", planned_hours: 1 }],
+      request_id: crypto.randomUUID(),
+    });
+    expect(nextPlan.status, JSON.stringify(nextPlan.body)).toBe(201);
+    const applicationPath = `${sourcePath}/plan-applications`;
+    const application = { target_plan_version_id: nextPlan.body.plan.id, attempt_ids: [attempts[0].id],
+      reason: "تطبيق الخطة الأحدث مع حفظ إتمام الطالب السابق" };
+    const applicationPreview = await write(owner, `${applicationPath}/preview`, application);
+    expect(applicationPreview.status, JSON.stringify(applicationPreview.body)).toBe(200);
+    expect(applicationPreview.body.students[0]).toMatchObject({
+      attempt_id: attempts[0].id, before: { covered_count: 0, required_count: 1 },
+      after: { covered_count: 0, required_count: 2 },
+    });
+    const applied = await write(owner, applicationPath, {
+      ...application, group_revision: applicationPreview.body.group_revision,
+      preview_token: applicationPreview.body.preview_token, request_id: crypto.randomUUID(),
+    });
+    expect(applied.status, JSON.stringify(applied.body)).toBe(201);
+    expect(applied.body.applied_count).toBe(1);
+    const versioned = (await read(owner, `${sourcePath}/coverage`)).body;
+    expect(versioned.group.plan_version_id).toBe(level.body.level.plan.id);
+    expect(versioned.students.find((row: { attempt_id: string }) => row.attempt_id === attempts[0].id)).toMatchObject({
+      attempt_status: "completed", plan_version_id: nextPlan.body.plan.id, covered_count: 0, required_count: 2,
+    });
+    expect(versioned.students.find((row: { attempt_id: string }) => row.attempt_id === attempts[1].id)).toMatchObject({
+      attempt_status: "completed", plan_version_id: level.body.level.plan.id, covered_count: 1, required_count: 1,
+    });
+    await measurePage(owner, `${sourcePath}/coverage`, students[0].name);
+    const historicalDecision = (await read(owner, `students/${students[0].id}/courses/${course.body.course.id}/completion`)).body;
+    expect(historicalDecision.levels[0].attempt).toMatchObject({
+      status: "completed", covered_count: 1, required_count: 1,
+      approved_at: firstDecision.levels[0].attempt.approved_at,
+    });
+    await owner.goto(`${origin}/admin/audit`);
+    await expect(owner.getByRole("heading", { name: "إكمال مجموعة" }).first()).toBeVisible();
+    await expect(owner.getByRole("heading", { name: "اعتماد إتمام دراسة طالب" }).first()).toBeVisible();
+    await expect(owner.getByRole("heading", { name: "تطبيق إصدار خطة جديد على محاولات مختارة" }).first()).toBeVisible();
+  } finally {
+    await owner.close();
+  }
+});

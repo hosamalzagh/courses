@@ -5,6 +5,7 @@ test.skip(!process.env.COURSES_ENROLLMENT_CREDENTIALS, "Requires the disposable 
 const origin = process.env.COURSES_ENROLLMENT_ORIGIN ?? "http://alpha.courses.test:8057";
 const credentials = process.env.COURSES_ENROLLMENT_CREDENTIALS
   ? JSON.parse(readFileSync(process.env.COURSES_ENROLLMENT_CREDENTIALS, "utf8")) : {};
+const workerPorts = (process.env.COURSES_ENROLLMENT_WORKER_PORTS ?? "8157,8158").split(",").map(Number);
 
 async function signIn(page: Page, who: "alpha" | "staff" = "alpha") {
   await page.goto(`${origin}/login`);
@@ -252,8 +253,8 @@ test("parallel suspension and enrollment produce one serialized decision", async
   await page.evaluate(() => fetch("/sanctum/csrf-cookie", { credentials: "same-origin" }));
   const xsrf = (await page.context().cookies(origin)).find(cookie => cookie.name === "XSRF-TOKEN")?.value ?? "";
   const headers = { Accept: "application/json", "X-XSRF-TOKEN": decodeURIComponent(xsrf) };
-  const statusUrl = `http://alpha.courses.test:8157/api/v1/center/students/${studentId}/status`;
-  const enrollmentUrl = `http://alpha.courses.test:8158/api/v1/center/students/${studentId}/enrollments`;
+  const statusUrl = `http://alpha.courses.test:${workerPorts[0]}/api/v1/center/students/${studentId}/status`;
+  const enrollmentUrl = `http://alpha.courses.test:${workerPorts[1]}/api/v1/center/students/${studentId}/enrollments`;
   const [suspension, enrollment] = await Promise.all([
     page.request.post(statusUrl, { headers, data: { status: "suspended", reason: "قرار متزامن", status_revision: 1, request_id: crypto.randomUUID() } }),
     page.request.post(enrollmentUrl, { headers, data: { group_id: createdGroup.id, group_revision: createdGroup.revision,
@@ -292,13 +293,13 @@ test("simultaneous submissions keep one fee per request and reject stale distinc
     });
     return { status: response.status(), body: await response.json() };
   };
-  const same = await Promise.all([post(8157, payload), post(8158, payload)]);
+  const same = await Promise.all([post(workerPorts[0], payload), post(workerPorts[1], payload)]);
   expect(same.map(item => item.status).sort()).toEqual([200, 201]);
   expect(same[0].body.attempt.id).toBe(same[1].body.attempt.id);
   const after = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
   expect(after.attempts).toHaveLength(1);
   expect(after.balance.debt).toBe("80.00");
-  const distinct = await Promise.all([0, 1].map(index => post(index ? 8158 : 8157, {
+  const distinct = await Promise.all([0, 1].map(index => post(workerPorts[index], {
     ...payload, group_id: second.id, group_revision: second.revision, version: after.student.version, request_id: crypto.randomUUID(),
   })));
   expect(distinct.map(item => item.status).sort()).toEqual([201, 409]);
@@ -418,7 +419,7 @@ test("registration note stays on its event with version history and importance",
   await expect(page.getByRole("heading", { name: "ملاحظات التسجيل الدراسي" })).toBeVisible();
   await expect(page.getByText("مسودة الموظف بعد التعارض").first()).toBeVisible();
   await page.getByRole("button", { name: "عرض تاريخ التعديل" }).click();
-  await expect(page.getByRole("heading", { name: `تاريخ ملاحظة ${createdGroup.name}` })).toBeVisible();
+  await expect(page.getByRole("region", { name: "نسخ الملاحظة" }).getByRole("heading", { name: "نسخ ملاحظة تسجيل دراسي" })).toBeVisible();
   await expect(page.getByText("نسخة ٥", { exact: false })).toBeVisible();
   await page.goto(`${origin}/admin/audit`);
   await expect(page.getByText("تعديل ملاحظة تسجيل الطالب").first()).toBeVisible();
@@ -432,9 +433,9 @@ test("registration note stays on its event with version history and importance",
   try {
     await signIn(viewer, "staff");
     await viewer.goto(`${origin}/admin/students/${studentId}`);
-    await viewer.getByRole("link", { name: "ملاحظات التسجيل" }).click();
+    await viewer.getByRole("link", { name: "الملاحظات", exact: true }).click();
     await expect(viewer.getByText("مسودة الموظف بعد التعارض").first()).toBeVisible();
-    await viewer.getByRole("button", { name: "عرض تاريخ التعديل" }).click();
+    await viewer.getByRole("button", { name: "عرض النسخ" }).click();
     await expect(viewer.getByText("نسخة ٥", { exact: false })).toBeVisible();
     await expect(viewer.getByRole("link", { name: "التسجيل ومحاولات الدراسة" })).toHaveCount(0);
     await expect(viewer.getByText("120.00 EGP")).toHaveCount(0);
