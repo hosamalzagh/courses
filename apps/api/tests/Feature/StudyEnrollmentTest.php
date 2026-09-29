@@ -870,6 +870,11 @@ class StudyEnrollmentTest extends TestCase
 
     public function test_allocation_correction_moves_a_real_payment_atomically_without_changing_receipt(): void
     {
+        $this->center->run(function (): void {
+            $this->assertTrue(DB::table('pg_indexes')
+                ->where('tablename', 'student_payment_allocations')
+                ->where('indexname', 'student_payment_allocations_submission_id_index')->exists());
+        });
         $northGroup = $this->group($this->north, '400.00');
         $southGroup = $this->group($this->south, '400.00');
         $student = $this->student([$this->north, $this->south]);
