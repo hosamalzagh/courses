@@ -16,10 +16,10 @@ test.setTimeout(120_000);
 
 const credentials = credentialsFile ? JSON.parse(readFileSync(credentialsFile, "utf8")) : {};
 
-async function signIn(page: Page, host = origin!) {
+async function signIn(page: Page, host = origin!, identity: "alpha" | "staff" = "alpha") {
   await page.goto(`${host}/login`);
-  await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(credentials.alpha.email);
-  await page.getByRole("textbox", { name: "كلمة المرور", exact: true }).fill(credentials.alpha.password);
+  await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(credentials[identity].email);
+  await page.getByRole("textbox", { name: "كلمة المرور", exact: true }).fill(credentials[identity].password);
   const login = page.waitForResponse(response => response.url().endsWith("/api/v1/center/auth/login") && response.request().method() === "POST");
   await page.getByRole("button", { name: "دخول المركز", exact: true }).click();
   expect((await login).status()).toBe(200);
@@ -58,7 +58,7 @@ function assertMeasuredPage(after: number, studentId: string, requireStudentRead
   return reads.map(read => ({ path: read.path, count: read.count!, ms: read.ms! }));
 }
 
-test("one authorized profile keeps study, attendance, suspension and finance together across measured tabs", async ({ page }) => {
+test("one authorized profile keeps study, attendance, suspension and finance together across measured tabs", async ({ page, browser }) => {
   await signIn(page);
   const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
   const branch = workspace.branches[0].id as number;
@@ -110,7 +110,7 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
   expect((await write(page, `groups/${groupId}/start`, { revision: secondSession.body.group_revision })).status).toBe(200);
   for (const id of [centerId, groupId, sessionId, secondSessionId]) expect(id).toMatch(/^[a-f0-9-]{36}$/);
   execFileSync("psql", ["-h", "127.0.0.1", "-p", databasePort!, "-U", "postgres", "-d", `courses_center_${centerId}`,
-    "-c", `UPDATE study_groups SET started_at = now() - interval '1 day' WHERE id = '${groupId}'; UPDATE study_sessions SET scheduled_at = now() - interval '2 hours' WHERE id = '${sessionId}'; UPDATE study_sessions SET scheduled_at = now() - interval '1 hour' WHERE id = '${secondSessionId}'`], { stdio: "ignore" });
+    "-c", `UPDATE study_groups SET started_at = now() - interval '2 days' WHERE id = '${groupId}'; UPDATE study_sessions SET scheduled_at = now() - interval '26 hours' WHERE id = '${sessionId}'; UPDATE study_sessions SET scheduled_at = now() - interval '25 hours' WHERE id = '${secondSessionId}'`], { stdio: "ignore" });
   const attendanceRoute = `groups/${groupId}/sessions/${sessionId}/attendance`;
   const roster = await (await page.request.get(`${origin}/api/v1/center/${attendanceRoute}`)).json();
   expect((await write(page, attendanceRoute, { attempt_id: attempt.body.attempt.id, status: "counted",
@@ -207,6 +207,142 @@ test("one authorized profile keeps study, attendance, suspension and finance tog
   await expect(page.getByText(`السبب: قبول فك ${unique}`, { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "ملخص الطالب" }).getByText(`Group ${unique}`, { exact: false })).toBeVisible();
   measurements.push({ route: "active:history", state: "cold", reads: assertMeasuredPage(before, studentId) });
+
+  // #43/#44: a changed group requirement and a newer plan applied to one student
+  // must stay distinct in the student's historical profile after withdrawal.
+  const requirement = { kind: "add", content: `Group only ${unique}`, reason: "قبول تغيير متطلبات المجموعة" };
+  const requirementPreview = await write(page, `groups/${groupId}/requirements/preview`, requirement);
+  expect(requirementPreview.status, JSON.stringify(requirementPreview.body)).toBe(200);
+  const addedRequirement = await write(page, `groups/${groupId}/requirements`, {
+    ...requirement, group_revision: requirementPreview.body.group_revision,
+    preview_token: requirementPreview.body.preview_token, request_id: crypto.randomUUID(),
+  });
+  expect(addedRequirement.status, JSON.stringify(addedRequirement.body)).toBe(201);
+  const newerPlan = await write(page, `levels/${level.body.level.id}/plan-versions`, {
+    base_plan_version_id: level.body.level.plan.id, base_revision: level.body.level.plan.revision,
+    lectures: [{ number: 1, content: "Required", planned_hours: 1 },
+      { number: 2, content: "Required next", planned_hours: 1 },
+      { number: 3, content: `New plan ${unique}`, planned_hours: 1 },
+      { number: 4, content: `New plan extra ${unique}`, planned_hours: 1 }],
+    request_id: crypto.randomUUID(),
+  });
+  expect(newerPlan.status, JSON.stringify(newerPlan.body)).toBe(201);
+  const planChange = { target_plan_version_id: newerPlan.body.plan.id,
+    attempt_ids: [attempt.body.attempt.id], reason: "قبول إصدار الخطة الأحدث لطالب واحد" };
+  const planPreview = await write(page, `groups/${groupId}/plan-applications/preview`, planChange);
+  expect(planPreview.status, JSON.stringify(planPreview.body)).toBe(200);
+  const appliedPlan = await write(page, `groups/${groupId}/plan-applications`, {
+    ...planChange, group_revision: planPreview.body.group_revision,
+    preview_token: planPreview.body.preview_token, request_id: crypto.randomUUID(),
+  });
+  expect(appliedPlan.status, JSON.stringify(appliedPlan.body)).toBe(201);
+  enrollment = await (await page.request.get(`${origin}/api/v1/center/${enrollments}`)).json();
+  expect(enrollment.attempts[0].plan_version_id).toBe(newerPlan.body.plan.id);
+  expect(enrollment.attempts[0].requirements_count).toBe(4);
+  const todayCairo = new Date().toLocaleDateString("sv-SE", { timeZone: "Africa/Cairo" });
+  const withdrawn = await write(page, `${enrollments}/${attempt.body.attempt.id}/withdraw`, {
+    withdrawn_on: todayCairo, reason: "قبول حفظ تاريخ الدراسة بعد التعديل",
+    revision: enrollment.attempts[0].revision, request_id: crypto.randomUUID(),
+  });
+  expect(withdrawn.status, JSON.stringify(withdrawn.body)).toBe(200);
+  enrollment = await (await page.request.get(`${origin}/api/v1/center/${enrollments}`)).json();
+  expect(enrollment.attempts[0].status).toBe("withdrawn");
+  expect(enrollment.attempts[0].plan_version_id).toBe(newerPlan.body.plan.id);
+  expect(enrollment.attempts[0].requirements_count).toBe(4);
+  const coverage = await (await page.request.get(`${origin}/api/v1/center/groups/${groupId}/coverage`)).json();
+  expect(coverage.group.required_count).toBe(3);
+  expect(coverage.students.find((row: { attempt_id: string }) => row.attempt_id === attempt.body.attempt.id).required_count).toBe(4);
+  before = cursor();
+  await page.goto(`${origin}/admin/students/${studentId}?tab=study`, { waitUntil: "networkidle" });
+  await expect(page.getByText("انسحب من المحاولة")).toBeVisible();
+  measurements.push({ route: "withdrawn:study", state: "cold", reads: assertMeasuredPage(before, studentId) });
+  before = cursor();
+  await page.goto(`${origin}/admin/students/${studentId}/enrollments`, { waitUntil: "networkidle" });
+  const historicalRow = page.getByRole("table", { name: "محاولات الدراسة" }).getByRole("row", { name: new RegExp(`Group ${unique}`) });
+  await expect(historicalRow.getByRole("cell").nth(4)).toHaveText("٤");
+  measurements.push({ route: "withdrawn:enrollments", state: "cold", reads: assertMeasuredPage(before, studentId) });
+
+  // #54: a fee settlement, refund, payment correction and event note must flow
+  // through the same profile while preserving financial scope and SQL bounds.
+  const financialBefore = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
+  const feeId = financialBefore.fees.find((fee: { attempt_id: string }) => fee.attempt_id === attempt.body.attempt.id).id as string;
+  const feeDetail = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/fees/${feeId}/adjustments?new_due=80.00`)).json();
+  const settled = await write(page, `students/${studentId}/fees/${feeId}/adjustments`, {
+    new_due: "80.00", reason: "قبول تسوية رسوم الانسحاب", replaces_adjustment_id: null,
+    version: feeDetail.version, request_id: crypto.randomUUID(),
+  });
+  expect(settled.status, JSON.stringify(settled.body)).toBe(201);
+  const refundRoute = `students/${studentId}/payments/${payment.body.payment.id}/refunds`;
+  const refundDetail = await (await page.request.get(`${origin}/api/v1/center/${refundRoute}`)).json();
+  const refunded = await write(page, refundRoute, { amount: "10.00", refunded_on: todayCairo,
+    reason: "قبول استرداد جزء من الدفعة", version: refundDetail.version, request_id: crypto.randomUUID() });
+  expect(refunded.status, JSON.stringify(refunded.body)).toBe(201);
+  const correctionRoute = `students/${studentId}/payments/${payment.body.payment.id}/corrections`;
+  const correctionDetail = await (await page.request.get(`${origin}/api/v1/center/${correctionRoute}`)).json();
+  const corrected = await write(page, correctionRoute, { correct_amount: "40.00", allocations: [],
+    reason: "قبول تصحيح مبلغ الدفعة", version: correctionDetail.version, request_id: crypto.randomUUID() });
+  expect(corrected.status, JSON.stringify(corrected.body)).toBe(201);
+  const correctionNote = `تصحيح مالي مهم ${unique}`;
+  const noted = await write(page, `students/${studentId}/financial-events/payment_correction/${corrected.body.reversal.id}/note`, {
+    body: correctionNote, important: true, revision: 0, request_id: crypto.randomUUID(),
+  }, "PUT");
+  expect(noted.status, JSON.stringify(noted.body)).toBe(201);
+  const afterMoney = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
+  expect(afterMoney.account.received_total).toBe("45.00");
+  expect(afterMoney.account.refunded_total).toBe("10.00");
+  expect(afterMoney.account.available_balance).toBe("35.00");
+  expect(afterMoney.account.due_total).toBe("80.00");
+  expect(afterMoney.account.debt).toBe("80.00");
+  before = cursor();
+  await page.goto(`${origin}/admin/students/${studentId}`, { waitUntil: "networkidle" });
+  await expect(page.getByRole("region", { name: "ملخص الطالب" }).getByText("مديونية في الفروع المالية المصرح بها: 80.00 EGP", { exact: false })).toBeVisible();
+  await expect(page.getByRole("link", { name: correctionNote })).toBeVisible();
+  measurements.push({ route: "settled:profile", state: "cold", reads: assertMeasuredPage(before, studentId) });
+  before = cursor();
+  await page.goto(`${origin}/admin/students/${studentId}?tab=notes`, { waitUntil: "networkidle" });
+  await expect(page.getByRole("region", { name: "ملاحظات أحداث الطالب" }).getByText(correctionNote)).toBeVisible();
+  measurements.push({ route: "corrected:notes", state: "cold", reads: assertMeasuredPage(before, studentId) });
+  before = cursor();
+  await page.goto(`${origin}/admin/students/${studentId}/account`, { waitUntil: "networkidle" });
+  await expect(page.getByText("80.00 EGP", { exact: false }).first()).toBeVisible();
+  measurements.push({ route: "corrected:account", state: "cold", reads: assertMeasuredPage(before, studentId) });
+  const allocationRoute = `students/${studentId}/payments/${payment.body.payment.id}/allocations`;
+  const allocationOptions = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/payments/${payment.body.payment.id}/allocation-options`)).json();
+  const allocated = await write(page, allocationRoute, { targets: [{ attempt_id: attempt.body.attempt.id, amount: "20.00" }],
+    version: allocationOptions.version, request_id: crypto.randomUUID() });
+  expect(allocated.status, JSON.stringify(allocated.body)).toBe(201);
+  expect((await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json()).account.debt).toBe("60.00");
+  before = cursor();
+  await page.goto(`${origin}/admin/students/${studentId}`, { waitUntil: "networkidle" });
+  await expect(page.getByRole("region", { name: "ملخص الطالب" }).getByText("مديونية في الفروع المالية المصرح بها: 60.00 EGP", { exact: false })).toBeVisible();
+  measurements.push({ route: "allocated:profile", state: "cold", reads: assertMeasuredPage(before, studentId) });
+  const allocationId = allocated.body.allocations[0].id as string;
+  const allocationCorrection = await write(page, `students/${studentId}/allocations/${allocationId}/corrections`, {
+    target_attempt_id: null, reason: "قبول تصحيح تخصيص الدفعة", version: allocated.body.version,
+    request_id: crypto.randomUUID(),
+  });
+  expect(allocationCorrection.status, JSON.stringify(allocationCorrection.body)).toBe(201);
+  const correctedAccount = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
+  expect(correctedAccount.account.debt).toBe("80.00");
+  expect(correctedAccount.account.available_balance).toBe("35.00");
+  before = cursor();
+  await page.goto(`${origin}/admin/students/${studentId}`, { waitUntil: "networkidle" });
+  await expect(page.getByRole("region", { name: "ملخص الطالب" }).getByText("مديونية في الفروع المالية المصرح بها: 80.00 EGP", { exact: false })).toBeVisible();
+  measurements.push({ route: "allocation-corrected:profile", state: "cold", reads: assertMeasuredPage(before, studentId) });
+  const registration = await browser.newPage();
+  try {
+    await signIn(registration, origin!, "staff");
+    expect((await registration.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).status()).toBe(404);
+    expect((await registration.request.get(`${origin}/api/v1/center/students/${studentId}/financial-events/payment_correction/${corrected.body.reversal.id}/note`)).status()).toBe(404);
+    before = cursor();
+    await registration.goto(`${origin}/admin/students/${studentId}`, { waitUntil: "networkidle" });
+    await expect(registration.getByText(`قبول التوسعة ${unique}`, { exact: false }).first()).toBeVisible();
+    await expect(registration.getByText(correctionNote)).toHaveCount(0);
+    await expect(registration.getByText("مديونية في الفروع المالية المصرح بها", { exact: false })).toHaveCount(0);
+    measurements.push({ route: "registration:profile", state: "cold", reads: assertMeasuredPage(before, studentId) });
+  } finally {
+    await registration.close();
+  }
   console.log(`Profile expansion SSR: ${JSON.stringify(measurements)}`);
 });
 
