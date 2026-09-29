@@ -23,15 +23,16 @@ type Props<T> = {
   rowKey: (row: T) => string | number; searchText: (row: T) => string;
   emptyMessage: string; action?: ReactNode; filters?: { label: string; value: string; matches: (row: T) => boolean }[];
   expanded?: (row: T) => ReactNode; rowClassName?: string;
-  pageSize?: number; serverSearch?: { value: string; onSearch: (value: string) => void };
+  pageSize?: number; serverSearch?: { value: string; onSearch: (value: string) => void; label?: string; placeholder?: string; pending?: boolean };
   serverPagination?: { page: number; hasMore: boolean; batchSize: number; previousHref: string; nextHref: string; onNavigate?: (href: string) => void };
+  lookup?: { started: boolean };
 };
 
 
-export function DataTable<T>({ id, title, description, rows, columns, rowKey, searchText, emptyMessage, action, filters = [], expanded, rowClassName, pageSize = 10, serverSearch, serverPagination }: Props<T>) {
+export function DataTable<T>({ id, title, description, rows, columns, rowKey, searchText, emptyMessage, action, filters = [], expanded, rowClassName, pageSize = 10, serverSearch, serverPagination, lookup }: Props<T>) {
   const serverSearchValue = serverSearch?.value;
   const hasServerSearch = Boolean(serverSearch);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(serverSearchValue ?? "");
   const [loadedServerSearch, setLoadedServerSearch] = useState(serverSearchValue);
   const [loadedServerPage, setLoadedServerPage] = useState(serverPagination?.page);
   const [filter, setFilter] = useState("");
@@ -44,9 +45,9 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
   const preferences = useTablePreferences(id, columns);
   const draggableColumn = useRef<string | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
-  const filterable = columns.filter((column) => column.filterText);
+  const filterable = columns.filter((column) => !lookup && column.filterText);
   const filterKeys = filterable.map((column) => column.key).join("|");
-  const shownColumns = preferences.ordered.map((key) => columns.find((column) => column.key === key)!).filter((column) => !preferences.hidden.includes(column.key));
+  const shownColumns = lookup ? columns : preferences.ordered.map((key) => columns.find((column) => column.key === key)!).filter((column) => !preferences.hidden.includes(column.key));
   const [ready, setReady] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   if (loadedServerSearch !== serverSearchValue) {
@@ -73,7 +74,7 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
 
   const activeFilter = filters.find((item) => item.value === filter);
   const query = search.trim().toLocaleLowerCase("ar-EG");
-  const visible = rows.filter((row) => (hasServerSearch || !query || searchText(row).toLocaleLowerCase("ar-EG").includes(query)) && (!activeFilter || activeFilter.matches(row)) && filterable.every((column) => {
+  const visible = rows.filter((row) => (hasServerSearch || !query || searchText(row).toLocaleLowerCase("ar-EG").includes(query)) && (lookup || !activeFilter || activeFilter.matches(row)) && filterable.every((column) => {
     const value = columnFilters[column.key]?.trim().toLocaleLowerCase("ar-EG");
     return !value || column.filterText!(row).toLocaleLowerCase("ar-EG").includes(value);
   }));
@@ -84,7 +85,7 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
   const start = (currentPage - 1) * pageSize;
   const pageRows = visible.slice(start, start + pageSize);
   const batchOffset = serverPagination ? (serverPagination.page - 1) * serverPagination.batchSize : 0;
-  const previousBatchHref = serverPagination ? `${serverPagination.previousHref}${serverPagination.previousHref.includes("?") ? "&" : "?"}${id}-page=${Math.ceil(serverPagination.batchSize / pageSize)}` : "";
+  const previousBatchHref = serverPagination ? lookup ? serverPagination.previousHref : `${serverPagination.previousHref}${serverPagination.previousHref.includes("?") ? "&" : "?"}${id}-page=${Math.ceil(serverPagination.batchSize / pageSize)}` : "";
   const hasPreviousPage = currentPage > 1 || Boolean(serverPagination && serverPagination.page > 1);
   const hasNextPage = currentPage < pages || Boolean(serverPagination?.hasMore);
   const previousPage = () => setPage(currentPage - 1);
@@ -105,10 +106,10 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
   function closeFilters() { setFiltersOpen(false); }
 
   return <section className="data-panel" aria-labelledby={`${id}-title`} data-density="compact">
-    <div className="table-heading"><div><h2 id={`${id}-title`}>{title}<span className="record-count">{rows.length.toLocaleString("ar-EG")}</span></h2>{description ? <p className="muted">{description}</p> : null}</div>{action}</div>
+    <div className="table-heading"><div><h2 id={`${id}-title`}>{title}{!lookup || lookup.started ? <span className="record-count">{rows.length.toLocaleString("ar-EG")}</span> : null}</h2>{description ? <p className="muted">{description}</p> : null}</div>{action}</div>
     <div className="table-toolbar">
-      <form className="w-full max-w-sm" role="search" onSubmit={(event) => { event.preventDefault(); serverSearch?.onSearch(search.trim()); }}><InputGroup><label className="sr-only" htmlFor={`${id}-search`}>بحث في {title}</label><InputGroupInput ref={input} id={`${id}-search`} type="search" value={search} placeholder={`${serverSearch ? "بحث في جميع" : "بحث في"} ${title}…`} onChange={(event) => { setSearch(event.target.value); setPage(1); }} />{search ? <InputGroupAddon align="inline-end"><InputGroupButton type="button" aria-label={`مسح البحث في ${title}`} onClick={() => { setSearch(""); setPage(1); serverSearch?.onSearch(""); input.current?.focus(); }}>×</InputGroupButton></InputGroupAddon> : null}{serverSearch ? <InputGroupAddon align="inline-end"><InputGroupButton type="submit" aria-label={`بحث في جميع ${title}`}>بحث</InputGroupButton></InputGroupAddon> : null}</InputGroup></form>
-      <div className="table-tools">
+      <form className={lookup ? "w-full max-w-2xl" : "w-full max-w-sm"} role="search" noValidate aria-busy={serverSearch?.pending} onSubmit={(event) => { event.preventDefault(); serverSearch?.onSearch(search.trim()); }}><InputGroup><label className="sr-only" htmlFor={`${id}-search`}>{serverSearch?.label ?? `بحث في ${title}`}</label><InputGroupInput ref={input} id={`${id}-search`} type="search" value={search} placeholder={serverSearch?.placeholder ?? `${serverSearch ? "بحث في جميع" : "بحث في"} ${title}…`} onChange={(event) => { setSearch(event.target.value); setPage(1); }} />{search ? <InputGroupAddon align="inline-end"><InputGroupButton type="button" aria-label={`مسح البحث في ${title}`} disabled={serverSearch?.pending} onClick={() => { setSearch(""); setPage(1); serverSearch?.onSearch(""); input.current?.focus(); }}>×</InputGroupButton></InputGroupAddon> : null}{serverSearch ? <InputGroupAddon align="inline-end"><InputGroupButton type="submit" disabled={serverSearch.pending} aria-label={serverSearch.label ?? `بحث في جميع ${title}`}>بحث</InputGroupButton></InputGroupAddon> : null}</InputGroup></form>
+      {!lookup ? <div className="table-tools">
         <TablePopover id={`${id}-columns`} label="الأعمدة" scope={title} title={`الأعمدة المعروضة — ${title}`}>
           <>
             <p className="muted popover-hint">اسحب رأس العمود لتغيير مكانه، أو استخدم أزرار الترتيب هنا.</p>
@@ -133,39 +134,39 @@ export function DataTable<T>({ id, title, description, rows, columns, rowKey, se
           </FieldGroup>
 </form>
         </TablePopover>
-      </div>
+      </div> : null}
     </div>
-    <span id={`${id}-order-help`} className="sr-only">اسحب العمود لتغيير مكانه، أو اضغط Alt مع السهم الأيسر أو الأيمن. عمود الإجراءات ثابت.</span>
+    {!lookup ? <span id={`${id}-order-help`} className="sr-only">اسحب العمود لتغيير مكانه، أو اضغط Alt مع السهم الأيسر أو الأيمن. عمود الإجراءات ثابت.</span> : null}
     <span className="sr-only" aria-live="polite">{announcement}</span>
-    <Table ref={tableRef} containerProps={{ className: "table-scroll", role: "region", "aria-label": `جدول ${title} — قابل للتمرير أفقيًا`, tabIndex: 0 }}><TableCaption className="sr-only">{title}</TableCaption><TableHeader><TableRow>{shownColumns.map((column) => <TableHead scope="col" key={column.key} data-column-key={column.key} className={column.actions ? "actions-column" : "reorderable-column"} tabIndex={column.actions ? undefined : 0} draggable={!column.actions} aria-describedby={column.actions ? undefined : `${id}-order-help`}
-            onDragStart={(event) => { if (column.actions) return; draggableColumn.current = column.key; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", column.key); }}
-            onDragOver={(event) => { if (!column.actions) event.preventDefault(); }}
-            onDrop={(event) => { event.preventDefault(); if (!column.actions && draggableColumn.current) preferences.move(draggableColumn.current, column.key); draggableColumn.current = null; }}
+    {!lookup || visible.length > 0 ? <Table ref={tableRef} containerProps={{ className: "table-scroll", role: "region", "aria-label": `جدول ${title} — قابل للتمرير أفقيًا`, tabIndex: 0 }}><TableCaption className="sr-only">{title}</TableCaption><TableHeader><TableRow>{shownColumns.map((column) => <TableHead scope="col" key={column.key} data-column-key={column.key} className={column.actions ? "actions-column" : lookup ? undefined : "reorderable-column"} tabIndex={column.actions || lookup ? undefined : 0} draggable={!lookup && !column.actions} aria-describedby={column.actions || lookup ? undefined : `${id}-order-help`}
+            onDragStart={(event) => { if (lookup || column.actions) return; draggableColumn.current = column.key; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", column.key); }}
+            onDragOver={(event) => { if (!lookup && !column.actions) event.preventDefault(); }}
+            onDrop={(event) => { event.preventDefault(); if (!lookup && !column.actions && draggableColumn.current) preferences.move(draggableColumn.current, column.key); draggableColumn.current = null; }}
             onDragEnd={() => { draggableColumn.current = null; }}
             onKeyDown={(event) => {
-              if (column.actions || !event.altKey || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+              if (lookup || column.actions || !event.altKey || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
               event.preventDefault();
               const keys = shownColumns.filter((item) => !item.actions).map((item) => item.key);
               const target = keys[keys.indexOf(column.key) + (event.key === "ArrowLeft" ? 1 : -1)];
               if (!target) return;
               preferences.move(column.key, target); setAnnouncement(`تغيّر ترتيب عمود ${column.label}`);
               requestAnimationFrame(() => tableRef.current?.querySelector<HTMLElement>(`th[data-column-key="${CSS.escape(column.key)}"]`)?.focus());
-            }}><span>{column.label}</span>{!column.actions ? <span className="column-grip" aria-hidden="true">⠿</span> : null}</TableHead>)}</TableRow></TableHeader>
+            }}><span>{column.label}</span>{!lookup && !column.actions ? <span className="column-grip" aria-hidden="true">⠿</span> : null}</TableHead>)}</TableRow></TableHeader>
         <TableBody>{pageRows.map((row) => <Fragment key={rowKey(row)}><TableRow className={rowClassName}>{shownColumns.map((column) => <TableCell key={column.key} className={column.actions ? "actions-column" : undefined}>{column.render(row)}</TableCell>)}</TableRow>{expanded?.(row) ? <TableRow className="table-detail-row"><TableCell colSpan={shownColumns.length}>{expanded(row)}</TableCell></TableRow> : null}</Fragment>)}</TableBody>
-      </Table>
-      {!visible.length ? <Empty><EmptyHeader><EmptyTitle><h3>{rows.length ? "لا توجد نتائج مطابقة" : emptyMessage}</h3></EmptyTitle>{rows.length ? <EmptyDescription>جرّب بحثًا آخر أو أعد ضبط التصفية.</EmptyDescription> : null}</EmptyHeader>{rows.length ? <EmptyContent><Button onClick={() => { setSearch(""); setFilter(""); setColumnFilters({}); setPage(1); input.current?.focus(); }}>مسح البحث والتصفية</Button></EmptyContent> : null}</Empty> : null}
-    <div className="table-footer"><span aria-live="polite">{visible.length ? `${(batchOffset + start + 1).toLocaleString("ar-EG")}–${(batchOffset + Math.min(start + pageSize, visible.length)).toLocaleString("ar-EG")}${serverPagination ? " من الدفعة المحمّلة" : ` من ${visible.length.toLocaleString("ar-EG")}`}` : "٠ سجل"}</span><div className="pagination" aria-label={`صفحات ${title}`}>
+      </Table> : null}
+      {!visible.length ? <Empty><EmptyHeader><EmptyTitle><h3>{rows.length && !lookup ? "لا توجد نتائج مطابقة" : emptyMessage}</h3></EmptyTitle>{rows.length && !lookup ? <EmptyDescription>جرّب بحثًا آخر أو أعد ضبط التصفية.</EmptyDescription> : null}</EmptyHeader>{rows.length && !lookup ? <EmptyContent><Button onClick={() => { setSearch(""); setFilter(""); setColumnFilters({}); setPage(1); input.current?.focus(); }}>مسح البحث والتصفية</Button></EmptyContent> : null}</Empty> : null}
+    {!lookup || visible.length > 0 || (lookup.started && serverPagination && serverPagination.page > 1) ? <div className="table-footer"><span aria-live="polite">{lookup ? `${visible.length.toLocaleString("ar-EG")} نتيجة في الدفعة` : visible.length ? `${(batchOffset + start + 1).toLocaleString("ar-EG")}–${(batchOffset + Math.min(start + pageSize, visible.length)).toLocaleString("ar-EG")}${serverPagination ? " من الدفعة المحمّلة" : ` من ${visible.length.toLocaleString("ar-EG")}`}` : "٠ سجل"}</span><div className="pagination" aria-label={lookup ? `دفعات ${title}` : `صفحات ${title}`}>
       {currentPage > 1 || !serverPagination || serverPagination.page <= 1
-        ? <Button disabled={!hasPreviousPage} onClick={previousPage} aria-label={`الصفحة السابقة في ${title}`}>السابق</Button>
-        : <PrefetchLink href={previousBatchHref} className={buttonVariants({ variant: "outline" })} aria-label={`الصفحة السابقة في ${title}`}
+        ? <Button disabled={!hasPreviousPage} onClick={previousPage} aria-label={`${lookup ? "الدفعة" : "الصفحة"} السابقة في ${title}`}>السابق</Button>
+        : <PrefetchLink href={previousBatchHref} className={buttonVariants({ variant: "outline" })} aria-label={`${lookup ? "الدفعة" : "الصفحة"} السابقة في ${title}`}
           data-preserve-dirty-navigation={serverPagination.onNavigate ? "true" : undefined}
           onNavigate={serverPagination.onNavigate ? (event) => { event.preventDefault(); serverPagination.onNavigate?.(previousBatchHref); } : undefined}>السابق</PrefetchLink>}
-      <span>{serverPagination ? `دفعة ${serverPagination.page.toLocaleString("ar-EG")} · ` : ""}صفحة {currentPage.toLocaleString("ar-EG")} من {pages.toLocaleString("ar-EG")}</span>
+      <span>{lookup && serverPagination ? `دفعة ${serverPagination.page.toLocaleString("ar-EG")}` : `${serverPagination ? `دفعة ${serverPagination.page.toLocaleString("ar-EG")} · ` : ""}صفحة ${currentPage.toLocaleString("ar-EG")} من ${pages.toLocaleString("ar-EG")}`}</span>
       {currentPage < pages || !serverPagination || !serverPagination.hasMore
-        ? <Button disabled={!hasNextPage} onClick={nextPage} aria-label={`الصفحة التالية في ${title}`}>التالي</Button>
-        : <PrefetchLink href={serverPagination.nextHref} className={buttonVariants({ variant: "outline" })} aria-label={`الصفحة التالية في ${title}`}
+        ? <Button disabled={!hasNextPage} onClick={nextPage} aria-label={`${lookup ? "الدفعة" : "الصفحة"} التالية في ${title}`}>التالي</Button>
+        : <PrefetchLink href={serverPagination.nextHref} className={buttonVariants({ variant: "outline" })} aria-label={`${lookup ? "الدفعة" : "الصفحة"} التالية في ${title}`}
           data-preserve-dirty-navigation={serverPagination.onNavigate ? "true" : undefined}
           onNavigate={serverPagination.onNavigate ? (event) => { event.preventDefault(); serverPagination.onNavigate?.(serverPagination.nextHref); } : undefined}>التالي</PrefetchLink>}
-    </div></div>
+    </div></div> : null}
   </section>;
 }

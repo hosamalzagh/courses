@@ -333,6 +333,17 @@ button, a, input { touch-action: manipulation; }
 .workspace-sections-scroll [data-slot="tabs-trigger"] { min-height: 40px; padding-inline: var(--space-3); flex: none; cursor: pointer; }
 .workspace-section-content { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; font-size: inherit; }
 .workspace-section-content[hidden] { display: none; }
+.student-lookup { display: grid; gap: var(--space-3); min-width: 0; }
+.student-lookup-options { display: flex; align-items: end; flex-wrap: wrap; gap: var(--space-3); }
+.student-lookup-scope { border: 0; padding: 0; margin: 0; }
+.student-lookup-scope-options { display: flex; width: auto; flex-wrap: wrap; gap: var(--space-2); }
+.student-lookup-scope-option { display: inline-flex; min-height: 44px; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); cursor: pointer; }
+.student-lookup-scope-option:has([data-checked]) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); }
+.student-lookup-scope-option:has([data-disabled]) { opacity: 0.6; cursor: not-allowed; }
+.student-lookup-method { width: min(100%, 20rem); }
+.student-lookup-policy { margin: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--warning-soft); color: var(--ink); }
+.student-lookup-policy a { color: var(--accent-strong); font-weight: 600; text-decoration: underline; text-underline-offset: 0.2rem; }
+.student-lookup-current-scope, .student-lookup-privacy { margin: 0; }
 .settings-workspace { gap: var(--space-4); }
 .settings-workspace .workspace-sections-scroll { border-bottom: 0; padding-block: 0 6px; }
 .settings-workspace [data-slot="tabs-list"] { display: flex; width: max-content; min-width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-panel); padding: 5px; }

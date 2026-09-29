@@ -5,7 +5,7 @@ import path from 'node:path';
 import { credentials, ensureLocalFixtures, signIn } from './local-fixtures';
 import type { MemberContext, StudentSearchContext, StudentSearchPolicy } from '@/lib/server-context';
 
-const host = 'http://alpha.courses.test';
+const host = process.env.COURSES_SEARCH_HOST ?? 'http://alpha.courses.test';
 const php = process.env.COURSES_PHP_BIN ?? (process.platform === 'darwin' ? 'php85' : 'php');
 const apiDirectory = path.resolve(process.cwd(), '../api');
 const studentIds = new Set<string>();
@@ -35,11 +35,11 @@ async function budget(page: Page, url: string, cold: boolean) {
   const cursor = Number(execFileSync(php, ['artisan', 'tinker', '--no-interaction', '--execute=' + String.raw`echo \Illuminate\Support\Facades\DB::connection('central')->table('telescope_entries')->max('sequence') ?? 0;`], { cwd: apiDirectory, stdio: 'pipe' }).toString().trim());
   const response = await page.goto(url);
   expect(response?.status()).toBe(200);
-  await expect(page.getByRole('heading', { name: 'البحث في طلاب المركز', exact: true })).toBeVisible();
+  await expect(page.getByRole('searchbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' })).toBeVisible();
   const metrics = () => JSON.parse(execFileSync(php, ['artisan', 'tinker', '--no-interaction', '--execute=' + String.raw`
     $requests = \Illuminate\Support\Facades\DB::connection('central')->table('telescope_entries')
       ->where('type', 'request')->where('sequence', '>', (int) getenv('COURSES_SEARCH_CURSOR'))
-      ->whereRaw("content::jsonb->'headers'->>'host' = ?", ['alpha.courses.test'])->get(['batch_id', 'content']);
+      ->whereRaw("content::jsonb->'headers'->>'host' = ?", [getenv('COURSES_SEARCH_REQUEST_HOST')])->get(['batch_id', 'content']);
     $queries = \Illuminate\Support\Facades\DB::connection('central')->table('telescope_entries')->where('type', 'query')
       ->whereIn('batch_id', $requests->pluck('batch_id'))->pluck('content')->map(fn($content) => json_decode($content,true));
     $headers = $requests->map(fn($row) => json_decode($row->content,true)['response_headers']);
@@ -47,7 +47,7 @@ async function budget(page: Page, url: string, cold: boolean) {
       'counted' => $headers->sum(fn($header) => (int) ($header['x-courses-query-count'] ?? -1)),
       'valid' => $headers->every(fn($header) => (int) ($header['x-courses-query-count'] ?? -1) > 0),
       'connections' => $queries->filter(fn($query) => in_array($query['connection'], ['central','tenant']))->count()]);
-  `], { cwd: apiDirectory, env: { ...process.env, COURSES_SEARCH_CURSOR: String(cursor) }, stdio: 'pipe' }).toString().trim()) as { requests: number; counted: number; recorded: number; valid: boolean; connections: number };
+  `], { cwd: apiDirectory, env: { ...process.env, COURSES_SEARCH_CURSOR: String(cursor), COURSES_SEARCH_REQUEST_HOST: new URL(host).host }, stdio: 'pipe' }).toString().trim()) as { requests: number; counted: number; recorded: number; valid: boolean; connections: number };
   await expect.poll(() => metrics().requests).toBeGreaterThan(0);
   const result = metrics();
   expect(result.valid).toBe(true); expect(result.recorded).toBe(result.counted); expect(result.connections).toBe(result.counted); expect(result.counted).toBeLessThanOrEqual(6);
@@ -74,6 +74,54 @@ test.afterEach(() => {
   studentIds.clear();
 });
 
+test('student lookup keeps one field, scopes and barcode mode in the URL', async ({ page }) => {
+  test.setTimeout(120_000);
+  const owner = credentials('alpha');
+  await signIn(page, host, owner.email, owner.password);
+  const initial = (await workspace(page)).policy.enabled;
+  try {
+    await restorePolicy(page, true);
+    const members = await (await page.request.get(`${host}/api/v1/center/member-workspace`)).json() as MemberContext;
+    const north = members.branches.find((branch) => branch.slug === 'north')!.id;
+    const name = `بحث قبول ${Date.now()}`;
+    const created = await write(page, 'students', 'POST', { name, branch_ids: [north], request_id: crypto.randomUUID() });
+    expect(created.status).toBe(201);
+
+    await budget(page, `${host}/admin/students?q=${encodeURIComponent(name)}`, true);
+    await budget(page, `${host}/admin/students?q=${encodeURIComponent(name)}`, false);
+    await page.goto(`${host}/admin/students`);
+    await expect(page.getByRole('searchbox')).toHaveCount(1);
+    await expect(page.getByRole('table')).toHaveCount(1);
+    const search = page.getByRole('searchbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' });
+    await search.fill(name); await search.press('Enter');
+    await expect(page).toHaveURL(/scope=branches&q=/);
+    await expect(page.getByRole('row').filter({ hasText: name }).getByRole('link', { name: 'فتح ملف الطالب' })).toBeVisible();
+
+    await page.getByRole('combobox', { name: 'طريقة البحث' }).click();
+    await page.getByRole('option', { name: /الرقم الداخلي أو/ }).click();
+    await expect(page).toHaveURL(/mode=identifier/);
+    await expect(page.getByRole('table')).toHaveCount(0);
+    const barcode = page.getByRole('searchbox', { name: 'رقم الطالب الداخلي أو الباركود' });
+    await barcode.fill(String(created.body.student.student_number)); await barcode.press('Enter');
+    await expect(page).toHaveURL(/identifier=/);
+    await expect(page.getByRole('row').filter({ hasText: name })).toBeVisible();
+
+    await page.getByRole('radio', { name: 'كل المركز' }).click();
+    await expect(page).toHaveURL(/scope=center/);
+    await expect(page.getByRole('table')).toHaveCount(0);
+    await page.goBack();
+    await expect(page).toHaveURL(/mode=identifier.*identifier=/);
+    await expect(page.getByRole('row').filter({ hasText: name })).toBeVisible();
+
+    const legacy = await page.goto(`${host}/admin/student-search?q=${encodeURIComponent(name)}&page=2`);
+    expect(legacy?.status()).toBe(200);
+    await expect(page).toHaveURL(/\/admin\/students\?scope=center&q=.*&page=2/);
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect(page.getByRole('radio', { name: 'فروعي' })).toBeVisible();
+  } finally { await restorePolicy(page, initial); }
+});
+
 test('center search management confirms visibility, recovers stale and uncertain writes and stays within six SSR queries', async ({ page }) => {
   test.setTimeout(120_000);
   const owner = credentials('alpha');
@@ -81,8 +129,9 @@ test('center search management confirms visibility, recovers stale and uncertain
   const initial = (await workspace(page)).policy.enabled;
   try {
     await restorePolicy(page, false);
-    await page.goto(`${host}/admin/student-search`);
-    await expect(page.getByRole('button', { name: 'بحث في طلاب المركز', exact: true })).toBeDisabled();
+    await page.goto(`${host}/admin/students`);
+    await expect(page.getByRole('radio', { name: 'كل المركز', exact: true })).toBeDisabled();
+    await expect(page.getByRole('searchbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' })).toBeEnabled();
     await page.goto(`${host}/admin/settings?tab=students`);
     const toggle = page.getByRole('button', { name: 'تفعيل البحث بين الفروع', exact: true });
     await toggle.click();
@@ -102,10 +151,10 @@ test('center search management confirms visibility, recovers stale and uncertain
     expect(retries[1].body.policy.revision).toBe(current.revision + 1);
     const after = await (await page.request.get(`${host}/api/v1/center/audit`)).json();
     expect(after.entries.filter((entry: { id: number; event: string }) => entry.id > auditCursor && entry.event === 'center.student_search_changed')).toHaveLength(1);
-    await budget(page, `${host}/admin/student-search?q=غيرمطابق`, true);
-    await budget(page, `${host}/admin/student-search?q=غيرمطابق`, false);
-    await page.getByRole('button', { name: 'مسح البحث', exact: true }).click();
-    await expect(page.getByRole('textbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' })).toBeFocused();
+    await budget(page, `${host}/admin/students?scope=center&q=غيرمطابق`, true);
+    await budget(page, `${host}/admin/students?scope=center&q=غيرمطابق`, false);
+    await page.getByRole('button', { name: 'مسح البحث في نتائج البحث', exact: true }).click();
+    await expect(page.getByRole('searchbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' })).toBeFocused();
     await page.goto(`${host}/admin/settings?tab=students`);
     // Keep this open snapshot while another protected request changes policy twice.
     const old = (await workspace(page)).policy;
@@ -157,10 +206,10 @@ test('search and similarity reveal basic data only and lose revoked cross-branch
     const hidden = await write(owner, 'students', 'POST', { name, phone: '01099007766', branch_ids: [south], request_id: crypto.randomUUID() });
     expect(hidden.status).toBe(201);
     await signIn(staff, host, staffCredentials.email, staffCredentials.password);
-    await staff.goto(`${host}/admin/student-search`);
+    await staff.goto(`${host}/admin/students?scope=center`);
     await expect(staff.getByRole('tab', { name: 'الطلاب', exact: true })).toHaveCount(0);
-    await staff.getByRole('textbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' }).fill(name);
-    await staff.getByRole('button', { name: 'بحث في طلاب المركز', exact: true }).click();
+    await staff.getByRole('searchbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' }).fill(name);
+    await staff.getByRole('button', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل', exact: true }).click();
     const row = staff.getByRole('row').filter({ hasText: name }); await expect(row).toBeVisible();
     await expect(staff.getByRole('tab', { name: 'الطلاب', exact: true })).toHaveCount(0);
     await expect(staff.getByRole('status').filter({ hasText: 'البحث بين الفروع مغلق' })).toHaveCount(0);
@@ -171,7 +220,7 @@ test('search and similarity reveal basic data only and lose revoked cross-branch
     await staff.goto(`${host}/admin/students`);
     await staff.getByRole('button', { name: 'إنشاء ملف طالب', exact: true }).click();
     await staff.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name);
-    await staff.getByRole('link', { name: 'البحث في طلاب المركز', exact: true }).click();
+    await staff.getByRole('link', { name: 'الطلاب', exact: true }).click();
     await expect(staff.getByRole('alertdialog', { name: 'مغادرة دون حفظ' })).toBeVisible();
     await staff.getByRole('alertdialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
     await expect(staff.getByRole('textbox', { name: 'اسم الطالب', exact: true })).toHaveValue(name);

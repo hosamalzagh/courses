@@ -58,12 +58,14 @@ class CenterStudentSearchTest extends TestCase
         $hidden = $this->createStudent('Hidden sibling', [$this->south]);
         $shared = $this->createStudent('Shared sibling', [$this->north, $this->south]);
         $this->getJson("{$this->base}/student-search-workspace")->assertOk()->assertJsonPath('policy.enabled', false);
+        $this->getJson("{$this->base}/student-workspace")->assertOk()->assertJsonPath('student_search_enabled', false);
         $this->grant([$this->north => ['registration', 'center_student_search']]);
         $this->asUser($this->staff);
         $this->getJson("{$this->base}/student-search-workspace?q=sibling")->assertOk()->assertJsonCount(0, 'students');
         $this->patchJson("{$this->base}/student-search-policy", ['enabled' => true, 'revision' => 1])->assertForbidden();
         $this->asUser($this->owner);
         $this->patchJson("{$this->base}/student-search-policy", ['enabled' => true, 'revision' => 1])->assertOk()->assertJsonPath('policy.revision', 2);
+        $this->getJson("{$this->base}/student-workspace")->assertOk()->assertJsonPath('student_search_enabled', true);
         $this->asUser($this->staff);
         $result = $this->getJson("{$this->base}/student-search-workspace?q=sibling")->assertOk()->assertJsonCount(2, 'students');
         $this->assertEqualsCanonicalizing(['id', 'student_number', 'name', 'phone', 'within_scope'], array_keys($result->json('students.0')));
@@ -78,7 +80,7 @@ class CenterStudentSearchTest extends TestCase
         $this->getJson("{$this->base}/students/similar?name=Hidden%20sibling")->assertOk()->assertJsonCount(0, 'students');
         $this->asUser($this->owner);
         $this->patchJson("{$this->base}/student-search-policy", ['enabled' => false, 'revision' => 2])->assertOk();
-        $this->getJson("{$this->base}/student-workspace")->assertOk()->assertJsonCount(2, 'students');
+        $this->getJson("{$this->base}/student-workspace")->assertOk()->assertJsonPath('student_search_enabled', false)->assertJsonCount(2, 'students');
     }
 
     public function test_settings_hint_skips_manager_search_but_preserves_search_for_non_managers(): void

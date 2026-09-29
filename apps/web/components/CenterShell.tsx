@@ -12,6 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetClose, SheetTrigger 
 import { ThemeToggle } from "./ThemeProvider";
 import { InlineNotice } from "./InlineNotice";
 import { TablePreferenceUser } from "./TablePreferences";
+import { canReadStudents, canSearchCenterStudents } from "@/lib/student-search-access";
 
 const navigationIcons: Record<string, ReactNode> = {
   branches: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
@@ -88,8 +89,7 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
   const canAudit = context.permissions.can_manage_center || Object.values(context.permissions.branch_roles).some((roles) => roles.includes("branch_auditor"));
   const links = [
     { href: "/admin", label: "الرئيسية", icon: "branches", visible: true },
-    { href: "/admin/students", label: "الطلاب", icon: "members", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
-    { href: "/admin/student-search", label: "البحث في طلاب المركز", icon: "members", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("students.search_center")) },
+    { href: canReadStudents(context) ? "/admin/students" : "/admin/students?scope=center", label: "الطلاب", icon: "members", visible: canReadStudents(context) || canSearchCenterStudents(context) },
     { href: "/admin/instructors", label: "المحاضرون", icon: "members", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
     { href: "/admin/curriculum", label: "المناهج والخطط", icon: "audit", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
     { href: "/admin/equivalences", label: "معادلة المحتوى", icon: "audit", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
@@ -123,7 +123,7 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
   }
 
   function navigation(mobile = false, footer = false) {
-    return <nav aria-label={mobile ? "تنقل المركز على الهاتف" : "إدارة المركز"} className="center-nav">{links.filter((link) => footer === ["settings", "security"].includes(link.icon)).map((link) => <Link key={link.href} href={link.href} aria-current={path === link.href ? "page" : undefined} title={collapsed && !mobile ? link.label : undefined} onClick={() => setMenuOpen(false)}>
+    return <nav aria-label={mobile ? "تنقل المركز على الهاتف" : "إدارة المركز"} className="center-nav">{links.filter((link) => footer === ["settings", "security"].includes(link.icon)).map((link) => <Link key={link.href} href={link.href} aria-current={path === link.href.split("?")[0] ? "page" : undefined} title={collapsed && !mobile ? link.label : undefined} onClick={() => setMenuOpen(false)}>
       <svg className="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{navigationIcons[link.icon]}</svg><span className={collapsed && !mobile ? "sr-only" : ""}>{link.label}</span><NavigationPending />
     </Link>)}</nav>;
   }
