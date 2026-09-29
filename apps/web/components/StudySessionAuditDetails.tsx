@@ -67,7 +67,7 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
     {entry.event === "study_sessions.scheduled" && Array.isArray(data.sessions) ? <ul>{data.sessions.map((value, index) => {
       if (!value || typeof value !== "object" || Array.isArray(value)) return null;
       const item = value as Record<string, unknown>;
-      return <li key={index}>الموعد {typeof item.number === "number" ? item.number.toLocaleString("ar-EG") : "—"} · محاضرة الخطة {typeof item.plan_lecture_number === "number" ? item.plan_lecture_number.toLocaleString("ar-EG") : "—"} · {date(item.scheduled_at)}{typeof item.title === "string" ? ` · ${item.title}` : ""}</li>;
+      return <li key={index}>الموعد {typeof item.number === "number" ? item.number.toLocaleString("ar-EG") : "—"} · المحاضرة المعتمدة {typeof item.plan_lecture_number === "number" ? item.plan_lecture_number.toLocaleString("ar-EG") : "—"} · {date(item.scheduled_at)}{typeof item.title === "string" ? ` · ${item.title}` : ""}</li>;
     })}</ul> : null}
     {entry.event === "study_session.postponed" ? <>
       <p>الموعد: <bdi>{typeof data.session_id === "string" ? data.session_id : "غير مسجل"}</bdi></p>
@@ -85,13 +85,13 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
     </> : null}
     {entry.event === "study_session.cancelled" ? <>
       <p>الموعد الملغى: <bdi dir="ltr">{typeof data.session_id === "string" ? data.session_id : "غير مسجل"}</bdi> · الوقت الأصلي: {date(data.scheduled_at)}</p>
-      <p>قرار التعويض: {data.decision === "academic" ? "بديل أكاديمي" : data.decision === "financial" ? "مراجعة مالية" : "دون تعويض"} · يبقى متطلب الخطة معتمدًا.</p>
+      <p>قرار التعويض: {data.decision === "academic" ? "بديل أكاديمي" : data.decision === "financial" ? "مراجعة مالية" : "دون تعويض"} · يبقى متطلب المحاضرة معتمدًا.</p>
       {typeof data.reason === "string" ? <p>السبب: {data.reason}</p> : null}
     </> : null}
     {entry.event === "study_session.replacement_scheduled" ? <>
       <p>الموعد الملغى: <bdi dir="ltr">{typeof data.cancelled_session_id === "string" ? data.cancelled_session_id : "غير مسجل"}</bdi></p>
       <p>الموعد البديل: <bdi dir="ltr">{typeof data.replacement_session_id === "string" ? data.replacement_session_id : "غير مسجل"}</bdi> · {date(data.scheduled_at)}</p>
-      <p>بقي متطلب الخطة نفسه والقرار الأكاديمي محفوظًا دون إجراء مالي آلي.</p>
+      <p>بقي متطلب المحاضرة نفسه والقرار الأكاديمي محفوظًا دون إجراء مالي آلي.</p>
     </> : null}
     {entry.event === "study_group.requirements_changed" ? <>
       <p>القرار: {data.kind === "add" ? "محاضرة إضافية" : "إلغاء نهائي وخفض العدد"} · السبب: {typeof data.reason === "string" ? data.reason : "غير مسجل"}</p>

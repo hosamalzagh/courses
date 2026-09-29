@@ -80,9 +80,9 @@ test("schedule preview, confirmation, postponement and branch permissions throug
     await owner.getByRole("button", { name: "إلغاء المعاينة" }).click();
     await expect(owner.getByRole("button", { name: "معاينة المواعيد" })).toBeFocused();
     await owner.getByRole("button", { name: "معاينة المواعيد" }).click();
-    await expect(owner.getByRole("heading", { name: "تأكيد المواعيد" }).locator("..")).toContainText("محاضرة الخطة ١");
+    await expect(owner.getByRole("heading", { name: "تأكيد المواعيد" }).locator("..")).toContainText("المحاضرة المعتمدة ١");
     await owner.getByRole("button", { name: /تأكيد وحفظ ٢ موعد/ }).click();
-    await expect(owner.getByText("حُفظت المواعيد وربطت بمحاضرات الخطة المعتمدة.")).toBeVisible();
+    await expect(owner.getByText("حُفظت المواعيد وربطت بالمحاضرات المعتمدة للمجموعة.")).toBeVisible();
     await expect(owner.getByRole("table").getByRole("row")).toHaveCount(3);
     await owner.getByRole("button", { name: "تأجيل" }).first().click();
     await expect(owner.getByLabel("الموعد الجديد بتوقيت القاهرة")).toBeFocused();
@@ -91,7 +91,7 @@ test("schedule preview, confirmation, postponement and branch permissions throug
     await owner.getByLabel("الموعد الجديد بتوقيت القاهرة").fill(laterLocal);
     await owner.getByRole("textbox", { name: "سبب التأجيل (اختياري)" }).fill("تغيير القاعة");
     await owner.getByRole("button", { name: "حفظ التأجيل" }).click();
-    await expect(owner.getByText("تأجل موعد المحاضرة؛ بقي رقمها ومحاضرة الخطة المرتبطة بها كما هما.")).toBeVisible();
+    await expect(owner.getByText("تأجل موعد المحاضرة؛ بقي رقمها والمحاضرة المعتمدة المرتبطة بها كما هما.")).toBeVisible();
     await owner.goto(`${origin}/admin/audit`);
     await expect(owner.getByText("تأجيل محاضرة مجموعة").first()).toBeVisible();
     await owner.getByText("عرض تغيير جدول المحاضرات").first().click();

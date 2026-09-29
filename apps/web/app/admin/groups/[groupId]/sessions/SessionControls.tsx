@@ -134,7 +134,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
       setGroup(current => ({ ...current, revision: result.group_revision ?? current.revision,
         scheduled_requirements: [...new Set([...current.scheduled_requirements, ...result.sessions.map(item => item.plan_lecture_number)])] }));
       setDraft(initialDraft); setPreview(null); setRequestId(newSubmissionId());
-      setNotice("حُفظت المواعيد وربطت بمحاضرات الخطة المعتمدة.");
+      setNotice("حُفظت المواعيد وربطت بالمحاضرات المعتمدة للمجموعة.");
       router.refresh();
     } catch { setError("تعذر التأكد من الحفظ. أعد التأكيد بنفس الطلب؛ لن تتكرر المحاضرات."); }
     finally { busyRef.current = false; setBusy(false); }
@@ -157,7 +157,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
       if (result.group_revision) setGroup(current => ({ ...current, revision: result.group_revision! }));
       const id = selected.id;
       setSelected(null); setPostponeAt(""); setReason(""); setPostponeId(newSubmissionId());
-      setNotice("تأجل موعد المحاضرة؛ بقي رقمها ومحاضرة الخطة المرتبطة بها كما هما.");
+      setNotice("تأجل موعد المحاضرة؛ بقي رقمها والمحاضرة المعتمدة المرتبطة بها كما هما.");
       router.refresh();
       requestAnimationFrame(() => document.getElementById(`postpone-${id}`)?.focus());
     } catch { setError("تعذر التأكد من التأجيل. أعد الطلب نفسه للتحقق من النتيجة."); }
@@ -194,7 +194,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
       setGroup(current => ({ ...current, revision: result.group_revision }));
       const id = cancelTarget.id;
       setCancelTarget(null); setCancelPreview(null); setCancelReason(""); setCancelId(newSubmissionId());
-      setNotice("أُلغي الموعد وبقي متطلب الخطة في العدد المعتمد. لم يُسجل غياب أو إجراء مالي تلقائي.");
+      setNotice("أُلغي الموعد وبقي متطلب المحاضرة في العدد المعتمد. لم يُسجل غياب أو إجراء مالي تلقائي.");
       router.refresh(); requestAnimationFrame(() => document.getElementById(`cancel-${id}`)?.focus());
     } catch { setError("تعذر التأكد من الإلغاء. أعد تأكيد الطلب نفسه؛ لن يتكرر الأثر."); }
     finally { busyRef.current = false; setBusy(false); }
@@ -236,7 +236,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
       setSessions(current => [...current.map(item => item.id === replacementTarget.id ? { ...item, replacement_id: result.session.id, replacement_number: result.session.number } : item), result.session]);
       setGroup(current => ({ ...current, revision: result.group_revision }));
       setReplacementTarget(null); setReplacementPreview(null); setReplacementAt(""); setReplacementTitle(""); setReplacementId(newSubmissionId());
-      setNotice("حُفظ الموعد البديل وربط بمحاضرة الخطة نفسها دون زيادة العدد المعتمد.");
+      setNotice("حُفظ الموعد البديل وربط بالمحاضرة المعتمدة نفسها دون زيادة العدد المعتمد.");
       router.refresh(); requestAnimationFrame(() => document.getElementById(`${formId}-heading`)?.focus());
     } catch { setError("تعذر التأكد من حفظ البديل. أعد تأكيد الطلب نفسه؛ لن يتكرر الموعد."); }
     finally { busyRef.current = false; setBusy(false); }
@@ -267,10 +267,10 @@ export function SessionControls({ context }: { context: SessionContext }) {
             <NativeSelectOption value="single">محاضرة واحدة</NativeSelectOption>
             <NativeSelectOption value="weekly">مواعيد أسبوعية متكررة</NativeSelectOption>
           </NativeSelect>
-          <FieldDescription>تستهلك كل إضافة محاضرة موجودة من إصدار الخطة؛ لا ترفع العدد المعتمد.</FieldDescription>
+          <FieldDescription>تجدول كل إضافة محاضرة معتمدة للمجموعة؛ لا ترفع العدد المعتمد.</FieldDescription>
         </Field>
         {draft.kind === "single" ? <>
-          <Field data-invalid={Boolean(fieldErrors.plan_lecture_number)}><FieldLabel htmlFor={`${formId}-requirement`}>محاضرة الخطة</FieldLabel>
+          <Field data-invalid={Boolean(fieldErrors.plan_lecture_number)}><FieldLabel htmlFor={`${formId}-requirement`}>المحاضرة المعتمدة</FieldLabel>
             <NativeSelect id={`${formId}-requirement`} value={draft.plan_lecture_number} disabled={busy || conflict} onChange={event => changeDraft({ plan_lecture_number: event.target.value })}>
               <NativeSelectOption value="">اختر محاضرة غير مجدولة</NativeSelectOption>
               {available.map(item => <NativeSelectOption key={item.number} value={String(item.number)}>{item.number.toLocaleString("ar-EG")} · {item.title || item.content}</NativeSelectOption>)}
@@ -286,15 +286,15 @@ export function SessionControls({ context }: { context: SessionContext }) {
         {!preview ? <CenterHeaderActions><Button id={`${formId}-review`} form={`${formId}-schedule`} type="submit" variant="primary" busy={busy} disabled={conflict || !draft.start_at || (draft.kind === "single" && !draft.plan_lecture_number)}>معاينة المواعيد</Button></CenterHeaderActions> : null}
         {preview ? <section className="form-stack" aria-labelledby={`${formId}-preview`}>
           <h3 id={`${formId}-preview`} tabIndex={-1}>تأكيد المواعيد</h3>
-          <ol>{preview.sessions.map(item => <li key={item.number}>موعد {item.number.toLocaleString("ar-EG")} · محاضرة الخطة {item.plan_lecture_number.toLocaleString("ar-EG")} · <bdi dir="ltr">{item.local_at.replace("T", " ")}</bdi> القاهرة{item.title ? ` · ${item.title}` : ""}</li>)}</ol>
+          <ol>{preview.sessions.map(item => <li key={item.number}>موعد {item.number.toLocaleString("ar-EG")} · المحاضرة المعتمدة {item.plan_lecture_number.toLocaleString("ar-EG")} · <bdi dir="ltr">{item.local_at.replace("T", " ")}</bdi> القاهرة{item.title ? ` · ${item.title}` : ""}</li>)}</ol>
           <p>راجع الترتيب والمواعيد قبل الحفظ؛ سيتحقق النظام من الحالة مجددًا عند التأكيد.</p>
           <CenterHeaderActions><Button form={`${formId}-schedule`} type="submit" variant="primary" busy={busy} disabled={conflict}>تأكيد وحفظ {preview.sessions.length.toLocaleString("ar-EG")} موعد</Button><Button disabled={busy} onClick={() => { setPreview(null); requestAnimationFrame(() => document.getElementById(`${formId}-review`)?.focus()); }}>إلغاء المعاينة</Button></CenterHeaderActions>
         </section> : null}
-      </form> : group.status === "completed" ? <p>المجموعة مكتملة؛ جدولها متاح للقراءة فقط.</p> : !group.can_manage ? <p>جدول المجموعة متاح للقراءة. تعديل المواعيد يتطلب صلاحية إدارة المنهج في الفرع.</p> : <p>جُدولت جميع محاضرات الخطة المعتمدة.</p>}
+      </form> : group.status === "completed" ? <p>المجموعة مكتملة؛ جدولها متاح للقراءة فقط.</p> : !group.can_manage ? <p>جدول المجموعة متاح للقراءة. تعديل المواعيد يتطلب صلاحية إدارة المنهج في الفرع.</p> : <p>جُدولت جميع محاضرات المجموعة المعتمدة.</p>}
     </section>
     {selected ? <form id={`${formId}-postpone-form`} noValidate className="context-card form-stack" aria-label={`تأجيل الموعد ${selected.number}`} onSubmit={event => { event.preventDefault(); void postpone(); }}>
       <h2>تأجيل الموعد {selected.number.toLocaleString("ar-EG")}</h2>
-      <p>الوقت الحالي: {formatSessionTime(selected.scheduled_at)} · محاضرة الخطة {selected.plan_lecture_number.toLocaleString("ar-EG")}.</p>
+      <p>الوقت الحالي: {formatSessionTime(selected.scheduled_at)} · المحاضرة المعتمدة {selected.plan_lecture_number.toLocaleString("ar-EG")}.</p>
       <FormField id={`${formId}-postpone`} label="الموعد الجديد بتوقيت القاهرة" value={postponeAt} onChange={value => { setPostponeAt(value); setPostponeId(newSubmissionId()); setFieldErrors({}); }} type="datetime-local" direction="ltr" error={fieldErrors.scheduled_at} disabled={busy || conflict} required focusOnMount />
       <FormField id={`${formId}-reason`} label="سبب التأجيل (اختياري)" value={reason} onChange={value => { setReason(value); setPostponeId(newSubmissionId()); setFieldErrors({}); }} error={fieldErrors.reason} disabled={busy || conflict} />
       <CenterHeaderActions><Button form={`${formId}-postpone-form`} type="submit" variant="primary" busy={busy} disabled={conflict || !postponeAt}>حفظ التأجيل</Button><Button disabled={busy} onClick={() => { const id = selected.id; setSelected(null); setPostponeAt(""); setReason(""); requestAnimationFrame(() => document.getElementById(`postpone-${id}`)?.focus()); }}>إلغاء</Button></CenterHeaderActions>
@@ -303,7 +303,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
       onSaved={requirementSaved} onReload={reload} onClose={() => { const id = requirementEditor.kind === "reduce" ? `reduce-${requirementEditor.session.id}` : "add-group-requirement"; setRequirementEditor(null); requestAnimationFrame(() => document.getElementById(id)?.focus()); }} /> : null}
     {cancelTarget ? <form id={`${formId}-cancel-form`} noValidate className="context-card form-stack" aria-label={`إلغاء الموعد ${cancelTarget.number}`} onSubmit={event => { event.preventDefault(); if (cancelPreview) void confirmCancellation(); else void reviewCancellation(); }}>
       <h2>إلغاء الموعد {cancelTarget.number.toLocaleString("ar-EG")} قبل انعقاده</h2>
-      <p>محاضرة الخطة {cancelTarget.plan_lecture_number.toLocaleString("ar-EG")} · الوقت الأصلي {formatSessionTime(cancelTarget.scheduled_at)}.</p>
+      <p>المحاضرة المعتمدة {cancelTarget.plan_lecture_number.toLocaleString("ar-EG")} · الوقت الأصلي {formatSessionTime(cancelTarget.scheduled_at)}.</p>
       <FormField id={`${formId}-cancel-reason`} label="سبب الإلغاء" value={cancelReason} onChange={value => { setCancelReason(value); setCancelPreview(null); setCancelId(newSubmissionId()); setFieldErrors({}); }} error={fieldErrors.reason} disabled={busy || conflict} required focusOnMount />
       <Field data-invalid={Boolean(fieldErrors.decision)}><FieldLabel htmlFor={`${formId}-cancel-decision`}>قرار التعويض</FieldLabel>
         <NativeSelect id={`${formId}-cancel-decision`} value={cancelDecision} disabled={busy || conflict} onChange={event => { setCancelDecision(event.target.value as typeof cancelDecision); setCancelPreview(null); setCancelId(newSubmissionId()); }}>
@@ -311,30 +311,30 @@ export function SessionControls({ context }: { context: SessionContext }) {
           <NativeSelectOption value="financial">إحالة لمراجعة مالية</NativeSelectOption>
           <NativeSelectOption value="none">دون تعويض</NativeSelectOption>
         </NativeSelect>
-        <FieldDescription>يُحفظ القرار للمراجعة فقط. لا يُسجل حضور أو غياب أو حركة مالية تلقائيًا، ويبقى متطلب الخطة مطلوبًا.</FieldDescription>
+        <FieldDescription>يُحفظ القرار للمراجعة فقط. لا يُسجل حضور أو غياب أو حركة مالية تلقائيًا، ويبقى متطلب المحاضرة مطلوبًا.</FieldDescription>
         {fieldErrors.decision ? <FieldError>{fieldErrors.decision}</FieldError> : null}
       </Field>
       {cancelPreview ? <section aria-labelledby={`${formId}-cancel-preview`} className="form-stack">
         <h3 id={`${formId}-cancel-preview`} tabIndex={-1}>تأكيد إلغاء الموعد</h3>
-        <p>سيُلغى الموعد {cancelTarget.number.toLocaleString("ar-EG")} بتاريخ {formatSessionTime(cancelPreview.scheduled_at)}، وتبقى {cancelPreview.required_count.toLocaleString("ar-EG")} محاضرة في الخطة المعتمدة. القرار: {cancelDecision === "academic" ? "بديل أكاديمي" : cancelDecision === "financial" ? "مراجعة مالية" : "دون تعويض"}.</p>
+        <p>سيُلغى الموعد {cancelTarget.number.toLocaleString("ar-EG")} بتاريخ {formatSessionTime(cancelPreview.scheduled_at)}، وتبقى {cancelPreview.required_count.toLocaleString("ar-EG")} محاضرة معتمدة للمجموعة. القرار: {cancelDecision === "academic" ? "بديل أكاديمي" : cancelDecision === "financial" ? "مراجعة مالية" : "دون تعويض"}.</p>
       </section> : null}
       <CenterHeaderActions><Button form={`${formId}-cancel-form`} type="submit" variant="primary" busy={busy} disabled={conflict || cancelReason.trim().length < 3}>{cancelPreview ? "تأكيد إلغاء الموعد" : "معاينة الإلغاء"}</Button><Button disabled={busy} onClick={() => { const id = cancelTarget.id; setCancelTarget(null); setCancelPreview(null); setCancelReason(""); requestAnimationFrame(() => document.getElementById(`cancel-${id}`)?.focus()); }}>رجوع</Button></CenterHeaderActions>
     </form> : null}
     {replacementTarget ? <form id={`${formId}-replacement-form`} noValidate className="context-card form-stack" aria-label={`بديل للموعد ${replacementTarget.number}`} onSubmit={event => { event.preventDefault(); if (replacementPreview) void confirmReplacement(); else void reviewReplacement(); }}>
       <h2>جدولة بديل للموعد {replacementTarget.number.toLocaleString("ar-EG")}</h2>
-      <p>يبقى مرتبطًا بمحاضرة الخطة {replacementTarget.plan_lecture_number.toLocaleString("ar-EG")}؛ لن يزيد عدد المحاضرات المعتمدة.</p>
+      <p>يبقى مرتبطًا بالمحاضرة المعتمدة {replacementTarget.plan_lecture_number.toLocaleString("ar-EG")}؛ لن يزيد عدد المحاضرات المعتمدة.</p>
       <FormField id={`${formId}-replacement-at`} label="موعد البديل بتوقيت القاهرة" value={replacementAt} onChange={value => { setReplacementAt(value); setReplacementPreview(null); setReplacementId(newSubmissionId()); setFieldErrors({}); }} type="datetime-local" direction="ltr" error={fieldErrors.start_at} disabled={busy || conflict} required focusOnMount />
       <FormField id={`${formId}-replacement-title`} label="عنوان البديل (اختياري)" value={replacementTitle} onChange={value => { setReplacementTitle(value); setReplacementPreview(null); setReplacementId(newSubmissionId()); }} error={fieldErrors.title} disabled={busy || conflict} />
       {replacementPreview ? <section aria-labelledby={`${formId}-replacement-preview`} className="form-stack">
         <h3 id={`${formId}-replacement-preview`} tabIndex={-1}>تأكيد الموعد البديل</h3>
-        <p>الموعد {replacementPreview.number.toLocaleString("ar-EG")} · محاضرة الخطة {replacementPreview.plan_lecture_number.toLocaleString("ar-EG")} · <bdi dir="ltr">{replacementPreview.local_at.replace("T", " ")}</bdi> القاهرة.</p>
+        <p>الموعد {replacementPreview.number.toLocaleString("ar-EG")} · المحاضرة المعتمدة {replacementPreview.plan_lecture_number.toLocaleString("ar-EG")} · <bdi dir="ltr">{replacementPreview.local_at.replace("T", " ")}</bdi> القاهرة.</p>
       </section> : null}
       <CenterHeaderActions><Button form={`${formId}-replacement-form`} type="submit" variant="primary" busy={busy} disabled={conflict || !replacementAt}>{replacementPreview ? "تأكيد حفظ البديل" : "معاينة البديل"}</Button><Button disabled={busy} onClick={() => { const id = replacementTarget.id; setReplacementTarget(null); setReplacementPreview(null); setReplacementAt(""); setReplacementTitle(""); requestAnimationFrame(() => document.getElementById(`replacement-${id}`)?.focus()); }}>رجوع</Button></CenterHeaderActions>
     </form> : null}
-    <DataTable id="study-sessions" title="مواعيد المحاضرات" description="كل موعد يحتفظ برقمه ومحاضرة الخطة المرتبطة به. الأوقات بتوقيت القاهرة." rows={sessions} rowKey={item => item.id} searchText={item => `${item.number} ${item.plan_lecture_number} ${item.title ?? ""} ${item.content}`} emptyMessage="لم تُجدول محاضرات لهذه المجموعة بعد."
+    <DataTable id="study-sessions" title="مواعيد المحاضرات" description="كل موعد يحتفظ برقمه والمحاضرة المعتمدة المرتبطة به. الأوقات بتوقيت القاهرة." rows={sessions} rowKey={item => item.id} searchText={item => `${item.number} ${item.plan_lecture_number} ${item.title ?? ""} ${item.content}`} emptyMessage="لم تُجدول محاضرات لهذه المجموعة بعد."
       columns={[
         { key: "number", label: "الموعد", render: item => item.number.toLocaleString("ar-EG") },
-        { key: "requirement", label: "محاضرة الخطة", render: item => `${item.plan_lecture_number.toLocaleString("ar-EG")} · ${item.content}` },
+        { key: "requirement", label: "المحاضرة المعتمدة", render: item => `${item.plan_lecture_number.toLocaleString("ar-EG")} · ${item.content}` },
         { key: "title", label: "العنوان", render: item => item.title || "—" },
         { key: "time", label: "الموعد بتوقيت القاهرة", render: item => formatSessionTime(item.scheduled_at) },
         { key: "status", label: "الحالة", render: item => item.revoked_at ? "أُلغي اعتمادها" : item.status === "planned" ? item.replaces_session_number ? `بديل للموعد ${item.replaces_session_number.toLocaleString("ar-EG")}` : "مخطط" : item.status === "held" ? "أُقيمت" : <span>ملغاة {item.cancelled_at ? `في ${formatSessionTime(item.cancelled_at)}` : ""}{item.cancelled_by_name ? ` بواسطة ${item.cancelled_by_name}` : ""} · {item.compensation_decision === "academic" ? "بديل أكاديمي" : item.compensation_decision === "financial" ? "مراجعة مالية" : "دون تعويض"}{item.replacement_number ? ` · البديل ${item.replacement_number.toLocaleString("ar-EG")}` : ""}{item.cancellation_reason ? ` · السبب: ${item.cancellation_reason}` : ""}</span> },

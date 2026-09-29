@@ -64,7 +64,7 @@ test("cancelled unheld lecture keeps the requirement and a linked replacement in
     expect(pageReads).toHaveLength(1);
     expect(pageReads[0].count).toBeLessThanOrEqual(6);
   }
-  await page.getByLabel("محاضرة الخطة").selectOption("1");
+  await page.getByLabel("المحاضرة المعتمدة").selectOption("1");
   await page.getByLabel("موعد المحاضرة بتوقيت القاهرة").fill(localTime(15));
   await page.getByRole("button", { name: "معاينة المواعيد" }).click();
   await page.getByRole("button", { name: /تأكيد وحفظ/ }).click();
@@ -75,9 +75,9 @@ test("cancelled unheld lecture keeps the requirement and a linked replacement in
   await page.getByLabel("قرار التعويض").selectOption("academic");
   await page.getByRole("button", { name: "معاينة الإلغاء" }).click();
   await expect(page.getByRole("heading", { name: "تأكيد إلغاء الموعد" })).toBeFocused();
-  await expect(page.getByText("تبقى ١ محاضرة في الخطة المعتمدة", { exact: false })).toBeVisible();
+  await expect(page.getByText("تبقى ١ محاضرة معتمدة للمجموعة", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "تأكيد إلغاء الموعد" }).click();
-  await expect(page.getByText("أُلغي الموعد وبقي متطلب الخطة", { exact: false })).toBeVisible();
+  await expect(page.getByText("أُلغي الموعد وبقي متطلب المحاضرة", { exact: false })).toBeVisible();
   await expect(page.getByText("غير المجدولة: ٠", { exact: false })).toBeVisible();
   await expect(page.getByRole("table")).toContainText("تعذر تجهيز القاعة");
   await page.getByRole("button", { name: "جدولة البديل" }).click();
@@ -100,7 +100,7 @@ test("cancelled unheld lecture keeps the requirement and a linked replacement in
   await page.getByRole("button", { name: "تأكيد اعتماد القرار" }).click();
   await expect(page.getByText("اعتمدت محاضرة كاملة إضافية", { exact: false })).toBeVisible();
   await expect(page.getByText("المحاضرات المعتمدة: ٢", { exact: false })).toBeVisible();
-  await page.getByLabel("محاضرة الخطة").selectOption("2");
+  await page.getByLabel("المحاضرة المعتمدة").selectOption("2");
   await page.getByLabel("موعد المحاضرة بتوقيت القاهرة").fill(localTime(45));
   await page.getByRole("button", { name: "معاينة المواعيد" }).click();
   await page.getByRole("button", { name: /تأكيد وحفظ/ }).click();

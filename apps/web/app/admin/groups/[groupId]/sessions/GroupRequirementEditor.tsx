@@ -96,7 +96,7 @@ export function GroupRequirementEditor({ group, mode, onSaved, onReload, onClose
   return <form id={`${formId}-form`} noValidate className="context-card form-stack" aria-label={mode.kind === "add" ? "اعتماد محاضرة إضافية" : "اعتماد خفض عدد المحاضرات"}
     onSubmit={event => { event.preventDefault(); if (preview) void confirm(); else void review(); }}>
     <h2>{mode.kind === "add" ? "اعتماد محاضرة كاملة إضافية" : `إلغاء نهائي وخفض العدد · الموعد ${mode.session.number.toLocaleString("ar-EG")}`}</h2>
-    {mode.kind === "reduce" ? <p>محاضرة الخطة {mode.session.plan_lecture_number.toLocaleString("ar-EG")} · الموعد الأصلي {formatSessionTime(mode.session.scheduled_at)}. خفض العدد يتطلب معاينة واعتمادًا مستقلًا، ولا يحدث عند الإلغاء وحده.</p>
+    {mode.kind === "reduce" ? <p>المحاضرة المعتمدة {mode.session.plan_lecture_number.toLocaleString("ar-EG")} · الموعد الأصلي {formatSessionTime(mode.session.scheduled_at)}. خفض العدد يتطلب معاينة واعتمادًا مستقلًا، ولا يحدث عند الإلغاء وحده.</p>
       : <p>ستضاف محاضرة مرقمة للمجموعة الحالية فقط؛ تبقى الخطة والمجموعات الأخرى كما هي.</p>}
     {mode.kind === "add" ? <>
       <FormField id={`${formId}-content`} label="محتوى المحاضرة الإضافية" value={content} onChange={value => { setContent(value); resetPreview(); }} error={fieldErrors.content} disabled={busy || conflict} required focusOnMount />
