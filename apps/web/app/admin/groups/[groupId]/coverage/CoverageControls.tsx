@@ -58,6 +58,7 @@ export function CoverageControls({ context, search }: { context: CoverageContext
   const [conflict, setConflict] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<string | null>(null);
   const [planOpen, setPlanOpen] = useState(false);
+  const [planUncertain, setPlanUncertain] = useState(false);
   const completionFormId = useId();
   const completionErrorRef = useRef<HTMLDivElement>(null);
   const completionPreviewRef = useRef<HTMLHeadingElement>(null);
@@ -206,13 +207,17 @@ export function CoverageControls({ context, search }: { context: CoverageContext
 
   function closePlanEditor() {
     setPlanOpen(false);
+    setPlanUncertain(false);
     requestAnimationFrame(() => planLaunchRef.current?.focus());
   }
 
   if (planOpen) return <>
-    <UnsavedChangesGuard dirty guardHistory onDiscard={closePlanEditor} />
+    <UnsavedChangesGuard dirty guardHistory blockDiscard={planUncertain}
+      blockDiscardTitle="تحقق من نتيجة تطبيق الخطة أولًا"
+      blockDiscardDescription="قد يكون تطبيق الخطة قد حُفظ. عد إلى المحرر وأعد الطلب نفسه للتحقق قبل مغادرة الصفحة."
+      onDiscard={closePlanEditor} />
     <PlanApplicationEditor context={context} onSaved={() => { closePlanEditor(); router.refresh(); }}
-      onReload={() => router.refresh()} onClose={closePlanEditor} />
+      onReload={() => router.refresh()} onClose={closePlanEditor} onUncertainChange={setPlanUncertain} />
   </>;
 
   return <>

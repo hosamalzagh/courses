@@ -98,7 +98,32 @@ test("academic staff applies a newer plan to a selected attempt without changing
     await expect(owner.getByText(/محاضرة أصلية/)).toBeVisible();
     await expect(owner.getByText(/^قبل: ٠\/١/)).toBeVisible();
     await expect(owner.getByText(/^بعد: ٠\/٢/)).toBeVisible();
+    const applicationRequests: string[] = [];
+    let dropFirstConfirmation = true;
+    await owner.route(`**/api/v1/center/groups/${group.body.group.id}/plan-applications`, async route => {
+      if (route.request().method() !== "POST") { await route.continue(); return; }
+      applicationRequests.push((JSON.parse(route.request().postData() ?? "{}") as { request_id: string }).request_id);
+      if (dropFirstConfirmation) {
+        dropFirstConfirmation = false;
+        expect((await route.fetch()).status()).toBe(201);
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
     await owner.locator("header.center-topbar").getByRole("button", { name: "تأكيد التطبيق على المختارين" }).click();
+    await expect(owner.getByText(/انقطع الاتصال أثناء الاعتماد/)).toBeVisible();
+    await expect(owner.getByLabel("الإصدار الجديد")).toBeDisabled();
+    await expect(owner.getByLabel("سبب التطبيق")).toBeDisabled();
+    await expect(owner.getByRole("checkbox", { name: `اختيار محاولة ${student.body.student.name} لتطبيق إصدار الخطة` })).toBeDisabled();
+    await expect(owner.locator("header.center-topbar").getByRole("button", { name: "رجوع للتقرير" })).toBeDisabled();
+    await owner.locator('a[href="/admin"]').first().click();
+    await expect(owner.getByRole("alertdialog", { name: "تحقق من نتيجة تطبيق الخطة أولًا" })).toBeVisible();
+    await expect(owner.getByRole("button", { name: "مغادرة دون حفظ" })).toHaveCount(0);
+    await owner.getByRole("button", { name: "العودة للتحقق" }).click();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "التحقق من نتيجة التطبيق" }).click();
+    await expect.poll(() => applicationRequests.length).toBe(2);
+    expect(applicationRequests[1]).toBe(applicationRequests[0]);
     await expect(owner.getByRole("row", { name: new RegExp(student.body.student.name) })).toContainText("٠/٢");
     const report = await (await owner.request.get(`${origin}/api/v1/center/${path}`)).json();
     expect(report.group.plan_version_id).toBe(level.body.level.plan.id);

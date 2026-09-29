@@ -24,8 +24,9 @@ type StudentImpact = { attempt_id: string; name: string; student_number: number;
 type Preview = { group_revision: number; target_plan_version: number;
   target_requirements: Requirement[]; students: StudentImpact[]; preview_token: string };
 
-export function PlanApplicationEditor({ context, onSaved, onReload, onClose }: {
+export function PlanApplicationEditor({ context, onSaved, onReload, onClose, onUncertainChange }: {
   context: CoverageContext; onSaved: () => void; onReload: () => void; onClose: () => void;
+  onUncertainChange: (uncertain: boolean) => void;
 }) {
   const formId = useId();
   const busyRef = useRef(false);
@@ -44,6 +45,7 @@ export function PlanApplicationEditor({ context, onSaved, onReload, onClose }: {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState(false);
+  const [uncertain, setUncertain] = useState(false);
   const [closePrompt, setClosePrompt] = useState(false);
 
   const groupId = context.group.id;
@@ -54,7 +56,10 @@ export function PlanApplicationEditor({ context, onSaved, onReload, onClose }: {
 
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
 
-  function invalidate() { setPreview(null); setRequestId(newSubmissionId()); setError(""); setConflict(false); }
+  function invalidate() {
+    if (uncertain) return;
+    setPreview(null); setRequestId(newSubmissionId()); setError(""); setConflict(false);
+  }
   const loadVersions = useCallback(async (page: number, q: string) => {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true); setError("");
@@ -74,7 +79,7 @@ export function PlanApplicationEditor({ context, onSaved, onReload, onClose }: {
     return () => window.clearTimeout(timeout);
   }, [loadVersions]);
   async function review() {
-    if (busyRef.current || !targetId || !selected.length || reason.trim().length < 3) return;
+    if (busyRef.current || uncertain || !targetId || !selected.length || reason.trim().length < 3) return;
     busyRef.current = true; setBusy(true); setError("");
     try {
       const response = await centerRequest(`groups/${groupId}/plan-applications/preview`, "POST", {
@@ -95,11 +100,21 @@ export function PlanApplicationEditor({ context, onSaved, onReload, onClose }: {
         group_revision: preview.group_revision, preview_token: preview.preview_token, request_id: requestId,
       });
       if (!response.ok) {
+        if (response.status >= 500) {
+          setUncertain(true); onUncertainChange(true);
+          setError("تعذر التحقق من نتيجة الاعتماد. أعد الطلب نفسه للتحقق؛ لا تغيّر المسودة أو تغادر الصفحة.");
+          return;
+        }
+        setUncertain(false); onUncertainChange(false);
         if (response.status === 409) { setConflict(true); setPreview(null); }
         setError(await responseMessage(response)); return;
       }
+      setUncertain(false); onUncertainChange(false);
       onSaved();
-    } catch { setError("انقطع الاتصال أثناء الاعتماد. أعد الطلب نفسه للتحقق من النتيجة؛ لن يتكرر التطبيق."); }
+    } catch {
+      setUncertain(true); onUncertainChange(true); setClosePrompt(false);
+      setError("انقطع الاتصال أثناء الاعتماد. أعد الطلب نفسه للتحقق من النتيجة؛ لا تغيّر المسودة أو تغادر الصفحة.");
+    }
     finally { busyRef.current = false; setBusy(false); }
   }
   const coverageText = (coverage: Coverage) => `${coverage.covered_count.toLocaleString("ar-EG")}/${coverage.required_count.toLocaleString("ar-EG")} · ${coverage.percentage.toLocaleString("ar-EG")}% · يلزم ${coverage.needed.toLocaleString("ar-EG")} · ${coverage.eligible ? "بلغ الحد" : "ناقص"}${coverage.provisional ? " مبدئيًا حتى إغلاق المحاضرة" : ""}`;
@@ -107,14 +122,14 @@ export function PlanApplicationEditor({ context, onSaved, onReload, onClose }: {
   return <form id={`${formId}-form`} className="form-stack" noValidate onSubmit={event => { event.preventDefault(); if (preview) void confirm(); else void review(); }}>
     <h2 className="text-lg font-semibold">تطبيق إصدار خطة جديد على محاولات مختارة</h2>
     <p>مجموعة {context.group.name} تظل على إصدارها ومحاضراتها الفعلية. التغيير يخص متطلبات المحاولات المختارة فقط، ولا يغير الحضور أو الرسوم أو قرارات الإتمام السابقة.</p>
-    <FormField id={`${formId}-search`} label="ابحث عن رقم إصدار الخطة" value={versionSearch} onChange={value => setVersionSearch(value)} disabled={busy} />
+    <FormField id={`${formId}-search`} label="ابحث عن رقم إصدار الخطة" value={versionSearch} onChange={value => setVersionSearch(value)} disabled={busy || uncertain} />
     <CenterHeaderActions>
-      <Button type="button" disabled={busy} onClick={() => void loadVersions(1, versionSearch)}>بحث في الإصدارات</Button>
-      {hasMore ? <Button type="button" disabled={busy} onClick={() => void loadVersions(versionPage + 1, versionSearch)}>إصدارات أخرى</Button> : null}
+      <Button type="button" disabled={busy || uncertain} onClick={() => void loadVersions(1, versionSearch)}>بحث في الإصدارات</Button>
+      {hasMore ? <Button type="button" disabled={busy || uncertain} onClick={() => void loadVersions(versionPage + 1, versionSearch)}>إصدارات أخرى</Button> : null}
     </CenterHeaderActions>
     <Field>
       <FieldLabel htmlFor={`${formId}-version`}>الإصدار الجديد</FieldLabel>
-      <NativeSelect id={`${formId}-version`} value={targetId} disabled={busy || !loaded || conflict}
+      <NativeSelect id={`${formId}-version`} value={targetId} disabled={busy || !loaded || conflict || uncertain}
         onChange={event => {
           setTargetId(event.target.value);
           setSelectedVersion(visibleVersions.find(version => version.id === event.target.value) ?? null);
@@ -129,7 +144,7 @@ export function PlanApplicationEditor({ context, onSaved, onReload, onClose }: {
     </Field>
     <Field>
       <FieldLabel htmlFor={`${formId}-reason`}>سبب التطبيق</FieldLabel>
-      <Textarea id={`${formId}-reason`} value={reason} maxLength={1000} disabled={busy || conflict}
+      <Textarea id={`${formId}-reason`} value={reason} maxLength={1000} disabled={busy || conflict || uncertain}
         onChange={event => { setReason(event.target.value); invalidate(); }} />
     </Field>
     <DataTable id="plan-application-attempts" title="المحاولات في هذه الصفحة" rows={editable}
@@ -137,7 +152,7 @@ export function PlanApplicationEditor({ context, onSaved, onReload, onClose }: {
       emptyMessage="لا توجد محاولات قابلة للاختيار في هذه الصفحة."
       columns={[
         { key: "select", label: "اختيار", render: (row: CoverageRow) => <Checkbox
-          checked={selected.includes(row.attempt_id)} disabled={busy || conflict}
+          checked={selected.includes(row.attempt_id)} disabled={busy || conflict || uncertain}
           aria-label={`اختيار محاولة ${row.name} لتطبيق إصدار الخطة`}
           onCheckedChange={checked => { setSelected(current => checked
             ? [...current.filter(id => id !== row.attempt_id), row.attempt_id]
@@ -169,15 +184,15 @@ export function PlanApplicationEditor({ context, onSaved, onReload, onClose }: {
     <CenterHeaderActions>
       <Button form={`${formId}-form`} type="submit" variant="primary" busy={busy}
         disabled={busy || conflict || !targetId || !selected.length || reason.trim().length < 3}>
-        {preview ? "تأكيد التطبيق على المختارين" : "معاينة أثر الإصدار"}
+        {uncertain ? "التحقق من نتيجة التطبيق" : preview ? "تأكيد التطبيق على المختارين" : "معاينة أثر الإصدار"}
       </Button>
-      {conflict ? <Button type="button" disabled={busy} onClick={() => {
+      {conflict ? <Button type="button" disabled={busy || uncertain} onClick={() => {
         onReload(); setConflict(false); setPreview(null); setRequestId(newSubmissionId()); setError("");
         requestAnimationFrame(() => document.getElementById(`${formId}-version`)?.focus());
       }}>تحميل أحدث التقرير</Button> : null}
-      <Button type="button" disabled={busy} onClick={() => draft ? setClosePrompt(true) : onClose()}>رجوع للتقرير</Button>
+      <Button type="button" disabled={busy || uncertain} onClick={() => draft ? setClosePrompt(true) : onClose()}>رجوع للتقرير</Button>
     </CenterHeaderActions>
-    {closePrompt ? <ConfirmationDialog title="التخلي عن التطبيق" description="لديك اختيار أو معاينة لم تُعتمد. هل تريد الرجوع إلى التقرير؟"
+    {closePrompt && !uncertain ? <ConfirmationDialog title="التخلي عن التطبيق" description="لديك اختيار أو معاينة لم تُعتمد. هل تريد الرجوع إلى التقرير؟"
       confirmLabel="الرجوع دون تطبيق" onCancel={() => setClosePrompt(false)} onConfirm={onClose} /> : null}
   </form>;
 }
