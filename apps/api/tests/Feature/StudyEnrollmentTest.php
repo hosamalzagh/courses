@@ -179,10 +179,13 @@ class StudyEnrollmentTest extends TestCase
                 [$north, 2, null, now()->addHours(4)]] as [$group, $number, $status, $scheduled]) {
                 $lecture = DB::table('plan_lectures')->where('plan_version_id', $group['plan_version_id'])
                     ->where('number', $number)->value('id');
+                $requirementId = DB::table('study_group_requirements')->where('group_id', $group['id'])
+                    ->where('plan_lecture_id', $lecture)->value('id');
                 $sessionId = (string) Str::uuid();
                 $entryId = (string) Str::uuid();
                 DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $group['id'],
-                    'plan_lecture_id' => $lecture, 'number' => $number, 'scheduled_at' => $scheduled,
+                    'plan_lecture_id' => $lecture, 'group_requirement_id' => $requirementId,
+                    'number' => $number, 'scheduled_at' => $scheduled,
                     'status' => 'held', 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
                     'created_at' => now(), 'updated_at' => now()]);
                 DB::table('study_attendance_entries')->insert(['id' => $entryId, 'session_id' => $sessionId,
@@ -262,6 +265,8 @@ class StudyEnrollmentTest extends TestCase
         $oldestId = $this->center->run(function () use ($group, $attempt): string {
             $lectures = DB::table('plan_lectures')->where('plan_version_id', $group['plan_version_id'])
                 ->pluck('id', 'number');
+            $requirements = DB::table('study_group_requirements')->where('group_id', $group['id'])
+                ->pluck('id', 'plan_lecture_id');
             $sessions = [];
             $entries = [];
             $oldestId = '';
@@ -272,7 +277,8 @@ class StudyEnrollmentTest extends TestCase
                     $oldestId = $entryId;
                 }
                 $sessions[] = ['id' => $sessionId, 'group_id' => $group['id'],
-                    'plan_lecture_id' => $lectures[$number], 'number' => $number,
+                    'plan_lecture_id' => $lectures[$number],
+                    'group_requirement_id' => $requirements[$lectures[$number]], 'number' => $number,
                     'title' => $number === 1 ? 'Needle history' : 'Ordinary lecture',
                     'scheduled_at' => now()->subDays(22 - $number), 'status' => 'held',
                     'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
