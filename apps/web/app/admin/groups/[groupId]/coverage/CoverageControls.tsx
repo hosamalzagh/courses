@@ -269,7 +269,8 @@ export function CoverageControls({ context, search }: { context: CoverageContext
         { key: "coverage", label: "التغطية", render: row => `${row.covered_count.toLocaleString("ar-EG")}/${row.required_count.toLocaleString("ar-EG")} · ${row.percentage.toLocaleString("ar-EG")}%` },
         { key: "missing", label: "الناقص", render: row => row.missing_numbers.length.toLocaleString("ar-EG") },
         { key: "result", label: "أهلية الإتمام", render: result },
-        { key: "exception", label: "سبب الاستثناء", render: row => Object.hasOwn(completionSelected, row.attempt_id) && (!row.eligible || !!completionSelected[row.attempt_id])
+        { key: "exception", label: "سبب الاستثناء", render: row => row.approved_at && row.exceptional
+          ? <span>{row.completion_reason}</span> : Object.hasOwn(completionSelected, row.attempt_id) && (!row.eligible || !!completionSelected[row.attempt_id])
           ? <Field><FieldLabel htmlFor={`${completionFormId}-${row.attempt_id}`}>سبب إتمام {row.name} دون الحد</FieldLabel>
             <Textarea id={`${completionFormId}-${row.attempt_id}`} value={completionSelected[row.attempt_id]} maxLength={1000}
               disabled={anyBusy} onChange={event => setCompletionSelected(current => ({ ...current, [row.attempt_id]: event.target.value }))} /></Field> : "—" },

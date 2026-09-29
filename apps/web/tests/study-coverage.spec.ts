@@ -164,6 +164,7 @@ test("coverage is provisional until closure and hidden branch data stays denied"
     await expect(owner.getByText("حُفظ اعتماد إتمام الطلاب المختارين.")).toBeVisible();
     await owner.reload();
     await expect(owner.getByRole("row", { name: new RegExp(secondStudent.body.student.name) })).toContainText("اكتمل استثنائيًا بقرار محفوظ");
+    await expect(owner.getByRole("row", { name: new RegExp(secondStudent.body.student.name) })).toContainText("قرار استثنائي بعد مراجعة النواقص");
     await owner.setViewportSize({ width: 390, height: 844 });
     expect(await owner.locator("html").getAttribute("dir")).toBe("rtl");
     await owner.getByRole("button", { name: "القائمة" }).click();

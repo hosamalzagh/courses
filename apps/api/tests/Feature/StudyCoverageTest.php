@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Center;
 use App\Models\CenterMembership;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -292,6 +293,13 @@ class StudyCoverageTest extends TestCase
             $this->assertSame(now('Africa/Cairo')->toDateString(), DB::table('study_attempt_group_periods')
                 ->where('attempt_id', $secondAttempt['id'])->value('left_on'));
             $this->assertSame(2, (int) DB::table('study_attempts')->where('id', $firstAttempt['id'])->value('revision'));
+            try {
+                DB::transaction(fn () => DB::table('study_attempt_completion_decisions')
+                    ->where('attempt_id', $secondAttempt['id'])->update(['reason' => null]));
+                $this->fail('An exceptional decision must retain its reason.');
+            } catch (QueryException $exception) {
+                $this->assertSame('23514', $exception->getCode());
+            }
         });
     }
 
