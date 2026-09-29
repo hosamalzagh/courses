@@ -902,6 +902,54 @@ test("simultaneous real HTTP retries save one payment", async ({ page }) => {
   expect(after.account.available_balance).toBe(distinct[0].status === 201 ? "22.25" : "24.25");
 });
 
+test("lost refund response keeps its request across a blocked server search and safe retry", async ({ page }) => {
+  await signIn(page);
+  const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+  const student = await write(page, "students", { name: `رد باستجابة مفقودة ${Date.now()}`,
+    branch_ids: [workspace.branches[0].id], request_id: crypto.randomUUID() });
+  expect(student.status).toBe(201);
+  const studentId = student.body.student.id;
+  const accountPath = `students/${studentId}/account`;
+  const account = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  if (!account.account.currency) expect((await write(page, "financial-currency", {
+    currency: "EGP", revision: account.account.currency_revision,
+  }, "PATCH")).status).toBe(200);
+  const payment = await write(page, `students/${studentId}/payments`, {
+    branch_id: workspace.branches[0].id, method: "cash", received_on: "2026-09-28",
+    amount: "30.00", version: (await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json()).account.version,
+    request_id: crypto.randomUUID(),
+  });
+  expect(payment.status).toBe(201);
+  const refundPath = `students/${studentId}/payments/${payment.body.payment.id}/refunds`;
+  await page.goto(`${origin}/admin/students/${studentId}/account`);
+  await page.getByRole("button", { name: "رد أو تصحيح" }).click();
+  await page.getByRole("textbox", { name: "المبلغ المعاد (EGP)" }).fill("10.00");
+  await page.getByLabel("تاريخ الرد الفعلي").fill("2026-09-28");
+  await page.getByRole("textbox", { name: "سبب الاسترداد" }).fill("رد نقدي");
+  await page.getByRole("button", { name: "معاينة رد المبلغ" }).click();
+  await expect(page.getByRole("region", { name: "معاينة الرد النقدي" })).toBeVisible();
+  await page.route(`**/api/v1/center/${refundPath}`, async (route) => {
+    if (route.request().method() !== "POST") { await route.continue(); return; }
+    await route.fetch();
+    await route.abort("failed");
+    await page.unroute(`**/api/v1/center/${refundPath}`);
+  });
+  await page.getByRole("button", { name: "اعتماد رد المبلغ" }).click();
+  await page.getByRole("button", { name: "تأكيد الاسترداد" }).click();
+  await expect(page.getByText("تعذر التأكد من حفظ الرد النقدي", { exact: false })).toBeVisible();
+  const accountUrl = page.url();
+  await page.getByRole("searchbox", { name: "بحث في حركات الدفعات المقدمة" }).fill("دفعة غائبة");
+  await page.getByRole("button", { name: "بحث في جميع حركات الدفعات المقدمة" }).click();
+  expect(page.url()).toBe(accountUrl);
+  await expect(page.getByRole("region", { name: /رد المال الفعلي/ })).toBeVisible();
+  await page.getByRole("button", { name: "اعتماد رد المبلغ" }).click();
+  await page.getByRole("button", { name: "تأكيد الاسترداد" }).click();
+  await expect(page.getByText("سُجل المبلغ المعاد فعليًا", { exact: false })).toBeVisible();
+  const saved = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  expect(saved.account).toMatchObject({ refunded_total: "10.00", available_balance: "20.00" });
+  expect((await (await page.request.get(`${origin}/api/v1/center/${refundPath}`)).json()).history).toHaveLength(1);
+});
+
 test("lost payment response keeps the same request until a safe retry", async ({ page }) => {
   await signIn(page);
   const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
