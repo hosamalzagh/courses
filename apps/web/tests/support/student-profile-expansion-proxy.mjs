@@ -27,10 +27,14 @@ http.createServer((request, response) => {
   }, result => {
     response.writeHead(result.statusCode, result.headers);
     if (api && request.method === "GET" && request.url.startsWith("/api/v1/center/")) {
-      const count = result.headers["x-courses-query-count"];
-      const ms = result.headers["x-courses-sql-ms"];
+      const rawCount = result.headers["x-courses-query-count"];
+      const parsedCount = typeof rawCount === "string" && /^\d+$/.test(rawCount) ? Number(rawCount) : null;
+      const count = Number.isSafeInteger(parsedCount) ? parsedCount : null;
+      const rawMs = result.headers["x-courses-sql-ms"];
+      const parsedMs = typeof rawMs === "string" && /^\d+(?:\.\d+)?$/.test(rawMs) ? Number(rawMs) : null;
+      const ms = Number.isFinite(parsedMs) ? parsedMs : null;
       fs.appendFileSync(log, JSON.stringify({ path: request.url, host: request.headers.host,
-        count: count === undefined ? null : Number(count), ms: ms === undefined ? null : Number(ms) }) + "\n");
+        count, ms }) + "\n");
     }
     result.pipe(response);
   });

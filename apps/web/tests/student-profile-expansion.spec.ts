@@ -452,7 +452,9 @@ test("long financial and note histories stay paged and measured", async ({ page 
   const pageTwo = page.waitForResponse(response => response.url().includes(`/api/v1/center/students/${studentId}/notes?page=2`));
   await page.getByRole("navigation", { name: "صفحات ملاحظات الأحداث" }).getByRole("button", { name: "التالي" }).click();
   const response = await pageTwo;
-  expect(Number.isInteger(Number(response.headers()["x-courses-query-count"]))).toBe(true);
-  expect(Number(response.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+  const rawCount = response.headers()["x-courses-query-count"];
+  expect(rawCount).toMatch(/^\d+$/);
+  expect(Number.isSafeInteger(Number(rawCount))).toBe(true);
+  expect(Number(rawCount)).toBeLessThanOrEqual(6);
   await expect(notes.getByRole("article")).toHaveCount(2);
 });
