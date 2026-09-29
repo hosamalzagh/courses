@@ -283,6 +283,7 @@ class CenterStudyMakeupController extends Controller
                 ORDER BY periods.left_on DESC, periods.created_at DESC, periods.id DESC LIMIT 1)
                 AS closed_period_requirements');
         if ($lock) {
+            $query->addSelect('attempts.required_lectures');
             $query->lock('FOR UPDATE OF students, attempts');
         }
         $attempt = $query->first();
@@ -349,16 +350,20 @@ class CenterStudyMakeupController extends Controller
         $origin = $attempt->current_group_id === null && $attempt->waitlist_origin !== null
             ? json_decode($attempt->waitlist_origin, true) : null;
         $requiredGroupId = $attempt->current_group_id ?? ($origin['from_group_id'] ?? null);
-        $requirements = in_array($attempt->status, ['withdrawn', 'completed'], true) && $attempt->current_group_id !== null
+        $requirements = $attempt->status === 'withdrawn' && $attempt->current_group_id !== null
             && $attempt->closed_period_requirements !== null
             ? json_decode($attempt->closed_period_requirements, true)
             : ($attempt->current_group_id === null
-            ? ($origin['required_credit_ids'] ?? DB::connection('tenant')->table('plan_lectures')
-                ->where('plan_version_id', $attempt->plan_version_id)->pluck('id')->all())
-            : DB::connection('tenant')->table('study_group_requirements')
-                ->where('group_id', $attempt->current_group_id)->whereNull('retired_at')
-                ->get(['id', 'plan_lecture_id'])
-                ->map(fn (object $row): string => $row->plan_lecture_id ?? $row->id)->all());
+                ? ($origin['required_credit_ids'] ?? DB::connection('tenant')->table('plan_lectures')
+                    ->where('plan_version_id', $attempt->plan_version_id)->pluck('id')->all())
+                : ($attempt->required_lectures !== null
+                    ? array_column(json_decode($attempt->required_lectures, true), 'id')
+                    : ($attempt->status === 'completed' && $attempt->closed_period_requirements !== null
+                        ? json_decode($attempt->closed_period_requirements, true)
+                        : DB::connection('tenant')->table('study_group_requirements')
+                            ->where('group_id', $attempt->current_group_id)->whereNull('retired_at')
+                            ->get(['id', 'plan_lecture_id'])
+                            ->map(fn (object $row): string => $row->plan_lecture_id ?? $row->id)->all())));
         $attendance = DB::connection('tenant')->table('study_attendance_entries as entries')
             ->join('study_sessions as sessions', 'sessions.id', '=', 'entries.session_id')
             ->where('entries.attempt_id', $attempt->id)->where('entries.status', 'counted')
@@ -372,6 +377,10 @@ class CenterStudyMakeupController extends Controller
                     ->orWhereExists(DB::connection('tenant')->table('study_attempt_transfers as transfers')
                         ->where('transfers.attempt_id', $attempt->id)
                         ->whereColumn('transfers.to_plan_version_id', 'approvals.target_plan_version_id')
+                        ->selectRaw('1'))
+                    ->orWhereExists(DB::connection('tenant')->table('study_attempt_plan_applications as applications')
+                        ->where('applications.attempt_id', $attempt->id)
+                        ->whereColumn('applications.to_plan_version_id', 'approvals.target_plan_version_id')
                         ->selectRaw('1'));
             })
             ->get(['approvals.id', 'approvals.source_lecture_ids', 'approvals.target_lecture_ids'])

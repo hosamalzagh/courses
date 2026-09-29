@@ -75,6 +75,8 @@ export type TeachingContext = CenterContext & {
 
 export type CoverageRow = {
   attempt_id: string; student_id: string; name: string; student_number: number;
+  plan_version_id: string; plan_version: number;
+  requirements: { id: string; number: number; title: string | null; content: string }[] | null;
   joined_on: string; attempt_status: string; student_status: "active" | "suspended";
   covered_numbers: number[]; missing_numbers: number[]; open_numbers: number[];
   covered_count: number; required_count: number; completion_threshold: number; percentage: number; eligible: boolean;
@@ -83,6 +85,7 @@ export type CoverageRow = {
 
 export type CoverageContext = CenterContext & {
   group: { id: string; name: string; status: StudyGroup["status"]; branch_id: number; course_id: string; revision: number; can_complete: boolean;
+    plan_version_id: string;
     completion_threshold: number; required_count: number;
     requirements: { number: number; title: string | null; content: string }[] };
   students: CoverageRow[];

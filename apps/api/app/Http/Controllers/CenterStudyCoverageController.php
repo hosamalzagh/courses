@@ -32,17 +32,17 @@ class CenterStudyCoverageController extends Controller
         abort_unless($group && $permissions->can('read', (int) $group->branch_id), 404);
 
         $requirements = json_decode($group->requirements, true);
-        $requiredNumbers = array_column($requirements, 'number');
-        $requiredCount = count($requiredNumbers);
+        $requiredCount = count($requirements);
         $threshold = (int) $group->completion_threshold;
         $page = (int) ($data['page'] ?? 1);
         $students = DB::connection('tenant')->table('study_attempts as attempts')
             ->join('students', 'students.id', '=', 'attempts.student_id')
+            ->join('study_plan_versions as attempt_plans', 'attempt_plans.id', '=', 'attempts.plan_version_id')
             ->leftJoin('study_attempt_completion_decisions as decisions', 'decisions.attempt_id', '=', 'attempts.id')
             ->where('attempts.current_group_id', $groupId)
-            ->where('attempts.plan_version_id', $group->plan_version_id)
             ->select(['attempts.id as attempt_id', 'attempts.status as attempt_status', 'attempts.joined_on',
-                'attempts.completion_threshold',
+                'attempts.completion_threshold', 'attempts.plan_version_id', 'attempts.required_lectures',
+                'attempt_plans.version as plan_version',
                 'students.id as student_id', 'students.name', 'students.student_number', 'students.status as student_status',
                 'decisions.approved_at', 'decisions.exceptional', 'decisions.reason as completion_reason'])
             ->selectRaw('(SELECT periods.required_credit_ids FROM study_attempt_group_periods AS periods
@@ -76,7 +76,10 @@ COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     WHERE approvals.target_plan_version_id = attempts.plan_version_id
       OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
           WHERE transfers.attempt_id = attempts.id
-            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
+            AND transfers.to_plan_version_id = approvals.target_plan_version_id)
+      OR EXISTS (SELECT 1 FROM study_attempt_plan_applications AS applications
+          WHERE applications.attempt_id = attempts.id
+            AND applications.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
 COALESCE((SELECT json_agg(json_build_object('id', mappings.id,
     'source_lecture_ids', json_build_array(mappings.candidate_requirement_id),
     'target_lecture_ids', json_build_array(mappings.required_requirement_id)) ORDER BY mappings.id)
@@ -96,11 +99,34 @@ SQL);
         }
         $rows = $students->orderBy('students.student_number')->orderBy('attempts.id')
             ->offset(($page - 1) * 20)->limit(21)->get();
-        $report = $rows->take(20)->map(function (object $row) use ($requirements): array {
-            $effectiveRequirements = in_array($row->attempt_status, ['withdrawn', 'completed'], true)
-                && $row->closed_period_requirements !== null
-                ? json_decode($row->closed_period_requirement_rows ?? '[]', true)
-                : $requirements;
+        $closedPlanIds = $rows->take(20)
+            ->filter(fn (object $row): bool => $row->attempt_status === 'withdrawn' && $row->closed_period_requirements !== null)
+            ->flatMap(function (object $row): array {
+                $groupIds = array_column(json_decode($row->closed_period_requirement_rows ?? '[]', true), 'id');
+
+                return array_values(array_diff(json_decode($row->closed_period_requirements, true), $groupIds));
+            })->unique()->values()->all();
+        $planHistory = $closedPlanIds === [] ? [] : DB::connection('tenant')->table('plan_lectures')
+            ->whereIn('id', $closedPlanIds)->get(['id', 'number', 'title', 'content', 'planned_hours'])
+            ->mapWithKeys(fn (object $lecture): array => [$lecture->id => [
+                'id' => $lecture->id, 'number' => (int) $lecture->number,
+                'title' => $lecture->title, 'content' => $lecture->content,
+                'planned_hours' => $lecture->planned_hours,
+            ]])->all();
+        $report = $rows->take(20)->map(function (object $row) use ($requirements, $planHistory): array {
+            $appliedRequirements = $row->required_lectures === null ? null : json_decode($row->required_lectures, true);
+            $closed = in_array($row->attempt_status, ['withdrawn', 'completed'], true)
+                && $row->closed_period_requirements !== null;
+            $effectiveRequirements = $appliedRequirements ?? $requirements;
+            if ($row->attempt_status === 'withdrawn' && $closed) {
+                $groupHistory = collect(json_decode($row->closed_period_requirement_rows ?? '[]', true))->keyBy('id');
+                $appliedById = collect($appliedRequirements ?? [])->keyBy('id');
+                $effectiveRequirements = array_values(array_filter(array_map(
+                    fn (string $id): ?array => $groupHistory->get($id) ?? $planHistory[$id] ?? $appliedById->get($id),
+                    json_decode($row->closed_period_requirements, true))));
+            } elseif ($closed && $appliedRequirements === null) {
+                $effectiveRequirements = json_decode($row->closed_period_requirement_rows ?? '[]', true);
+            }
             $effectiveNumbers = array_column($effectiveRequirements, 'number');
             $effectiveCount = count($effectiveNumbers);
             $credits = StudyCoverageCredits::resolve(json_decode($row->attendance_rows, true), json_decode($row->approvals, true));
@@ -112,6 +138,9 @@ SQL);
 
             return [
                 'attempt_id' => $row->attempt_id, 'student_id' => $row->student_id,
+                'plan_version_id' => $row->plan_version_id,
+                'plan_version' => (int) $row->plan_version,
+                'requirements' => $appliedRequirements !== null || $closed ? $effectiveRequirements : null,
                 'name' => $row->name, 'student_number' => $row->student_number,
                 'joined_on' => $row->joined_on, 'attempt_status' => $row->attempt_status,
                 'student_status' => $row->student_status,
@@ -134,7 +163,7 @@ SQL);
             'center' => $request->attributes->get('center')->only(['id', 'name', 'slug']),
             'permissions' => $permissions->toArray(),
             'group' => ['id' => $group->id, 'name' => $group->name, 'status' => $group->status,
-                'revision' => (int) $group->revision,
+                'revision' => (int) $group->revision, 'plan_version_id' => $group->plan_version_id,
                 'can_complete' => $permissions->can('study.complete', (int) $group->branch_id),
                 'branch_id' => $group->branch_id, 'course_id' => $group->course_id,
                 'completion_threshold' => $threshold,

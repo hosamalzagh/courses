@@ -140,6 +140,7 @@ class CenterStudyTransferController extends Controller
             DB::connection('tenant')->table('study_attempts')->where('id', $attemptId)->update([
                 'branch_id' => $preview['to']['branch_id'], 'level_id' => $preview['to']['level_id'],
                 'plan_version_id' => $preview['to']['plan_version_id'], 'current_group_id' => $data['group_id'],
+                'required_lectures' => null,
                 'completion_threshold' => $preview['to']['completion_threshold'],
                 'revision' => $attempt->revision + 1, 'updated_at' => $now,
             ]);
@@ -232,10 +233,13 @@ COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     'target_plan_version_id', approvals.target_plan_version_id,
     'source_lecture_ids', approvals.source_lecture_ids, 'target_lecture_ids', approvals.target_lecture_ids) ORDER BY approvals.id)
     FROM content_equivalences AS approvals
-    WHERE approvals.target_plan_version_id = groups.plan_version_id
+    WHERE approvals.target_plan_version_id IN (groups.plan_version_id, attempts.plan_version_id)
       OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
           WHERE transfers.attempt_id = attempts.id
-            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
+            AND transfers.to_plan_version_id = approvals.target_plan_version_id)
+      OR EXISTS (SELECT 1 FROM study_attempt_plan_applications AS applications
+          WHERE applications.attempt_id = attempts.id
+            AND applications.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json)::jsonb ||
 COALESCE((SELECT json_agg(json_build_object('id', mappings.id,
     'source_plan_version_id', NULL, 'target_plan_version_id', NULL,
     'source_lecture_ids', json_build_array(mappings.candidate_requirement_id),

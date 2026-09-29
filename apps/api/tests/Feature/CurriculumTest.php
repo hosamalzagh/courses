@@ -288,7 +288,15 @@ class CurriculumTest extends TestCase
     public function test_curriculum_migration_supports_existing_and_new_centers_without_linking_their_data(): void
     {
         $this->center->run(function (): void {
-            foreach (['*_create_study_makeup_bookings.php', '*_create_group_requirement_equivalences.php', '*_create_group_requirement_impacts.php', '*_create_group_requirements.php'] as $pattern) {
+            foreach (['*_snapshot_opening_study_period_requirements.php',
+                '*_snapshot_waitlist_period_requirements.php'] as $pattern) {
+                $migration = glob(database_path('migrations/tenant/'.$pattern))[0];
+                (require $migration)->down();
+                DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
+            }
+            foreach (['*_create_study_attempt_plan_applications.php', '*_create_study_makeup_bookings.php',
+                '*_create_group_requirement_equivalences.php', '*_create_group_requirement_impacts.php',
+                '*_create_group_requirements.php'] as $pattern) {
                 foreach (glob(database_path('migrations/tenant/'.$pattern)) as $migration) {
                     (require $migration)->down();
                     DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
@@ -348,6 +356,8 @@ class CurriculumTest extends TestCase
         $this->center->run(function (): void {
             $this->assertTrue(DB::getSchemaBuilder()->hasTable('content_equivalences'));
             $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attendance_entries'));
+            $this->assertTrue(DB::getSchemaBuilder()->hasColumn('study_attempt_group_periods', 'required_credit_ids'));
+            $this->assertTrue(DB::getSchemaBuilder()->hasColumn('study_attempt_group_periods', 'opening_required_credit_ids'));
             $this->assertTrue(DB::table('pg_indexes')->where('indexname', 'study_periods_group_date_attempt_idx')->exists());
             $this->assertStringContainsString('Superseded study plan is immutable', DB::selectOne("SELECT pg_get_functiondef('protect_used_plan_lecture()'::regprocedure) AS definition")->definition);
         });
@@ -361,6 +371,7 @@ class CurriculumTest extends TestCase
         $beta->run(function (): void {
             $this->assertTrue(DB::getSchemaBuilder()->hasTable('content_equivalences'));
             $this->assertTrue(DB::getSchemaBuilder()->hasTable('study_attendance_entries'));
+            $this->assertTrue(DB::getSchemaBuilder()->hasColumn('study_attempt_group_periods', 'opening_required_credit_ids'));
             $this->assertTrue(DB::table('pg_indexes')->where('indexname', 'study_periods_group_date_attempt_idx')->exists());
             $this->assertStringContainsString('Superseded study plan is immutable', DB::selectOne("SELECT pg_get_functiondef('protect_used_plan_lecture()'::regprocedure) AS definition")->definition);
         });

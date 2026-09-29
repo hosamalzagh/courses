@@ -135,7 +135,15 @@ class InstructorProfilesTest extends TestCase
     {
         $this->createInstructor('Alpha only', [$this->north]);
         $this->center->run(function (): void {
-            foreach (['*_create_study_makeup_bookings.php', '*_create_group_requirement_equivalences.php', '*_create_group_requirement_impacts.php', '*_create_group_requirements.php'] as $pattern) {
+            foreach (['*_snapshot_opening_study_period_requirements.php',
+                '*_snapshot_waitlist_period_requirements.php'] as $pattern) {
+                $migration = glob(database_path('migrations/tenant/'.$pattern))[0];
+                (require $migration)->down();
+                DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
+            }
+            foreach (['*_create_study_attempt_plan_applications.php', '*_create_study_makeup_bookings.php',
+                '*_create_group_requirement_equivalences.php', '*_create_group_requirement_impacts.php',
+                '*_create_group_requirements.php'] as $pattern) {
                 foreach (glob(database_path('migrations/tenant/'.$pattern)) as $migration) {
                     (require $migration)->down();
                     DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
@@ -187,6 +195,8 @@ class InstructorProfilesTest extends TestCase
             DB::table('migrations')->where('migration', '2026_09_26_201733_create_instructor_profiles')->delete();
         });
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']), Artisan::output());
+        $this->center->run(fn () => $this->assertTrue(DB::getSchemaBuilder()
+            ->hasColumn('study_attempt_group_periods', 'opening_required_credit_ids')));
         $instructor = $this->createInstructor('Migrated', [$this->north]);
         $this->assertSame(0, Artisan::call('courses:migrate-centers', ['--center' => 'alpha']));
         $this->getJson("{$this->base}/instructor-workspace")->assertOk()->assertJsonCount(1, 'instructors')->assertJsonCount(2, 'branches');
@@ -194,6 +204,8 @@ class InstructorProfilesTest extends TestCase
             'name' => 'Beta', 'slug' => 'beta', 'subdomain' => 'beta', 'plan' => 'starter', 'owner_email' => 'owner@beta.test',
         ])->assertCreated();
         $beta = Center::where('slug', 'beta')->firstOrFail();
+        $beta->run(fn () => $this->assertTrue(DB::getSchemaBuilder()
+            ->hasColumn('study_attempt_group_periods', 'opening_required_credit_ids')));
         CenterMembership::create(['tenant_id' => $beta->id, 'user_id' => $this->owner->id, 'status' => 'active']);
         $beta->run(fn () => DB::table('center_grants')->insert(['user_id' => $this->owner->id, 'role' => 'center_owner']));
         $this->actingAs($this->owner, 'web')->withSession(['center_id' => $beta->id]);

@@ -458,6 +458,21 @@ class StudySessionsTest extends TestCase
         ])->assertCreated();
         $coveragePath = "{$this->base}/groups/{$requiredGroup['id']}/coverage";
         $this->getJson($coveragePath)->assertOk()->assertJsonPath('students.0.covered_count', 1);
+        $level = $this->getJson("{$this->base}/levels/{$requiredGroup['level_id']}")
+            ->assertOk()->json('levels.0');
+        $newPlan = $this->postJson("{$this->base}/levels/{$requiredGroup['level_id']}/plan-versions", [
+            'base_plan_version_id' => $requiredGroup['plan_version_id'],
+            'base_revision' => $level['plan']['revision'],
+            'lectures' => [['number' => 1, 'content' => 'محتوى الإصدار الأحدث', 'planned_hours' => 1]],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('plan');
+        $applicationPath = "{$this->base}/groups/{$requiredGroup['id']}/plan-applications";
+        $application = ['target_plan_version_id' => $newPlan['id'],
+            'attempt_ids' => [$attempt['id']], 'reason' => 'معاينة الانتقال بعد تعويض المتطلب المضاف'];
+        $applicationPreview = $this->postJson("{$applicationPath}/preview", $application)
+            ->assertOk()->assertJsonPath('students.0.before.covered_count', 1)
+            ->assertJsonPath('students.0.before.required_count', 2)->json();
+        $this->assertContains($approval['id'], $applicationPreview['students'][0]['approval_ids']);
         $revokePath = "{$equivalencesPath}/{$approval['id']}/revoke";
         $revoke = ['revision' => $approval['revision'], 'reason' => 'سحب الاعتماد بعد المراجعة',
             'request_id' => (string) Str::uuid()];
@@ -466,6 +481,11 @@ class StudySessionsTest extends TestCase
         $this->postJson($revokePath, [...$revoke, 'request_id' => (string) Str::uuid()])
             ->assertConflict()->assertJsonPath('code', 'requirement_equivalence_revoked');
         $this->getJson($coveragePath)->assertOk()->assertJsonPath('students.0.covered_count', 0);
+        $this->postJson($applicationPath, [...$application,
+            'group_revision' => $applicationPreview['group_revision'],
+            'preview_token' => $applicationPreview['preview_token'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertConflict()->assertJsonPath('code', 'plan_application_preview_changed');
         $this->center->run(fn () => $this->assertSame('counted', DB::table('study_attendance_entries')
             ->where('attempt_id', $attempt['id'])->where('session_id', $session['id'])->value('status')));
         $this->assertStringContainsString('study_group.requirement_equivalence_revoked',
