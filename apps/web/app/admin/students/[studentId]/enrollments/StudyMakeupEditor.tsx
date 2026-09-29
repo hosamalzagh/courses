@@ -125,7 +125,7 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
     {loading ? <p role="status">جارٍ تحميل محاضرات التعويض…</p> : null}
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-    {conflict ? <CenterHeaderActions><Button disabled={busy} onClick={() => void reload()}>تحميل أحدث البيانات</Button></CenterHeaderActions> : null}
+    {conflict || uncertain ? <CenterHeaderActions><Button disabled={busy} onClick={() => void reload()}>تحميل أحدث البيانات</Button></CenterHeaderActions> : null}
     {workspace && !loading ? <>
       <DataTable id={`${prefix}-sessions`} title="محاضرات التعويض" rows={workspace.sessions} rowKey={row => row.id}
         pageSize={20} searchText={row => `${row.group_name} ${row.number} ${row.title ?? ""}`}
@@ -139,7 +139,7 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
           { key: "actions", label: "الإجراءات", actions: true, render: row => row.booking_id && row.attendance_status
             ? <span className="muted">مسجل</span> : (row.status === "planned" && row.can_book && !row.booking_id)
               || (row.status === "held" && row.can_prove)
-              ? <Button id={`${prefix}-select-${row.id}`} type="button" disabled={busy || conflict}
+              ? <Button id={`${prefix}-select-${row.id}`} type="button" disabled={busy || conflict || uncertain}
                 onClick={() => { if (selectedId === row.id) return;
                   setSelectedId(row.id); setSourceId(row.source_session_id ?? ""); setReason("");
                   setSourceAbsences([]); setAbsencesLoading(true); pendingId.current = null;
@@ -154,14 +154,14 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
         <h3>{selected.group_name} — المحاضرة {selected.number.toLocaleString("ar-EG")}</h3>
         <FieldGroup>
           <Field><FieldLabel htmlFor={`${prefix}-source`}>الغياب الأصلي المرتبط، إن وجد</FieldLabel>
-            <NativeSelect id={`${prefix}-source`} value={sourceId} onChange={event => { setSourceId(event.target.value); pendingId.current = null; }} disabled={busy || absencesLoading}>
+            <NativeSelect id={`${prefix}-source`} value={sourceId} onChange={event => { setSourceId(event.target.value); pendingId.current = null; }} disabled={busy || uncertain || absencesLoading}>
               <NativeSelectOption value="">محتوى ناقص دون ربط بغياب محدد</NativeSelectOption>
               {sourceAbsences.map(absence => <NativeSelectOption key={absence.id} value={absence.id}>
                 {absence.group_name} — المحاضرة {absence.number} — {formatSessionTime(absence.scheduled_at)}
               </NativeSelectOption>)}
             </NativeSelect>{absencesLoading ? <FieldDescription>جارٍ تحميل الغيابات الأصلية…</FieldDescription> : null}</Field>
           {selected.status === "held" ? <Field><FieldLabel htmlFor={`${prefix}-reason`}>سبب إثبات الحضور بعد الإغلاق</FieldLabel>
-            <Textarea id={`${prefix}-reason`} value={reason} maxLength={1000} required disabled={busy}
+            <Textarea id={`${prefix}-reason`} value={reason} maxLength={1000} required disabled={busy || uncertain}
               onChange={event => { setReason(event.target.value); pendingId.current = null; }} />
             <FieldDescription>يتطلب صلاحية تصحيح الحضور، ويظهر السبب والقيمة الجديدة في سجل التدقيق.</FieldDescription></Field> : null}
         </FieldGroup>
