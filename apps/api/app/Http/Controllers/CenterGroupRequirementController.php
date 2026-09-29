@@ -205,10 +205,11 @@ class CenterGroupRequirementController extends Controller
             $creditId = $requirement->plan_lecture_id ?? $requirement->id;
             $openSnapshot = $db->table('study_attempt_waitlists as waitlists')
                 ->join('study_attempts as attempts', 'attempts.id', '=', 'waitlists.attempt_id')
-                ->join('study_attempt_group_periods as periods', 'periods.id', '=', 'waitlists.origin_period_id')
+                ->leftJoin('study_attempt_group_periods as periods', 'periods.id', '=', 'waitlists.origin_period_id')
                 ->where('waitlists.from_group_id', $group->id)->whereNull('waitlists.left_on')
                 ->where('attempts.status', 'active')
-                ->whereRaw('periods.required_credit_ids @> ?::jsonb', [json_encode([$creditId])])->exists();
+                ->where(fn (Builder $query) => $query->whereNull('periods.required_credit_ids')
+                    ->orWhereRaw('periods.required_credit_ids @> ?::jsonb', [json_encode([$creditId])]))->exists();
             if ($openSnapshot) {
                 $this->conflict('waitlisted_requirement_snapshot_exists');
             }

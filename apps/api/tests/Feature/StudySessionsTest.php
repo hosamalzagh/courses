@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\Concerns\CleansCenterDatabases;
 use Tests\TestCase;
@@ -579,6 +580,49 @@ class StudySessionsTest extends TestCase
             'session_revision' => $scheduled['revision'] + 1,
             'reason' => 'إثبات تعويض سابق للانسحاب', 'request_id' => (string) Str::uuid(),
         ])->assertCreated();
+    }
+
+    public function test_existing_waitlist_source_period_is_backfilled_before_requirement_changes(): void
+    {
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $group = $this->group($this->north, 'Existing waitlist', 2);
+        $student = $this->student();
+        $session = $this->postJson("{$this->base}/groups/{$group['id']}/sessions", [
+            'kind' => 'single', 'revision' => 1,
+            'start_at' => now('Africa/Cairo')->addDays(5)->setTime(16, 0)->format('Y-m-d\\TH:i'),
+            'plan_lecture_number' => 2, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
+        $this->enroll($student['id'], [...$group, 'revision' => 2], now('Africa/Cairo')->toDateString());
+        $path = "{$this->base}/students/{$student['id']}/enrollments";
+        $attempt = $this->getJson($path)->assertOk()->json('attempts.0');
+        $this->postJson("{$path}/{$attempt['id']}/waitlist", [
+            'entered_on' => now('Africa/Cairo')->toDateString(), 'reason' => 'انتظار قائم قبل الترحيل',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+
+        $this->center->run(function () use ($attempt, $group): void {
+            // Replay the real migration against a center with an existing waitlist.
+            Schema::table('study_attempt_group_periods', fn ($table) => $table->dropColumn('required_credit_ids'));
+            (require database_path('migrations/tenant/2026_09_29_110000_snapshot_waitlist_period_requirements.php'))->up();
+            $period = DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])->first();
+            $this->assertNotNull($period->left_on);
+            $this->assertSame(2, count(json_decode($period->required_credit_ids, true)));
+            $this->assertSame($period->id, DB::table('study_attempt_waitlists')
+                ->where('attempt_id', $attempt['id'])->value('origin_period_id'));
+            $this->assertSame(2, DB::table('study_group_requirements')
+                ->where('group_id', $group['id'])->count());
+        });
+        $this->getJson($path)->assertOk()->assertJsonPath('attempts.0.requirements_count', 2);
+        $this->postJson("{$this->base}/groups/{$group['id']}/requirements/preview", [
+            'kind' => 'reduce', 'session_id' => $session['id'], 'decision' => 'none',
+            'reason' => 'خفض متطلب فترة انتظار قائمة',
+        ])->assertConflict()->assertJsonPath('code', 'waitlisted_requirement_snapshot_exists');
+        $this->center->run(fn () => DB::table('study_attempt_waitlists')
+            ->where('attempt_id', $attempt['id'])->update(['origin_period_id' => null]));
+        $this->postJson("{$this->base}/groups/{$group['id']}/requirements/preview", [
+            'kind' => 'reduce', 'session_id' => $session['id'], 'decision' => 'none',
+            'reason' => 'لا تخفّض متطلب فترة مجهولة المصدر',
+        ])->assertConflict()->assertJsonPath('code', 'waitlisted_requirement_snapshot_exists');
     }
 
     public function test_final_reduction_rejects_a_booked_makeup_session_without_partial_changes(): void
