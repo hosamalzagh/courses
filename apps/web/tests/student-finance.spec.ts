@@ -937,6 +937,9 @@ test("lost refund response keeps its request across a blocked server search and 
   await page.getByRole("button", { name: "اعتماد رد المبلغ" }).click();
   await page.getByRole("button", { name: "تأكيد الاسترداد" }).click();
   await expect(page.getByText("تعذر التأكد من حفظ الرد النقدي", { exact: false })).toBeVisible();
+  await page.locator('a[href="/admin"]').first().click();
+  await expect(page.getByRole("alertdialog")).toContainText("تحقق من اعتماد الاسترداد أولًا");
+  await page.getByRole("button", { name: "العودة للتحقق" }).click();
   const accountUrl = page.url();
   await page.getByRole("searchbox", { name: "بحث في حركات الدفعات المقدمة" }).fill("دفعة غائبة");
   await page.getByRole("button", { name: "بحث في جميع حركات الدفعات المقدمة" }).click();

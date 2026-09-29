@@ -200,7 +200,11 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
 
   return <>
     <CenterPageActions context={current} />
-    <UnsavedChangesGuard dirty={dirty} guardHistory blockDiscard={feeUncertain || refundUncertain} />
+    <UnsavedChangesGuard dirty={dirty} guardHistory blockDiscard={feeUncertain || refundUncertain}
+      blockDiscardTitle={refundUncertain && !feeUncertain ? "تحقق من اعتماد الاسترداد أولًا" : undefined}
+      blockDiscardDescription={refundUncertain && !feeUncertain
+        ? "تعذر التأكد من حفظ الاسترداد أو تصحيحه. عد إلى سجل الاسترداد وأعد المحاولة بالمفتاح نفسه قبل مغادرة الصفحة."
+        : undefined} />
     <section className="context-card form-stack" aria-label="ملخص الحساب المالي">
       <h2>{current.account.student_name} — رقم {current.account.student_number.toLocaleString("ar-EG")}</h2>
       {current.account.student_status === "suspended" ? <p className="muted">ملف الطالب موقوف. يمكن استلام السداد وتخصيصه للرسوم القائمة، وتبقى الحركات المالية محفوظة.</p> : null}
