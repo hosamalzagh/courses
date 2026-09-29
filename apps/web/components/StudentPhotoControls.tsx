@@ -19,6 +19,7 @@ export function StudentPhotoControls({ student }: { student: Student }) {
   const router = useRouter();
   const formId = useId();
   const input = useRef<HTMLInputElement>(null);
+  const chooseButton = useRef<HTMLButtonElement>(null);
   const saving = useRef(false);
   const [current, setCurrent] = useState(student);
   const [file, setFile] = useState<File | null>(null);
@@ -45,7 +46,7 @@ export function StudentPhotoControls({ student }: { student: Student }) {
     setConflict(false);
     setRequestId(newSubmissionId());
     if (input.current) input.current.value = "";
-    input.current?.focus();
+    chooseButton.current?.focus();
   }
   function saved() {
     clear(false);
@@ -59,12 +60,12 @@ export function StudentPhotoControls({ student }: { student: Student }) {
     setNotice("");
     if (!file) {
       setError("اختر صورة الطالب أولًا.");
-      input.current?.focus();
+      chooseButton.current?.focus();
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
       setError("اختر صورة لا تتجاوز 10 MB.");
-      input.current?.focus();
+      chooseButton.current?.focus();
       return;
     }
     saving.current = true;
@@ -86,7 +87,7 @@ export function StudentPhotoControls({ student }: { student: Student }) {
             ? "تغيرت صورة الطالب. حمّل أحدث الصورة ثم راجع اختيارك؛ الملف المختار محفوظ."
             : await responseMessage(response),
         );
-        input.current?.focus();
+        chooseButton.current?.focus();
         return;
       }
       const result = await response.json();
@@ -124,7 +125,7 @@ export function StudentPhotoControls({ student }: { student: Student }) {
         setRequestId(newSubmissionId());
         setNotice("حُمّلت أحدث الصورة. راجع الملف المختار قبل حفظه.");
         router.refresh();
-        input.current?.focus();
+        chooseButton.current?.focus();
       }
     } catch {
       setError("تعذر تحميل أحدث الصورة. أعد المحاولة؛ الملف المختار محفوظ.");
@@ -152,6 +153,7 @@ export function StudentPhotoControls({ student }: { student: Student }) {
             id={`${formId}-file`}
             className="sr-only"
             style={{ width: 1, height: 1, minWidth: 0 }}
+            tabIndex={-1}
             type="file"
             accept="image/jpeg,image/png,image/webp"
             disabled={busy}
@@ -165,7 +167,7 @@ export function StudentPhotoControls({ student }: { student: Student }) {
             }}
           />
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" disabled={busy} onClick={() => input.current?.click()}>اختيار صورة</Button>
+            <Button ref={chooseButton} type="button" disabled={busy} onClick={() => input.current?.click()}>اختيار صورة</Button>
             <span className="muted text-sm">{file?.name ?? 'لم تُحدّد صورة جديدة'}</span>
           </div>
           <FieldDescription id={`${formId}-hint`}>

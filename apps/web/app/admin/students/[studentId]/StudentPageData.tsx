@@ -15,6 +15,7 @@ import type { StudentChoiceKind } from '@/lib/server-context';
 import { loadStudentWorkspace } from '@/lib/server-context';
 import { CenterAccessState } from '@/components/CenterAccessState';
 import { CenterPage } from '@/components/CenterPage';
+import { WorkspaceSections } from '@/components/WorkspaceSections';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { StudentStatusPanel } from '../StudentStatusPanel';
 import { StudentSharingControls } from '../StudentSharingControls';
@@ -47,12 +48,8 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
     { label: 'الرقم القومي المصري', value: student.identity.national_id },
     { label: 'رقم جواز السفر', value: student.identity.passport_number },
   ].filter(field => field.value) : [];
-  const tabHref = (nextTab?: string) => {
-    const params = new URLSearchParams();
-    if (status_page) params.set('status_page', status_page);
-    if (nextTab) params.set('tab', nextTab);
-    return `/admin/students/${student.id}${params.size ? `?${params}` : ''}`;
-  };
+  const profileTab = tab === 'enrollment-notes' ? 'notes' : ['study', 'attendance', 'attachments', 'custom-history', 'notes'].includes(tab ?? '') ? tab! : 'personal';
+  const resetTabParams = ['study_page', 'study_q', 'attendance_page', 'attendance_q', 'attachments_page', 'attachments_status', 'custom_history_page'];
   return <CenterPage context={context} path={`/admin/students/${studentId}`} className='student-profile-page'>
     <StudentProfileActions context={context} tab={tab} />
     <Link className='student-back-link' href='/admin/students'>العودة إلى ملفات الطلاب</Link>
@@ -91,14 +88,14 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
       <Link href={`/admin/students/${student.id}?tab=notes`}>عرض كل الملاحظات</Link>
     </section> : null}
     {student.missing_custom_fields > 0 ? <InlineNotice tone='warning'>الملف ينقصه {student.missing_custom_fields.toLocaleString('ar-EG')} من الحقول المطلوبة. أكملها عند تعديل البيانات؛ المشاركة والإيقاف مستقلان.</InlineNotice> : null}
-    <nav className='student-profile-tabs' aria-label='أقسام ملف الطالب'>
-      <Link href={tabHref()} aria-current={!tab ? 'page' : undefined}>البيانات الشخصية</Link>
-      <Link href={tabHref('study')} aria-current={tab === 'study' ? 'page' : undefined}>الدراسة</Link>
-      <Link href={tabHref('attendance')} aria-current={tab === 'attendance' ? 'page' : undefined}>الحضور والغياب</Link>
-      <Link href={tabHref('attachments')} aria-current={tab === 'attachments' ? 'page' : undefined}>المرفقات</Link>
-      <Link href={tabHref('custom-history')} aria-current={tab === 'custom-history' ? 'page' : undefined}>تاريخ الحقول الإضافية</Link>
-      <Link href={tabHref('notes')} aria-current={tab === 'notes' ? 'page' : undefined}>الملاحظات</Link>
-    </nav>
+    <WorkspaceSections value={profileTab} label='أقسام ملف الطالب' path={`/admin/students/${student.id}`} sections={[
+      { value: 'personal', label: 'البيانات الشخصية', resetParams: resetTabParams },
+      { value: 'study', label: 'الدراسة', resetParams: resetTabParams },
+      { value: 'attendance', label: 'الحضور والغياب', resetParams: resetTabParams },
+      { value: 'attachments', label: 'المرفقات', resetParams: resetTabParams },
+      { value: 'custom-history', label: 'تاريخ الحقول الإضافية', resetParams: resetTabParams },
+      { value: 'notes', label: 'الملاحظات', resetParams: resetTabParams },
+    ]}>
     <div className='student-profile-layout'>
       <div className='student-profile-main'>
     {tab === 'study' && context.study ? <StudentStudyTab context={context} search={study_q ?? ''} /> : tab === 'attendance' && context.attendance ? <StudentAttendanceTab context={context} search={attendance_q ?? ''} query={query} /> : tab === 'notes' && context.student_notes ? <StudentEventNotes key={student.id} studentId={student.id} initial={context.student_notes} permissions={context.permissions} /> : tab === 'enrollment-notes' && context.enrollment_notes ? <StudentEnrollmentNoteHistory key={student.id} studentId={student.id} initial={context.enrollment_notes} permissions={context.permissions} /> : context.attachments ? <StudentAttachments key={`${student.id}-${context.attachments.status}-${context.attachments.pagination.page}`} student={student} page={context.attachments} canRestore={context.permissions.can_manage_center} /> : context.custom_history ? <StudentCustomFieldHistory history={context.custom_history} studentId={student.id} /> : <>
@@ -116,7 +113,7 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
       </div>
       <aside className='student-profile-side' aria-label='حالة الطالب وروابط الملف'>
         <StudentStatusPanel context={context} query={query} />
-        {!tab ? <StudentPhotoControls key={student.id} student={student} /> : null}
+        {profileTab === 'personal' ? <StudentPhotoControls key={student.id} student={student} /> : null}
         <nav className='context-card student-profile-related' aria-label='روابط الطالب'>
           <h2>روابط الطالب</h2>
           {context.permissions.can_manage_center || student.branch_ids.some((id) => context.permissions.branch_actions?.[String(id)]?.includes('enrollment.manage')) ? <Link href={`/admin/students/${student.id}/enrollments`}>التسجيل ومحاولات الدراسة</Link> : null}
@@ -125,5 +122,6 @@ export async function StudentPageData({ params, searchParams }: { params: Promis
         </nav>
       </aside>
     </div>
+    </WorkspaceSections>
   </CenterPage>;
 }

@@ -7,12 +7,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
 // Route-backed peer views share keyboard navigation and the existing link guard.
 // Only the selected view mounts its controls and registers header actions.
-export function WorkspaceSections({ value, label, path, sections, appearance = "line" }: {
+export function WorkspaceSections({ value, label, path, sections, appearance = "line", children }: {
   value: string;
   label: string;
   path: string;
   appearance?: "line" | "default";
-  sections: { value: string; label: string; content: ReactNode; resetParams?: string[] }[];
+  sections: { value: string; label: string; content?: ReactNode; resetParams?: string[] }[];
+  children?: ReactNode;
 }) {
   const params = useSearchParams();
   const list = useRef<HTMLDivElement>(null);
@@ -35,7 +36,7 @@ export function WorkspaceSections({ value, label, path, sections, appearance = "
       </TabsList>
     </div>
     {sections.map((section) => <TabsContent key={section.value} value={section.value} className="workspace-section-content">
-      {section.value === value ? section.content : null}
+      {section.value === value ? children ?? section.content : null}
     </TabsContent>)}
   </Tabs>;
 }

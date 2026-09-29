@@ -114,9 +114,13 @@ export function StudentLookup(props: Props) {
           { key: "number", label: "رقم الطالب الداخلي", render: (student) => <span className="table-code">{student.student_number.toLocaleString("ar-EG")}</span> },
           { key: "name", label: "الطالب", render: (student) => <h3>{student.name}</h3> },
           { key: "phone", label: "رقم التواصل", render: (student) => <bdi dir="ltr">{student.phone || "لم يُضف رقم تواصل"}</bdi> },
-          { key: "access", label: "إتاحة الملف", actions: true, render: (student) => student.within_scope
-            ? <Link href={`/admin/students/${student.id}`}>فتح ملف الطالب</Link>
-            : <span className="muted">بيانات أساسية فقط · خارج فروعك</span> },
+          { key: "access", label: "إجراءات الملف", actions: true, render: (student) => {
+            if (!student.within_scope) return <span className="muted">بيانات أساسية فقط · خارج فروعك</span>;
+            const profile = branchContext?.students.find((row) => row.id === student.id);
+            return profile && branchContext
+              ? <StudentRowActions student={profile} permissions={branchContext.permissions} />
+              : <Link href={`/admin/students/${student.id}`}>فتح ملف الطالب</Link>;
+          } },
         ]} />}
     </>}
   </div>;

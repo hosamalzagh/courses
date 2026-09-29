@@ -28,7 +28,16 @@ test('student rows expose authorized actions and the profile keeps its summary f
   await expect(menu.getByRole('menuitem', { name: 'الحساب المالي' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(actions).toBeFocused();
-  await actions.click();
+  const studentName = await row.locator('h3').textContent();
+  await page.getByRole('searchbox').fill(studentName!);
+  await page.getByRole('searchbox').press('Enter');
+  const searchRow = page.getByRole('table', { name: 'نتائج البحث' }).locator('tbody tr').first();
+  await searchRow.getByRole('button', { name: /^إجراءات الطالب / }).click();
+  await expect(menu.getByRole('menuitem', { name: 'تقرير الطالب' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.goto(`${origin}/admin/students`);
+  const firstActions = page.getByRole('table', { name: 'الطلاب في فروعي' }).locator('tbody tr').first().getByRole('button', { name: /^إجراءات الطالب / });
+  await firstActions.click();
   await menu.getByRole('menuitem', { name: 'تعديل البيانات' }).click();
   await expect(page).toHaveURL(/\/admin\/students\/[0-9a-f-]+\/edit$/);
   await expect(page.getByRole('button', { name: 'حفظ بيانات الطالب' })).toBeVisible();
@@ -48,6 +57,7 @@ test('student rows expose authorized actions and the profile keeps its summary f
   expect(summaryBox!.width).toBeLessThanOrEqual(1280);
   await expect(page.getByRole('button', { name: 'حفظ صورة الطالب' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'اختيار صورة', exact: true })).toBeVisible();
+  await expect(page.locator('input[type="file"]')).toHaveAttribute('tabindex', '-1');
   await page.screenshot({ path: testInfo.outputPath('student-profile-desktop.png') });
   await page.screenshot({ path: testInfo.outputPath('student-profile-desktop-full.png'), fullPage: true });
   await page.getByRole('button', { name: 'تفعيل الوضع الداكن' }).click();
@@ -64,11 +74,11 @@ test('student rows expose authorized actions and the profile keeps its summary f
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
   await page.setViewportSize({ width: 390, height: 844 });
 
-  await page.getByRole('navigation', { name: 'أقسام ملف الطالب' }).getByRole('link', { name: 'الدراسة' }).click();
+  await page.getByRole('tablist', { name: 'أقسام ملف الطالب' }).getByRole('tab', { name: 'الدراسة' }).click();
   await expect(page.getByRole('heading', { name: 'محاولات الدراسة' })).toBeVisible();
-  await page.getByRole('navigation', { name: 'أقسام ملف الطالب' }).getByRole('link', { name: 'الحضور والغياب' }).click();
+  await page.getByRole('tablist', { name: 'أقسام ملف الطالب' }).getByRole('tab', { name: 'الحضور والغياب' }).click();
   await expect(page.getByRole('heading', { name: 'سجل المحاضرات' })).toBeVisible();
-  await page.getByRole('navigation', { name: 'أقسام ملف الطالب' }).getByRole('link', { name: 'البيانات الشخصية' }).click();
+  await page.getByRole('tablist', { name: 'أقسام ملف الطالب' }).getByRole('tab', { name: 'البيانات الشخصية' }).click();
   await expect(page.getByRole('heading', { name: 'البيانات الشخصية', exact: true })).toBeVisible();
 
   await page.getByRole('link', { name: 'تقرير الطالب' }).click();

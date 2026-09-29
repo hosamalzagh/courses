@@ -387,10 +387,6 @@ button, a, input { touch-action: manipulation; }
 .student-summary-facts .form-stack { margin: 0; gap: 0; font-size: var(--font-table); font-weight: 600; }
 .student-summary-facts .form-stack span { color: var(--ink); font-size: var(--font-table); }
 .student-summary-alerts { display: grid; gap: var(--space-2); }
-.student-profile-tabs { display: flex; gap: var(--space-1); min-width: 0; overflow-x: auto; border-block-end: 1px solid var(--border); scrollbar-width: thin; }
-.student-profile-tabs a { flex: none; padding: var(--space-2) var(--space-3); border-block-end: 2px solid transparent; color: var(--body); font-size: var(--font-table); text-decoration: none; white-space: nowrap; }
-.student-profile-tabs a:hover { color: var(--ink); background: var(--surface-raised); }
-.student-profile-tabs a[aria-current='page'] { border-color: var(--accent); color: var(--accent-strong); font-weight: 600; }
 .student-profile-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(16rem, 20rem); gap: var(--space-4); align-items: start; }
 .student-profile-main, .student-profile-side { display: grid; min-width: 0; gap: var(--space-3); }
 .student-profile-main > .form-stack, .student-profile-side > .form-stack { margin-top: 0; }
