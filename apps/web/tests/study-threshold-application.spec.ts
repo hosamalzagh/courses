@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-test.skip(!process.env.COURSES_THRESHOLD_CREDENTIALS || !process.env.COURSES_THRESHOLD_QUERY_LOG,
+test.skip(!process.env.COURSES_THRESHOLD_CREDENTIALS || !process.env.COURSES_THRESHOLD_QUERY_LOG || !process.env.COURSES_THRESHOLD_DB_PORT,
   "Requires disposable PostgreSQL, protected browser credentials, and an SSR query log.");
 const origin = process.env.COURSES_THRESHOLD_ORIGIN ?? "http://alpha.courses.test:8065";
 const credentials = process.env.COURSES_THRESHOLD_CREDENTIALS
@@ -39,6 +40,7 @@ test("selected existing attempts keep their threshold until reviewed and approve
   try {
     await signIn(owner);
     const workspace = await (await owner.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+    const centerId = workspace.center.id as string;
     const north = workspace.branches.find((branch: { slug: string }) => branch.slug === "north").id as number;
     const course = await write(owner, "courses", { branch_id: north, name: `Threshold ${crypto.randomUUID().slice(0, 6)}`, request_id: crypto.randomUUID() });
     expect(course.status).toBe(201);
@@ -71,6 +73,19 @@ test("selected existing attempts keep their threshold until reviewed and approve
       instructor_ids: [instructor.body.instructor.id],
     }, "PATCH");
     expect(settings.status).toBe(200);
+    const attemptId = saved.body.attempt.id as string;
+    const planId = level.body.level.plan.id as string;
+    for (const id of [centerId, groupId, attemptId, planId]) expect(id).toMatch(/^[a-f0-9-]{36}$/);
+    execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_THRESHOLD_DB_PORT!, "-U", "postgres",
+      "-d", `courses_center_${centerId}`, "-v", "ON_ERROR_STOP=1", "-c", `
+INSERT INTO study_sessions (id, group_id, plan_lecture_id, number, scheduled_at, status, revision, created_by, created_by_name, created_at, updated_at)
+SELECT gen_random_uuid(), '${groupId}', lectures.id, lectures.number, now() + lectures.number * interval '1 hour', 'planned', 1,
+  (SELECT user_id FROM center_grants WHERE role = 'center_owner' LIMIT 1), 'اختبار المتصفح', now(), now()
+FROM plan_lectures AS lectures WHERE lectures.plan_version_id = '${planId}' ORDER BY lectures.number LIMIT 6;
+INSERT INTO study_attendance_entries (id, session_id, attempt_id, status, revision, recorded_by, recorded_at, created_at, updated_at)
+SELECT gen_random_uuid(), sessions.id, '${attemptId}', 'counted', 1,
+  (SELECT user_id FROM center_grants WHERE role = 'center_owner' LIMIT 1), now(), now(), now()
+FROM study_sessions AS sessions WHERE sessions.group_id = '${groupId}';`], { stdio: "ignore" });
 
     const url = `${origin}/admin/groups/${groupId}/coverage`;
     const log = process.env.COURSES_THRESHOLD_QUERY_LOG!;
@@ -95,6 +110,8 @@ test("selected existing attempts keep their threshold until reviewed and approve
     await expect(owner.getByRole("textbox", { name: "سبب التطبيق" })).toHaveValue("قرار أكاديمي موثق بعد مراجعة نسبة المجموعة");
     await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة أثر النسبة" }).click();
     await expect(owner.getByText(/٨٠٪ \(٨ محاضرات\) ← ٦٠٪ \(٦ محاضرات\)/)).toBeVisible();
+    await expect(owner.getByText(/الأهلية غير مستوفٍ ← مستوفٍ مبدئيًا/)).toBeVisible();
+    await expect(owner.getByText(/يتضمن الرصيد ٦ محاضرة مفتوحة/)).toBeVisible();
     let releaseApproval!: () => void;
     const approvalGate = new Promise<void>(resolve => { releaseApproval = resolve; });
     await owner.route(`**/api/v1/center/groups/${groupId}/completion-threshold`, async route => {
@@ -113,6 +130,9 @@ test("selected existing attempts keep their threshold until reviewed and approve
     await expect(owner.getByText("حد هذه المحاولة: ٦٠%", { exact: false })).toBeVisible();
     await owner.goto(`${origin}/admin/audit`);
     await expect(owner.getByRole("heading", { name: "تطبيق نسبة الإتمام على تسجيلات قائمة" }).first()).toBeVisible();
+    await owner.getByText("عرض قرار تطبيق نسبة الإتمام").first().click();
+    await expect(owner.getByText(/الأهلية غير مستوفٍ ← مستوفٍ مبدئيًا/)).toBeVisible();
+    await expect(owner.getByText(/يتضمن الرصيد وقت القرار ٦ محاضرة مفتوحة/)).toBeVisible();
 
     await signIn(staff, "staff");
     await staff.goto(url);
