@@ -163,11 +163,11 @@ class CenterStudyCompletionController extends Controller
             $this->conflict('completion_selection_empty');
         }
         $db = DB::connection('tenant');
-        $requirements = $db->table('plan_lectures')->where('plan_version_id', $group->plan_version_id)
-            ->orderBy('number')->get(['id', 'number']);
+        $requirements = $db->table('study_group_requirements')->where('group_id', $group->id)
+            ->whereNull('retired_at')->orderBy('number')->get(['id', 'plan_lecture_id', 'number']);
         $required = $requirements->pluck('number')->map(fn ($number): int => (int) $number)->all();
         $openSessions = $db->table('study_sessions as sessions')
-            ->join('plan_lectures as lectures', 'lectures.id', '=', 'sessions.plan_lecture_id')
+            ->join('study_group_requirements as lectures', 'lectures.id', '=', 'sessions.group_requirement_id')
             ->where('sessions.group_id', $group->id)->where('sessions.status', '<>', 'cancelled')
             ->whereNull('sessions.closed_at')->orderBy('lectures.number')->pluck('lectures.number')->all();
         $ids = array_column($data['decisions'], 'attempt_id');
@@ -180,10 +180,10 @@ class CenterStudyCompletionController extends Controller
                 ->select(['attempts.id as attempt_id', 'attempts.student_id', 'attempts.completion_threshold',
                     'students.name', 'students.student_number'])
                 ->selectRaw(<<<'SQL'
-COALESCE((SELECT json_agg(json_build_object('id', lectures.id, 'final', sessions.closed_at IS NOT NULL))
+COALESCE((SELECT json_agg(json_build_object('id', COALESCE(sessions.plan_lecture_id, sessions.group_requirement_id),
+    'final', sessions.closed_at IS NOT NULL) ORDER BY entries.id)
     FROM study_attendance_entries AS entries
     JOIN study_sessions AS sessions ON sessions.id = entries.session_id
-    JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id
     WHERE entries.attempt_id = attempts.id AND entries.status = 'counted' AND sessions.status <> 'cancelled'), '[]'::json) AS attendance_rows,
 COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     'source_lecture_ids', approvals.source_lecture_ids, 'target_lecture_ids', approvals.target_lecture_ids))
@@ -213,10 +213,13 @@ SQL)
                     $this->conflict('completion_before_join_date');
                 }
                 $credits = StudyCoverageCredits::resolve(json_decode($row->attendance_rows, true), json_decode($row->approvals, true));
-                $covered = $requirements->filter(fn (object $item): bool => array_key_exists($item->id, $credits['lectures']))
+                $covered = $requirements->filter(fn (object $item): bool => array_key_exists(
+                    $item->plan_lecture_id ?? $item->id, $credits['lectures']))
                     ->pluck('number')->map(fn ($number): int => (int) $number)->all();
-                $open = $requirements->filter(fn (object $item): bool => array_key_exists($item->id, $credits['lectures'])
-                    && ! $credits['lectures'][$item->id])->pluck('number')->map(fn ($number): int => (int) $number)->all();
+                $open = $requirements->filter(fn (object $item): bool => array_key_exists(
+                    $item->plan_lecture_id ?? $item->id, $credits['lectures'])
+                    && ! $credits['lectures'][$item->plan_lecture_id ?? $item->id])
+                    ->pluck('number')->map(fn ($number): int => (int) $number)->all();
                 $missing = array_values(array_diff($required, $covered));
                 $eligible = $required !== [] && count($covered) * 100 >= (int) $row->completion_threshold * count($required);
                 $reason = $reasons[$row->attempt_id];

@@ -262,6 +262,14 @@ class StudySessionsTest extends TestCase
             ->assertJsonPath('students.0.eligible', false);
         $this->getJson("{$path}/sessions")->assertOk()->assertJsonPath('group.required_count', 11)
             ->assertJsonPath('group.requirements.10.number', 11);
+        $this->postJson("{$path}/completion-preview", [
+            'complete_group' => true,
+            'decisions' => [['attempt_id' => $attempt, 'exception_reason' => 'اعتماد استثنائي بعد نقص المحاضرات']],
+        ])->assertOk()->assertJsonPath('students.0.covered_count', 8)
+            ->assertJsonPath('students.0.required_count', 11)
+            ->assertJsonPath('students.0.percentage', 72.73)
+            ->assertJsonPath('students.0.missing_numbers', [9, 10, 11])
+            ->assertJsonPath('students.0.exceptional', true);
         $extraTime = now('Africa/Cairo')->addDays(14)->setTime(18, 0);
         $extra = $this->postJson("{$path}/sessions", [
             'kind' => 'single', 'revision' => 4, 'start_at' => $extraTime->format('Y-m-d\\TH:i'),
@@ -276,6 +284,13 @@ class StudySessionsTest extends TestCase
         $this->getJson("{$path}/coverage")->assertOk()->assertJsonPath('students.0.covered_count', 9)
             ->assertJsonPath('students.0.required_count', 11)->assertJsonPath('students.0.percentage', 81.82)
             ->assertJsonPath('students.0.eligible', true);
+        $this->postJson("{$path}/completion-preview", [
+            'complete_group' => true, 'decisions' => [['attempt_id' => $attempt]],
+        ])->assertOk()->assertJsonPath('students.0.covered_count', 9)
+            ->assertJsonPath('students.0.required_count', 11)
+            ->assertJsonPath('students.0.percentage', 81.82)
+            ->assertJsonPath('students.0.open_numbers.8', 11)
+            ->assertJsonPath('students.0.exceptional', false);
         $currentGroup = $this->getJson("{$path}/sessions")->assertOk()->json('group');
         $this->patchJson("{$path}/settings", [
             'revision' => $currentGroup['revision'], 'approved_price' => '100.00',
