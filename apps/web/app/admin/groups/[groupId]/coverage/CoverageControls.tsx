@@ -118,7 +118,15 @@ export function CoverageControls({ context, search }: { context: CoverageContext
         preview_token: completionPreview.data.preview_token, request_id: completionPreview.requestId,
       });
       setCompletionUncertain(false);
-      if (!response.ok) { setCompletionError(await completionMessage(response)); return; }
+      if (!response.ok) {
+        const code = (await response.clone().json().catch(() => ({}))).code as string | undefined;
+        setCompletionError(await completionMessage(response));
+        if (code === "completion_exception_reason_required" || code === "completion_reason_unneeded" || code === "completion_preview_changed") {
+          setCompletionPreview(null);
+          router.refresh();
+        }
+        return;
+      }
       setCompletionNotice(completeGroup ? "اكتملت المجموعة، وحُفظت قرارات الطلاب المختارين." : "حُفظ اعتماد إتمام الطلاب المختارين.");
       setCompletionSelected({}); setCompletionPreview(null); router.refresh();
     } catch { setCompletionUncertain(true); setCompletionError("انقطع الاتصال أثناء الاعتماد. أعد المحاولة بالطلب نفسه للتحقق من النتيجة."); }
