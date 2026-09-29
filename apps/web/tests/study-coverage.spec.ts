@@ -133,11 +133,16 @@ test("coverage is provisional until closure and hidden branch data stays denied"
     await expect(owner.getByText(/تغيرت أهلية أحد الطلاب/)).toBeVisible();
     await expect(owner.getByLabel(`سبب إتمام ${student.body.student.name} دون الحد`)).toBeVisible();
     await expect(owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` })).toBeChecked();
+    await owner.getByLabel(`سبب إتمام ${student.body.student.name} دون الحد`).fill("سبب استثنائي مؤقت");
     execFileSync("psql", ["-h", "127.0.0.1", "-p", process.env.COURSES_COVERAGE_DB_PORT!, "-U", "postgres",
       "-d", `courses_center_${centerId}`, "-c",
       `UPDATE study_attendance_entries SET status = 'counted' WHERE id = '${finalRecorded.body.entry.id}'`], { stdio: "ignore" });
-    await owner.reload();
-    await owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` }).check();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" }).click();
+    await expect(owner.getByText(/امسح السبب الذي لم يعد مطلوبًا/)).toBeVisible();
+    await expect(owner.getByLabel(`سبب إتمام ${student.body.student.name} دون الحد`)).toBeVisible();
+    await expect(owner.getByRole("checkbox", { name: `اختيار إتمام ${student.body.student.name}` })).toBeChecked();
+    await owner.getByLabel(`سبب إتمام ${student.body.student.name} دون الحد`).fill("");
+    await expect(owner.getByLabel(`سبب إتمام ${student.body.student.name} دون الحد`)).toHaveCount(0);
     await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة إكمال المجموعة" }).click();
     await expect(owner.getByRole("heading", { name: "معاينة قرار الإتمام" })).toBeFocused();
     await owner.locator("header.center-topbar").getByRole("button", { name: "إلغاء المعاينة" }).click();

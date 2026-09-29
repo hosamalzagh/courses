@@ -70,6 +70,12 @@ class CenterStudyCompletionController extends Controller
                 ]);
             }
             foreach ($snapshot['students'] as $student) {
+                $closed = $db->table('study_attempt_group_periods')
+                    ->where('attempt_id', $student['attempt_id'])->where('group_id', $groupId)
+                    ->whereNull('left_on')->update(['left_on' => now('Africa/Cairo')->toDateString()]);
+                if ($closed !== 1) {
+                    $this->conflict('completion_attempt_changed');
+                }
                 $db->table('study_attempt_completion_decisions')->insert([
                     'id' => (string) Str::uuid(), 'attempt_id' => $student['attempt_id'],
                     'group_id' => $groupId, 'student_id' => $student['student_id'], 'branch_id' => $group->branch_id,
@@ -82,7 +88,7 @@ class CenterStudyCompletionController extends Controller
                     'approved_at' => $now, 'request_id' => $data['request_id'],
                 ]);
                 $db->table('study_attempts')->where('id', $student['attempt_id'])->update([
-                    'status' => 'completed', 'updated_at' => $now,
+                    'status' => 'completed', 'revision' => DB::raw('revision + 1'), 'updated_at' => $now,
                 ]);
                 $this->audit($actor->id, $group->branch_id, 'study_attempt.completed', [
                     'group_id' => $groupId, 'attempt_id' => $student['attempt_id'],

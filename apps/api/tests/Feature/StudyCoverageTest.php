@@ -287,6 +287,11 @@ class StudyCoverageTest extends TestCase
             $this->assertSame(0, (int) $decisions[$secondAttempt['id']]->covered_count);
             $this->assertSame(1, DB::table('center_audit_logs')->where('event', 'study_group.completed')->count());
             $this->assertSame(2, DB::table('center_audit_logs')->where('event', 'study_attempt.completed')->count());
+            $this->assertSame(now('Africa/Cairo')->toDateString(), DB::table('study_attempt_group_periods')
+                ->where('attempt_id', $firstAttempt['id'])->value('left_on'));
+            $this->assertSame(now('Africa/Cairo')->toDateString(), DB::table('study_attempt_group_periods')
+                ->where('attempt_id', $secondAttempt['id'])->value('left_on'));
+            $this->assertSame(2, (int) DB::table('study_attempts')->where('id', $firstAttempt['id'])->value('revision'));
         });
     }
 
@@ -363,8 +368,12 @@ class StudyCoverageTest extends TestCase
             ...$selection, 'group_revision' => $preview['group']['revision'],
             'preview_token' => $preview['preview_token'], 'request_id' => (string) Str::uuid(),
         ])->assertOk();
-        $this->center->run(fn () => $this->assertSame(1,
-            (int) DB::table('study_attempt_completion_decisions')->where('attempt_id', $attempt['id'])->value('covered_count')));
+        $this->center->run(function () use ($attempt): void {
+            $this->assertSame(1, (int) DB::table('study_attempt_completion_decisions')
+                ->where('attempt_id', $attempt['id'])->value('covered_count'));
+            $this->assertSame(0, DB::table('study_attempt_group_periods')
+                ->where('attempt_id', $attempt['id'])->whereNull('left_on')->count());
+        });
     }
 
     private function group(int $branchId, int $lectureCount): array
