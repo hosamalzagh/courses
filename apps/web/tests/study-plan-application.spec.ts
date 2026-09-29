@@ -111,12 +111,11 @@ test("academic staff applies a newer plan to a selected attempt without changing
     const draftReason = "تطبيق إصدار أحدث مع المحافظة على مسودة التعارض";
     await owner.getByLabel("سبب التطبيق").fill(draftReason);
     await owner.locator("header.center-topbar").getByRole("button", { name: "معاينة أثر الإصدار" }).click();
-    const directPreview = await write(owner, `${path.replace("/coverage", "")}/plan-applications/preview`, {
-      target_plan_version_id: nextPlan.body.plan.id, attempt_ids: [attempt.body.attempt.id], reason: draftReason,
-    });
+    const requirementChange = { kind: "add", content: "متطلب إضافي لتحديث المجموعة", reason: "تعديل متطلبات المجموعة أثناء مراجعة الإصدار" };
+    const directPreview = await write(owner, `${path.replace("/coverage", "")}/requirements/preview`, requirementChange);
     expect(directPreview.status).toBe(200);
-    const directApply = await write(owner, `${path.replace("/coverage", "")}/plan-applications`, {
-      target_plan_version_id: nextPlan.body.plan.id, attempt_ids: [attempt.body.attempt.id], reason: draftReason,
+    const directApply = await write(owner, `${path.replace("/coverage", "")}/requirements`, {
+      ...requirementChange,
       group_revision: directPreview.body.group_revision, preview_token: directPreview.body.preview_token,
       request_id: crypto.randomUUID(),
     });

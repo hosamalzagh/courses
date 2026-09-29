@@ -895,6 +895,52 @@ class StudyCoverageTest extends TestCase
         });
     }
 
+    public function test_closed_group_period_freezes_the_plan_effective_on_its_boundary_date(): void
+    {
+        $group = $this->group($this->north, 1);
+        $students = [$this->student(), $this->student()];
+        $joinedOn = now('Africa/Cairo')->subDays(2)->toDateString();
+        $attempts = array_map(fn (array $student): array => $this->enroll($student['id'], $group, $joinedOn), $students);
+        $originalIds = $this->center->run(fn () => DB::table('study_group_requirements')
+            ->where('group_id', $group['id'])->orderBy('number')->pluck('plan_lecture_id')->all());
+        $newPlan = $this->postJson("{$this->base}/levels/{$group['level_id']}/plan-versions", [
+            'base_plan_version_id' => $group['plan_version_id'], 'base_revision' => 1,
+            'lectures' => [['number' => 1, 'content' => 'محتوى الإصدار الجديد الأول', 'planned_hours' => 1],
+                ['number' => 2, 'content' => 'محتوى الإصدار الجديد الثاني', 'planned_hours' => 1]],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('plan');
+        $newIds = $this->center->run(fn () => DB::table('plan_lectures')
+            ->where('plan_version_id', $newPlan['id'])->orderBy('number')->pluck('id')->all());
+        $path = "{$this->base}/groups/{$group['id']}/plan-applications";
+        $change = ['target_plan_version_id' => $newPlan['id'],
+            'attempt_ids' => array_column($attempts, 'id'), 'reason' => 'اعتماد الإصدار الجديد للمحاولتين'];
+        $preview = $this->postJson("{$path}/preview", $change)->assertOk()->json();
+        $this->postJson($path, [...$change, 'group_revision' => $preview['group_revision'],
+            'preview_token' => $preview['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+
+        foreach ($attempts as $index => $attempt) {
+            $revision = $this->center->run(fn () => DB::table('study_attempts')
+                ->where('id', $attempt['id'])->value('revision'));
+            $this->postJson("{$this->base}/students/{$students[$index]['id']}/enrollments/{$attempt['id']}/withdraw", [
+                'withdrawn_on' => now('Africa/Cairo')->subDays($index)->toDateString(),
+                'reason' => 'تثبيت متطلبات فترة الطالب عند الانسحاب',
+                'revision' => $revision, 'request_id' => (string) Str::uuid(),
+            ])->assertOk();
+        }
+        $this->center->run(function () use ($attempts, $newIds, $originalIds): void {
+            $periods = DB::table('study_attempt_group_periods')
+                ->whereIn('attempt_id', array_column($attempts, 'id'))->get()->keyBy('attempt_id');
+            $this->assertSame($newIds, json_decode($periods[$attempts[0]['id']]->required_credit_ids, true));
+            $this->assertSame($originalIds, json_decode($periods[$attempts[1]['id']]->required_credit_ids, true));
+        });
+        $report = $this->getJson("{$this->base}/groups/{$group['id']}/coverage")->assertOk();
+        $this->assertLessThanOrEqual(6, (int) $report->headers->get('X-Courses-Query-Count'));
+        $rows = collect($report->json('students'))->keyBy('attempt_id');
+        $this->assertSame(2, $rows[$attempts[0]['id']]['required_count']);
+        $this->assertSame(1, $rows[$attempts[1]['id']]['required_count']);
+    }
+
     public function test_plan_application_failure_rolls_back_attempt_and_history_before_safe_retry(): void
     {
         $group = $this->group($this->north, 1);

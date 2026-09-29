@@ -99,14 +99,34 @@ SQL);
         }
         $rows = $students->orderBy('students.student_number')->orderBy('attempts.id')
             ->offset(($page - 1) * 20)->limit(21)->get();
-        $report = $rows->take(20)->map(function (object $row) use ($requirements): array {
+        $closedPlanIds = $rows->take(20)
+            ->filter(fn (object $row): bool => $row->attempt_status === 'withdrawn' && $row->closed_period_requirements !== null)
+            ->flatMap(function (object $row): array {
+                $groupIds = array_column(json_decode($row->closed_period_requirement_rows ?? '[]', true), 'id');
+
+                return array_values(array_diff(json_decode($row->closed_period_requirements, true), $groupIds));
+            })->unique()->values()->all();
+        $planHistory = $closedPlanIds === [] ? [] : DB::connection('tenant')->table('plan_lectures')
+            ->whereIn('id', $closedPlanIds)->get(['id', 'number', 'title', 'content', 'planned_hours'])
+            ->mapWithKeys(fn (object $lecture): array => [$lecture->id => [
+                'id' => $lecture->id, 'number' => (int) $lecture->number,
+                'title' => $lecture->title, 'content' => $lecture->content,
+                'planned_hours' => $lecture->planned_hours,
+            ]])->all();
+        $report = $rows->take(20)->map(function (object $row) use ($requirements, $planHistory): array {
+            $appliedRequirements = $row->required_lectures === null ? null : json_decode($row->required_lectures, true);
             $closed = in_array($row->attempt_status, ['withdrawn', 'completed'], true)
                 && $row->closed_period_requirements !== null;
-            $effectiveRequirements = $row->attempt_status === 'withdrawn' && $closed
-                ? json_decode($row->closed_period_requirement_rows ?? '[]', true)
-                : ($row->required_lectures !== null
-                    ? json_decode($row->required_lectures, true)
-                    : ($closed ? json_decode($row->closed_period_requirement_rows ?? '[]', true) : $requirements));
+            $effectiveRequirements = $appliedRequirements ?? $requirements;
+            if ($row->attempt_status === 'withdrawn' && $closed) {
+                $groupHistory = collect(json_decode($row->closed_period_requirement_rows ?? '[]', true))->keyBy('id');
+                $appliedById = collect($appliedRequirements ?? [])->keyBy('id');
+                $effectiveRequirements = array_values(array_filter(array_map(
+                    fn (string $id): ?array => $groupHistory->get($id) ?? $planHistory[$id] ?? $appliedById->get($id),
+                    json_decode($row->closed_period_requirements, true))));
+            } elseif ($closed && $appliedRequirements === null) {
+                $effectiveRequirements = json_decode($row->closed_period_requirement_rows ?? '[]', true);
+            }
             $effectiveNumbers = array_column($effectiveRequirements, 'number');
             $effectiveCount = count($effectiveNumbers);
             $credits = StudyCoverageCredits::resolve(json_decode($row->attendance_rows, true), json_decode($row->approvals, true));
@@ -120,7 +140,7 @@ SQL);
                 'attempt_id' => $row->attempt_id, 'student_id' => $row->student_id,
                 'plan_version_id' => $row->plan_version_id,
                 'plan_version' => (int) $row->plan_version,
-                'requirements' => $row->required_lectures === null ? null : $effectiveRequirements,
+                'requirements' => $appliedRequirements !== null || $closed ? $effectiveRequirements : null,
                 'name' => $row->name, 'student_number' => $row->student_number,
                 'joined_on' => $row->joined_on, 'attempt_status' => $row->attempt_status,
                 'student_status' => $row->student_status,
