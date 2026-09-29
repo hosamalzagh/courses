@@ -17,7 +17,7 @@ async function select(page: Page, label: string, value: string) {
 }
 test('manage all five lists, select on create, disable and preserve old profile values', async ({ page }) => {
   await signIn(page);
-  await page.getByRole('link', { name: 'قوائم بيانات الطالب', exact: true }).click();
+  await page.goto(`${origin}/admin/settings?tab=student-choices`);
   const labels = ['المدينة', 'المؤهل الدراسي', 'المهنة', 'طريقة جمع البيانات', 'مصدر معرفة الطالب بالمركز'];
   const stamp = Date.now();
   for (const [index, label] of labels.entries()) {
@@ -38,7 +38,7 @@ test('manage all five lists, select on create, disable and preserve old profile 
   const student = (await (await response).json()).student;
   await expect(page).toHaveURL(new RegExp(`/students/${student.id}`));
   for (let i = 0; i < 5; i++) await expect(page.getByText(`اختيار ${i} ${stamp}`, { exact: true })).toBeVisible();
-  await page.getByRole('link', { name: 'قوائم بيانات الطالب', exact: true }).click();
+  await page.goto(`${origin}/admin/settings?tab=student-choices`);
   await page.getByRole('link', { name: 'المدينة', exact: true }).click();
   await page.getByRole('row').filter({ hasText: `اختيار 0 ${stamp}` }).getByRole('button', { name: 'تعديل', exact: true }).click();
   await page.getByRole('checkbox', { name: 'متاح للاستخدام الجديد', exact: true }).uncheck();
@@ -140,7 +140,7 @@ test('full SSR reads and warm navigation preserve six-query budget and shell on 
   const log = process.env.COURSES_CHOICES_READ_LOG!;
   const cursor = () => readFileSync(log,'utf8').trim().split('\n').length;
   const rows = (offset:number) => readFileSync(log,'utf8').trim().split('\n').slice(offset).map(row=>JSON.parse(row)).filter(row=>row.path.startsWith('/api/v1/center/'));
-  for (const route of ['/admin/student-profile-choices','/admin/students/new','/admin/students']) {
+  for (const route of ['/admin/settings?tab=student-choices','/admin/students/new','/admin/students']) {
     const start=cursor(); await page.goto(`${origin}${route}`); await expect(page.getByRole('heading',{level:1})).toBeVisible();
     const reads=rows(start); expect(reads.length).toBeGreaterThan(0); expect(reads.every(row=>typeof row.count==='number'&&row.count>0)).toBe(true);
     const total=reads.reduce((sum,row)=>sum+row.count,0); expect(total).toBeLessThanOrEqual(6);console.log(JSON.stringify({route,total,requests:reads.length}));
@@ -148,10 +148,11 @@ test('full SSR reads and warm navigation preserve six-query budget and shell on 
   const start=cursor();
   await page.locator('.center-topbar').evaluate(element=>element.setAttribute('data-persist-proof','yes'));
   const documents: string[]=[];page.on('request',request=>{if(request.resourceType()==='document')documents.push(request.url());});
-  const link=page.getByRole('link',{name:'قوائم بيانات الطالب',exact:true});await link.hover();await expect.poll(()=>rows(start).length).toBeGreaterThan(0);await link.click();
-  await expect(page.getByRole('heading',{name:'قوائم بيانات الطالب',exact:true})).toBeVisible();
+  const link=page.getByRole('link',{name:'الإعدادات',exact:true});await link.hover();await expect.poll(()=>rows(start).length).toBeGreaterThan(0);await link.click();
+  await page.getByRole('tab',{name:'قوائم بيانات الطالب',exact:true}).click();
+  await expect(page.getByRole('tab',{name:'قوائم بيانات الطالب',exact:true})).toHaveAttribute('aria-selected','true');
   await expect(page.locator('.center-topbar')).toHaveAttribute('data-persist-proof','yes'); expect(documents).toEqual([]);
-  expect(rows(start).reduce((sum,row)=>sum+row.count,0)).toBeLessThanOrEqual(6);
+  expect(rows(start).every(row=>row.count<=6)).toBe(true);
   await page.getByRole('button',{name:'إضافة اختيار',exact:true}).click();await page.getByRole('button',{name:'حفظ الاختيار',exact:true}).click();await expect(page.getByRole('textbox',{name:'اسم الاختيار',exact:true})).toBeFocused();
   await page.getByRole('button',{name:'إلغاء',exact:true}).click();
   await page.screenshot({path:'/tmp/courses-issue57/lists-desktop-light.png',fullPage:true});

@@ -6,6 +6,7 @@ import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard';
 import { Button } from '@/components/Button';
 import { FormField } from '@/components/FormField';
 import { InlineNotice } from '@/components/InlineNotice';
+import { SettingsRow } from '@/components/SettingsRow';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FieldGroup, FieldSet, FieldLabel } from '@/components/ui/field';
 import { centerRequest, responseFieldErrors, responseMessage } from '@/lib/client-api';
@@ -38,9 +39,9 @@ export function StudentCodeControls({ settings }: { settings: CenterSettings }) 
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'تعذر تحميل الإعداد الحالي.'); }
     finally { saving.current=false; setBusy(false); }
   }
-  return <form id={`${prefix}-code-settings`} className='context-card form-stack' aria-label='إعداد الباركود الإضافي' noValidate onSubmit={submit}>
+  return <form id={`${prefix}-code-settings`} className='settings-list' aria-label='إعداد الباركود الإضافي' noValidate onSubmit={submit}>
+    <SettingsRow title='الباركود الإضافي' description='رمز يدوي باسم يختاره المركز. تعطيله يحفظ القيم السابقة ويوقف استخدامها في البحث.'>
     <FieldGroup><UnsavedChangesGuard guardHistory dirty={JSON.stringify(draft) !== JSON.stringify(saved)} />
-      <h2>الباركود الإضافي</h2><p>رمز يدوي إضافي باسم يختاره المركز. تعطيله يحفظ القيم السابقة ويوقف استخدامها للبحث؛ لا تتغير أرقام الطلاب الداخلية.</p>
       {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}{notice ? <InlineNotice>{notice}</InlineNotice> : null}
       <FieldSet disabled={busy}>
         <FieldLabel className='flex items-center gap-2'><Checkbox checked={draft.enabled} onCheckedChange={enabled => {setDraft({...draft,enabled:Boolean(enabled)});setNotice('');}} />تفعيل الباركود الإضافي</FieldLabel>
@@ -48,5 +49,6 @@ export function StudentCodeControls({ settings }: { settings: CenterSettings }) 
         <CenterHeaderActions><Button type='submit' form={`${prefix}-code-settings`} variant='primary' busy={busy} disabled={conflict}>حفظ إعداد الباركود الإضافي</Button><Button disabled={busy} onClick={() => {setDraft(saved);setErrors({});setError('');setNotice('');}}>إلغاء إعداد الباركود</Button>{conflict ? <Button disabled={busy} onClick={reload}>تحميل إعداد الباركود الحالي</Button> : null}</CenterHeaderActions>
       </FieldSet>
     </FieldGroup>
+    </SettingsRow>
   </form>;
 }

@@ -872,17 +872,19 @@ test("currency, payment and visible account work through the employee UI and SSR
   await page.getByRole("link", { name: "الحساب المالي" }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/students/${studentId}/account$`));
   await expect(page.getByText("الرصيد المتاح", { exact: false })).toBeVisible();
-  if (await page.getByRole("combobox", { name: "عملة المركز" }).count()) {
+  const currency = (await (await page.request.get(`${origin}/api/v1/center/settings`)).json()).settings.financial_currency;
+  if (!currency) {
+    await page.getByRole("link", { name: "الإعدادات العامة" }).click();
     await page.getByRole("combobox", { name: "عملة المركز" }).selectOption("EGP");
-    if (await page.getByRole("button", { name: "حفظ عملة المركز" }).isEnabled()) {
-      await page.getByRole("button", { name: "حفظ عملة المركز" }).click();
-      await expect(page.getByText("حُفظت عملة المركز.", { exact: false })).toBeVisible();
-    }
-  } else await expect(page.getByText("عملة المركز ثابتة بعد أول حركة", { exact: false })).toBeVisible();
+    await page.getByRole("button", { name: "حفظ عملة المركز" }).click();
+    await expect(page.getByText("حُفظت عملة المركز.", { exact: false })).toBeVisible();
+    await page.goto(`${origin}/admin/students/${studentId}/account`);
+  }
   await page.getByRole("button", { name: "تسجيل الدفعة" }).click();
   await expect(page.getByLabel("تاريخ الاستلام")).toBeFocused();
   await page.getByLabel("تاريخ الاستلام").fill("2026-09-28");
   await page.getByLabel("المبلغ (EGP)").fill("120.50");
+  await expect(page.getByLabel("المبلغ (EGP)")).toHaveValue("120.50");
   await page.getByRole("button", { name: "تسجيل الدفعة" }).click();
   await expect(page.getByText("سُجلت الدفعة المقدمة", { exact: false })).toBeVisible();
   await expect(page.getByText("120.50 EGP").first()).toBeVisible();

@@ -60,9 +60,10 @@ test('every admin editor places submit and cancel in the shared header', async (
 
   await page.goto(`${origin}/admin/settings`);
   await headerSubmit(page, 'حفظ الإعدادات');
+  await page.getByRole('tab', { name: 'الطلاب', exact: true }).click();
   await headerSubmit(page, 'حفظ بداية الترقيم');
 
-  await page.goto(`${origin}/admin/security`);
+  await page.goto(`${origin}/admin/settings?tab=security`);
   await headerSubmit(page, 'تفعيل التحقق بخطوتين');
 });
 

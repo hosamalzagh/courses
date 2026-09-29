@@ -415,14 +415,14 @@ export function StudentCustomFieldControls({
       <nav className="form-actions" aria-label="دفعات الحقول الإضافية">
         {context.pagination.page > 1 ? (
           <Link
-            href={`/admin/student-custom-fields?page=${context.pagination.page - 1}`}
+            href={`/admin/settings?tab=student-fields&page=${context.pagination.page - 1}`}
           >
             الدفعة السابقة
           </Link>
         ) : null}
         {context.pagination.has_more ? (
           <Link
-            href={`/admin/student-custom-fields?page=${context.pagination.page + 1}`}
+            href={`/admin/settings?tab=student-fields&page=${context.pagination.page + 1}`}
           >
             الدفعة التالية
           </Link>

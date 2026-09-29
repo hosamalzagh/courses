@@ -68,7 +68,7 @@ test("every ordinary authenticated page stays within six queries on cold and war
     await signIn(beta, "http://beta.courses.test", betaOwner.email, betaOwner.password);
     await signInToPlatform(landlord, platformOwner.email, platformOwner.password);
     for (const [page, host] of [[alpha, "alpha.courses.test"], [beta, "beta.courses.test"]] as const) {
-      for (const route of ["admin", "admin/settings", "admin/members", "admin/audit", "admin/security"]) {
+      for (const route of ["admin", "admin/settings", "admin/settings?tab=branches", "admin/settings?tab=students", "admin/settings?tab=security", "admin/members", "admin/audit"]) {
         const url = `http://${host}/${route}`;
         report.push({ page: `${host}/${route}`, cold: await measure(page, url, true), warm: await measure(page, url, false) });
       }

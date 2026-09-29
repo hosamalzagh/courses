@@ -13,6 +13,7 @@ import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { Button } from "@/components/Button";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
+import { SettingsRow } from "@/components/SettingsRow";
 import { centerRequest, responseFieldErrors, responseMessage } from "@/lib/client-api";
 
 export function StudentNumberingControls({ start, revision }: { start: number; revision: number }) {
@@ -65,11 +66,10 @@ export function StudentNumberingControls({ start, revision }: { start: number; r
     finally { saving.current = false; setBusy(false); }
   }
 
-  return <form id={`${formPrefix}-0`} className="context-card form-stack" noValidate onSubmit={save} aria-label="ترقيم الطلاب">
-<FieldGroup>
+  return <form id={`${formPrefix}-0`} className="settings-list" noValidate onSubmit={save} aria-label="ترقيم الطلاب">
+    <SettingsRow title="ترقيم الطلاب" description="تسلسل واحد لكل فروع المركز. تغيير البداية يحفظ الأرقام الحالية ولا يعيد استعمال رقم صدر سابقًا.">
+      <FieldGroup>
     <UnsavedChangesGuard dirty={value !== savedValue} />
-    <h2>ترقيم الطلاب</h2>
-    <p>تسلسل واحد لجميع فروع المركز. تغيير البداية يحفظ أرقام الطلاب الحالية، ولا يعيد استعمال رقم صدر سابقًا. إذا كانت البداية أقل من التسلسل الحالي يستمر الترقيم منه.</p>
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     <FieldSet disabled={busy} className="form-stack" style={{ border: 0, margin: 0, padding: 0 }}>
@@ -79,6 +79,7 @@ export function StudentNumberingControls({ start, revision }: { start: number; r
       {conflict ? <Button type="button" disabled={busy} onClick={reload}>تحميل إعداد الترقيم الحالي</Button> : null}
     </CenterHeaderActions>
     </FieldSet>
-  </FieldGroup>
+      </FieldGroup>
+    </SettingsRow>
 </form>;
 }

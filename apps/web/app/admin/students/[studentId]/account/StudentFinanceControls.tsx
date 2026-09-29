@@ -22,8 +22,6 @@ import { StudentPaymentRefunds } from "./StudentPaymentRefunds";
 import { StudentFeeAdjustmentEditor } from "./StudentFeeAdjustmentEditor";
 import { StudentFinancialEvents } from "./StudentFinancialEvents";
 
-const currencies = ["EGP", "SAR", "AED", "USD", "EUR", "GBP"];
-
 function SelectField({ id, label, value, options, onChange, error }: {
   id: string; label: string; value: string; options: { value: string; label: string }[];
   onChange: (value: string) => void; error?: string;
@@ -46,7 +44,6 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   const formPrefix = useId();
   const [loadedInitial, setLoadedInitial] = useState(initial);
   const [current, setCurrent] = useState(initial);
-  const [currency, setCurrency] = useState(initial.account.currency ?? "");
   const [branch, setBranch] = useState(initial.recordable_branches[0] ? String(initial.recordable_branches[0].id) : "");
   const [method, setMethod] = useState("cash");
   const [receivedOn, setReceivedOn] = useState("");
@@ -75,7 +72,7 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   const submitting = useRef(false);
   const requestId = useRef<string | null>(null);
   if (loadedInitial !== initial) {
-    setLoadedInitial(initial); setCurrent(initial); setCurrency(initial.account.currency ?? "");
+    setLoadedInitial(initial); setCurrent(initial);
     if (!initial.recordable_branches.some((item) => String(item.id) === branch)) {
       setBranch(initial.recordable_branches[0] ? String(initial.recordable_branches[0].id) : "");
     }
@@ -98,11 +95,10 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
     ...(paymentId ? { payment_id: paymentId } : {}),
     ...(financialEventType && financialEventId ? { financial_event_type: financialEventType, financial_event_id: financialEventId } : {}),
   })}`;
-  const currencyForm = `${formPrefix}-currency`;
   const paymentForm = `${formPrefix}-payment`;
   const paymentDirty = Boolean(amount || receivedOn || method !== "cash" ||
     (current.recordable_branches[0] && branch !== String(current.recordable_branches[0].id)));
-  const dirty = Boolean((currency && currency !== current.account.currency) || paymentDirty || allocationDirty || refundDirty || correctionDirty || feeDirty || eventNoteDirty);
+  const dirty = Boolean(paymentDirty || allocationDirty || refundDirty || correctionDirty || feeDirty || eventNoteDirty);
   const selectedPayment = current.payments.find((item) => item.id === selectedPaymentId);
   const selectedRefundPayment = current.payments.find((item) => item.id === selectedRefundPaymentId);
   const selectedCorrectionPayment = current.payments.find((item) => item.id === selectedCorrectionPaymentId);
@@ -121,7 +117,7 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
       const response = await centerRequest(accountPath, "GET");
       if (!response.ok) { setError(await responseMessage(response)); return; }
       const payload = await response.json() as StudentAccountContext;
-      setCurrent(payload); setCurrency(payload.account.currency ?? ""); setConflict(false); setError("");
+      setCurrent(payload); setConflict(false); setError("");
       setNotice("حُمّلت أحدث حركة. راجع بيانات الدفعة قبل إعادة المحاولة.");
       router.refresh();
     } catch { setError("تعذر تحميل الحساب. تحقق من الاتصال وأعد المحاولة."); }
@@ -135,25 +131,6 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
       setCurrent(await response.json() as StudentAccountContext);
       router.refresh();
     } catch { setError("حُفظت الحركة، لكن تعذر تحديث ملخص الحساب. حمّل أحدث الحساب."); }
-  }
-
-  async function saveCurrency(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (submitting.current || current.account.currency_locked) return;
-    if (!currency) { setFieldErrors({ currency: "اختر عملة المركز." }); focus("currency"); return; }
-    submitting.current = true; setBusy(true); setError(""); setNotice(""); setFieldErrors({});
-    try {
-      const response = await centerRequest("financial-currency", "PATCH", { currency, revision: current.account.currency_revision });
-      if (!response.ok) {
-        if (response.status === 409) { setConflict(true); setError("تغيرت عملة المركز أو سُجلت حركة. حمّل الحساب الحالي."); }
-        else { const errors = await responseFieldErrors(response); setFieldErrors(errors); setError(await responseMessage(response)); if (Object.keys(errors).length) focus("currency"); }
-        return;
-      }
-      const saved = await response.json() as { currency: string; revision: number };
-      setCurrent((value) => ({ ...value, account: { ...value.account, currency: saved.currency, currency_revision: saved.revision } }));
-      setNotice("حُفظت عملة المركز. ستثبت بعد أول حركة مالية."); router.refresh();
-    } catch { setConflict(true); setError("تعذر التأكد من حفظ العملة. حمّل أحدث بيانات المركز."); }
-    finally { submitting.current = false; setBusy(false); }
   }
 
   async function savePayment(event: FormEvent<HTMLFormElement>) {
@@ -190,7 +167,7 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
       setNotice("سُجلت الدفعة المقدمة دون تخصيصها لمجموعة. لا يمكن تعديل الحركة المعتمدة أو حذفها.");
       try {
         const fresh = await centerRequest(accountPath, "GET");
-        if (fresh.ok) { const payload = await fresh.json() as StudentAccountContext; setCurrent(payload); setCurrency(payload.account.currency ?? ""); }
+        if (fresh.ok) { const payload = await fresh.json() as StudentAccountContext; setCurrent(payload); }
       } catch { setNotice("حُفظت الدفعة، لكن تعذر تحديث القائمة. حمّل الحساب لمراجعتها."); }
       router.refresh(); focus("amount");
     } catch { setUncertain(true); setError("تعذر التأكد من استلام الدفعة. أبقِ البيانات كما هي وأعد المحاولة بالمفتاح نفسه للتحقق دون تكرارها."); }
@@ -201,7 +178,6 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
   const branchPage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(current.pagination.page), branches_page: String(page), fees_page: String(current.pagination.fees_page), ...(search ? { q: search } : {}) })}`;
   const feePage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(current.pagination.page), branches_page: String(current.pagination.branches_page), fees_page: String(page), ...(search ? { q: search } : {}) })}`;
   const eventsPage = (page: number) => `/admin/students/${studentId}/account?${new URLSearchParams({ page: String(current.pagination.page), branches_page: String(current.pagination.branches_page), fees_page: String(current.pagination.fees_page), events_page: String(page), ...(search ? { q: search } : {}) })}`;
-  const cancelCurrency = () => { setCurrency(current.account.currency ?? ""); setFieldErrors({}); setError(""); focus("currency"); };
   const cancelPayment = () => {
     if (uncertain) return;
     setAmount(""); setReceivedOn(""); setMethod("cash");
@@ -233,14 +209,7 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     {conflict ? <CenterHeaderActions><Button disabled={busy} onClick={reload}>تحميل أحدث الحساب</Button></CenterHeaderActions> : null}
-    {current.permissions.can_manage_center && !current.account.currency_locked ? <section className="context-card form-stack" aria-labelledby={`${formPrefix}-currency-title`}>
-      <h2 id={`${formPrefix}-currency-title`}>عملة المركز</h2>
-      <p className="muted">اختر العملة قبل أول دفعة. بعد اعتماد أول حركة لا يمكن تغييرها.</p>
-      <form id={currencyForm} noValidate onSubmit={saveCurrency}><FieldGroup>
-        <SelectField id={`${formPrefix}-currency`} label="عملة المركز" value={currency} options={currencies.map((value) => ({ value, label: value }))} onChange={(value) => { setCurrency(value); setFieldErrors({}); }} error={fieldErrors.currency} />
-      </FieldGroup></form>
-      <CenterHeaderActions><Button form={currencyForm} type="submit" variant="primary" busy={busy} disabled={conflict || currency === current.account.currency}>حفظ عملة المركز</Button><Button disabled={busy || currency === current.account.currency} onClick={cancelCurrency}>إلغاء تعديل العملة</Button></CenterHeaderActions>
-    </section> : null}
+    {current.permissions.can_manage_center && !current.account.currency_locked ? <p className="muted">اختر عملة المركز من <Link href="/admin/settings?tab=general">الإعدادات العامة</Link> قبل استلام أول دفعة.</p> : null}
     {current.recordable_branches.length ? <section className="context-card form-stack" aria-labelledby={`${formPrefix}-payment-title`}>
       <h2 id={`${formPrefix}-payment-title`}>استلام دفعة مقدمة</h2>
       <p className="muted">حدد الفرع الذي استلم المبلغ وطريقة وتاريخ الاستلام. تُحفظ الدفعة في حساب الطالب دون تخصيص.</p>

@@ -7,10 +7,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
 // Route-backed peer views share keyboard navigation and the existing link guard.
 // Only the selected view mounts its controls and registers header actions.
-export function WorkspaceSections({ value, label, path, sections }: {
+export function WorkspaceSections({ value, label, path, sections, appearance = "line" }: {
   value: string;
   label: string;
   path: string;
+  appearance?: "line" | "default";
   sections: { value: string; label: string; content: ReactNode; resetParams?: string[] }[];
 }) {
   const params = useSearchParams();
@@ -26,7 +27,7 @@ export function WorkspaceSections({ value, label, path, sections }: {
   }
   return <Tabs value={value} className="workspace-sections">
     <div className="workspace-sections-scroll">
-      <TabsList ref={list} variant="line" aria-label={label} activateOnFocus={false}>
+      <TabsList ref={list} variant={appearance} aria-label={label} activateOnFocus={false}>
         {sections.map((section) => <TabsTrigger key={section.value} value={section.value} nativeButton={false}
           render={<PrefetchLink href={href(section)} scroll={false} />}>
           {section.label}

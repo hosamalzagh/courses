@@ -50,8 +50,8 @@ test("admin navigation retains the document, sidebar and header", async ({ page 
 
   for (const [link, heading] of [
     ["إدارة الموظفين والدعوات", "موظفو المركز"],
-    ["إعدادات المركز", "إعدادات المركز"],
-    ["الفروع", "الفروع"],
+    ["الإعدادات", "الإعدادات"],
+    ["الرئيسية", "الرئيسية"],
   ]) {
     await page.getByRole("link", { name: link, exact: true }).click();
     await expect(page.locator(".center-topbar").getByRole("heading", { name: heading, exact: true })).toBeVisible();
@@ -60,6 +60,8 @@ test("admin navigation retains the document, sidebar and header", async ({ page 
     expect(await header!.evaluate((node) => node === document.querySelector(".center-topbar"))).toBe(true);
     await expect(page.locator(".center-shell")).toHaveClass(/sidebar-collapsed/);
   }
+  await page.getByRole("link", { name: "الإعدادات", exact: true }).click();
+  await page.getByRole("tab", { name: "الفروع", exact: true }).click();
   await page.getByRole("button", { name: "إنشاء فرع", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "اسم الفرع", exact: true })).toBeFocused();
 });
@@ -79,7 +81,7 @@ test("slow admin navigation keeps content and header geometry until the destinat
   });
   await page.getByRole("link", { name: "إدارة الموظفين والدعوات", exact: true }).click();
   await intercepted;
-  await expect(page.getByRole("table", { name: "الفروع", exact: true })).toBeVisible();
+  await expect(page.locator(".center-topbar").getByRole("heading", { name: "الرئيسية", exact: true })).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "جارٍ تحميل محتوى الصفحة" })).toBeVisible();
   expect(await page.locator(".center-topbar").evaluate((node) => node.getBoundingClientRect().height)).toBe(height);
   release();

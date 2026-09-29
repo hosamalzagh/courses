@@ -85,8 +85,15 @@ class CenterAdminTest extends TestCase
             ->assertJsonPath('permissions.center_roles.0', 'center_admin');
         $this->assertQueryBudget($userPage);
         $settingsPage = $this->getJson("{$base}/user?include=settings")->assertOk()
-            ->assertJsonPath('settings.contact_email', 'office@alpha.test');
+            ->assertJsonPath('settings.contact_email', 'office@alpha.test')
+            ->assertJsonPath('settings.financial_currency', null)
+            ->assertJsonPath('settings.financial_currency_revision', 1);
         $this->assertQueryBudget($settingsPage);
+        $studentSettingsPage = $this->getJson("{$base}/user?include=student-settings")->assertOk()
+            ->assertJsonPath('settings.student_number_start', 1)
+            ->assertJsonPath('student_search_policy.enabled', false)
+            ->assertJsonPath('student_search_policy.default_sharing_enabled', true);
+        $this->assertQueryBudget($studentSettingsPage);
         $membersPage = $this->getJson("{$base}/member-workspace")->assertOk()
             ->assertJsonCount(3, 'members');
         $this->assertQueryBudget($membersPage);

@@ -280,6 +280,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await secondManagerPage.getByRole("textbox", { name: "كلمة المرور" }).fill(secondManagerPassword);
     await secondManagerPage.getByRole("button", { name: "دخول المركز" }).click();
     await expect(secondManagerPage).toHaveURL(`${host}/admin`);
+    await secondManagerPage.goto(`${host}/admin/settings?tab=branches`);
     await expect(secondManagerPage.getByRole("heading", { name: "فرع التجربة الشمالي المحدّث" })).toBeVisible();
     await expect(secondManagerPage.getByRole("heading", { name: "فرع التجربة الجنوبي" })).toHaveCount(0);
     const southId = Number(runFixture(String.raw`
@@ -298,7 +299,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await firstManagerCard.locator("xpath=following-sibling::tr[1]").getByRole("button", { name: "حفظ الأدوار" }).click();
     expect((await adminGrant).status()).toBe(200);
     await expect(firstManagerCard).toContainText("مسؤول المركز");
-    await staffPage.goto(`${host}/admin`);
+    await staffPage.goto(`${host}/admin/settings?tab=branches`);
     await expect(staffPage.getByRole("heading", { name: "فرع التجربة الشرقي" })).toBeVisible();
     await staffPage.goto(`${host}/admin/settings`);
     await staffPage.getByRole("textbox", { name: "بريد التواصل" }).fill("office@alpha.test");
@@ -347,7 +348,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     `, slug, email);
     await page.reload();
     await expect(page.getByRole("row").filter({ hasText: expiredEmail })).toContainText("انتهت صلاحية الدعوة");
-    await page.goto(`${host}/admin`);
+    await page.goto(`${host}/admin/settings?tab=branches`);
     runFixture(String.raw`
       $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
       $user = \App\Models\User::where('email', getenv('COURSES_BROWSER_EMAIL'))->firstOrFail();

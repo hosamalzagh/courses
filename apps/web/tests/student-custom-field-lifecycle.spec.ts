@@ -704,7 +704,7 @@ test("history is bounded and the shared header remains usable in RTL themes with
           row.path?.startsWith("/api/v1/center/"),
       ) as { count: number | null; ms: number | null }[];
   for (const route of [
-    "/admin/student-custom-fields",
+    "/admin/settings?tab=student-fields",
     "/admin/students/new",
     `/admin/students/${student.id}`,
     `/admin/students/${student.id}/edit`,

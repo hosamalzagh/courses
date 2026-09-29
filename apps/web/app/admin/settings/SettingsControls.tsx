@@ -1,27 +1,24 @@
 "use client";
 
-import { useId } from "react";
-
+import { useId, useRef, useState, type FormEvent } from "react";
 import { FieldGroup } from "@/components/ui/field";
-
-
-import { StudentNumberingControls } from "./StudentNumberingControls";
 import { Button } from "@/components/Button";
-import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { CenterPageActions } from "@/components/CenterShell";
 import type { CenterContext } from "@/lib/server-context";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
+import { SettingsRow } from "@/components/SettingsRow";
+import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { centerRequest, responseFieldErrors, responseMessage } from "@/lib/client-api";
 
 type Settings = import('@/lib/server-context').CenterSettings;
 
-import { StudentCodeControls } from './StudentCodeControls';
-
 export function SettingsControls({ context, initialSettings }: { context: CenterContext; initialSettings: Settings }) {
   const formPrefix = useId();
   const router = useRouter();
+  const saving = useRef(false);
+  const [saved, setSaved] = useState({ email: initialSettings.contact_email ?? "", phone: initialSettings.phone ?? "", address: initialSettings.address ?? "" });
   const [email, setEmail] = useState(initialSettings.contact_email ?? "");
   const [phone, setPhone] = useState(initialSettings.phone ?? "");
   const [address, setAddress] = useState(initialSettings.address ?? "");
@@ -29,9 +26,12 @@ export function SettingsControls({ context, initialSettings }: { context: Center
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
+  const dirty = email !== saved.email || phone !== saved.phone || address !== saved.address;
 
   async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError(""); setFieldErrors({}); setNotice("");
+    event.preventDefault();
+    if (saving.current) return;
+    saving.current = true; setBusy(true); setError(""); setFieldErrors({}); setNotice("");
     try {
       const response = await centerRequest("settings", "PATCH", {
         contact_email: email || null, phone: phone || null, address: address || null,
@@ -40,25 +40,33 @@ export function SettingsControls({ context, initialSettings }: { context: Center
         setFieldErrors(await responseFieldErrors(response));
         throw new Error(await responseMessage(response));
       }
+      setSaved({ email, phone, address });
       setNotice("حُفظت إعدادات المركز.");
       router.refresh();
     } catch (failure) { setError(failure instanceof Error ? failure.message : "تعذر حفظ الإعدادات."); }
-    finally { setBusy(false); }
+    finally { saving.current = false; setBusy(false); }
   }
 
   return <>
-    <CenterPageActions context={context} actions={<Button variant="primary" form={`${formPrefix}-0`} disabled={busy} type="submit" busy={busy} busyLabel="جارٍ الحفظ…">حفظ الإعدادات</Button>} />
+    <CenterPageActions context={context} actions={<><Button variant="primary" form={`${formPrefix}-0`} disabled={busy} type="submit" busy={busy} busyLabel="جارٍ الحفظ…">حفظ الإعدادات</Button>{dirty ? <Button disabled={busy} onClick={() => { setEmail(saved.email); setPhone(saved.phone); setAddress(saved.address); setError(""); setFieldErrors({}); }}>إلغاء تعديل بيانات المركز</Button> : null}</>} />
+      <UnsavedChangesGuard dirty={dirty} guardHistory />
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-      <form id={`${formPrefix}-0`} className="context-card form-stack" noValidate onSubmit={save}>
-<FieldGroup>
-        <FormField id="contact-email" label="بريد التواصل" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.contact_email} direction="ltr" />
-        <FormField id="phone" label="الهاتف" type="tel" value={phone} onChange={(value) => { setPhone(value); setFieldErrors({}); }} error={fieldErrors.phone} direction="ltr" />
-        <FormField id="address" label="العنوان" value={address} onChange={(value) => { setAddress(value); setFieldErrors({}); }} error={fieldErrors.address} />
-
-      </FieldGroup>
-</form>
-      <StudentCodeControls settings={initialSettings} />
-      <StudentNumberingControls start={initialSettings.student_number_start ?? 1} revision={initialSettings.student_number_revision ?? 1} />
+      <form id={`${formPrefix}-0`} className="settings-list" noValidate onSubmit={save}>
+        <FieldGroup>
+          <SettingsRow title="اسم المركز" description="الاسم المسجل للمركز ويظهر في مساحة الإدارة.">
+            <p><strong>{context.center.name}</strong></p>
+          </SettingsRow>
+          <SettingsRow title="بريد التواصل" description="البريد الذي يستخدمه المركز للتواصل مع الطلاب وأولياء الأمور.">
+            <FormField id={`${formPrefix}-email`} label="بريد التواصل" type="email" value={email} onChange={(value) => { setEmail(value); setFieldErrors({}); }} error={fieldErrors.contact_email} direction="ltr" />
+          </SettingsRow>
+          <SettingsRow title="هاتف المركز" description="رقم التواصل الرئيسي للمركز.">
+            <FormField id={`${formPrefix}-phone`} label="الهاتف" type="tel" value={phone} onChange={(value) => { setPhone(value); setFieldErrors({}); }} error={fieldErrors.phone} direction="ltr" />
+          </SettingsRow>
+          <SettingsRow title="عنوان المركز" description="العنوان العام للمركز؛ لكل فرع عنوانه الخاص في تبويب الفروع.">
+            <FormField id={`${formPrefix}-address`} label="العنوان" value={address} onChange={(value) => { setAddress(value); setFieldErrors({}); }} error={fieldErrors.address} />
+          </SettingsRow>
+        </FieldGroup>
+      </form>
   </>;
 }

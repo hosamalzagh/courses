@@ -62,7 +62,7 @@ class CenterMemberManagementTest extends TestCase
             ->assertOk()->assertJsonPath('branches.0.name', 'North')->assertJsonCount(2, 'branches')->assertJsonCount(2, 'members')
             ->assertJsonPath('user.permissions.center_roles.0', 'center_owner');
         $this->assertLessThanOrEqual(6, (int) $workspace->headers->get('X-Courses-Query-Count'));
-        foreach (['', '?include=settings', '?include=audit'] as $suffix) {
+        foreach (['', '?include=settings', '?include=student-settings', '?include=audit'] as $suffix) {
             $page = $this->getJson('http://alpha.courses.test/api/v1/center/user'.$suffix)->assertOk();
             $this->assertLessThanOrEqual(6, (int) $page->headers->get('X-Courses-Query-Count'));
         }
@@ -89,6 +89,8 @@ class CenterMemberManagementTest extends TestCase
         $this->assertEqualsCanonicalizing(['branch_viewer', 'branch_auditor'], $roles);
 
         $this->actingAs($staff, 'web')->withSession(['center_id' => $alpha->id]);
+        $this->getJson('http://alpha.courses.test/api/v1/center/user?include=student-settings')->assertOk()
+            ->assertJsonMissingPath('settings')->assertJsonMissingPath('student_search_policy');
         $this->getJson("http://alpha.courses.test/api/v1/center/branches/{$branchId}")->assertOk();
         $this->patchJson("http://alpha.courses.test/api/v1/center/branches/{$branchId}", ['name' => 'Denied'])->assertForbidden();
         $this->getJson('http://alpha.courses.test/api/v1/center/members')->assertForbidden();

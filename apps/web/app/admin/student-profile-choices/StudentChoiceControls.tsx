@@ -68,13 +68,13 @@ export function StudentChoiceControls({ context, kind, query }: { context: Stude
     } catch { setError('تعذر تحميل الاختيار الحالي. أعد المحاولة.'); }
     finally { saving.current = false; setBusy(false); }
   }
-  const href = (page: number) => `/admin/student-profile-choices?${new URLSearchParams({ kind, page: String(page), q: query })}`;
+  const href = (page: number) => `/admin/settings?${new URLSearchParams({ tab: 'student-choices', kind, page: String(page), q: query })}`;
   return <>
     <CenterPageActions context={context} />
     <UnsavedChangesGuard dirty={dirty} guardHistory />
-    <nav className='form-actions' aria-label='قوائم بيانات الطالب'>{Object.entries(studentChoiceLabels).map(([key, value]) => <Link key={key} href={`/admin/student-profile-choices?kind=${key}`} aria-current={key === kind ? 'page' : undefined}>{value}</Link>)}</nav>
+    <nav className='form-actions' aria-label='قوائم بيانات الطالب'>{Object.entries(studentChoiceLabels).map(([key, value]) => <Link key={key} href={`/admin/settings?tab=student-choices&kind=${key}`} aria-current={key === kind ? 'page' : undefined}>{value}</Link>)}</nav>
     {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}
-    <form id={`${prefix}-search`} className='context-card form-stack' onSubmit={event => { event.preventDefault(); router.push(`/admin/student-profile-choices?${new URLSearchParams({ kind, q: search })}`); }}>
+    <form id={`${prefix}-search`} className='context-card form-stack' onSubmit={event => { event.preventDefault(); router.push(`/admin/settings?${new URLSearchParams({ tab: 'student-choices', kind, q: search })}`); }}>
       <FieldGroup><FormField id={`${prefix}-query`} label='البحث في جميع اختيارات القائمة' value={search} onChange={setSearch} /></FieldGroup>
     </form>
     {editor ? <form id={`${prefix}-editor`} className='context-card form-stack' aria-label='تعديل اختيار القائمة' noValidate onSubmit={save}>

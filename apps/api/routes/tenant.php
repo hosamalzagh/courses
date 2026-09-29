@@ -34,10 +34,10 @@ use App\Http\Controllers\CenterStudentStatusController;
 use App\Http\Controllers\CenterStudyAttendanceController;
 use App\Http\Controllers\CenterStudyCompletionController;
 use App\Http\Controllers\CenterStudyCoverageController;
-use App\Http\Controllers\CenterStudyPlanApplicationController;
 use App\Http\Controllers\CenterStudyEnrollmentController;
 use App\Http\Controllers\CenterStudyGroupController;
 use App\Http\Controllers\CenterStudyMakeupController;
+use App\Http\Controllers\CenterStudyPlanApplicationController;
 use App\Http\Controllers\CenterStudySessionController;
 use App\Http\Controllers\CenterStudyTeachingController;
 use App\Http\Controllers\CenterStudyTransferController;
@@ -82,9 +82,34 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
 
             if ($request->query('include') === 'settings' && $permissions->isCenterManager()) {
                 $payload['settings'] = DB::connection('tenant')->table('center_settings')->where('id', 1)
-                    ->first(['contact_email', 'phone', 'address', 'student_number_start', 'student_number_revision', 'student_code_enabled', 'student_code_label', 'student_code_revision']) ?: [
+                    ->first(['contact_email', 'phone', 'address', 'student_number_start', 'student_number_revision', 'student_code_enabled', 'student_code_label', 'student_code_revision', 'financial_currency', 'financial_currency_revision', 'financial_currency_locked_at']) ?: [
                         'contact_email' => null, 'phone' => null, 'address' => null, 'student_number_start' => 1, 'student_number_revision' => 1,
+                        'financial_currency' => null, 'financial_currency_revision' => 1, 'financial_currency_locked_at' => null,
                     ];
+            }
+
+            if ($request->query('include') === 'student-settings' && $permissions->isCenterManager()) {
+                $studentSettings = DB::connection('tenant')->table('center_settings as settings')
+                    ->crossJoin('student_search_policy as policy')
+                    ->where('settings.id', 1)->where('policy.id', 1)
+                    ->first([
+                        'settings.student_number_start', 'settings.student_number_revision', 'settings.student_code_enabled',
+                        'settings.student_code_label', 'settings.student_code_revision',
+                        'policy.enabled as policy_enabled', 'policy.revision as policy_revision',
+                        'policy.default_sharing_enabled as policy_default_sharing_enabled',
+                    ]);
+                $payload['settings'] = [
+                    'student_number_start' => $studentSettings->student_number_start,
+                    'student_number_revision' => $studentSettings->student_number_revision,
+                    'student_code_enabled' => (bool) $studentSettings->student_code_enabled,
+                    'student_code_label' => $studentSettings->student_code_label,
+                    'student_code_revision' => $studentSettings->student_code_revision,
+                ];
+                $payload['student_search_policy'] = [
+                    'enabled' => (bool) $studentSettings->policy_enabled,
+                    'revision' => $studentSettings->policy_revision,
+                    'default_sharing_enabled' => (bool) $studentSettings->policy_default_sharing_enabled,
+                ];
             }
 
             if ($request->query('include') === 'audit') {

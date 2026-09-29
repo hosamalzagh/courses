@@ -333,6 +333,21 @@ button, a, input { touch-action: manipulation; }
 .workspace-sections-scroll [data-slot="tabs-trigger"] { min-height: 40px; padding-inline: var(--space-3); flex: none; cursor: pointer; }
 .workspace-section-content { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; font-size: inherit; }
 .workspace-section-content[hidden] { display: none; }
+.settings-workspace { gap: var(--space-4); }
+.settings-workspace .workspace-sections-scroll { border-bottom: 0; padding-block: 0 6px; }
+.settings-workspace [data-slot="tabs-list"] { display: flex; width: max-content; min-width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-panel); padding: 5px; }
+.settings-workspace [data-slot="tabs-trigger"] { min-height: 44px; padding-inline: var(--space-3); }
+.settings-workspace [data-slot="tabs-trigger"][data-active] { background: var(--accent-soft); color: var(--accent-strong); }
+.settings-list { display: block; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-panel); }
+.settings-list > [data-slot="field-group"] { gap: 0; }
+.settings-row { display: grid; grid-template-columns: minmax(13rem, 1fr) minmax(16rem, 0.9fr); gap: var(--space-4); align-items: start; padding: var(--space-4); border-bottom: 1px solid var(--border); }
+.settings-row:last-child { border-bottom: 0; }
+.settings-row-copy h2 { font-size: 1rem; margin: 0 0 var(--space-1); }
+.settings-row-copy p { color: var(--body); font-size: 0.875rem; margin: 0; max-width: 42rem; }
+.settings-row-control { min-width: 0; display: grid; gap: var(--space-2); }
+.settings-row-control > [data-slot="field-group"] { gap: var(--space-2); }
+.settings-row-control p { margin: 0; }
+@media (max-width: 700px) { .settings-row { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); padding: var(--space-3); } }
 .student-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
 .workspace-register { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
 .workspace-register[hidden] { display: none; }

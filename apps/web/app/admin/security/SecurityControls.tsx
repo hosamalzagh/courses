@@ -103,7 +103,7 @@ export function SecurityControls({ context, initialEnabled, requiredForPlatform 
 
       {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
-      <section className="context-card form-stack">
+      <section className="form-stack">
         <h2>{enabled ? "التحقق بخطوتين مفعّل" : "التحقق بخطوتين غير مفعّل"}</h2>
         {enabled ? <>
           {recoveryCodes.length > 0 ? <div className="context-card form-stack" aria-label="رموز الاستعادة">

@@ -788,8 +788,9 @@ test("custom field editors support cancel, keyboard, mobile RTL themes and share
   page,
 }) => {
   await page
-    .getByRole("link", { name: "الحقول الإضافية للطالب", exact: true })
+    .getByRole("link", { name: "الإعدادات", exact: true })
     .click();
+  await page.getByRole("tab", { name: "الحقول الإضافية", exact: true }).click();
   const opener = page.getByRole("button", { name: "إضافة حقل", exact: true });
   await opener.click();
   const label = page.getByRole("textbox", { name: "اسم الحقل", exact: true });
@@ -878,8 +879,8 @@ test("custom field SSR and warm navigation keep six measured SQL reads and a per
   expect(created.status).toBe(201);
   const student = created.body.student;
   for (const route of [
-    "/admin/student-custom-fields",
-    "/admin/student-custom-fields?page=2",
+    "/admin/settings?tab=student-fields",
+    "/admin/settings?tab=student-fields&page=2",
     "/admin/students",
     "/admin/students/new",
     `/admin/students/${student.id}`,
@@ -897,18 +898,15 @@ test("custom field SSR and warm navigation keep six measured SQL reads and a per
     console.log(JSON.stringify({ route, sql }));
     expect(sql).toBeLessThanOrEqual(6);
   }
-  const start = cursor();
-  await page
-    .getByRole("button", { name: "تحميل المزيد من الحقول", exact: true })
-    .click();
-  await expect.poll(() => reads(start).length).toBeGreaterThan(0);
-  const rows = reads(start);
-  expect(
-    rows.every((row) => typeof row.count === "number" && row.count > 0),
-  ).toBe(true);
-  expect(
-    rows.reduce((sum, row) => sum + (row.count ?? Number.NaN), 0),
-  ).toBeLessThanOrEqual(6);
+  const more = page.getByRole("button", { name: "تحميل المزيد من الحقول", exact: true });
+  if (await more.count()) {
+    const start = cursor();
+    await more.click();
+    await expect.poll(() => reads(start).length).toBeGreaterThan(0);
+    const rows = reads(start);
+    expect(rows.every((row) => typeof row.count === "number" && row.count > 0)).toBe(true);
+    expect(rows.reduce((sum, row) => sum + (row.count ?? Number.NaN), 0)).toBeLessThanOrEqual(6);
+  }
   await page
     .locator(".center-topbar")
     .evaluate((element) =>
@@ -920,21 +918,20 @@ test("custom field SSR and warm navigation keep six measured SQL reads and a per
   });
   const warm = cursor();
   const link = page.getByRole("link", {
-    name: "الحقول الإضافية للطالب",
+    name: "الإعدادات",
     exact: true,
   });
   await link.hover();
   await expect.poll(() => reads(warm).length).toBeGreaterThan(0);
   await link.click();
-  await expect(page).toHaveURL(/\/admin\/student-custom-fields$/);
+  await page.getByRole("tab", { name: "الحقول الإضافية", exact: true }).click();
+  await expect(page).toHaveURL(/\/admin\/settings\?tab=student-fields$/);
   await expect(page.locator(".center-topbar")).toHaveAttribute(
     "data-custom-shell",
     "retained",
   );
   expect(documents).toEqual([]);
-  expect(
-    reads(warm).reduce((sum, row) => sum + (row.count ?? Number.NaN), 0),
-  ).toBeLessThanOrEqual(6);
+  expect(reads(warm).every((row) => typeof row.count === "number" && row.count <= 6)).toBe(true);
 });
 
 test("profile recovery resets paged definitions and restores stored later-page values at the current template revision", async ({

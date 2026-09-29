@@ -63,7 +63,7 @@ test('numbering, printable barcode, keyboard scan, branch/center isolation and p
     const south = await write(owner, 'branches', 'POST', { name: `جنوب ${stamp}`, slug: `south-${stamp}` });
     expect(north.status).toBe(201); expect(south.status).toBe(201);
     const setting = (await (await owner.request.get(`${host}/api/v1/center/settings`)).json()).settings;
-    await owner.goto(`${host}/admin/settings`);
+    await owner.goto(`${host}/admin/settings?tab=students`);
     await owner.getByRole('spinbutton', { name: 'بداية ترقيم الطلاب' }).fill('0');
     await owner.getByRole('button', { name: 'حفظ بداية الترقيم' }).click();
     await expect(owner.getByRole('spinbutton', { name: 'بداية ترقيم الطلاب' })).toHaveAttribute('aria-invalid', 'true');
@@ -115,8 +115,8 @@ test('numbering, printable barcode, keyboard scan, branch/center isolation and p
     const metrics = [];
     metrics.push({ route: 'short-student-search', cold: await measure(owner, `${host}/admin/students?q=${encodeURIComponent(name)}`), warm: await measure(owner, `${host}/admin/students?q=${encodeURIComponent(name)}`) });
     for (let index = 0; index < 51; index++) expect((await write(owner, 'students', 'POST', { name: `قياس ${stamp} ${index}`, branch_ids: [north.body.branch.id], request_id: crypto.randomUUID() })).status).toBe(201);
-    for (const route of ['/admin/settings', '/admin/students', `/admin/students/${saved!.id}`]) metrics.push({ route, cold: await measure(owner, `${host}${route}`), warm: await measure(owner, `${host}${route}`) });
-    await owner.goto(`${host}/admin/settings`);
+    for (const route of ['/admin/settings?tab=students', '/admin/students', `/admin/students/${saved!.id}`]) metrics.push({ route, cold: await measure(owner, `${host}${route}`), warm: await measure(owner, `${host}${route}`) });
+    await owner.goto(`${host}/admin/settings?tab=students`);
     metrics.push({ route: 'client-navigation-to-students', navigation: await measure(owner, `${host}/admin/students`, true) });
     await owner.goto(`${host}/admin/students/${saved!.id}`); await owner.waitForLoadState('networkidle'); await owner.screenshot({ path: 'test-results/numbering/desktop.png', fullPage: true });
     await owner.getByRole('button', { name: 'تفعيل الوضع الداكن' }).click();
@@ -149,7 +149,7 @@ test('concurrent branch creation, duplicate requests and numbering revisions', a
     expect(repeated.map((result) => result.status).sort()).toEqual([200, 201]); expect(repeated[0].body.student.id).toBe(repeated[1].body.student.id); expect(repeated[0].body.student.student_number).toBe(start + 2);
     const changes = await Promise.all([write(first, 'student-numbering', 'PATCH', { start: start + 100, revision: change.body.settings.student_number_revision }), write(second, 'student-numbering', 'PATCH', { start: start + 200, revision: change.body.settings.student_number_revision })]);
     expect(changes.map((result) => result.status).sort()).toEqual([200, 409]);
-    await second.goto(`${host}/admin/settings`);
+    await second.goto(`${host}/admin/settings?tab=students`);
     const current = (await (await first.request.get(`${host}/api/v1/center/settings`)).json()).settings;
     await write(first, 'student-numbering', 'PATCH', { start: start + 300, revision: current.student_number_revision });
     await second.getByRole('spinbutton', { name: 'بداية ترقيم الطلاب' }).fill(String(start + 400)); await second.getByRole('button', { name: 'حفظ بداية الترقيم' }).click();

@@ -16,7 +16,7 @@ async function select(page: Page, label: string, value: string) {
   await page.getByRole('option', { name: value, exact: true }).click();
 }
 test('enable a named card, preserve leading zeros, and scan one authorized profile', async ({page}) => {
-  await signIn(page); await page.goto(`${origin}/admin/settings`);
+  await signIn(page); await page.goto(`${origin}/admin/settings?tab=students`);
   await page.getByRole('checkbox',{name:'تفعيل الباركود الإضافي',exact:true}).check();
   await page.getByRole('textbox',{name:'اسم الباركود الإضافي',exact:true}).fill('كارت المركز');
   await page.getByRole('button',{name:'حفظ إعداد الباركود الإضافي',exact:true}).click();
@@ -152,14 +152,14 @@ test('disabled codes retain values; code search and writes enforce current branc
 });
 
 test('settings conflict recovers through the correct header form and RTL themes work on mobile', async ({page}) => {
-  await signIn(page); await page.getByRole('link',{name:'إعدادات المركز',exact:true}).click();
+  await signIn(page); await page.getByRole('link',{name:'الإعدادات',exact:true}).click(); await page.getByRole('tab',{name:'الطلاب',exact:true}).click();
   const label=page.getByRole('textbox',{name:'اسم الباركود الإضافي',exact:true});
   await label.fill(''); await page.getByRole('button',{name:'حفظ إعداد الباركود الإضافي',exact:true}).click(); await expect(label).toBeFocused();
   await label.fill('مسودة الكارت');
   await page.goBack();
   await expect(page.getByRole('alertdialog')).toContainText('مغادرة دون حفظ');
   await page.getByRole('alertdialog').getByRole('button',{name:'إلغاء',exact:true}).click();
-  await expect(page).toHaveURL(`${origin}/admin/settings`);
+  await expect(page).toHaveURL(`${origin}/admin/settings?tab=students`);
   await expect(label).toHaveValue('مسودة الكارت');
   const current=(await (await page.request.get(`${origin}/api/v1/center/settings`)).json()).settings;
   expect((await write(page,'student-code-settings','PATCH',{enabled:true,label:'إعداد أحدث',revision:current.student_code_revision})).status).toBe(200);
@@ -190,7 +190,7 @@ test('ordinary SSR code settings, create, profile, edit and scan remain at six m
   expect((await write(page,'student-code-settings','PATCH',{enabled:true,label:'كارت مقاس',revision:settings.student_code_revision})).status).toBe(200);
   const workspace=(await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json());
   const result=await write(page,'students','POST',{name:`قياس باركود ${Date.now()}`,manual_code:`000MEASURE-${Date.now()}`,branch_ids:[workspace.branches[0].id],request_id:crypto.randomUUID()}); expect(result.status).toBe(201); const student=result.body.student;
-  for (const route of ['/admin/settings','/admin/students/new',`/admin/students/${student.id}`,`/admin/students/${student.id}/edit`,`/admin/students?identifier=${student.manual_code}`]) {
+  for (const route of ['/admin/settings?tab=students','/admin/students/new',`/admin/students/${student.id}`,`/admin/students/${student.id}/edit`,`/admin/students?identifier=${student.manual_code}`]) {
     const start=cursor(); await page.goto(`${origin}${route}`); await expect(page.getByRole('heading',{level:1})).toBeVisible();
     const rows=reads(start); expect(rows.length).toBeGreaterThan(0); expect(rows.every(row=>typeof row.count==='number' && row.count>0)).toBe(true);
     const sql=rows.reduce((sum,row)=>sum+(row.count??Number.NaN),0); expect(sql).toBeLessThanOrEqual(6); console.log(JSON.stringify({route,sql}));

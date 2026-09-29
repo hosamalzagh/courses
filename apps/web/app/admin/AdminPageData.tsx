@@ -1,5 +1,5 @@
 import "server-only";
-import { BranchWorkspace } from "./BranchWorkspace";
+import { CenterPage } from "@/components/CenterPage";
 import { loadCenterContext } from "@/lib/server-context";
 import { CenterAccessState } from "@/components/CenterAccessState";
 
@@ -8,5 +8,5 @@ export async function AdminPageData() {
 
   if (typeof context === "string") return <CenterAccessState state={context} />;
 
-  return <BranchWorkspace context={context} />;
+  return <CenterPage context={context} path="/admin">{null}</CenterPage>;
 }

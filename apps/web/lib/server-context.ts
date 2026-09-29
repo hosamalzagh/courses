@@ -6,7 +6,7 @@ import type { ContentEquivalenceContext } from "./content-equivalences";
 import type { AttendanceContext, CoverageContext, GroupContext, SessionContext, TeachingContext } from "./groups";
 
 export type Branch = { id: number; name: string; slug: string; address: string | null };
-export type CenterSettings = { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number; student_code_enabled?: boolean; student_code_label?: string; student_code_revision?: number };
+export type CenterSettings = { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number; student_code_enabled?: boolean; student_code_label?: string; student_code_revision?: number; financial_currency?: string | null; financial_currency_revision?: number; financial_currency_locked_at?: string | null };
 export type CenterContext = {
   user: { id: number; name: string; email: string; mfa_enabled?: boolean; mfa_required_for_platform?: boolean };
   membership: { status: string; grants_version: number };
@@ -19,6 +19,7 @@ export type CenterContext = {
   };
   branches: Branch[];
   settings?: CenterSettings;
+  student_search_policy?: StudentSearchPolicy;
   audit_entries?: AuditEntry[];
 };
 
@@ -153,7 +154,7 @@ const fetchCenterPayload = cache(async function fetchCenterPayload<T>(path: stri
   return response.json() as Promise<T>;
 });
 
-export function loadCenterContext(include?: "settings" | "audit"): Promise<CenterContext | CenterAccessFailure> {
+export function loadCenterContext(include?: "settings" | "student-settings" | "audit"): Promise<CenterContext | CenterAccessFailure> {
   return fetchCenterPayload<CenterContext>(`user${include ? `?include=${include}` : ""}`);
 }
 
@@ -239,10 +240,13 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
     }
     return result.toString();
   }
-  if (path === "/admin" || path === "/admin/security") return loadCenterContext();
-  if (path === "/admin/student-custom-fields") return loadStudentCustomFieldWorkspace(url.searchParams.get("page") ?? "1");
-  if (path === "/admin/student-profile-choices") return loadStudentChoiceWorkspace(url.searchParams.get("kind") ?? "city", url.searchParams.get("page") ?? "1", url.searchParams.get("q") ?? "");
-  if (path === "/admin/settings") return loadCenterContext("settings");
+  if (path === "/admin" || path === "/admin/security" || path === "/admin/student-custom-fields" || path === "/admin/student-profile-choices") return loadCenterContext();
+  if (path === "/admin/settings") {
+    const tab = url.searchParams.get("tab");
+    if (tab === "student-fields") return loadStudentCustomFieldWorkspace(url.searchParams.get("page") ?? "1");
+    if (tab === "student-choices") return loadStudentChoiceWorkspace(url.searchParams.get("kind") ?? "city", url.searchParams.get("page") ?? "1", url.searchParams.get("q") ?? "");
+    return loadCenterContext(tab === "students" ? "student-settings" : tab === "general" || tab === null ? "settings" : undefined);
+  }
   if (path === "/admin/audit") return loadCenterContext("audit");
   if (path === "/admin/members") return loadMemberWorkspace(query(["members_page", "invitations_page", "branches_page"]));
   if (path === "/admin/students") return loadStudentWorkspace(query(["page", "branches_page", "q", "identifier"]));
@@ -269,8 +273,8 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   const groupSessions = path.match(/^\/admin\/groups\/([^/]+)\/sessions$/);
   if (groupSessions) return loadGroupSessions(decodeURIComponent(groupSessions[1]), query(["page"]));
   if (path === "/admin/student-search") {
+    if (url.searchParams.get("tab") === "settings") return loadCenterContext();
     const params = new URLSearchParams(query(["q", "page"]));
-    if (url.searchParams.get("tab") === "settings") params.set("view", "settings");
     return loadStudentSearchWorkspace(params.toString());
   }
   const detail = path.match(/^\/admin\/(students|instructors|curriculum)\/([^/]+)$/);

@@ -83,7 +83,7 @@ test('center search management confirms visibility, recovers stale and uncertain
     await restorePolicy(page, false);
     await page.goto(`${host}/admin/student-search`);
     await expect(page.getByRole('button', { name: 'بحث في طلاب المركز', exact: true })).toBeDisabled();
-    await page.getByRole('tab', { name: 'إعدادات المشاركة والبحث', exact: true }).click();
+    await page.goto(`${host}/admin/settings?tab=students`);
     const toggle = page.getByRole('button', { name: 'تفعيل البحث بين الفروع', exact: true });
     await toggle.click();
     const dialog = page.getByRole('alertdialog', { name: 'تفعيل البحث بين الفروع' });
@@ -106,7 +106,7 @@ test('center search management confirms visibility, recovers stale and uncertain
     await budget(page, `${host}/admin/student-search?q=غيرمطابق`, false);
     await page.getByRole('button', { name: 'مسح البحث', exact: true }).click();
     await expect(page.getByRole('textbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' })).toBeFocused();
-    await page.getByRole('tab', { name: 'إعدادات المشاركة والبحث', exact: true }).click();
+    await page.goto(`${host}/admin/settings?tab=students`);
     // Keep this open snapshot while another protected request changes policy twice.
     const old = (await workspace(page)).policy;
     expect((await write(page, 'student-search-policy', 'PATCH', { enabled: false, revision: old.revision })).status).toBe(200);
@@ -114,7 +114,7 @@ test('center search management confirms visibility, recovers stale and uncertain
     await page.getByRole('button', { name: 'تعطيل البحث بين الفروع', exact: true }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'تعطيل البحث', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'تغيّر إعداد البحث' })).toBeVisible();
-    await page.getByRole('button', { name: 'تحميل أحدث إعداد' }).click();
+    await page.getByRole('button', { name: 'تحميل أحدث إعداد للبحث' }).click();
     await expect(page.getByRole('status').filter({ hasText: 'حُمّل أحدث إعداد' })).toBeVisible();
     await page.route('**/api/v1/center/student-search-policy', async (route) => {
       if (route.request().method() === 'PATCH') { await route.fetch(); await route.abort('connectionfailed'); await page.unroute('**/api/v1/center/student-search-policy'); }
@@ -123,7 +123,7 @@ test('center search management confirms visibility, recovers stale and uncertain
     await page.getByRole('button', { name: 'تعطيل البحث بين الفروع', exact: true }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'تعطيل البحث', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'تعذر التأكد من حفظ الإعداد' })).toBeVisible();
-    await page.getByRole('button', { name: 'تحميل أحدث إعداد' }).click();
+    await page.getByRole('button', { name: 'تحميل أحدث إعداد للبحث' }).click();
     await expect(page.getByRole('button', { name: 'تفعيل البحث بين الفروع', exact: true })).toBeVisible();
     const light = page.getByRole('button', { name: 'تفعيل الوضع الفاتح' });
     if (await light.count()) await light.click();
@@ -158,11 +158,11 @@ test('search and similarity reveal basic data only and lose revoked cross-branch
     expect(hidden.status).toBe(201);
     await signIn(staff, host, staffCredentials.email, staffCredentials.password);
     await staff.goto(`${host}/admin/student-search`);
-    await expect(staff.getByRole('tab', { name: 'إعدادات المشاركة والبحث', exact: true })).toHaveCount(0);
+    await expect(staff.getByRole('tab', { name: 'الطلاب', exact: true })).toHaveCount(0);
     await staff.getByRole('textbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' }).fill(name);
     await staff.getByRole('button', { name: 'بحث في طلاب المركز', exact: true }).click();
     const row = staff.getByRole('row').filter({ hasText: name }); await expect(row).toBeVisible();
-    await expect(staff.getByRole('tab', { name: 'إعدادات المشاركة والبحث', exact: true })).toHaveCount(0);
+    await expect(staff.getByRole('tab', { name: 'الطلاب', exact: true })).toHaveCount(0);
     await expect(staff.getByRole('status').filter({ hasText: 'البحث بين الفروع مغلق' })).toHaveCount(0);
     await staff.screenshot({ path: '/tmp/courses-issue22/search-results.png', fullPage: true });
     await expect(row).toContainText('بيانات أساسية فقط'); await expect(row.getByRole('link')).toHaveCount(0);

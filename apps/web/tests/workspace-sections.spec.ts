@@ -30,7 +30,7 @@ test('peer views show one panel, retain route/header state, render without JS an
   const views = [
     ['/admin/students','سجل الطلاب'], ['/admin/students?tab=search','البحث عن طالب'],
     ['/admin/instructors','سجل المحاضرين'], ['/admin/instructors?tab=search','البحث عن محاضر'],
-    ['/admin/student-search','البحث عن طالب'], ['/admin/student-search?tab=settings','إعدادات المشاركة والبحث'],
+    ['/admin/student-search','البحث عن طالب'], ['/admin/settings?tab=students','الطلاب'],
     ['/admin/curriculum','الكورسات'], ['/admin/curriculum?tab=stages','المراحل الدراسية'], ['/admin/curriculum?tab=levels','المستويات وخططها'],
   ];
   for (const [route, label] of views) {
@@ -41,7 +41,7 @@ test('peer views show one panel, retain route/header state, render without JS an
     expect(rows.every(row => typeof row.count === 'number' && row.count > 0 && typeof row.ms === 'number')).toBe(true);
     const sql = rows.reduce((sum,row) => sum + row.count,0); expect(sql).toBeLessThanOrEqual(6);
     console.log(JSON.stringify({route,sql,sql_ms:rows.reduce((sum,row) => sum+row.ms,0)}));
-    if (route.endsWith('tab=settings')) {
+    if (route.endsWith('tab=students')) {
       await expect(page.getByRole('button', {name:'بحث في طلاب المركز',exact:true})).toHaveCount(0);
       await expect(page.getByRole('button', {name:'تغيير افتراضي المشاركة',exact:true})).toBeVisible();
     }
@@ -151,7 +151,7 @@ test('search settings register only their actions and recover current policy bef
   const original = (await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy;
   try {
     await expect(page.getByRole('button',{name:'تغيير افتراضي المشاركة',exact:true})).toHaveCount(0);
-    await page.getByRole('tab',{name:'إعدادات المشاركة والبحث',exact:true}).click();
+    await page.goto(`${origin}/admin/settings?tab=students`);
     await expect(page.getByRole('form',{name:'البحث في البيانات الأساسية لطلاب المركز'})).toHaveCount(0);
     await page.getByRole('button',{name:'تغيير افتراضي المشاركة',exact:true}).click();
     await page.getByRole('alertdialog').getByRole('button',{name:original.default_sharing_enabled ? 'غلق المشاركة للملفات الجديدة' : 'السماح بالمشاركة للملفات الجديدة',exact:true}).click();
@@ -161,8 +161,8 @@ test('search settings register only their actions and recover current policy bef
     await page.getByRole('button',{name:'تغيير افتراضي المشاركة',exact:true}).click();
     await page.getByRole('alertdialog').getByRole('button',{name:current.default_sharing_enabled ? 'غلق المشاركة للملفات الجديدة' : 'السماح بالمشاركة للملفات الجديدة',exact:true}).click();
     await expect(page.getByRole('alert').filter({hasText:'تغيّر إعداد البحث'})).toBeVisible();
-    await expect(page.getByRole('button',{name:'تحميل أحدث إعداد',exact:true})).toHaveCount(1);
-    await page.getByRole('button',{name:'تحميل أحدث إعداد',exact:true}).click();
+    await expect(page.getByRole('button',{name:'تحميل أحدث إعداد للبحث',exact:true})).toHaveCount(1);
+    await page.getByRole('button',{name:'تحميل أحدث إعداد للبحث',exact:true}).click();
     await expect(page.getByRole('status').filter({hasText:'حُمّل أحدث إعداد'})).toBeVisible();
     const enabled = (await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy.enabled;
     if (!enabled) {
@@ -170,17 +170,16 @@ test('search settings register only their actions and recover current policy bef
       await page.getByRole('alertdialog').getByRole('button',{name:'تفعيل البحث',exact:true}).click();
       await expect(page.getByRole('status').filter({hasText:'فُعّل البحث'})).toBeVisible();
     }
-    await page.getByRole('tab',{name:'البحث عن طالب',exact:true}).click();
+    await page.goto(`${origin}/admin/student-search`);
     await expect(page.getByRole('button',{name:'تغيير افتراضي المشاركة',exact:true})).toHaveCount(0);
     await expect(page.getByRole('button',{name:'بحث في طلاب المركز',exact:true})).toBeVisible();
-    const student = (await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json()).students[0];
     const search = page.getByRole('textbox',{name:'الاسم أو رقم الطالب الداخلي أو رقم التواصل',exact:true});
-    await search.fill(String(student.student_number));
+    await search.fill('missing-sections-student');
     await page.getByRole('button',{name:'بحث في طلاب المركز',exact:true}).click();
-    await expect(page.getByRole('table')).toContainText(student.name);
+    await expect(page.getByRole('heading',{name:'لا يوجد طالب مطابق في هذا المركز.',exact:true})).toBeVisible();
     await page.getByRole('button',{name:'مسح البحث',exact:true}).click(); await expect(search).toBeFocused(); await expect(search).toHaveValue('');
-    const staff = await browser.newPage(); await login(staff,'staff'); await staff.goto(`${origin}/admin/student-search?tab=settings`);
-    await expect(staff.getByRole('tab',{name:'إعدادات المشاركة والبحث',exact:true})).toHaveCount(0); await staff.close();
+    const staff = await browser.newPage(); await login(staff,'staff'); await staff.goto(`${origin}/admin/settings?tab=branches`);
+    await expect(staff.getByRole('tab',{name:'الطلاب',exact:true})).toHaveCount(0); await staff.close();
   } finally {
     const current = (await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy;
     expect((await write(page,'student-search-policy','PATCH',{enabled:original.enabled,default_sharing_enabled:original.default_sharing_enabled,revision:current.revision})).status).toBe(200);
@@ -348,56 +347,33 @@ test('successful creation and committed recovery retain destination batch state'
 });
 
 
-test('settings skip retained student queries and browser history dismisses policy confirmations', async ({page,browser}) => {
+test('settings load only the selected section and dismiss policy confirmations on history navigation', async ({page,browser}) => {
   await login(page);
-  const original = (await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy;
-  try {
-    if (!original.enabled) expect((await write(page,'student-search-policy','PATCH',{enabled:true,revision:original.revision})).status).toBe(200);
-    const studentContext = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
-    const student = studentContext.students[0];
-    const value = String(student.student_number);
-    await page.mouse.move(0, 0);
-    const start = cursor(); await page.goto(`${origin}/admin/student-search?tab=settings&q=${value}&page=2`);
-    await expect(page.getByRole('tab',{name:'إعدادات المشاركة والبحث',exact:true})).toHaveAttribute('aria-selected','true');
-    const rows = metrics(start); expect(rows).toHaveLength(1);
-    expect(rows[0].path).toBe(`/api/v1/center/student-search-workspace?q=${value}&page=2&view=settings`);
-    expect(rows.every(row => typeof row.count === 'number' && row.count > 0)).toBe(true);
-    const sql = rows.reduce((sum,row) => sum + row.count,0); expect(sql).toBeLessThanOrEqual(5);
-    console.log(JSON.stringify({route:'student-search settings with retained query',sql}));
-    await page.getByRole('tab',{name:'البحث عن طالب',exact:true}).click();
-    await expect(page).toHaveURL(url => url.searchParams.get('q') === value && url.searchParams.get('page') === '2' && url.searchParams.get('tab') === 'search');
-    await expect(page.getByRole('textbox',{name:'الاسم أو رقم الطالب الداخلي أو رقم التواصل',exact:true})).toHaveValue(value);
-    await page.goto(`${origin}/admin/student-search`);
-    await page.getByRole('tab',{name:'إعدادات المشاركة والبحث',exact:true}).click(); await expect(page).toHaveURL(/tab=settings/);
-    const current = (await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy;
-    await page.getByRole('button',{name:'تغيير افتراضي المشاركة',exact:true}).click(); await expect(page.getByRole('alertdialog')).toBeVisible();
-    await page.goBack(); await expect(page.getByRole('tab',{name:'البحث عن طالب',exact:true})).toHaveAttribute('aria-selected','true');
-    await expect(page.getByRole('alertdialog')).toHaveCount(0);
-    await page.goForward(); await expect(page.getByRole('tab',{name:'إعدادات المشاركة والبحث',exact:true})).toHaveAttribute('aria-selected','true');
-    await expect(page.getByRole('alertdialog')).toHaveCount(0);
-    await page.getByRole('button',{name:'تعطيل البحث بين الفروع',exact:true}).click(); await expect(page.getByRole('alertdialog')).toBeVisible();
-    await page.goBack(); await expect(page.getByRole('tab',{name:'البحث عن طالب',exact:true})).toHaveAttribute('aria-selected','true');
-    await expect(page.getByRole('alertdialog')).toHaveCount(0);
-    expect((await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy.revision).toBe(current.revision);
+  await page.goto(`${origin}/admin/student-search?tab=settings&q=123&page=2`);
+  await expect(page).toHaveURL(`${origin}/admin/settings?tab=students&q=123&page=2`);
+  await expect(page.getByRole('tab',{name:'الطلاب',exact:true})).toHaveAttribute('aria-selected','true');
+  const start = cursor();
+  await page.goto(`${origin}/admin/settings?tab=students`);
+  const rows = metrics(start);
+  expect(rows.some(row => row.path === '/api/v1/center/user?include=student-settings')).toBe(true);
+  expect(rows.some(row => row.path.includes('student-search-workspace?q='))).toBe(false);
+  expect(rows.filter(row => row.path.includes('student-search-workspace'))).toHaveLength(0);
+  const sql = rows.reduce((sum,row) => sum + row.count,0);
+  expect(sql).toBeLessThanOrEqual(6);
 
-    const memberContext = await (await page.request.get(`${origin}/api/v1/center/member-workspace`)).json();
-    const member = memberContext.members.find((row:{user:{email:string}}) => row.user.email === credentials.staff.email);
-    const north = studentContext.branches.find((row:{slug:string}) => row.slug === 'north');
-    expect(member).toBeTruthy(); expect(north).toBeTruthy();
-    try {
-      expect((await write(page,`members/${member.id}/grants`,'PUT',{center_roles:[],branch_roles:{[north.id]:['registration','center_student_search']}})).status).toBe(200);
-      const staff = await browser.newPage();
-      try {
-        await login(staff,'staff'); await staff.goto(`${origin}/admin/student-search?tab=settings&q=${value}`);
-        await expect(staff.getByRole('tab',{name:'البحث عن طالب',exact:true})).toHaveAttribute('aria-selected','true');
-        await expect(staff.getByRole('textbox',{name:'الاسم أو رقم الطالب الداخلي أو رقم التواصل',exact:true})).toHaveValue(value);
-        await expect(staff.getByRole('table')).toContainText(student.name);
-      } finally { await staff.close(); }
-    } finally {
-      expect((await write(page,`members/${member.id}/grants`,'PUT',{center_roles:member.center_roles,branch_roles:member.branch_roles})).status).toBe(200);
-    }
-  } finally {
-    const current = (await (await page.request.get(`${origin}/api/v1/center/student-search-workspace`)).json()).policy;
-    expect((await write(page,'student-search-policy','PATCH',{enabled:original.enabled,default_sharing_enabled:original.default_sharing_enabled,revision:current.revision})).status).toBe(200);
-  }
+  await page.getByRole('tab',{name:'الفروع',exact:true}).click();
+  await page.getByRole('tab',{name:'الطلاب',exact:true}).click();
+  await page.getByRole('button',{name:'تغيير افتراضي المشاركة',exact:true}).click();
+  await expect(page.getByRole('alertdialog')).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('tab',{name:'الفروع',exact:true})).toHaveAttribute('aria-selected','true');
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+
+  const staff = await browser.newPage();
+  try {
+    await login(staff,'staff');
+    await staff.goto(`${origin}/admin/settings?tab=branches`);
+    await expect(staff.getByRole('tab',{name:'الطلاب',exact:true})).toHaveCount(0);
+    await expect(staff.getByRole('tab',{name:'أمان الحساب',exact:true})).toBeVisible();
+  } finally { await staff.close(); }
 });

@@ -87,7 +87,7 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
   const menuButton = useRef<HTMLButtonElement>(null);
   const canAudit = context.permissions.can_manage_center || Object.values(context.permissions.branch_roles).some((roles) => roles.includes("branch_auditor"));
   const links = [
-    { href: "/admin", label: "الفروع", icon: "branches", visible: true },
+    { href: "/admin", label: "الرئيسية", icon: "branches", visible: true },
     { href: "/admin/students", label: "الطلاب", icon: "members", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
     { href: "/admin/student-search", label: "البحث في طلاب المركز", icon: "members", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("students.search_center")) },
     { href: "/admin/instructors", label: "المحاضرون", icon: "members", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
@@ -97,10 +97,7 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
     { href: "/admin/absence-review", label: "مراجعة الغياب", icon: "audit", visible: context.permissions.can_manage_center || Object.values(context.permissions.branch_actions ?? {}).some((actions) => actions.includes("read")) },
     { href: "/admin/members", label: "إدارة الموظفين والدعوات", icon: "members", visible: context.permissions.can_manage_center },
     { href: "/admin/audit", label: "سجل التدقيق", icon: "audit", visible: canAudit },
-    { href: "/admin/student-custom-fields", label: "الحقول الإضافية للطالب", icon: "settings", visible: context.permissions.can_manage_center },
-    { href: "/admin/student-profile-choices", label: "قوائم بيانات الطالب", icon: "settings", visible: context.permissions.can_manage_center },
-    { href: "/admin/settings", label: "إعدادات المركز", icon: "settings", visible: context.permissions.can_manage_center },
-    { href: "/admin/security", label: "أمان الحساب", icon: "security", visible: true },
+    { href: "/admin/settings", label: "الإعدادات", icon: "settings", visible: true },
   ].filter((link) => link.visible);
 
   useEffect(() => {
@@ -145,7 +142,7 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
   return <PageRegistration.Provider value={registration}><TablePreferenceUser.Provider value={String(context.user.id)}><Sheet open={menuOpen} onOpenChange={setMenuOpen}><div className={`center-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
     <a className="skip-link" href="#center-content">انتقل إلى المحتوى</a>
     <aside className="center-sidebar">
-      <Link className="brand" href="/admin" aria-label="Courses — الفروع"><span className="brand-mark" aria-hidden="true">C</span>{!collapsed ? <span>Courses</span> : null}</Link>
+      <Link className="brand" href="/admin" aria-label="Courses — الرئيسية"><span className="brand-mark" aria-hidden="true">C</span>{!collapsed ? <span>Courses</span> : null}</Link>
       {!collapsed ? <div className="sidebar-center"><span className="eyebrow">مساحة المركز</span><strong>{context.center.name}</strong></div> : null}
       <div className="sidebar-navigation">{navigation()}</div>
       <div className="sidebar-bottom">{navigation(false, true)}

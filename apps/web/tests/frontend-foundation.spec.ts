@@ -6,6 +6,7 @@ const alpha = "http://alpha.courses.test";
 test("shared theme, table state, drawer focus and responsive overflow work together", async ({ page }) => {
   const owner = credentials("alpha");
   await signIn(page, alpha, owner.email, owner.password);
+  await page.goto(`${alpha}/admin/settings?tab=branches`);
   await expect(page.getByRole("table", { name: "الفروع", exact: true })).toBeVisible();
   let clientApiRequests = 0;
   page.on("request", (request) => { if (request.url().includes("/api/v1/center/")) clientApiRequests++; });
@@ -22,7 +23,7 @@ test("shared theme, table state, drawer focus and responsive overflow work toget
   expect(clientApiRequests).toBe(0);
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.goto(`${alpha}/admin?branches-density=compact&branches-page=999`);
+  await page.goto(`${alpha}/admin/settings?tab=branches&branches-density=compact&branches-page=999`);
   await expect(page.getByRole("table", { name: "الفروع", exact: true })).toBeVisible();
   await expect(page).not.toHaveURL(/branches-page=/);
   await expect(page.getByRole("button", { name: "الصفحة التالية في الفروع" })).toBeDisabled();
@@ -59,7 +60,8 @@ test("shared theme, table state, drawer focus and responsive overflow work toget
   await expect(page.getByRole("alertdialog").getByRole("button", { name: "إلغاء" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(staff.getByRole("button", { name: "إيقاف العضوية", exact: true })).toBeFocused();
-  await page.getByRole("link", { name: "أمان الحساب", exact: true }).click();
+  await page.getByRole("link", { name: "الإعدادات", exact: true }).click();
+  await page.getByRole("tab", { name: "أمان الحساب", exact: true }).click();
   await page.getByRole("textbox", { name: "كلمة المرور الحالية" }).fill("preview-only");
   await page.getByRole("button", { name: "إظهار كلمة المرور الحالية" }).click();
   await expect(page.getByRole("textbox", { name: "كلمة المرور الحالية" })).toHaveAttribute("type", "text");
@@ -67,7 +69,8 @@ test("shared theme, table state, drawer focus and responsive overflow work toget
   await expect(page.getByRole("textbox", { name: "كلمة المرور الحالية" })).toHaveAttribute("type", "password");
   await page.getByRole("link", { name: "سجل التدقيق", exact: true }).click();
   await expect(page.getByRole("table", { name: "الأحداث", exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "إعدادات المركز", exact: true }).click();
+  await page.getByRole("link", { name: "الإعدادات", exact: true }).click();
+  await page.getByRole("tab", { name: "عام", exact: true }).click();
   await expect(page.getByRole("button", { name: "حفظ الإعدادات", exact: true })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 });

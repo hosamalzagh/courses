@@ -103,6 +103,7 @@ async function acceptInvitation(browser: Browser, name: "alpha" | "beta" | "staf
 }
 
 async function ensureBranch(page: Page, name: string, slug: string) {
+  await page.goto(new URL("/admin/settings?tab=branches", page.url()).toString());
   if (await page.getByRole("heading", { name, exact: true }).count()) return;
   await page.getByRole("button", { name: "إنشاء فرع" }).click();
   await page.getByRole("textbox", { name: "اسم الفرع" }).fill(name);
