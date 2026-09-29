@@ -12,6 +12,7 @@ function status(level: Level) {
   if (attempt.status === "completed" && attempt.approved_at) return attempt.exceptional
     ? "مكتمل استثنائيًا بقرار محفوظ" : "مكتمل بقرار محفوظ";
   if (attempt.status === "withdrawn") return "انسحب من هذا المستوى";
+  if (attempt.status === "active" && !attempt.current_group_id) return "ينتظر مجموعة للمستوى";
   return "يدرس هذا المستوى؛ لم يعتمد إتمامه بعد";
 }
 

@@ -502,6 +502,9 @@ test("waitlists and reattaches within one attempt through the employee page", as
   const waiting = await waitingResponse.json();
   expect(waiting.attempts[0].current_group_id).toBeNull();
   expect(waiting.balance.debt).toBe("120.00");
+  await page.goto(`${origin}/admin/students/${studentId}/courses/${waiting.attempts[0].course_id}/completion`);
+  await expect(page.getByText("ينتظر مجموعة للمستوى")).toBeVisible();
+  await page.goto(`${origin}/admin/students/${studentId}/enrollments`);
   await page.locator(`[id$="-waitlist-${attemptId}"]`).click();
   await expect(page.getByRole("heading", { name: "إعادة إلحاق Level" })).toBeVisible();
   await page.getByRole("combobox", { name: "المجموعة الجديدة" }).selectOption(second.body.group.id);
