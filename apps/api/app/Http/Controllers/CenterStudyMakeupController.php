@@ -241,7 +241,7 @@ class CenterStudyMakeupController extends Controller
                 'attempts.status', 'attempts.revision', 'withdrawals.withdrawn_on',
                 'students.status as student_status', 'students.name as student_name']);
         if ($lock) {
-            $query->lock('FOR UPDATE OF attempts');
+            $query->lock('FOR UPDATE OF students, attempts');
         }
         $attempt = $query->first();
         abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
