@@ -37,6 +37,7 @@ class CenterStudentController extends Controller
             'branches_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'tab' => ['sometimes', 'in:custom-history,attachments,enrollment-notes,notes,study'],
             'study_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'study_q' => ['sometimes', 'string', 'max:100'],
             'custom_history_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'attachments_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'notes_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
@@ -157,32 +158,45 @@ class CenterStudentController extends Controller
         }
         if ($studentId !== null && ($data['tab'] ?? '') === 'study') {
             $studyPage = (int) ($data['study_page'] ?? 1);
+            $studySearch = trim($data['study_q'] ?? '');
             $readableBranches = $permissions->isCenterManager() ? null : $this->branchScope($permissions, 'read');
-            $attempts = DB::connection('tenant')->table('study_attempts as attempts')
-                ->join('levels as study_levels', 'study_levels.id', '=', 'attempts.level_id')
+            $currentPeriod = '(SELECT current_period.id FROM study_attempt_group_periods AS current_period WHERE current_period.attempt_id = attempts.id AND current_period.group_id = attempts.current_group_id ORDER BY current_period.joined_on DESC, current_period.created_at DESC LIMIT 1)';
+            $attempts = DB::connection('tenant')->table('study_attempt_group_periods as periods')
+                ->join('study_attempts as attempts', 'attempts.id', '=', 'periods.attempt_id')
+                ->join('study_groups as period_groups', 'period_groups.id', '=', 'periods.group_id')
+                ->join('levels as study_levels', 'study_levels.id', '=', 'period_groups.level_id')
                 ->join('stages as study_stages', 'study_stages.id', '=', 'study_levels.stage_id')
                 ->join('courses as study_courses', 'study_courses.id', '=', 'study_stages.course_id')
-                ->join('branches as study_branches', 'study_branches.id', '=', 'attempts.branch_id')
-                ->leftJoin('study_groups as current_groups', 'current_groups.id', '=', 'attempts.current_group_id')
+                ->join('branches as study_branches', 'study_branches.id', '=', 'study_courses.branch_id')
                 ->leftJoin('study_attempt_withdrawals as withdrawals', 'withdrawals.attempt_id', '=', 'attempts.id')
                 ->leftJoin('study_attempt_completion_decisions as decisions', 'decisions.attempt_id', '=', 'attempts.id')
                 ->whereColumn('attempts.student_id', 'students.id')
                 ->whereExists(DB::connection('tenant')->table('student_branches as study_associations')
                     ->whereColumn('study_associations.student_id', 'attempts.student_id')
-                    ->whereColumn('study_associations.branch_id', 'attempts.branch_id')->selectRaw('1'))
-                ->when($readableBranches !== null, fn (Builder $rows) => $rows->whereIn('attempts.branch_id', $readableBranches))
-                ->orderByDesc('attempts.created_at')->orderByDesc('attempts.id')
+                    ->whereColumn('study_associations.branch_id', 'study_courses.branch_id')->selectRaw('1'))
+                ->when($readableBranches !== null, fn (Builder $rows) => $rows->whereIn('study_courses.branch_id', $readableBranches))
+                ->when($studySearch !== '', fn (Builder $rows) => $rows->where(function (Builder $matched) use ($studySearch): void {
+                    $term = '%'.addcslashes($studySearch, '%_\\').'%';
+                    $matched->where('study_courses.name', 'ILIKE', $term)
+                        ->orWhere('study_levels.name', 'ILIKE', $term)
+                        ->orWhere('period_groups.name', 'ILIKE', $term);
+                }))
+                ->orderByDesc('periods.joined_on')->orderByDesc('periods.id')
                 ->offset(($studyPage - 1) * 20)->limit(21)
-                ->select(['attempts.id', 'attempts.branch_id', 'attempts.status', 'attempts.joined_on',
-                    'attempts.created_at', 'study_levels.name as level_name',
+                ->select(['attempts.id', 'periods.id as period_id', 'study_courses.branch_id',
+                    'periods.joined_on', 'periods.left_on', 'periods.created_at', 'study_levels.name as level_name',
                     'study_courses.id as course_id', 'study_courses.name as course_name',
-                    'study_branches.name as branch_name', 'current_groups.name as current_group_name',
-                    'withdrawals.withdrawn_on', 'decisions.approved_at', 'decisions.exceptional'])
-                ->selectRaw('(SELECT row_to_json(waitlist) FROM (SELECT entered_on, left_on, reason FROM study_attempt_waitlists WHERE attempt_id = attempts.id AND branch_id = attempts.branch_id ORDER BY entered_on DESC, created_at DESC LIMIT 1) AS waitlist) AS latest_waitlist')
-                ->selectRaw('(SELECT previous_groups.name FROM study_attempt_group_periods AS periods JOIN study_groups AS previous_groups ON previous_groups.id = periods.group_id JOIN levels AS previous_levels ON previous_levels.id = previous_groups.level_id JOIN stages AS previous_stages ON previous_stages.id = previous_levels.stage_id JOIN courses AS previous_courses ON previous_courses.id = previous_stages.course_id WHERE periods.attempt_id = attempts.id AND previous_courses.branch_id = attempts.branch_id ORDER BY periods.joined_on DESC, periods.created_at DESC LIMIT 1) AS previous_group_name')
-                ->selectRaw('(SELECT max(transferred_on) FROM study_attempt_transfers WHERE attempt_id = attempts.id AND to_branch_id = attempts.branch_id'.($readableBranches === null ? '' : ' AND from_branch_id IN ('.(implode(',', array_map('intval', $readableBranches)) ?: 'NULL').')').') AS last_visible_transfer_on');
+                    'study_branches.name as branch_name'])
+                ->selectRaw("CASE WHEN periods.id = {$currentPeriod} THEN attempts.status ELSE 'transferred' END AS status")
+                ->selectRaw("CASE WHEN periods.id = {$currentPeriod} AND study_courses.branch_id = attempts.branch_id THEN period_groups.name END AS current_group_name")
+                ->selectRaw("CASE WHEN periods.id IS DISTINCT FROM {$currentPeriod} OR study_courses.branch_id <> attempts.branch_id THEN period_groups.name END AS previous_group_name")
+                ->selectRaw('CASE WHEN study_courses.branch_id = attempts.branch_id THEN withdrawals.withdrawn_on END AS withdrawn_on')
+                ->selectRaw('CASE WHEN study_courses.branch_id = attempts.branch_id THEN decisions.approved_at END AS approved_at')
+                ->selectRaw('CASE WHEN study_courses.branch_id = attempts.branch_id THEN decisions.exceptional END AS exceptional')
+                ->selectRaw('(SELECT row_to_json(waitlist) FROM (SELECT entered_on, left_on, reason FROM study_attempt_waitlists WHERE attempt_id = attempts.id AND branch_id = study_courses.branch_id ORDER BY entered_on DESC, created_at DESC LIMIT 1) AS waitlist) AS latest_waitlist')
+                ->selectRaw('(SELECT max(transferred_on) FROM study_attempt_transfers WHERE attempt_id = attempts.id AND (from_branch_id = study_courses.branch_id OR to_branch_id = study_courses.branch_id)) AS last_visible_transfer_on');
             $query->selectSub(DB::connection('tenant')->query()->fromSub($attempts, 'study_rows')
-                ->selectRaw('json_agg(study_rows ORDER BY created_at DESC, id DESC)'), 'study_attempts');
+                ->selectRaw('json_agg(study_rows ORDER BY joined_on DESC, period_id DESC)'), 'study_attempts');
         }
         $students = $query->orderBy('student_number')->offset(($page - 1) * 50)->limit(51)->get();
         if ($studentId !== null) {

@@ -108,6 +108,10 @@ test("enrolls through the employee page and preserves SSR, credit, RTL, and the 
   await page.goto(studyUrl);
   await expect(page.getByRole("heading", { name: "الدراسة", exact: true })).toBeVisible();
   await expect(page.getByRole("row", { name: new RegExp(body.attempts[0].course_name) })).toContainText("يدرس المستوى");
+  await page.getByRole("searchbox", { name: "بحث في محاولات الدراسة" }).fill(body.attempts[0].course_name);
+  await page.getByRole("button", { name: "بحث في جميع محاولات الدراسة" }).click();
+  await expect(page).toHaveURL(/study_q=/);
+  await expect(page.getByRole("row", { name: new RegExp(body.attempts[0].course_name) })).toBeVisible();
   await page.getByRole("link", { name: "إتمام الكورس" }).click();
   await expect(page.getByText("الكورس لم يكتمل دراسيًا")).toBeVisible();
   const suspended = await write(page, `students/${studentId}/status`, { status: "suspended", reason: "مراجعة الملف", status_revision: 1, request_id: crypto.randomUUID() });
