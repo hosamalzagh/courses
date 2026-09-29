@@ -123,7 +123,11 @@ class CenterStudentFinanceController extends Controller
             ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'student_payments.id')
                 ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'allocated_amount')
             ->selectSub(ActiveStudentRefunds::query()->whereColumn('refunds.payment_id', 'student_payments.id')
-                ->selectRaw('COALESCE(SUM(refunds.amount), 0)'), 'refunded_amount')->get();
+                ->selectRaw('COALESCE(SUM(refunds.amount), 0)'), 'refunded_amount')
+            ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'student_payments.id')
+                ->when($permissions->isCenterManager(), fn (Builder $query) => $query->whereRaw('FALSE'))
+                ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereNotIn('allocations.target_branch_id', $readable))
+                ->selectRaw('COUNT(*)'), 'hidden_allocation_count')->get();
 
         $unallocated = StudentMoney::cents($student->received_total) - StudentMoney::cents($student->used_total)
             - StudentMoney::cents($student->refunded_total);
@@ -157,6 +161,7 @@ class CenterStudentFinanceController extends Controller
                     - StudentMoney::cents($row->refunded_amount)),
                 'can_refund' => $permissions->can('payments.record', (int) $row->branch_id)
                     && $permissions->can('finance.approve', (int) $row->branch_id),
+                'can_view_corrections' => (int) $row->hidden_allocation_count === 0,
             ])->values(),
             'fees' => $fees->take(20)->map(fn (array $row) => [
                 ...$row,

@@ -28,7 +28,7 @@ type CorrectionPreview = { original: { id: string; amount: string; refunded_on: 
 const laterLabels: Record<string, string> = {
   "student.payment_allocated": "تخصيص دفعة", "student.payment_allocation_reversed": "عكس تخصيص",
   "student.payment_allocation_corrected": "تصحيح تخصيص", "student.refund_recorded": "استرداد فعلي",
-  "student.refund_corrected": "تصحيح استرداد",
+  "student.refund_corrected": "تصحيح استرداد", "student.payment_corrected": "تصحيح دفعة",
 };
 
 export function StudentPaymentRefunds({ studentId, payment, onClose, onChanged, onDirtyChange, onUncertainChange }: {

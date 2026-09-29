@@ -2429,6 +2429,9 @@ class StudyEnrollmentTest extends TestCase
             'request_id' => (string) Str::uuid()])->assertCreated();
         $this->getJson($accountUrl)->assertJsonPath('account.received_total', '600.00')
             ->assertJsonPath('account.refunded_total', '100.00')->assertJsonPath('account.available_balance', '0.00');
+        $this->postJson("{$this->base}/students/{$student['id']}/refunds/{$refund['id']}/corrections/preview", [
+            'correct_amount' => '80.00', 'version' => $this->getJson($accountUrl)->json('account.version'),
+        ])->assertOk()->assertJsonFragment(['event' => 'student.payment_corrected']);
         $this->center->run(function () use ($refund, $payment): void {
             $this->assertSame(3, DB::table('student_payment_reversals')->where('payment_id', $payment['id'])->count());
             $this->assertSame($refund['id'], DB::table('student_refunds')->value('id'));
@@ -2468,6 +2471,7 @@ class StudyEnrollmentTest extends TestCase
         $url = "{$paymentUrl}/corrections";
         $this->grant([$this->north => ['accounting', 'branch_auditor']]);
         $this->asUser($this->staff);
+        $this->getJson($accountUrl)->assertJsonPath('payments.0.can_view_corrections', false);
         $this->getJson($url)->assertNotFound();
         $input = ['correct_amount' => '50.00', 'allocations' => [
             ['id' => $allocation['id'], 'amount' => '40.00']],
@@ -2475,6 +2479,7 @@ class StudyEnrollmentTest extends TestCase
         $this->postJson("{$url}/preview", $input)->assertNotFound();
         $this->grant([$this->north => ['accounting', 'branch_auditor'], $this->south => ['accounting']]);
         $this->asUser($this->staff);
+        $this->getJson($accountUrl)->assertJsonPath('payments.0.can_view_corrections', true);
         $input['version'] = $this->getJson($accountUrl)->json('account.version');
         $this->getJson($url)->assertOk()->assertJsonCount(1, 'allocations');
         $this->postJson("{$url}/preview", $input)->assertForbidden();

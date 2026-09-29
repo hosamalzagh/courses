@@ -1146,6 +1146,9 @@ test("corrects a receipt and two allocations together, and rejects stale or hidd
     const hidden = await staff.request.get(`${origin}/api/v1/center/${paymentPath}/corrections`);
     expect(hidden.status()).toBe(404);
     const staffAccount = await (await staff.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+    expect(staffAccount.payments[0].can_view_corrections).toBe(false);
+    await staff.goto(`${origin}/admin/students/${studentId}/account`);
+    await expect(staff.getByRole("button", { name: "تصحيح الدفعة" })).toHaveCount(0);
     expect((await write(staff, `${paymentPath}/corrections/preview`, {
       correct_amount: "400.00", allocations: [], version: staffAccount.account.version,
     })).status).toBe(404);

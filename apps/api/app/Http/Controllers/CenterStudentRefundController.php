@@ -310,7 +310,8 @@ class CenterStudentRefundController extends Controller
             ->where('created_at', '>=', $refund->created_at)
             ->where('details->payment_id', $payment->id)
             ->whereIn('event', ['student.payment_allocated', 'student.payment_allocation_reversed',
-                'student.payment_allocation_corrected', 'student.refund_recorded', 'student.refund_corrected'])
+                'student.payment_allocation_corrected', 'student.payment_corrected',
+                'student.refund_recorded', 'student.refund_corrected'])
             ->orderByDesc('id')->limit(21)->select(['id', 'event', 'created_at'])
             ->selectRaw("details->>'refund_id' AS refund_id")
             ->selectRaw("details->>'replacement_refund_id' AS replacement_refund_id")
