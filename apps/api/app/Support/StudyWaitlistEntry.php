@@ -61,8 +61,14 @@ class StudyWaitlistEntry
 
         $now = now();
         $waitlistId = (string) Str::uuid();
+        // Freeze this period's requirements before leaving the group. Later group edits
+        // must not change the meaning of a waitlisted attempt's missing content.
+        $requiredCreditIds = DB::connection('tenant')->table('study_group_requirements')
+            ->where('group_id', $period->group_id)->whereNull('retired_at')->orderBy('number')
+            ->get(['id', 'plan_lecture_id'])
+            ->map(fn (object $requirement): string => $requirement->plan_lecture_id ?? $requirement->id)->all();
         DB::connection('tenant')->table('study_attempt_group_periods')->where('id', $period->id)
-            ->update(['left_on' => $enteredOn]);
+            ->update(['left_on' => $enteredOn, 'required_credit_ids' => json_encode($requiredCreditIds)]);
         DB::connection('tenant')->table('study_attempts')->where('id', $attemptId)->update([
             'current_group_id' => null, 'revision' => $attempt->revision + 1, 'updated_at' => $now,
         ]);

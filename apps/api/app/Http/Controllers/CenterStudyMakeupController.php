@@ -270,7 +270,12 @@ class CenterStudyMakeupController extends Controller
             ->select(['attempts.id', 'attempts.student_id', 'attempts.branch_id', 'attempts.current_group_id', 'attempts.plan_version_id',
                 'attempts.joined_on',
                 'attempts.status', 'attempts.revision', 'withdrawals.withdrawn_on',
-                'students.status as student_status', 'students.name as student_name']);
+                'students.status as student_status', 'students.name as student_name'])
+            ->selectRaw('(SELECT row_to_json(origin) FROM (SELECT waitlists.from_group_id, periods.required_credit_ids
+                FROM study_attempt_waitlists AS waitlists
+                JOIN study_attempt_group_periods AS periods ON periods.id = waitlists.origin_period_id
+                WHERE waitlists.attempt_id = attempts.id AND waitlists.left_on IS NULL
+                ORDER BY waitlists.created_at DESC, waitlists.id DESC LIMIT 1) AS origin) AS waitlist_origin');
         if ($lock) {
             $query->lock('FOR UPDATE OF students, attempts');
         }
@@ -335,9 +340,12 @@ class CenterStudyMakeupController extends Controller
             : $this->sourceAbsence($attempt->id, $sourceSessionId, $permissions);
         $sourceLectureId = $sourceRequirement === null ? null
             : ($sourceRequirement->plan_lecture_id ?? $sourceRequirement->group_requirement_id);
+        $origin = $attempt->current_group_id === null && $attempt->waitlist_origin !== null
+            ? json_decode($attempt->waitlist_origin, true) : null;
+        $requiredGroupId = $attempt->current_group_id ?? ($origin['from_group_id'] ?? null);
         $requirements = $attempt->current_group_id === null
-            ? DB::connection('tenant')->table('plan_lectures')
-                ->where('plan_version_id', $attempt->plan_version_id)->pluck('id')->all()
+            ? ($origin['required_credit_ids'] ?? DB::connection('tenant')->table('plan_lectures')
+                ->where('plan_version_id', $attempt->plan_version_id)->pluck('id')->all())
             : DB::connection('tenant')->table('study_group_requirements')
                 ->where('group_id', $attempt->current_group_id)->whereNull('retired_at')
                 ->get(['id', 'plan_lecture_id'])
@@ -362,7 +370,7 @@ class CenterStudyMakeupController extends Controller
                 'source_lecture_ids' => json_decode($row->source_lecture_ids, true),
                 'target_lecture_ids' => json_decode($row->target_lecture_ids, true)])->all();
         $groupApprovals = DB::connection('tenant')->table('study_group_requirement_equivalences')
-            ->where('required_group_id', $attempt->current_group_id)->whereNull('revoked_at')
+            ->where('required_group_id', $requiredGroupId)->whereNull('revoked_at')
             ->get(['id', 'candidate_requirement_id', 'required_requirement_id'])
             ->map(fn ($row): array => ['id' => $row->id,
                 'source_lecture_ids' => [$row->candidate_requirement_id],

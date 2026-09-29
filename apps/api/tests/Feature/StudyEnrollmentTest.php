@@ -338,8 +338,11 @@ class StudyEnrollmentTest extends TestCase
             foreach ([[$north, $northAttemptId], [$south, $southAttemptId]] as [$group, $attemptId]) {
                 $sessionId = (string) Str::uuid();
                 $lectureId = DB::table('plan_lectures')->where('plan_version_id', $group['plan_version_id'])->value('id');
+                $requirementId = DB::table('study_group_requirements')->where('group_id', $group['id'])
+                    ->where('plan_lecture_id', $lectureId)->value('id');
                 DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $group['id'],
-                    'plan_lecture_id' => $lectureId, 'number' => 1, 'scheduled_at' => now()->subDay(),
+                    'plan_lecture_id' => $lectureId, 'group_requirement_id' => $requirementId,
+                    'number' => 1, 'scheduled_at' => now()->subDay(),
                     'status' => 'held', 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
                     'created_at' => now(), 'updated_at' => now()]);
                 DB::table('study_attendance_entries')->insert(['id' => (string) Str::uuid(),
