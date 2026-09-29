@@ -69,7 +69,7 @@ class CenterGroupRequirementController extends Controller
             }
             $actor = $request->user();
             $now = now();
-            $this->persistImpactHistory($group, $change, $impact, $confirmation['request_id'], $now);
+            $this->persistImpactHistory($group, $impact, $confirmation['request_id'], $now);
             $session = null;
             if ($change['kind'] === 'add') {
                 $requirementId = (string) Str::uuid();
@@ -203,6 +203,7 @@ class CenterGroupRequirementController extends Controller
             $requirement = $active->firstWhere('id', $row->group_requirement_id);
             abort_unless($requirement, 409, 'متطلب المحاضرة لم يعد معتمدًا.');
             $hasAttendance = $db->table('study_attendance_entries')->where('session_id', $row->id)->exists();
+            $hasTeaching = $db->table('study_session_teaching_segments')->where('session_id', $row->id)->exists();
             $hasReplacement = $db->table('study_sessions')->where('replaces_session_id', $row->id)->exists();
             $hasMakeupBooking = $db->table('study_sessions as requirement_sessions')
                 ->where('requirement_sessions.group_requirement_id', $requirement->id)
@@ -214,6 +215,9 @@ class CenterGroupRequirementController extends Controller
                 ->exists();
             if ($hasMakeupBooking) {
                 $this->conflict('makeup_booking_exists');
+            }
+            if ($hasTeaching) {
+                $this->conflict('session_has_teaching');
             }
             if ($row->closed_at !== null || $hasAttendance || $hasReplacement
                 || ! in_array($row->status, ['planned', 'cancelled'], true)
@@ -237,26 +241,7 @@ class CenterGroupRequirementController extends Controller
         $creditIds = $active->map(fn (object $row): string => $row->plan_lecture_id ?? $row->id)->all();
         $removed = $removedId ? $requirements->firstWhere('id', $removedId) : null;
         $removedCredit = $removed ? ($removed->plan_lecture_id ?? $removed->id) : null;
-        $studentQuery = $db->table('study_attempts as attempts')
-            ->join('students', 'students.id', '=', 'attempts.student_id')
-            ->where('attempts.current_group_id', $group->id)
-            ->where('attempts.plan_version_id', $group->plan_version_id)
-            ->select(['attempts.id', 'attempts.completion_threshold', 'students.name', 'students.student_number'])
-            ->selectRaw(<<<'SQL'
-COALESCE((SELECT json_agg(json_build_object('id', COALESCE(sessions.plan_lecture_id, sessions.group_requirement_id),
-    'final', sessions.closed_at IS NOT NULL) ORDER BY entries.id)
-    FROM study_attendance_entries AS entries
-    JOIN study_sessions AS sessions ON sessions.id = entries.session_id
-    WHERE entries.attempt_id = attempts.id AND entries.status = 'counted'
-      AND sessions.status <> 'cancelled'), '[]'::json) AS attendance_rows,
-COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
-    'source_lecture_ids', approvals.source_lecture_ids, 'target_lecture_ids', approvals.target_lecture_ids) ORDER BY approvals.id)
-    FROM content_equivalences AS approvals
-    WHERE approvals.target_plan_version_id = attempts.plan_version_id
-      OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
-          WHERE transfers.attempt_id = attempts.id
-            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json) AS approvals
-SQL);
+        $studentQuery = $this->studentImpactQuery($group);
         if ($stable === null) {
             $snapshot = $db->query()->fromSub($studentQuery, 'impact_rows')
                 ->selectRaw("count(*) AS total, md5(COALESCE(string_agg(md5(impact_rows.id::text || ':' || impact_rows.completion_threshold::text || ':' || impact_rows.attendance_rows::text || ':' || impact_rows.approvals::text), ',' ORDER BY impact_rows.id), '')) AS fingerprint")
@@ -281,33 +266,8 @@ SQL);
             : (int) $db->query()->fromSub($filteredQuery, 'filtered_impacts')->count();
         $students = (clone $filteredQuery)->orderBy('students.student_number')->orderBy('attempts.id')
             ->offset(($page - 1) * 20)->limit(20)->get()
-            ->map(function (object $row) use ($creditIds, $removedCredit, $beforeCount, $afterCount): array {
-                $credits = StudyCoverageCredits::resolve(
-                    json_decode($row->attendance_rows, true), json_decode($row->approvals, true))['lectures'];
-                $coveredIds = array_intersect($creditIds, array_keys($credits));
-                $afterCoveredIds = $removedCredit ? array_diff($coveredIds, [$removedCredit]) : $coveredIds;
-                $covered = count($coveredIds);
-                $afterCovered = count($afterCoveredIds);
-                $beforeFinal = count(array_filter($coveredIds, fn (string $id): bool => $credits[$id] === true));
-                $afterFinal = count(array_filter($afterCoveredIds, fn (string $id): bool => $credits[$id] === true));
-                $threshold = (int) $row->completion_threshold;
-                $beforeEligible = $covered * 100 >= $threshold * $beforeCount;
-                $afterEligible = $afterCovered * 100 >= $threshold * $afterCount;
-
-                return ['attempt_id' => $row->id, 'name' => $row->name,
-                    'student_number' => (int) $row->student_number,
-                    'completion_threshold' => $threshold,
-                    'covered_count' => $covered, 'after_covered_count' => $afterCovered,
-                    'before_open_count' => $covered - $beforeFinal,
-                    'after_open_count' => $afterCovered - $afterFinal,
-                    'before_percentage' => round($covered * 100 / $beforeCount, 2),
-                    'after_percentage' => round($afterCovered * 100 / $afterCount, 2),
-                    'before_needed' => (int) ceil($threshold * $beforeCount / 100),
-                    'after_needed' => (int) ceil($threshold * $afterCount / 100),
-                    'before_eligible' => $beforeEligible, 'after_eligible' => $afterEligible,
-                    'before_provisional' => $beforeEligible && $beforeFinal * 100 < $threshold * $beforeCount,
-                    'after_provisional' => $afterEligible && $afterFinal * 100 < $threshold * $afterCount];
-            })->all();
+            ->map(fn (object $row): array => $this->studentImpact($row, $creditIds, $removedCredit,
+                $beforeCount, $afterCount))->all();
         $before = ['required_count' => $beforeCount, 'last_number' => (int) $requirements->max('number')];
         $after = ['required_count' => $afterCount, 'last_number' => $lastNumber];
         $token = $stable['preview_token'] ?? hash('sha256', json_encode([$group->id, $group->revision,
@@ -320,34 +280,96 @@ SQL);
                 'total' => $filteredTotal]];
     }
 
-    private function persistImpactHistory(object $group, array $change, array $impact, string $requestId, Carbon $now): void
+    private function studentImpactQuery(object $group): Builder
     {
-        $pages = (int) ceil($impact['affected_total'] / 20);
-        for ($page = 1; $page <= $pages; $page++) {
-            $snapshot = $page === 1 ? $impact : $this->impact($group, $change, $page, '', $impact);
-            DB::connection('tenant')->table('study_group_requirement_impacts')->insert(
-                array_map(fn (array $student): array => [
-                    'request_id' => $requestId, 'group_id' => $group->id,
-                    'attempt_id' => $student['attempt_id'],
-                    'completion_threshold' => $student['completion_threshold'],
-                    'before_covered' => $student['covered_count'],
-                    'after_covered' => $student['after_covered_count'],
-                    'before_open_count' => $student['before_open_count'],
-                    'after_open_count' => $student['after_open_count'],
-                    'before_required' => $impact['before']['required_count'],
-                    'after_required' => $impact['after']['required_count'],
-                    'before_percentage' => $student['before_percentage'],
-                    'after_percentage' => $student['after_percentage'],
-                    'before_needed' => $student['before_needed'],
-                    'after_needed' => $student['after_needed'],
-                    'before_eligible' => $student['before_eligible'],
-                    'after_eligible' => $student['after_eligible'],
-                    'before_provisional' => $student['before_provisional'],
-                    'after_provisional' => $student['after_provisional'],
-                    'created_at' => $now,
-                ], $snapshot['students'])
+        return DB::connection('tenant')->table('study_attempts as attempts')
+            ->join('students', 'students.id', '=', 'attempts.student_id')
+            ->where('attempts.current_group_id', $group->id)
+            ->where('attempts.plan_version_id', $group->plan_version_id)
+            ->select(['attempts.id', 'attempts.completion_threshold', 'students.name', 'students.student_number'])
+            ->selectRaw(<<<'SQL'
+COALESCE((SELECT json_agg(json_build_object('id', COALESCE(sessions.plan_lecture_id, sessions.group_requirement_id),
+    'final', sessions.closed_at IS NOT NULL) ORDER BY entries.id)
+    FROM study_attendance_entries AS entries
+    JOIN study_sessions AS sessions ON sessions.id = entries.session_id
+    WHERE entries.attempt_id = attempts.id AND entries.status = 'counted'
+      AND sessions.status <> 'cancelled'), '[]'::json) AS attendance_rows,
+COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
+    'source_lecture_ids', approvals.source_lecture_ids, 'target_lecture_ids', approvals.target_lecture_ids) ORDER BY approvals.id)
+    FROM content_equivalences AS approvals
+    WHERE approvals.target_plan_version_id = attempts.plan_version_id
+      OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
+          WHERE transfers.attempt_id = attempts.id
+            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json) AS approvals
+SQL);
+    }
+
+    private function studentImpact(object $row, array $creditIds, ?string $removedCredit,
+        int $beforeCount, int $afterCount): array
+    {
+        $credits = StudyCoverageCredits::resolve(
+            json_decode($row->attendance_rows, true), json_decode($row->approvals, true))['lectures'];
+        $coveredIds = array_intersect($creditIds, array_keys($credits));
+        $afterCoveredIds = $removedCredit ? array_diff($coveredIds, [$removedCredit]) : $coveredIds;
+        $covered = count($coveredIds);
+        $afterCovered = count($afterCoveredIds);
+        $beforeFinal = count(array_filter($coveredIds, fn (string $id): bool => $credits[$id] === true));
+        $afterFinal = count(array_filter($afterCoveredIds, fn (string $id): bool => $credits[$id] === true));
+        $threshold = (int) $row->completion_threshold;
+        $beforeEligible = $covered * 100 >= $threshold * $beforeCount;
+        $afterEligible = $afterCovered * 100 >= $threshold * $afterCount;
+
+        return ['attempt_id' => $row->id, 'name' => $row->name,
+            'student_number' => (int) $row->student_number,
+            'completion_threshold' => $threshold,
+            'covered_count' => $covered, 'after_covered_count' => $afterCovered,
+            'before_open_count' => $covered - $beforeFinal,
+            'after_open_count' => $afterCovered - $afterFinal,
+            'before_percentage' => round($covered * 100 / $beforeCount, 2),
+            'after_percentage' => round($afterCovered * 100 / $afterCount, 2),
+            'before_needed' => (int) ceil($threshold * $beforeCount / 100),
+            'after_needed' => (int) ceil($threshold * $afterCount / 100),
+            'before_eligible' => $beforeEligible, 'after_eligible' => $afterEligible,
+            'before_provisional' => $beforeEligible && $beforeFinal * 100 < $threshold * $beforeCount,
+            'after_provisional' => $afterEligible && $afterFinal * 100 < $threshold * $afterCount];
+    }
+
+    private function persistImpactHistory(object $group, array $impact, string $requestId, Carbon $now): void
+    {
+        $db = DB::connection('tenant');
+        $requirements = $db->table('study_group_requirements')->where('group_id', $group->id)
+            ->whereNull('retired_at')->get(['id', 'plan_lecture_id']);
+        $creditIds = $requirements->map(fn (object $row): string => $row->plan_lecture_id ?? $row->id)->all();
+        $removed = $requirements->firstWhere('id', $impact['session']['group_requirement_id'] ?? null);
+        $removedCredit = $removed ? ($removed->plan_lecture_id ?? $removed->id) : null;
+        $beforeCount = $impact['before']['required_count'];
+        $afterCount = $impact['after']['required_count'];
+        $this->studentImpactQuery($group)->chunkById(200, function ($rows) use ($db, $group, $requestId,
+            $now, $creditIds, $removedCredit, $beforeCount, $afterCount): void {
+            $db->table('study_group_requirement_impacts')->insert(
+                $rows->map(fn (object $row): array => $this->studentImpact($row, $creditIds,
+                    $removedCredit, $beforeCount, $afterCount))->map(fn (array $student): array => [
+                        'request_id' => $requestId, 'group_id' => $group->id,
+                        'attempt_id' => $student['attempt_id'],
+                        'completion_threshold' => $student['completion_threshold'],
+                        'before_covered' => $student['covered_count'],
+                        'after_covered' => $student['after_covered_count'],
+                        'before_open_count' => $student['before_open_count'],
+                        'after_open_count' => $student['after_open_count'],
+                        'before_required' => $beforeCount,
+                        'after_required' => $afterCount,
+                        'before_percentage' => $student['before_percentage'],
+                        'after_percentage' => $student['after_percentage'],
+                        'before_needed' => $student['before_needed'],
+                        'after_needed' => $student['after_needed'],
+                        'before_eligible' => $student['before_eligible'],
+                        'after_eligible' => $student['after_eligible'],
+                        'before_provisional' => $student['before_provisional'],
+                        'after_provisional' => $student['after_provisional'],
+                        'created_at' => $now,
+                    ])->all()
             );
-        }
+        }, 'attempts.id', 'id');
     }
 
     private function conflict(string $code): never

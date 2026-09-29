@@ -374,6 +374,37 @@ class StudySessionsTest extends TestCase
         });
     }
 
+    public function test_final_reduction_rejects_a_session_with_recorded_teaching(): void
+    {
+        $group = $this->group($this->north, 'Teaching prevents reduction', 2);
+        $path = "{$this->base}/groups/{$group['id']}";
+        $session = $this->postJson("{$path}/sessions", [
+            'kind' => 'single', 'revision' => 1,
+            'start_at' => now('Africa/Cairo')->addDays(14)->setTime(16, 0)->format('Y-m-d\\TH:i'),
+            'plan_lecture_number' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
+        $change = ['kind' => 'reduce', 'session_id' => $session['id'], 'decision' => 'none',
+            'reason' => 'تعذر عقد المحاضرة ولن يوجد بديل'];
+        $preview = $this->postJson("{$path}/requirements/preview", $change)->assertOk()->json();
+        $this->center->run(fn () => DB::table('study_session_teaching_segments')->insert([
+            'id' => (string) Str::uuid(), 'session_id' => $session['id'],
+            'instructor_id' => $group['instructors'][0]['id'], 'start_minute' => 0,
+            'duration_minutes' => 60, 'recorded_by' => $this->owner->id,
+            'created_at' => now(), 'updated_at' => now(),
+        ]));
+        $this->postJson("{$path}/requirements/preview", $change)->assertConflict()
+            ->assertJsonPath('code', 'session_has_teaching');
+        $this->postJson("{$path}/requirements", [...$change,
+            'group_revision' => $preview['group_revision'], 'preview_token' => $preview['preview_token'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertConflict()->assertJsonPath('code', 'session_has_teaching');
+        $this->center->run(function () use ($group, $session): void {
+            $this->assertSame(2, DB::table('study_group_requirements')
+                ->where('group_id', $group['id'])->whereNull('retired_at')->count());
+            $this->assertSame('planned', DB::table('study_sessions')->where('id', $session['id'])->value('status'));
+        });
+    }
+
     public function test_unreplaced_academic_cancellation_can_be_finalized_with_audited_decision_change(): void
     {
         $group = $this->group($this->north, 'Academic cancellation finalized', 2);

@@ -3268,6 +3268,52 @@ class StudyEnrollmentTest extends TestCase
         $this->assertStringNotContainsString($eventId, $audit);
     }
 
+    public function test_transfer_preview_uses_added_group_requirements_and_rechecks_their_revision(): void
+    {
+        $source = $this->group($this->north, '0.00');
+        $target = $this->postJson("{$this->base}/groups", [
+            'level_id' => $source['level_id'], 'plan_version_id' => $source['plan_version_id'],
+            'name' => 'Target with added lecture', 'approved_price' => '0.00',
+            'instructor_ids' => array_column($source['instructors'], 'id'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $student = $this->student([$this->north]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($url)->assertOk()->json();
+        $attempt = $this->postJson($url, [
+            'group_id' => $source['id'], 'group_revision' => $source['revision'],
+            'currency_revision' => $workspace['student']['currency_revision'],
+            'joined_on' => '2026-09-28', 'discount' => '0.00', 'discount_reason' => null,
+            'version' => $workspace['student']['version'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $transferUrl = "{$url}/{$attempt['id']}/transfer";
+        $previewUrl = "{$transferUrl}/preview?".http_build_query([
+            'group_id' => $target['id'], 'transferred_on' => '2026-09-29',
+        ]);
+        $before = $this->getJson($previewUrl)->assertOk()
+            ->assertJsonPath('preview.required_count', 1)->json('preview');
+        $change = ['kind' => 'add', 'content' => 'محتوى إضافي لوجهة النقل',
+            'reason' => 'اعتماد محاضرة إضافية للمجموعة'];
+        $requirementsUrl = "{$this->base}/groups/{$target['id']}/requirements";
+        $impact = $this->postJson("{$requirementsUrl}/preview", $change)->assertOk()->json();
+        $saved = $this->postJson($requirementsUrl, [...$change,
+            'group_revision' => $impact['group_revision'], 'preview_token' => $impact['preview_token'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json();
+        $after = $this->getJson($previewUrl)->assertOk()
+            ->assertJsonPath('preview.required_count', 2)
+            ->assertJsonPath('preview.missing_lectures.1.id', $saved['requirement']['id'])->json('preview');
+        $this->assertNotSame($before['hash'], $after['hash']);
+        $payload = ['group_id' => $target['id'], 'group_revision' => $saved['group_revision'],
+            'transferred_on' => '2026-09-29', 'revision' => $attempt['revision'],
+            'reason' => 'نقل إلى مجموعة ذات متطلب إضافي', 'request_id' => (string) Str::uuid()];
+        $this->postJson($transferUrl, [...$payload, 'preview_hash' => $before['hash']])
+            ->assertConflict()->assertJsonPath('code', 'transfer_preview_changed');
+        $this->postJson($transferUrl, [...$payload, 'preview_hash' => $after['hash']])
+            ->assertCreated()->assertJsonPath('transfer.required_count', 2);
+    }
+
     private function group(int $branchId, string $price, int $lectureCount = 1): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => 'Course '.Str::random(5), 'request_id' => (string) Str::uuid()])->assertCreated()->json('course');

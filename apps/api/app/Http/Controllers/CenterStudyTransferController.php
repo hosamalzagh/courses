@@ -219,12 +219,14 @@ EXISTS (SELECT 1 FROM student_branches WHERE student_id = attempts.student_id AN
 EXISTS (SELECT 1 FROM study_attempts AS other WHERE other.student_id = attempts.student_id AND other.level_id = groups.level_id AND other.status = 'active' AND other.id <> attempts.id) AS level_occupied,
 COALESCE((SELECT joined_on::text FROM study_attempt_group_periods WHERE attempt_id = attempts.id AND left_on IS NULL),
     (SELECT entered_on::text FROM study_attempt_waitlists WHERE attempt_id = attempts.id AND left_on IS NULL)) AS current_start,
-COALESCE((SELECT json_agg(json_build_object('id', lectures.id, 'final', sessions.closed_at IS NOT NULL) ORDER BY lectures.id)
+COALESCE((SELECT json_agg(json_build_object('id', COALESCE(sessions.plan_lecture_id, sessions.group_requirement_id),
+    'final', sessions.closed_at IS NOT NULL) ORDER BY entries.id)
     FROM study_attendance_entries AS entries JOIN study_sessions AS sessions ON sessions.id = entries.session_id
-    JOIN plan_lectures AS lectures ON lectures.id = sessions.plan_lecture_id
     WHERE entries.attempt_id = attempts.id AND entries.status = 'counted' AND sessions.status <> 'cancelled'), '[]'::json) AS source_rows,
-COALESCE((SELECT json_agg(json_build_object('id', id, 'number', number) ORDER BY number)
-    FROM plan_lectures WHERE plan_version_id = groups.plan_version_id), '[]'::json) AS target_lectures,
+COALESCE((SELECT json_agg(json_build_object('id', COALESCE(requirements.plan_lecture_id, requirements.id),
+    'number', requirements.number) ORDER BY requirements.number)
+    FROM study_group_requirements AS requirements
+    WHERE requirements.group_id = groups.id AND requirements.retired_at IS NULL), '[]'::json) AS target_lectures,
 COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     'source_plan_version_id', approvals.source_plan_version_id,
     'target_plan_version_id', approvals.target_plan_version_id,
