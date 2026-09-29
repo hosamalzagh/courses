@@ -57,7 +57,7 @@ function assertMeasuredPage(after: number, studentId: string) {
   return reads.map(read => ({ path: read.path, count: read.count! }));
 }
 
-test("one authorized profile keeps real study, payment and note data across measured SSR tabs", async ({ page }) => {
+test("one authorized profile keeps study, attendance, suspension and finance together across measured tabs", async ({ page }) => {
   await signIn(page);
   const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
   const branch = workspace.branches[0].id as number;
@@ -159,6 +159,31 @@ test("one authorized profile keeps real study, payment and note data across meas
   }
   page.off("request", countDocuments);
   expect(documentRequests, "Client navigation keeps the page shell").toBe(0);
+  const statusRoute = `students/${studentId}/status`;
+  const suspended = await write(page, statusRoute, { status: "suspended", reason: `قبول إيقاف ${unique}`,
+    status_revision: 1, request_id: crypto.randomUUID() });
+  expect(suspended.status).toBe(200);
+  const suspendedAccount = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
+  const paymentWhileSuspended = await write(page, `students/${studentId}/payments`, { branch_id: branch, method: "cash",
+    received_on: "2026-09-28", amount: "5.00", version: suspendedAccount.account.version, request_id: crypto.randomUUID() });
+  expect(paymentWhileSuspended.status).toBe(201);
+  let before = cursor();
+  await page.goto(`${origin}/admin/students/${studentId}?tab=attendance`, { waitUntil: "networkidle" });
+  await expect(page.getByRole("heading", { name: "حالة ملف الطالب: موقوف" })).toBeVisible();
+  await expect(page.getByText("حضور محتسب", { exact: false }).first()).toBeVisible();
+  measurements.push({ route: "suspended:attendance", state: "cold", reads: assertMeasuredPage(before, studentId) });
+  before = cursor();
+  await page.goto(`${origin}/admin/students/${studentId}/account`, { waitUntil: "networkidle" });
+  await expect(page.getByText("35.00 EGP", { exact: false }).first()).toBeVisible();
+  measurements.push({ route: "suspended:account", state: "cold", reads: assertMeasuredPage(before, studentId) });
+  const lifted = await write(page, statusRoute, { status: "active", reason: `قبول فك ${unique}`,
+    status_revision: 2, request_id: crypto.randomUUID() });
+  expect(lifted.status).toBe(200);
+  before = cursor();
+  await page.goto(`${origin}/admin/students/${studentId}`, { waitUntil: "networkidle" });
+  await expect(page.getByText(`السبب: قبول إيقاف ${unique}`, { exact: true })).toBeVisible();
+  await expect(page.getByText(`السبب: قبول فك ${unique}`, { exact: true })).toBeVisible();
+  measurements.push({ route: "active:history", state: "cold", reads: assertMeasuredPage(before, studentId) });
   console.log(`Profile expansion SSR: ${JSON.stringify(measurements)}`);
 });
 
