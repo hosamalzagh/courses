@@ -100,6 +100,7 @@ test("academic staff applies a newer plan to a selected attempt without changing
     await expect(owner.getByText(/^بعد: ٠\/٢/)).toBeVisible();
     const applicationRequests: string[] = [];
     let dropFirstConfirmation = true;
+    let rejectOneReplay = true;
     await owner.route(`**/api/v1/center/groups/${group.body.group.id}/plan-applications`, async route => {
       if (route.request().method() !== "POST") { await route.continue(); return; }
       applicationRequests.push((JSON.parse(route.request().postData() ?? "{}") as { request_id: string }).request_id);
@@ -107,6 +108,11 @@ test("academic staff applies a newer plan to a selected attempt without changing
         dropFirstConfirmation = false;
         expect((await route.fetch()).status()).toBe(201);
         await route.abort("failed");
+        return;
+      }
+      if (rejectOneReplay) {
+        rejectOneReplay = false;
+        await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ message: "لا يمكن التحقق الآن" }) });
         return;
       }
       await route.continue();
@@ -123,7 +129,12 @@ test("academic staff applies a newer plan to a selected attempt without changing
     await owner.getByRole("button", { name: "العودة للتحقق" }).click();
     await owner.locator("header.center-topbar").getByRole("button", { name: "التحقق من نتيجة التطبيق" }).click();
     await expect.poll(() => applicationRequests.length).toBe(2);
+    await expect(owner.getByText(/تعذر التحقق من نتيجة الاعتماد/)).toBeVisible();
+    await expect(owner.getByLabel("سبب التطبيق")).toBeDisabled();
+    await owner.locator("header.center-topbar").getByRole("button", { name: "التحقق من نتيجة التطبيق" }).click();
+    await expect.poll(() => applicationRequests.length).toBe(3);
     expect(applicationRequests[1]).toBe(applicationRequests[0]);
+    expect(applicationRequests[2]).toBe(applicationRequests[0]);
     await expect(owner.getByRole("row", { name: new RegExp(student.body.student.name) })).toContainText("٠/٢");
     const report = await (await owner.request.get(`${origin}/api/v1/center/${path}`)).json();
     expect(report.group.plan_version_id).toBe(level.body.level.plan.id);

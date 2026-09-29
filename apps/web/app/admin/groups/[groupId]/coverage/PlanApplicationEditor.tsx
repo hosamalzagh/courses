@@ -100,7 +100,7 @@ export function PlanApplicationEditor({ context, onSaved, onReload, onClose, onU
         group_revision: preview.group_revision, preview_token: preview.preview_token, request_id: requestId,
       });
       if (!response.ok) {
-        if (response.status >= 500) {
+        if (response.status >= 500 || (uncertain && response.status !== 409)) {
           setUncertain(true); onUncertainChange(true);
           setError("تعذر التحقق من نتيجة الاعتماد. أعد الطلب نفسه للتحقق؛ لا تغيّر المسودة أو تغادر الصفحة.");
           return;
