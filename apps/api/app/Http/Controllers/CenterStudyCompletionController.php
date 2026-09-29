@@ -69,10 +69,12 @@ class CenterStudyCompletionController extends Controller
                     'open_sessions' => [], 'selected_attempt_ids' => array_column($snapshot['students'], 'attempt_id'),
                 ]);
             }
+            $completionDate = now('Africa/Cairo')->toDateString();
             foreach ($snapshot['students'] as $student) {
                 $closed = $db->table('study_attempt_group_periods')
                     ->where('attempt_id', $student['attempt_id'])->where('group_id', $groupId)
-                    ->whereNull('left_on')->update(['left_on' => now('Africa/Cairo')->toDateString()]);
+                    ->whereNull('left_on')->whereDate('joined_on', '<=', $completionDate)
+                    ->update(['left_on' => $completionDate]);
                 if ($closed !== 1) {
                     $this->conflict('completion_attempt_changed');
                 }
@@ -189,7 +191,10 @@ COALESCE((SELECT json_agg(json_build_object('id', approvals.id,
     WHERE approvals.target_plan_version_id = attempts.plan_version_id
       OR EXISTS (SELECT 1 FROM study_attempt_transfers AS transfers
           WHERE transfers.attempt_id = attempts.id
-            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json) AS approvals
+            AND transfers.to_plan_version_id = approvals.target_plan_version_id)), '[]'::json) AS approvals,
+(SELECT periods.joined_on FROM study_attempt_group_periods AS periods
+    WHERE periods.attempt_id = attempts.id AND periods.group_id = attempts.current_group_id
+      AND periods.left_on IS NULL LIMIT 1) AS period_joined_on
 SQL)
                 ->orderBy('attempts.id');
             if ($lock) {
@@ -201,6 +206,12 @@ SQL)
             }
             $reasons = array_column($data['decisions'], 'exception_reason', 'attempt_id');
             foreach ($rows as $row) {
+                if ($row->period_joined_on === null) {
+                    $this->conflict('completion_attempt_changed');
+                }
+                if ($row->period_joined_on > now('Africa/Cairo')->toDateString()) {
+                    $this->conflict('completion_before_join_date');
+                }
                 $credits = StudyCoverageCredits::resolve(json_decode($row->attendance_rows, true), json_decode($row->approvals, true));
                 $covered = $requirements->filter(fn (object $item): bool => array_key_exists($item->id, $credits['lectures']))
                     ->pluck('number')->map(fn ($number): int => (int) $number)->all();

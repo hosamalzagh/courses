@@ -303,6 +303,40 @@ class StudyCoverageTest extends TestCase
         });
     }
 
+    public function test_completion_rejects_a_period_that_has_not_started_even_after_an_earlier_preview(): void
+    {
+        $group = $this->group($this->north, 1);
+        $student = $this->student();
+        $joinedOn = now('Africa/Cairo')->addDays(5)->toDateString();
+        $attempt = $this->enroll($student['id'], $group, $joinedOn);
+        $start = now('Africa/Cairo')->addDays(2)->setTime(16, 0);
+        $this->postJson("{$this->base}/groups/{$group['id']}/sessions", [
+            'kind' => 'single', 'revision' => 1, 'start_at' => $start->format('Y-m-d\\TH:i'),
+            'plan_lecture_number' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->postJson("{$this->base}/groups/{$group['id']}/start", ['revision' => 2])->assertOk();
+        $selection = ['complete_group' => true, 'decisions' => [[
+            'attempt_id' => $attempt['id'], 'exception_reason' => 'قرار استثنائي بعد المراجعة',
+        ]]];
+        $previewPath = "{$this->base}/groups/{$group['id']}/completion-preview";
+        $this->postJson($previewPath, $selection)->assertConflict()
+            ->assertJsonPath('code', 'completion_before_join_date');
+        $this->travelTo(now('Africa/Cairo')->addDays(6));
+        $preview = $this->postJson($previewPath, $selection)->assertOk()->json();
+        $this->travelBack();
+        $this->postJson("{$this->base}/groups/{$group['id']}/completion", [
+            ...$selection, 'group_revision' => $preview['group']['revision'],
+            'preview_token' => $preview['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertConflict()->assertJsonPath('code', 'completion_before_join_date');
+        $this->center->run(function () use ($attempt, $joinedOn): void {
+            $period = DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])->first();
+            $this->assertSame($joinedOn, $period->joined_on);
+            $this->assertNull($period->left_on);
+            $this->assertSame('active', DB::table('study_attempts')->where('id', $attempt['id'])->value('status'));
+            $this->assertSame(0, DB::table('study_attempt_completion_decisions')->count());
+        });
+    }
+
     public function test_group_can_complete_without_approving_any_student(): void
     {
         $group = $this->group($this->north, 1);
