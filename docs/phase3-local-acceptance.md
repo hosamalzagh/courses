@@ -37,6 +37,8 @@ At 2026-09-29 03:43 UTC, the integrated browser suite passed 3/3 on the isolated
 
 On the branch rebased over #43, the same three browser journeys passed again on PostgreSQL `5554` with a separate API, Next.js and query proxy on `8159`/`3059`/`8059`. There were 38 measured reads, including twelve full SSR page visits, and every read used six SQL statements. The third journey now adds one group-only requirement (1→2), schedules its session, reduces it with a recorded `none` decision (2→1), completes one student, credits makeup and completes another after group completion, then corrects the first student's attendance. The live coverage becomes zero while the saved completion decision remains 1/1. This tests #43's group requirement and historical completion interaction without changing a completed group's requirements. The #44 plan-version application path remains pending its merge.
 
+The provisional #44 integration run adds an application of v2 to the first completed attempt after that correction. The preview shows live coverage moving from 0/1 to 0/2; the group and second completed attempt retain v1, while the first attempt uses v2 and requires two lectures. The first student's approved decision remains completed at its saved 1/1 and original approval time. All three browser journeys passed with 41 measured reads, including thirteen full SSR page visits, each at six SQL statements. Two focused Laravel plan-application and historical-period tests passed with 64 assertions. Repeat this run after #44 merges into the final branch.
+
 ## Acceptance matrix
 
 | Area | Durable/HTTP/UI/browser evidence |

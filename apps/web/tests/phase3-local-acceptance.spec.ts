@@ -403,9 +403,46 @@ test("a missed student makes up content and is approved after the group is compl
     expect((await read(owner, `groups/${source.id}/coverage`)).body.students.find(
       (row: { attempt_id: string }) => row.attempt_id === attempts[0].id,
     ).covered_count).toBe(0);
+    const nextPlan = await write(owner, `levels/${level.body.level.id}/plan-versions`, {
+      base_plan_version_id: level.body.level.plan.id, base_revision: 1,
+      lectures: [{ number: 1, content: "المحتوى المطلوب بإصدار جديد", planned_hours: 1 },
+        { number: 2, content: "امتداد الإصدار الجديد", planned_hours: 1 }],
+      request_id: crypto.randomUUID(),
+    });
+    expect(nextPlan.status, JSON.stringify(nextPlan.body)).toBe(201);
+    const applicationPath = `${sourcePath}/plan-applications`;
+    const application = { target_plan_version_id: nextPlan.body.plan.id, attempt_ids: [attempts[0].id],
+      reason: "تطبيق الخطة الأحدث مع حفظ إتمام الطالب السابق" };
+    const applicationPreview = await write(owner, `${applicationPath}/preview`, application);
+    expect(applicationPreview.status, JSON.stringify(applicationPreview.body)).toBe(200);
+    expect(applicationPreview.body.students[0]).toMatchObject({
+      attempt_id: attempts[0].id, before: { covered_count: 0, required_count: 1 },
+      after: { covered_count: 0, required_count: 2 },
+    });
+    const applied = await write(owner, applicationPath, {
+      ...application, group_revision: applicationPreview.body.group_revision,
+      preview_token: applicationPreview.body.preview_token, request_id: crypto.randomUUID(),
+    });
+    expect(applied.status, JSON.stringify(applied.body)).toBe(201);
+    expect(applied.body.applied_count).toBe(1);
+    const versioned = (await read(owner, `${sourcePath}/coverage`)).body;
+    expect(versioned.group.plan_version_id).toBe(level.body.level.plan.id);
+    expect(versioned.students.find((row: { attempt_id: string }) => row.attempt_id === attempts[0].id)).toMatchObject({
+      attempt_status: "completed", plan_version_id: nextPlan.body.plan.id, covered_count: 0, required_count: 2,
+    });
+    expect(versioned.students.find((row: { attempt_id: string }) => row.attempt_id === attempts[1].id)).toMatchObject({
+      attempt_status: "completed", plan_version_id: level.body.level.plan.id, covered_count: 1, required_count: 1,
+    });
+    await measurePage(owner, `${sourcePath}/coverage`, students[0].name);
+    const historicalDecision = (await read(owner, `students/${students[0].id}/courses/${course.body.course.id}/completion`)).body;
+    expect(historicalDecision.levels[0].attempt).toMatchObject({
+      status: "completed", covered_count: 1, required_count: 1,
+      approved_at: firstDecision.levels[0].attempt.approved_at,
+    });
     await owner.goto(`${origin}/admin/audit`);
     await expect(owner.getByRole("heading", { name: "إكمال مجموعة" }).first()).toBeVisible();
     await expect(owner.getByRole("heading", { name: "اعتماد إتمام دراسة طالب" }).first()).toBeVisible();
+    await expect(owner.getByRole("heading", { name: "تطبيق إصدار خطة جديد على محاولات مختارة" }).first()).toBeVisible();
   } finally {
     await owner.close();
   }
