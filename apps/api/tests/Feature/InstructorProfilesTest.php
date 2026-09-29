@@ -135,9 +135,12 @@ class InstructorProfilesTest extends TestCase
     {
         $this->createInstructor('Alpha only', [$this->north]);
         $this->center->run(function (): void {
-            $makeupMigration = glob(database_path('migrations/tenant/*_create_study_makeup_bookings.php'))[0];
-            (require $makeupMigration)->down();
-            DB::table('migrations')->where('migration', pathinfo($makeupMigration, PATHINFO_FILENAME))->delete();
+            foreach (['*_create_study_makeup_bookings.php', '*_create_group_requirement_impacts.php', '*_create_group_requirements.php'] as $pattern) {
+                foreach (glob(database_path('migrations/tenant/'.$pattern)) as $migration) {
+                    (require $migration)->down();
+                    DB::table('migrations')->where('migration', pathinfo($migration, PATHINFO_FILENAME))->delete();
+                }
+            }
             $transfersMigration = glob(database_path('migrations/tenant/*_create_study_attempt_transfers.php'))[0];
             (require $transfersMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($transfersMigration, PATHINFO_FILENAME))->delete();
