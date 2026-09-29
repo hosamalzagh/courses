@@ -13,7 +13,8 @@ class CenterCourseCompletionController extends Controller
     public function show(Request $request, string $studentId, string $courseId): JsonResponse
     {
         abort_unless(Str::isUuid($studentId) && Str::isUuid($courseId), 404);
-        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
+        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'q' => ['sometimes', 'string', 'max:100']]);
         $permissions = $request->attributes->get('center_permissions');
         $db = DB::connection('tenant');
         $course = $db->table('courses')
@@ -40,9 +41,14 @@ COUNT(*) FILTER (WHERE EXISTS (
 SQL, [$studentId, $course->branch_id]);
 
         $page = (int) ($data['page'] ?? 1);
+        $search = trim($data['q'] ?? '');
         $pageQuery = $db->table('levels')
             ->join('stages', 'stages.id', '=', 'levels.stage_id')
             ->where('stages.course_id', $courseId)
+            ->when($search !== '', fn ($query) => $query->where(function ($matched) use ($search): void {
+                $term = '%'.addcslashes($search, '%_\\').'%';
+                $matched->where('levels.name', 'ILIKE', $term)->orWhere('stages.name', 'ILIKE', $term);
+            }))
             ->select(['levels.id', 'levels.name', 'levels.created_at as level_created_at',
                 'stages.id as stage_id', 'stages.name as stage_name', 'stages.created_at as stage_created_at'])
             ->selectRaw(<<<'SQL'

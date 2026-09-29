@@ -508,6 +508,34 @@ class StudyCoverageTest extends TestCase
         $this->getJson("{$this->base}/students/{$student['id']}/courses/not-a-uuid/completion")->assertNotFound();
     }
 
+    public function test_course_completion_searches_levels_beyond_the_first_page_without_changing_the_summary(): void
+    {
+        $group = $this->group($this->north, 1);
+        $student = $this->student();
+        $curriculum = $this->center->run(fn () => DB::table('levels')->join('stages', 'stages.id', '=', 'levels.stage_id')
+            ->where('levels.id', $group['level_id'])->first(['stages.id as stage_id', 'stages.course_id']));
+        $this->center->run(function () use ($curriculum): void {
+            $rows = [];
+            for ($index = 1; $index <= 51; $index++) {
+                $created = now()->addMinute()->addSeconds($index);
+                $rows[] = ['id' => (string) Str::uuid(), 'stage_id' => $curriculum->stage_id,
+                    'name' => "Target {$index}", 'created_at' => $created, 'updated_at' => $created];
+            }
+            DB::table('levels')->insert($rows);
+        });
+        $path = "{$this->base}/students/{$student['id']}/courses/{$curriculum->course_id}/completion";
+        $first = $this->getJson($path)->assertOk()->assertJsonPath('course.required_levels', 52)
+            ->assertJsonCount(50, 'levels')->assertJsonPath('pagination.has_more', true);
+        $this->assertLessThanOrEqual(6, (int) $first->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$path}?page=2")->assertOk()->assertJsonCount(2, 'levels');
+        $found = $this->getJson("{$path}?q=Target%2051")->assertOk()
+            ->assertJsonPath('course.required_levels', 52)->assertJsonCount(1, 'levels')
+            ->assertJsonPath('levels.0.name', 'Target 51');
+        $this->assertLessThanOrEqual(6, (int) $found->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$path}?q=missing")->assertOk()->assertJsonCount(0, 'levels')
+            ->assertJsonPath('course.required_levels', 52);
+    }
+
     private function group(int $branchId, int $lectureCount): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => 'Coverage '.Str::random(5),

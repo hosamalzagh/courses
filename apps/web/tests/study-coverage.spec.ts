@@ -217,6 +217,10 @@ test("coverage is provisional until closure and hidden branch data stays denied"
     await expect(owner).toHaveURL(courseUrl);
     await expect(owner.getByText("اكتمل الكورس دراسيًا")).toBeVisible();
     await expect(owner.getByText("مكتمل بقرار محفوظ")).toBeVisible();
+    await owner.getByRole("searchbox", { name: "بحث في المستويات المطلوبة" }).fill("Level");
+    await owner.getByRole("button", { name: "بحث في جميع المستويات المطلوبة" }).click();
+    await expect(owner).toHaveURL(/q=Level/);
+    await expect(owner.getByText("مكتمل بقرار محفوظ")).toBeVisible();
     await owner.goto(`${origin}/admin/students/${secondStudent.body.student.id}/courses/${course.body.course.id}/completion`);
     await expect(owner.getByText("مكتمل استثنائيًا بقرار محفوظ")).toBeVisible();
     await expect(owner.getByText(/قرار استثنائي بعد مراجعة النواقص/)).toBeVisible();

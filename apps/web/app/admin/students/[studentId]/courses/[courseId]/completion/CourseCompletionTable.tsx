@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { DataTable } from "@/components/DataTable";
 import type { CourseCompletionContext } from "@/lib/server-context";
 
@@ -21,10 +22,16 @@ function approval(level: Level) {
   return `${date} · ${attempt.approved_by_name ?? "موظف المركز"}`;
 }
 
-export function CourseCompletionTable({ context }: { context: CourseCompletionContext }) {
+export function CourseCompletionTable({ context, search }: { context: CourseCompletionContext; search: string }) {
+  const router = useRouter();
   const { course, student, levels, pagination } = context;
   const base = `/admin/students/${student.id}/courses/${course.id}/completion`;
-  const href = (page: number) => page > 1 ? `${base}?page=${page}` : base;
+  const href = (page: number, q = search) => {
+    const params = new URLSearchParams();
+    if (page > 1) params.set("page", String(page));
+    if (q) params.set("q", q);
+    return `${base}${params.size ? `?${params}` : ""}`;
+  };
   return <>
     <section className="context-card form-stack" aria-label="ملخص إتمام الكورس">
       <p><strong>{student.name}</strong> · رقم {student.student_number.toLocaleString("ar-EG")} · {course.name} · فرع {course.branch_name}</p>
@@ -36,6 +43,7 @@ export function CourseCompletionTable({ context }: { context: CourseCompletionCo
       description="جميع مستويات الكورس ضمن الفرع المصرح به. تُعرض حتى ٥٠ في الدفعة الحالية."
       emptyMessage="لا توجد مستويات مطلوبة في هذا الكورس."
       searchText={level => `${level.stage_name} ${level.name}`}
+      serverSearch={{ value: search, onSearch: value => router.push(href(1, value)) }}
       serverPagination={{ page: pagination.page, hasMore: pagination.has_more, batchSize: 50,
         previousHref: href(Math.max(1, pagination.page - 1)), nextHref: href(pagination.page + 1) }}
       columns={[

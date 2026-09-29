@@ -241,7 +241,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   const studentAccount = path.match(/^\/admin\/students\/([^/]+)\/account$/);
   if (studentAccount) return loadStudentAccount(decodeURIComponent(studentAccount[1]), query(["page", "branches_page", "fees_page", "q", "payment_id"]));
   const courseCompletion = path.match(/^\/admin\/students\/([^/]+)\/courses\/([^/]+)\/completion$/);
-  if (courseCompletion) return loadCourseCompletion(decodeURIComponent(courseCompletion[1]), decodeURIComponent(courseCompletion[2]), query(["page"]));
+  if (courseCompletion) return loadCourseCompletion(decodeURIComponent(courseCompletion[1]), decodeURIComponent(courseCompletion[2]), query(["page", "q"]));
   const studentEnrollments = path.match(/^\/admin\/students\/([^/]+)\/enrollments$/);
   if (studentEnrollments) return loadStudyEnrollments(decodeURIComponent(studentEnrollments[1]), query(["page", "groups_page", "q", "attempt_id"]));
   if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q", "identifier"]));
