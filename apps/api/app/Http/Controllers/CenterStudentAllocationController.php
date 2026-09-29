@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Support\ActiveStudentAllocations;
+use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\EffectiveStudyFees;
@@ -58,6 +59,8 @@ class CenterStudentAllocationController extends Controller
                 'students.financial_account_revision'])
             ->selectSub(ActiveStudentAllocations::query()->whereColumn('allocations.payment_id', 'payments.id')
                 ->selectRaw('COALESCE(SUM(allocations.amount), 0)'), 'used_amount')
+            ->selectSub(ActiveStudentRefunds::query()->whereColumn('refunds.payment_id', 'payments.id')
+                ->selectRaw('COALESCE(SUM(refunds.amount), 0)'), 'refunded_amount')
             ->selectSub(DB::connection('tenant')->query()->fromSub($historyQuery, 'history_rows')
                 ->selectRaw("COALESCE(json_agg(history_rows ORDER BY created_at DESC, id DESC), '[]'::json)"), 'history_rows')->first();
         abort_unless($payment && $permissions->can('finance.read', (int) $payment->branch_id), 404);
@@ -84,7 +87,8 @@ class CenterStudentAllocationController extends Controller
         return response()->json([
             'payment' => ['id' => $payment->id, 'branch_id' => (int) $payment->branch_id, 'branch_name' => $payment->branch_name,
                 'amount' => $payment->amount, 'currency' => $payment->currency,
-                'available_amount' => StudentMoney::format(StudentMoney::cents($payment->amount) - StudentMoney::cents($payment->used_amount))],
+                'available_amount' => StudentMoney::format(StudentMoney::cents($payment->amount) - StudentMoney::cents($payment->used_amount)
+                    - StudentMoney::cents($payment->refunded_amount))],
             'version' => StudentAccountVersion::forActor($studentId, $payment->financial_account_revision, $request->user()->id),
             'can_allocate' => $permissions->can('payments.allocate', (int) $payment->branch_id),
             'can_correct' => $permissions->can('payments.correct', (int) $payment->branch_id),
@@ -235,7 +239,8 @@ class CenterStudentAllocationController extends Controller
                 $this->conflict('allocation_already_reversed');
             }
             $availableBefore = StudentMoney::cents(DB::connection('tenant')->table('student_payments')
-                ->where('id', $allocation->payment_id)->value('amount')) - $this->used($allocation->payment_id);
+                ->where('id', $allocation->payment_id)->value('amount')) - $this->used($allocation->payment_id)
+                - $this->refunded($allocation->payment_id);
             $paidBefore = StudentMoney::cents(ActiveStudentAllocations::query()->where('allocations.fee_id', $allocation->fee_id)
                 ->sum('allocations.amount'));
             $amount = StudentMoney::cents($allocation->amount);
@@ -443,7 +448,8 @@ class CenterStudentAllocationController extends Controller
                 'remaining_before' => StudentMoney::format($remaining),
                 'remaining_after' => StudentMoney::format($remaining - $amount)];
         }
-        $paymentAvailable = StudentMoney::cents($allocation->received_amount) - $this->used($allocation->payment_id);
+        $paymentAvailable = StudentMoney::cents($allocation->received_amount) - $this->used($allocation->payment_id)
+            - $this->refunded($allocation->payment_id);
         $accountBranches = array_values(array_unique(array_filter([
             (int) $allocation->source_branch_id, (int) $allocation->target_branch_id,
             $target['branch_id'] ?? null,
@@ -479,11 +485,14 @@ class CenterStudentAllocationController extends Controller
         $used = ActiveStudentAllocations::query()->where('allocations.student_id', $studentId)
             ->whereIn('allocations.source_branch_id', $branchIds)
             ->sum('allocations.amount');
+        $refunded = ActiveStudentRefunds::query()->where('refunds.student_id', $studentId)
+            ->whereIn('refunds.branch_id', $branchIds)->sum('refunds.amount');
         $paid = ActiveStudentAllocations::query()->where('allocations.student_id', $studentId)
             ->whereIn('allocations.target_branch_id', $branchIds)
             ->sum('allocations.amount');
 
-        return ['available' => StudentMoney::format(StudentMoney::cents($received) - StudentMoney::cents($used)),
+        return ['available' => StudentMoney::format(StudentMoney::cents($received) - StudentMoney::cents($used)
+            - StudentMoney::cents($refunded)),
             'debt' => StudentMoney::format(StudentMoney::cents($due) - StudentMoney::cents($paid))];
     }
 
@@ -547,7 +556,8 @@ class CenterStudentAllocationController extends Controller
     private function allocationPlan(string $studentId, object $payment, array $targets, CenterPermissions $permissions): array
     {
         $sum = array_sum(array_map(fn (array $target): int => StudentMoney::cents($target['amount']), $targets));
-        $availableBefore = StudentMoney::cents($payment->amount) - $this->used($payment->id);
+        $availableBefore = StudentMoney::cents($payment->amount) - $this->used($payment->id)
+            - $this->refunded($payment->id);
         if ($sum > $availableBefore) {
             $this->conflict('payment_not_available');
         }
@@ -606,6 +616,12 @@ class CenterStudentAllocationController extends Controller
     {
         return StudentMoney::cents(ActiveStudentAllocations::query()->where('allocations.payment_id', $paymentId)
             ->sum('allocations.amount'));
+    }
+
+    private function refunded(string $paymentId): int
+    {
+        return StudentMoney::cents(ActiveStudentRefunds::query()->where('refunds.payment_id', $paymentId)
+            ->sum('refunds.amount'));
     }
 
     private function conflict(string $code): never

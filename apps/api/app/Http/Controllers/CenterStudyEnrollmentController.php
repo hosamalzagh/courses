@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Support\ActiveStudentAllocations;
+use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\EffectiveStudyFees;
@@ -59,6 +60,9 @@ class CenterStudyEnrollmentController extends Controller
         $used = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.source_branch_id', $scope))
             ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
+        $refunded = ActiveStudentRefunds::query()->whereColumn('refunds.student_id', 'students.id')
+            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('refunds.branch_id', $scope))
+            ->selectRaw('COALESCE(SUM(refunds.amount), 0)');
         $paid = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.target_branch_id', $scope))
             ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
@@ -67,7 +71,7 @@ class CenterStudyEnrollmentController extends Controller
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency'), 'currency')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency_revision'), 'currency_revision')
             ->selectSub($payments, 'received_total')->selectSub($fees, 'due_total')
-            ->selectSub($used, 'used_total')->selectSub($paid, 'paid_total')
+            ->selectSub($used, 'used_total')->selectSub($refunded, 'refunded_total')->selectSub($paid, 'paid_total')
             ->selectSub(DB::connection('tenant')->query()->fromSub($groups, 'choices')->selectRaw('json_agg(choices)'), 'group_choices')
             ->first();
         abort_unless($student, 404);
@@ -87,7 +91,8 @@ class CenterStudyEnrollmentController extends Controller
                 'status' => $student->status, 'currency' => $student->currency,
                 'currency_revision' => (int) $student->currency_revision,
                 'version' => StudentAccountVersion::forActor($student->id, $student->financial_account_revision, $request->user()->id)],
-            'balance' => ['available_credit' => StudentMoney::format(StudentMoney::cents($student->received_total) - StudentMoney::cents($student->used_total)),
+            'balance' => ['available_credit' => StudentMoney::format(StudentMoney::cents($student->received_total)
+                - StudentMoney::cents($student->used_total) - StudentMoney::cents($student->refunded_total)),
                 'debt' => StudentMoney::format(StudentMoney::cents($student->due_total) - StudentMoney::cents($student->paid_total))],
             'groups' => $choices->take(50)->values(), 'attempts' => $attempts->take(20)->map(fn (object $row) => $this->present($row))->values(),
             'pagination' => ['page' => $page, 'has_more' => $attempts->count() > 20,

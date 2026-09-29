@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Support\ActiveStudentAllocations;
+use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\EffectiveStudyFees;
@@ -189,6 +190,9 @@ class CenterStudyTransferController extends Controller
         $used = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'attempts.student_id')
             ->when($branches !== null, fn (Builder $builder) => $builder->whereIn('allocations.source_branch_id', $branches))
             ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
+        $refunded = ActiveStudentRefunds::query()->whereColumn('refunds.student_id', 'attempts.student_id')
+            ->when($branches !== null, fn (Builder $builder) => $builder->whereIn('refunds.branch_id', $branches))
+            ->selectRaw('COALESCE(SUM(refunds.amount), 0)');
         $paid = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'attempts.student_id')
             ->when($branches !== null, fn (Builder $builder) => $builder->whereIn('allocations.target_branch_id', $branches))
             ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
@@ -239,7 +243,7 @@ EXISTS (SELECT 1 FROM study_attendance_entries AS entries
 SQL, [$data['transferred_on']]);
         $query->selectSub($sum('student_payments', 'amount', 'branch_id'), 'received_total')
             ->selectSub($sum('study_attempt_fees', EffectiveStudyFees::amount('study_attempt_fees'), 'branch_id'), 'due_total')
-            ->selectSub($used, 'used_total')->selectSub($paid, 'paid_total');
+            ->selectSub($used, 'used_total')->selectSub($refunded, 'refunded_total')->selectSub($paid, 'paid_total');
         $row = ($lock ? $query->lock('FOR UPDATE OF attempts, groups') : $query)->first();
         abort_unless($row && $permissions->can('enrollment.manage', (int) $row->branch_id), 404);
         $attempt = (object) ['id' => $row->id, 'revision' => $row->revision, 'branch_id' => $row->branch_id,
@@ -283,7 +287,8 @@ SQL, [$data['transferred_on']]);
         }
         $creditedLectures = $targetLectures->filter(fn ($lecture) => isset($credited[$lecture->id]));
         $missingLectures = $targetLectures->reject(fn ($lecture) => isset($credited[$lecture->id]));
-        $balance = ['available_credit' => StudentMoney::format(StudentMoney::cents($row->received_total) - StudentMoney::cents($row->used_total)),
+        $balance = ['available_credit' => StudentMoney::format(StudentMoney::cents($row->received_total)
+            - StudentMoney::cents($row->used_total) - StudentMoney::cents($row->refunded_total)),
             'debt' => StudentMoney::format(StudentMoney::cents($row->due_total) - StudentMoney::cents($row->paid_total))];
         $hash = hash('sha256', json_encode([$attempt->id, $attempt->revision, $attempt->branch_id,
             $attempt->level_id, $attempt->plan_version_id, $attempt->current_group_id,

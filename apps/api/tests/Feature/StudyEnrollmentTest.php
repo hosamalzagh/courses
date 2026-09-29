@@ -1154,6 +1154,119 @@ class StudyEnrollmentTest extends TestCase
         $this->assertSame('تصحيح بعد دفعة فرع مستقل', json_decode($visibleCorrection['details'], true)['reason']);
     }
 
+    public function test_refund_and_approved_correction_preserve_cash_history_and_available_credit(): void
+    {
+        $group = $this->group($this->north, '500.00');
+        $student = $this->student([$this->north, $this->south]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $enrollmentUrl = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($enrollmentUrl)->assertOk()->json();
+        $attempt = $this->postJson($enrollmentUrl, [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $workspace['student']['currency_revision'], 'joined_on' => '2026-09-28',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $workspace['student']['version'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $accountUrl = "{$this->base}/students/{$student['id']}/account";
+        $payment = $this->postJson("{$this->base}/students/{$student['id']}/payments", [
+            'branch_id' => $this->north, 'method' => 'cash', 'received_on' => '2026-09-28',
+            'amount' => '500.00', 'version' => $this->getJson($accountUrl)->json('account.version'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('payment');
+        $paymentUrl = "{$this->base}/students/{$student['id']}/payments/{$payment['id']}";
+        $refundUrl = "{$paymentUrl}/refunds";
+        $this->grant([$this->north => ['accounting']]);
+        $this->asUser($this->staff);
+        $staffVersion = $this->getJson($accountUrl)->assertOk()->json('account.version');
+        $this->getJson($refundUrl)->assertOk()->assertJsonPath('can_refund', false);
+        $this->postJson("{$refundUrl}/preview", [
+            'amount' => '200.00', 'refunded_on' => '2026-09-28', 'reason' => 'رد فعلي',
+            'version' => $staffVersion,
+        ])->assertForbidden();
+        $this->grant([$this->north => ['accounting', 'financial_approval']]);
+        $this->asUser($this->staff);
+        $staffVersion = $this->getJson($accountUrl)->json('account.version');
+        $this->postJson("{$refundUrl}/preview", [
+            'amount' => '200.00', 'refunded_on' => '2026-09-27', 'reason' => 'قبل القبض',
+            'version' => $staffVersion,
+        ])->assertUnprocessable()->assertJsonValidationErrors('refunded_on');
+        $this->postJson("{$refundUrl}/preview", [
+            'amount' => '200.00', 'refunded_on' => '2026-09-28', 'reason' => 'رد فعلي',
+            'version' => $staffVersion,
+        ])->assertOk()->assertJsonPath('payment.received_amount', '500.00')
+            ->assertJsonPath('payment.available_before', '500.00')
+            ->assertJsonPath('available_after', '300.00');
+        $refundRequest = ['amount' => '200.00', 'refunded_on' => '2026-09-28',
+            'reason' => 'رد فعلي', 'version' => $staffVersion, 'request_id' => (string) Str::uuid()];
+        $this->center->run(fn () => DB::statement("ALTER TABLE center_audit_logs ADD CONSTRAINT refund_audit_failure CHECK (event <> 'student.refund_recorded') NOT VALID"));
+        try {
+            $this->postJson($refundUrl, $refundRequest)->assertServerError();
+        } finally {
+            $this->center->run(fn () => DB::statement('ALTER TABLE center_audit_logs DROP CONSTRAINT refund_audit_failure'));
+        }
+        $this->center->run(fn () => $this->assertSame(0, DB::table('student_refunds')->count()));
+        $refund = $this->postJson($refundUrl, $refundRequest)->assertCreated()->json('refund');
+        $this->postJson($refundUrl, $refundRequest)->assertOk()->assertJsonPath('refund.id', $refund['id']);
+        $this->postJson($refundUrl, [...$refundRequest, 'amount' => '201.00'])->assertConflict()
+            ->assertJsonPath('code', 'refund_request_changed');
+        $this->getJson($accountUrl)->assertJsonPath('account.received_total', '500.00')
+            ->assertJsonPath('account.refunded_total', '200.00')->assertJsonPath('account.available_balance', '300.00');
+        $this->asUser($this->owner);
+        $this->getJson($enrollmentUrl)->assertJsonPath('balance.available_credit', '300.00');
+        $allocation = $this->postJson("{$paymentUrl}/allocations", [
+            'targets' => [['attempt_id' => $attempt['id'], 'amount' => '300.00']],
+            'version' => $this->getJson("{$paymentUrl}/allocation-options")->json('version'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('allocations.0');
+        $this->getJson($accountUrl)->assertJsonPath('account.available_balance', '0.00')
+            ->assertJsonPath('account.debt', '200.00');
+        $this->postJson($refundUrl, [
+            'amount' => '1.00', 'refunded_on' => '2026-09-28', 'reason' => 'لا يوجد رصيد',
+            'version' => $this->getJson($accountUrl)->json('account.version'), 'request_id' => (string) Str::uuid(),
+        ])->assertConflict()->assertJsonPath('code', 'refund_exceeds_available');
+        $correctionUrl = "{$this->base}/students/{$student['id']}/refunds/{$refund['id']}/corrections";
+        $version = $this->getJson($accountUrl)->json('account.version');
+        $this->postJson("{$correctionUrl}/preview", ['correct_amount' => '250.00', 'version' => $version])
+            ->assertConflict()->assertJsonPath('code', 'refund_exceeds_available');
+        $this->postJson("{$correctionUrl}/preview", ['correct_amount' => '100.00', 'version' => $version])
+            ->assertOk()->assertJsonPath('payment.received_amount', '500.00')
+            ->assertJsonPath('payment.allocated_amount', '300.00')
+            ->assertJsonPath('payment.available_before', '0.00')
+            ->assertJsonPath('available_after', '100.00')
+            ->assertJsonCount(1, 'later_movements');
+        $correction = ['correct_amount' => '100.00', 'reason' => 'المدفوع فعليًا مئة فقط',
+            'version' => $version, 'request_id' => (string) Str::uuid()];
+        $saved = $this->postJson($correctionUrl, $correction)->assertCreated()->json();
+        $this->postJson($correctionUrl, $correction)->assertOk()
+            ->assertJsonPath('replacement.id', $saved['replacement']['id']);
+        $this->postJson($correctionUrl, [...$correction, 'reason' => 'سبب مختلف'])->assertConflict();
+        $this->postJson("{$correctionUrl}/preview", [
+            'correct_amount' => '50.00', 'version' => $this->getJson($accountUrl)->json('account.version'),
+        ])->assertConflict()->assertJsonPath('code', 'refund_already_corrected');
+        $this->getJson($accountUrl)->assertJsonPath('account.received_total', '500.00')
+            ->assertJsonPath('account.allocated_total', '300.00')
+            ->assertJsonPath('account.refunded_total', '100.00')
+            ->assertJsonPath('account.available_balance', '100.00');
+        $this->getJson($enrollmentUrl)->assertJsonPath('balance.available_credit', '100.00');
+        $history = $this->getJson($refundUrl)->assertOk()->json('history');
+        $this->assertSame($saved['replacement']['id'], collect($history)->firstWhere('id', $refund['id'])['replacement_refund_id']);
+        $this->center->run(function () use ($payment, $refund, $saved, $allocation): void {
+            $this->assertSame('500.00', DB::table('student_payments')->where('id', $payment['id'])->value('amount'));
+            $this->assertSame(2, DB::table('student_refunds')->count());
+            $this->assertSame($refund['id'], $saved['reversal']['refund_id']);
+            $this->assertSame('300.00', DB::table('student_payment_allocations')->where('id', $allocation['id'])->value('amount'));
+            try {
+                (require database_path('migrations/tenant/2026_09_29_040000_create_student_refunds.php'))->down();
+                $this->fail('Approved refunds must prevent rollback.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString('Cannot roll back', $exception->getMessage());
+            }
+        });
+        $this->grant([$this->north => ['accounting']]);
+        $this->asUser($this->staff);
+        $this->postJson($correctionUrl, $correction)->assertForbidden();
+    }
+
     public function test_suspended_incomplete_student_can_pay_and_allocate_existing_debt_with_current_branch_grants(): void
     {
         $group = $this->group($this->north, '100.00');

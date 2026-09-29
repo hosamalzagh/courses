@@ -353,6 +353,140 @@ test("corrects an allocation to another branch while retaining the original rece
   } finally { await owner.close(); await staff.close(); }
 });
 
+test("records a real refund and corrects its amount without changing the receipt", async ({ browser }) => {
+  test.setTimeout(90_000);
+  const owner = await browser.newPage();
+  const staff = await browser.newPage();
+  try {
+    await signIn(owner);
+    const workspace = await (await owner.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+    const north = workspace.branches.find((branch: { slug: string }) => branch.slug === "north");
+    const group = await pricedGroup(owner, north.id, "500.00");
+    const student = await write(owner, "students", { name: `رد نقدي ${Date.now()}`,
+      branch_ids: [north.id], request_id: crypto.randomUUID() });
+    expect(student.status).toBe(201);
+    const studentId = student.body.student.id;
+    const accountPath = `students/${studentId}/account`;
+    const initial = await (await owner.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+    if (!initial.account.currency) expect((await write(owner, "financial-currency", {
+      currency: "EGP", revision: initial.account.currency_revision,
+    }, "PATCH")).status).toBe(200);
+    const enrollment = await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+    const saved = await write(owner, `students/${studentId}/enrollments`, {
+      group_id: group.id, group_revision: group.revision, currency_revision: enrollment.student.currency_revision,
+      joined_on: "2026-09-28", discount: "0.00", discount_reason: null,
+      version: enrollment.student.version, request_id: crypto.randomUUID(),
+    });
+    expect(saved.status).toBe(201);
+    const account = await (await owner.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+    const payment = await write(owner, `students/${studentId}/payments`, {
+      branch_id: north.id, method: "cash", received_on: "2026-09-28", amount: "500.00",
+      version: account.account.version, request_id: crypto.randomUUID(),
+    });
+    expect(payment.status).toBe(201);
+    const paymentPath = `students/${studentId}/payments/${payment.body.payment.id}`;
+    const refundPath = `${paymentPath}/refunds`;
+    const refundIndex = await owner.request.get(`${origin}/api/v1/center/${refundPath}`);
+    expect(Number(refundIndex.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+    expect((await refundIndex.json()).payment.available_before).toBe("500.00");
+
+    expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, {
+      center_roles: [], branch_roles: { [north.id]: ["accounting", "branch_auditor"] },
+    }, "PUT")).status).toBe(200);
+    await signIn(staff, "staff");
+    await staff.goto(`${origin}/admin/students/${studentId}/account`);
+    await staff.getByRole("button", { name: "سجل الاسترداد" }).click();
+    await expect(staff.getByRole("region", { name: "تسجيل رد نقدي" })).toHaveCount(0);
+    const withoutApproval = await (await staff.request.get(`${origin}/api/v1/center/${refundPath}`)).json();
+    expect(withoutApproval.can_refund).toBe(false);
+    expect((await write(staff, `${refundPath}/preview`, {
+      amount: "200.00", refunded_on: "2026-09-28", reason: "رد فعلي",
+      version: withoutApproval.version,
+    })).status).toBe(403);
+
+    expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, {
+      center_roles: [], branch_roles: { [north.id]: ["accounting", "branch_auditor", "financial_approval"] },
+    }, "PUT")).status).toBe(200);
+    await staff.reload();
+    await staff.getByRole("button", { name: "رد أو تصحيح" }).click();
+    await staff.getByRole("textbox", { name: "المبلغ المعاد (EGP)" }).fill("200.00");
+    await staff.getByLabel("تاريخ الرد الفعلي").fill("2026-09-28");
+    await staff.getByRole("textbox", { name: "سبب الاسترداد" }).fill("رد فعلي للطالب");
+    await staff.getByRole("button", { name: "معاينة رد المبلغ" }).click();
+    const preview = staff.getByRole("region", { name: "معاينة الرد النقدي" });
+    await expect(preview).toContainText("500.00");
+    await expect(preview).toContainText("300.00");
+    await staff.getByRole("button", { name: "اعتماد رد المبلغ" }).click();
+    await staff.getByRole("button", { name: "إلغاء", exact: true }).click();
+    await expect(staff.getByRole("button", { name: "اعتماد رد المبلغ" })).toBeFocused();
+    expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, {
+      center_roles: [], branch_roles: { [north.id]: ["accounting", "branch_auditor"] },
+    }, "PUT")).status).toBe(200);
+    await staff.getByRole("button", { name: "اعتماد رد المبلغ" }).click();
+    await staff.getByRole("button", { name: "تأكيد الاسترداد" }).click();
+    await expect(staff.getByRole("region", { name: /رد المال الفعلي/ }).getByRole("alert"))
+      .toContainText("هذه العملية خارج صلاحيتك");
+    expect((await (await owner.request.get(`${origin}/api/v1/center/${accountPath}`)).json()).account.refunded_total).toBe("0.00");
+    expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, {
+      center_roles: [], branch_roles: { [north.id]: ["accounting", "branch_auditor", "financial_approval"] },
+    }, "PUT")).status).toBe(200);
+    await staff.getByRole("button", { name: "اعتماد رد المبلغ" }).click();
+    await staff.getByRole("button", { name: "تأكيد الاسترداد" }).click();
+    await expect(staff.getByText("سُجل المبلغ المعاد فعليًا", { exact: false })).toBeVisible();
+    const afterRefundResponse = await owner.request.get(`${origin}/api/v1/center/${accountPath}`);
+    expect(Number(afterRefundResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+    const afterRefund = await afterRefundResponse.json();
+    expect(afterRefund.account).toMatchObject({ received_total: "500.00", refunded_total: "200.00", available_balance: "300.00" });
+
+    const allocationOptions = await (await owner.request.get(`${origin}/api/v1/center/${paymentPath}/allocation-options`)).json();
+    expect((await write(owner, `${paymentPath}/allocations`, {
+      targets: [{ attempt_id: saved.body.attempt.id, amount: "200.00" }],
+      version: allocationOptions.version, request_id: crypto.randomUUID(),
+    })).status).toBe(201);
+    await staff.reload();
+    await staff.getByRole("button", { name: "رد أو تصحيح" }).click();
+    await staff.getByRole("button", { name: "تصحيح المبلغ" }).click();
+    await expect(staff.getByRole("textbox", { name: "المبلغ الذي أُعيد فعليًا (EGP)" })).toBeFocused();
+    await staff.getByRole("textbox", { name: "المبلغ الذي أُعيد فعليًا (EGP)" }).fill("100.00");
+    await staff.getByRole("textbox", { name: "سبب التصحيح" }).fill("كان الرد الفعلي مئة فقط");
+    await staff.getByRole("button", { name: "معاينة التصحيح" }).click();
+    const correction = staff.getByRole("region", { name: "معاينة تصحيح الاسترداد" });
+    await expect(correction).toContainText("200.00");
+    await expect(correction).toContainText("100.00");
+    await expect(correction).toContainText("الحركات المسجلة منذ وقت الأصل");
+    await staff.getByRole("button", { name: "اعتماد التصحيح" }).click();
+    await staff.getByRole("button", { name: "تأكيد التصحيح" }).click();
+    await expect(staff.getByText("حُفظ عكس الاسترداد", { exact: false })).toBeVisible();
+    const corrected = await (await owner.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+    expect(corrected.account).toMatchObject({ received_total: "500.00", allocated_total: "200.00",
+      refunded_total: "100.00", available_balance: "200.00", debt: "300.00" });
+    await owner.goto(`${origin}/admin/audit`);
+    await owner.getByText("تفاصيل تصحيح سجل الاسترداد").first().click();
+    await expect(owner.getByText("كان الرد الفعلي مئة فقط")).toBeVisible();
+    await staff.getByRole("button", { name: "تصحيح المبلغ" }).click();
+    await staff.getByRole("textbox", { name: "المبلغ الذي أُعيد فعليًا (EGP)" }).fill("75.00");
+    await staff.getByRole("textbox", { name: "سبب التصحيح" }).fill("معاينة قديمة");
+    const refundHistory = await (await owner.request.get(`${origin}/api/v1/center/${refundPath}`)).json();
+    const activeRefund = refundHistory.history.find((entry: { reversal_id: string | null }) => !entry.reversal_id);
+    expect((await write(owner, `students/${studentId}/refunds/${activeRefund.id}/corrections`, {
+      correct_amount: "50.00", reason: "تصحيح متزامن", version: refundHistory.version,
+      request_id: crypto.randomUUID(),
+    })).status).toBe(201);
+    await staff.getByRole("button", { name: "معاينة التصحيح" }).click();
+    await expect(staff.getByText("تغير الرصيد أو سجل الاسترداد", { exact: false })).toBeVisible();
+    await staff.getByRole("button", { name: "تحميل أحدث الرصيد" }).click();
+    await expect(staff.getByRole("region", { name: "تصحيح مبلغ الاسترداد" })).toHaveCount(0);
+    await expect(staff.getByRole("button", { name: "إغلاق سجل الاسترداد" })).toBeEnabled();
+    await staff.setViewportSize({ width: 390, height: 844 });
+    expect(await staff.locator("html").getAttribute("dir")).toBe("rtl");
+    await staff.getByRole("button", { name: "القائمة" }).click();
+    await staff.getByRole("button", { name: "تفعيل الوضع الداكن" }).click();
+    await expect(staff.locator("html")).toHaveAttribute("data-theme", "dark");
+    await staff.getByRole("button", { name: "إغلاق القائمة" }).click();
+    expect(await staff.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  } finally { await owner.close(); await staff.close(); }
+});
+
 test("suspended student with an incomplete old profile can settle existing fees through the account", async ({ page }) => {
   await signIn(page);
   const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
@@ -599,6 +733,58 @@ test("simultaneous allocations cannot spend one payment twice", async ({ page })
   expect(after.payments[0].allocated_amount).toBe("80.00");
 });
 
+test("a refund and allocation cannot consume the same payment concurrently", async ({ page }) => {
+  await signIn(page);
+  const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+  const branchId = workspace.branches[0].id;
+  const group = await pricedGroup(page, branchId, "100.00");
+  const student = await write(page, "students", { name: `سباق الاسترداد ${Date.now()}`,
+    branch_ids: [branchId], request_id: crypto.randomUUID() });
+  expect(student.status).toBe(201);
+  const studentId = student.body.student.id;
+  const accountPath = `students/${studentId}/account`;
+  const settings = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  if (!settings.account.currency) expect((await write(page, "financial-currency", {
+    currency: "EGP", revision: settings.account.currency_revision,
+  }, "PATCH")).status).toBe(200);
+  const enrollment = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
+  const saved = await write(page, `students/${studentId}/enrollments`, {
+    group_id: group.id, group_revision: group.revision,
+    currency_revision: enrollment.student.currency_revision, joined_on: "2026-09-28",
+    discount: "0.00", discount_reason: null, version: enrollment.student.version,
+    request_id: crypto.randomUUID(),
+  });
+  expect(saved.status).toBe(201);
+  const before = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  const payment = await write(page, `students/${studentId}/payments`, {
+    branch_id: branchId, method: "cash", received_on: "2026-09-28", amount: "100.00",
+    version: before.account.version, request_id: crypto.randomUUID(),
+  });
+  expect(payment.status).toBe(201);
+  const paymentPath = `students/${studentId}/payments/${payment.body.payment.id}`;
+  const version = (await (await page.request.get(`${origin}/api/v1/center/${paymentPath}/refunds`)).json()).version;
+  await page.evaluate(() => fetch("/sanctum/csrf-cookie", { credentials: "same-origin" }));
+  const xsrf = (await page.context().cookies(origin)).find(cookie => cookie.name === "XSRF-TOKEN")?.value ?? "";
+  const requests = [
+    { port: workerPorts[0], path: `${paymentPath}/refunds`, data: {
+      amount: "100.00", refunded_on: "2026-09-28", reason: "رد فعلي", version, request_id: crypto.randomUUID(),
+    } },
+    { port: workerPorts[1], path: `${paymentPath}/allocations`, data: {
+      targets: [{ attempt_id: saved.body.attempt.id, amount: "100.00" }], version, request_id: crypto.randomUUID(),
+    } },
+  ];
+  const outcomes = await Promise.all(requests.map(async item => {
+    const response = await page.request.post(`http://alpha.courses.test:${item.port}/api/v1/center/${item.path}`, {
+      data: item.data, headers: { Accept: "application/json", "X-XSRF-TOKEN": decodeURIComponent(xsrf) },
+    });
+    return response.status();
+  }));
+  expect(outcomes.sort()).toEqual([201, 409]);
+  const after = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  expect(after.account.available_balance).toBe("0.00");
+  expect(Number(after.account.allocated_total) + Number(after.account.refunded_total)).toBe(100);
+});
+
 test("currency, payment and visible account work through the employee UI and SSR", async ({ page }) => {
   await signIn(page);
   const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
@@ -610,7 +796,7 @@ test("currency, payment and visible account work through the employee UI and SSR
   await page.goto(`${origin}/admin/students/${studentId}`);
   await page.getByRole("link", { name: "الحساب المالي" }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/students/${studentId}/account$`));
-  await expect(page.getByText("الرصيد غير المخصص", { exact: false })).toBeVisible();
+  await expect(page.getByText("الرصيد المتاح", { exact: false })).toBeVisible();
   if (await page.getByRole("combobox", { name: "عملة المركز" }).count()) {
     await page.getByRole("combobox", { name: "عملة المركز" }).selectOption("EGP");
     if (await page.getByRole("button", { name: "حفظ عملة المركز" }).isEnabled()) {
@@ -669,6 +855,11 @@ test("restricted staff see only their branch and a hidden account is denied in t
       expect(saved.status).toBe(201);
       if (branchId === south.id) southPaymentId = saved.body.payment.id;
     }
+    const southRefundVersion = (await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json()).account.version;
+    expect((await write(owner, `students/${studentId}/payments/${southPaymentId}/refunds`, {
+      amount: "20.00", refunded_on: "2026-09-28", reason: "رد فرع الجنوب",
+      version: southRefundVersion, request_id: crypto.randomUUID(),
+    })).status).toBe(201);
     const members = await (await owner.request.get(`${origin}/api/v1/center/member-workspace`)).json();
     const staffMembershipId = members.members.find((item: { user: { email: string } }) => item.user.email === credentials.staff.email)?.id;
     expect(staffMembershipId).toBeTruthy();
@@ -678,8 +869,11 @@ test("restricted staff see only their branch and a hidden account is denied in t
     await expect(staff.getByText("25.00 EGP").first()).toBeVisible();
     expect(await staff.locator("body").innerText()).not.toContain("80.00");
     expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/payments/${southPaymentId}/allocation-options`)).status()).toBe(404);
+    expect((await staff.request.get(`${origin}/api/v1/center/students/${studentId}/payments/${southPaymentId}/refunds`)).status()).toBe(404);
     const visible = await staff.request.get(`${origin}/api/v1/center/students/${studentId}/account`);
-    expect((await visible.json()).account).not.toHaveProperty("revision");
+    const visibleAccount = (await visible.json()).account;
+    expect(visibleAccount).toMatchObject({ received_total: "25.00", refunded_total: "0.00", available_balance: "25.00" });
+    expect(visibleAccount).not.toHaveProperty("revision");
     await staff.goto(`${origin}/admin/students/${hidden.body.student.id}/account`);
     await expect(staff.getByRole("heading", { name: "ملف الطالب غير متاح" })).toBeVisible();
     expect((await staff.request.get(`${origin}/api/v1/center/students/${hidden.body.student.id}/account`)).status()).toBe(404);
@@ -720,6 +914,57 @@ test("simultaneous real HTTP retries save one payment", async ({ page }) => {
   const after = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
   expect(after.payments).toHaveLength(2);
   expect(after.account.available_balance).toBe(distinct[0].status === 201 ? "22.25" : "24.25");
+});
+
+test("lost refund response keeps its request across a blocked server search and safe retry", async ({ page }) => {
+  await signIn(page);
+  const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
+  const student = await write(page, "students", { name: `رد باستجابة مفقودة ${Date.now()}`,
+    branch_ids: [workspace.branches[0].id], request_id: crypto.randomUUID() });
+  expect(student.status).toBe(201);
+  const studentId = student.body.student.id;
+  const accountPath = `students/${studentId}/account`;
+  const account = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  if (!account.account.currency) expect((await write(page, "financial-currency", {
+    currency: "EGP", revision: account.account.currency_revision,
+  }, "PATCH")).status).toBe(200);
+  const payment = await write(page, `students/${studentId}/payments`, {
+    branch_id: workspace.branches[0].id, method: "cash", received_on: "2026-09-28",
+    amount: "30.00", version: (await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json()).account.version,
+    request_id: crypto.randomUUID(),
+  });
+  expect(payment.status).toBe(201);
+  const refundPath = `students/${studentId}/payments/${payment.body.payment.id}/refunds`;
+  await page.goto(`${origin}/admin/students/${studentId}/account`);
+  await page.getByRole("button", { name: "رد أو تصحيح" }).click();
+  await page.getByRole("textbox", { name: "المبلغ المعاد (EGP)" }).fill("10.00");
+  await page.getByLabel("تاريخ الرد الفعلي").fill("2026-09-28");
+  await page.getByRole("textbox", { name: "سبب الاسترداد" }).fill("رد نقدي");
+  await page.getByRole("button", { name: "معاينة رد المبلغ" }).click();
+  await expect(page.getByRole("region", { name: "معاينة الرد النقدي" })).toBeVisible();
+  await page.route(`**/api/v1/center/${refundPath}`, async (route) => {
+    if (route.request().method() !== "POST") { await route.continue(); return; }
+    await route.fetch();
+    await route.abort("failed");
+    await page.unroute(`**/api/v1/center/${refundPath}`);
+  });
+  await page.getByRole("button", { name: "اعتماد رد المبلغ" }).click();
+  await page.getByRole("button", { name: "تأكيد الاسترداد" }).click();
+  await expect(page.getByText("تعذر التأكد من حفظ الرد النقدي", { exact: false })).toBeVisible();
+  await page.locator('a[href="/admin"]').first().click();
+  await expect(page.getByRole("alertdialog")).toContainText("تحقق من اعتماد الاسترداد أولًا");
+  await page.getByRole("button", { name: "العودة للتحقق" }).click();
+  const accountUrl = page.url();
+  await page.getByRole("searchbox", { name: "بحث في حركات الدفعات المقدمة" }).fill("دفعة غائبة");
+  await page.getByRole("button", { name: "بحث في جميع حركات الدفعات المقدمة" }).click();
+  expect(page.url()).toBe(accountUrl);
+  await expect(page.getByRole("region", { name: /رد المال الفعلي/ })).toBeVisible();
+  await page.getByRole("button", { name: "اعتماد رد المبلغ" }).click();
+  await page.getByRole("button", { name: "تأكيد الاسترداد" }).click();
+  await expect(page.getByText("سُجل المبلغ المعاد فعليًا", { exact: false })).toBeVisible();
+  const saved = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  expect(saved.account).toMatchObject({ refunded_total: "10.00", available_balance: "20.00" });
+  expect((await (await page.request.get(`${origin}/api/v1/center/${refundPath}`)).json()).history).toHaveLength(1);
 });
 
 test("lost payment response keeps the same request until a safe retry", async ({ page }) => {

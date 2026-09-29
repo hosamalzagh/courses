@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Support\ActiveStudentAllocations;
+use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\EffectiveStudyFees;
@@ -257,13 +258,16 @@ class CenterStudentFeeAdjustmentController extends Controller
         $used = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.source_branch_id', $scope))
             ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
+        $refunded = ActiveStudentRefunds::query()->whereColumn('refunds.student_id', 'students.id')
+            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('refunds.branch_id', $scope))
+            ->selectRaw('COALESCE(SUM(refunds.amount), 0)');
         $paid = ActiveStudentAllocations::query()->whereColumn('allocations.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.target_branch_id', $scope))
             ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
 
         return DB::connection('tenant')->table('students')->where('students.id', $studentId)
             ->selectSub($payments, 'received')->selectSub($fees, 'due')
-            ->selectSub($used, 'allocated')->selectSub($paid, 'paid')->firstOrFail();
+            ->selectSub($used, 'allocated')->selectSub($refunded, 'refunded')->selectSub($paid, 'paid')->firstOrFail();
     }
 
     private function preview(object $fee, object $account, int $target, int $released, array $release, ?object $replacement): array
@@ -272,6 +276,7 @@ class CenterStudentFeeAdjustmentController extends Controller
         $paidBefore = StudentMoney::cents($account->paid);
         $received = StudentMoney::cents($account->received);
         $allocatedBefore = StudentMoney::cents($account->allocated);
+        $refunded = StudentMoney::cents($account->refunded);
         $dueAfter = $dueBefore + $target - StudentMoney::cents($fee->current_due);
         $paidAfter = $paidBefore - $released;
         $allocatedAfter = $allocatedBefore - $released;
@@ -285,7 +290,8 @@ class CenterStudentFeeAdjustmentController extends Controller
             'account_after' => ['received_total' => StudentMoney::format($received),
                 'due_total' => StudentMoney::format($dueAfter), 'paid_total' => StudentMoney::format($paidAfter),
                 'allocated_total' => StudentMoney::format($allocatedAfter),
-                'available_balance' => StudentMoney::format($received - $allocatedAfter),
+                'refunded_total' => StudentMoney::format($refunded),
+                'available_balance' => StudentMoney::format($received - $allocatedAfter - $refunded),
                 'debt' => StudentMoney::format($dueAfter - $paidAfter)],
             'released_allocations' => array_map(fn (array $entry): array => [
                 'allocation_id' => $entry['allocation']->id,
@@ -302,10 +308,12 @@ class CenterStudentFeeAdjustmentController extends Controller
         $due = StudentMoney::cents($account->due);
         $paid = StudentMoney::cents($account->paid);
         $allocated = StudentMoney::cents($account->allocated);
+        $refunded = StudentMoney::cents($account->refunded);
 
         return ['received_total' => StudentMoney::format($received), 'due_total' => StudentMoney::format($due),
             'paid_total' => StudentMoney::format($paid), 'allocated_total' => StudentMoney::format($allocated),
-            'available_balance' => StudentMoney::format($received - $allocated),
+            'refunded_total' => StudentMoney::format($refunded),
+            'available_balance' => StudentMoney::format($received - $allocated - $refunded),
             'debt' => StudentMoney::format($due - $paid)];
     }
 

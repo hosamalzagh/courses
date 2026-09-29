@@ -67,10 +67,10 @@ export type InstructorContext = CenterContext & { instructors: Instructor[]; pag
 export type StudentSearchPolicy = { enabled: boolean; revision: number; default_sharing_enabled: boolean };
 export type StudentSearchResult = { id: string; student_number: number; name: string; phone: string | null; within_scope: boolean };
 export type StudentSearchContext = CenterContext & { policy: StudentSearchPolicy; students: StudentSearchResult[]; pagination: { page: number; has_more: boolean }; can_search: boolean };
-export type StudentPayment = { id: string; branch_id: number; branch_name?: string; amount: string; allocated_amount: string; available_amount: string; currency: string; method: string; received_on: string; actor_name: string; created_at: string };
+export type StudentPayment = { id: string; branch_id: number; branch_name?: string; amount: string; allocated_amount: string; refunded_amount: string; available_amount: string; can_refund: boolean; currency: string; method: string; received_on: string; actor_name: string; created_at: string };
 export type StudentFee = { id: string; attempt_id: string; branch_id: number; branch_name: string; group_name: string | null; status: string; withdrawn_on: string | null; net_amount: string; current_due: string; paid_amount: string; remaining_amount: string; currency: string; created_at: string; can_approve: boolean };
 export type StudentAccountContext = CenterContext & {
-  account: { student_id: string; student_name: string; student_number: number; student_status: 'active' | 'suspended'; version: string; currency: string | null; currency_revision: number; currency_locked: boolean; received_total: string; due_total: string; paid_total: string; allocated_total: string; available_balance: string; debt: string };
+  account: { student_id: string; student_name: string; student_number: number; student_status: 'active' | 'suspended'; version: string; currency: string | null; currency_revision: number; currency_locked: boolean; received_total: string; due_total: string; paid_total: string; allocated_total: string; refunded_total: string; available_balance: string; debt: string };
   recordable_branches: { id: number; name: string }[];
   payments: StudentPayment[];
   fees: StudentFee[];
