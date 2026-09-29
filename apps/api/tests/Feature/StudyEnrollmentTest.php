@@ -295,6 +295,39 @@ class StudyEnrollmentTest extends TestCase
         $this->assertLessThanOrEqual(6, (int) $searched->headers->get('X-Courses-Query-Count'));
     }
 
+    public function test_profile_study_history_keeps_withdrawal_on_the_waitlist_origin_period(): void
+    {
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $group = $this->group($this->north, '0.00');
+        $student = $this->student([$this->north]);
+        $url = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($url)->assertOk();
+        $attempt = $this->postJson($url, [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $workspace->json('student.currency_revision'),
+            'joined_on' => now('Africa/Cairo')->toDateString(), 'discount' => '0.00',
+            'discount_reason' => null, 'version' => $workspace->json('student.version'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $today = now('Africa/Cairo')->toDateString();
+        $this->postJson("{$url}/{$attempt['id']}/waitlist", [
+            'entered_on' => $today, 'reason' => 'بانتظار مجموعة جديدة',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $waiting = $this->getJson($url)->assertOk()->json('attempts.0');
+        $this->postJson("{$url}/{$attempt['id']}/withdraw", [
+            'withdrawn_on' => $today, 'reason' => 'انسحب أثناء الانتظار',
+            'revision' => $waiting['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+
+        $response = $this->getJson("{$this->base}/students/{$student['id']}?tab=study")->assertOk()
+            ->assertJsonCount(1, 'study.attempts')
+            ->assertJsonPath('study.attempts.0.status', 'withdrawn')
+            ->assertJsonPath('study.attempts.0.latest_waitlist.left_on', $today)
+            ->assertJsonPath('study.attempts.0.withdrawn_on', $today);
+        $this->assertLessThanOrEqual(6, (int) $response->headers->get('X-Courses-Query-Count'));
+    }
+
     public function test_enrollment_snapshots_price_plan_and_late_join_without_allocating_advance(): void
     {
         $group = $this->group($this->north, '1500.00');
