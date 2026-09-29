@@ -2429,10 +2429,11 @@ class StudyEnrollmentTest extends TestCase
         }
         $correctionUrl = "{$paymentUrl}/corrections";
         $options = $this->getJson($correctionUrl)->assertOk()->assertJsonCount(2, 'allocations')
-            ->assertJsonPath('payment.received_before', '1000.00')
-            ->assertJsonPath('allocations.0.amount', '400.00')
-            ->assertJsonPath('allocations.0.fee_due', '1000.00')
-            ->assertJsonPath('allocations.0.fee_paid', '700.00')->json();
+            ->assertJsonPath('payment.received_before', '1000.00')->json();
+        $firstAllocation = collect($options['allocations'])->firstWhere('id', $allocations[0]['id']);
+        $this->assertSame('400.00', $firstAllocation['amount']);
+        $this->assertSame('1000.00', $firstAllocation['fee_due']);
+        $this->assertSame('700.00', $firstAllocation['fee_paid']);
         $this->assertLessThanOrEqual(6, (int) $this->getJson($accountUrl)->headers->get('X-Courses-Query-Count'));
         $changes = [['id' => $allocations[0]['id'], 'amount' => '300.00'],
             ['id' => $allocations[1]['id'], 'amount' => '200.00']];
