@@ -33,6 +33,7 @@ use App\Http\Controllers\CenterStudyCoverageController;
 use App\Http\Controllers\CenterStudyEnrollmentController;
 use App\Http\Controllers\CenterStudyGroupController;
 use App\Http\Controllers\CenterAttemptThresholdController;
+use App\Http\Controllers\CenterStudyMakeupController;
 use App\Http\Controllers\CenterStudySessionController;
 use App\Http\Controllers\CenterStudyTeachingController;
 use App\Http\Controllers\CenterStudyTransferController;
@@ -112,6 +113,10 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('students/{studentId}/enrollments/{attemptId}/transfer/preview', [CenterStudyTransferController::class, 'preview']);
         Route::get('students/{studentId}/enrollments/{attemptId}/transfer/history', [CenterStudyTransferController::class, 'history']);
         Route::post('students/{studentId}/enrollments/{attemptId}/transfer', [CenterStudyTransferController::class, 'store']);
+        Route::get('students/{studentId}/enrollments/{attemptId}/makeup', [CenterStudyMakeupController::class, 'workspace']);
+        Route::get('students/{studentId}/enrollments/{attemptId}/makeup/absences', [CenterStudyMakeupController::class, 'absences']);
+        Route::post('students/{studentId}/enrollments/{attemptId}/makeup/book', [CenterStudyMakeupController::class, 'book']);
+        Route::post('students/{studentId}/enrollments/{attemptId}/makeup/prove', [CenterStudyMakeupController::class, 'prove']);
         Route::get('students/{studentId}/enrollment-notes', [CenterStudentEventNoteController::class, 'index']);
         Route::get('students/{studentId}/notes', [CenterStudentNotesController::class, 'index']);
         Route::get('students/{studentId}/notes/{noteId}', [CenterStudentNotesController::class, 'show']);

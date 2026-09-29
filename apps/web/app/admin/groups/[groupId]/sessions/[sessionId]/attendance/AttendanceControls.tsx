@@ -268,7 +268,7 @@ export function AttendanceControls({ context, search, linkedEntryId }: { context
       onSaved={note => setCurrent(previous => ({ ...previous, students: previous.students.map(row => row.entry_id === noteRow.entry_id
         ? { ...row, note_body: note.body, note_important: note.important } : row) }))} /> : null}
     {linkedEntryId ? <p>واقعة الحضور المرتبطة بالملاحظة: <Link href={`/admin/${path}/attendance`}>عرض كل الطلاب</Link></p> : null}
-    <DataTable id={`attendance-${session.id}`} title="كشف الطلاب المستحقين" description="يعرض الطلاب المرتبطين بالمجموعة وقت المحاضرة، مع فترات الإيقاف المستبعدة من الحضور والغياب." rows={current.students}
+    <DataTable id={`attendance-${session.id}`} title="كشف الطلاب المستحقين" description="يعرض الطلاب الأساسيين وطلاب التعويض المحجوزين، مع فترات الإيقاف المستبعدة من الحضور والغياب. حجز التعويض غير المسجل لا يتحول إلى غياب عند الإغلاق." rows={current.students}
       rowKey={row => row.attempt_id} searchText={row => `${row.name} ${row.student_number}`} emptyMessage="لا يوجد طلاب مستحقون لهذه المحاضرة."
       serverSearch={{ value: search, onSearch: value => {
         if (noteDirty || correctionDraftOpen || revokeReason.trim()) {
@@ -277,12 +277,12 @@ export function AttendanceControls({ context, search, linkedEntryId }: { context
         router.push(attendanceUrl(1, value));
       } }}
       columns={[
-        { key: "student", label: "الطالب", render: row => <Link href={`/admin/students/${row.student_id}`}>{row.name}</Link> },
+        { key: "student", label: "الطالب", render: row => <span><Link href={`/admin/students/${row.student_id}`}>{row.name}</Link>{row.booking_id ? <small className="muted"> — طالب تعويض</small> : null}</span> },
         { key: "number", label: "رقم الطالب", render: row => row.student_number.toLocaleString("ar-EG") },
         { key: "status", label: "الحضور", render: row => row.suspended_at
           ? <span>مستبعد بسبب الإيقاف<br /><small>من {formatSessionTime(row.suspended_at)}{row.lifted_at ? ` إلى ${formatSessionTime(row.lifted_at)}` : " إلى الآن"}</small></span>
           : row.status === "counted" ? "حاضر محتسب" : row.status === "not_counted" ? "حاضر غير محتسب" : row.status === "absent" ? "غائب"
-          : row.student_status === "suspended" ? "ملف الطالب موقوف حاليًا" : "غير مسجل" },
+          : row.student_status === "suspended" ? "ملف الطالب موقوف حاليًا" : row.booking_id ? "تعويض محجوز دون حضور" : "غير مسجل" },
         { key: "note", label: "ملاحظة", render: row => row.status && row.note_body
           ? <span>{row.note_important ? "★ " : ""}{row.note_body.slice(0, 80)}{row.note_body.length > 80 ? "…" : ""}</span> : "—" },
         { key: "actions", label: "الإجراءات", actions: true, render: row => <div className="flex flex-wrap gap-2">

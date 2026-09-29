@@ -5,7 +5,8 @@ import { PrefetchLink as Link } from "@/components/PrefetchLink";
 export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
   const attendance = entry.event.startsWith("study_attendance.");
   const teaching = entry.event === "study_session.teaching_recorded" || entry.event === "study_session.teaching_corrected";
-  if (!attendance && !teaching && !["study_sessions.scheduled", "study_session.postponed", "study_session.revoked", "study_session.cancelled", "study_session.replacement_scheduled"].includes(entry.event)) return null;
+  const makeup = entry.event.startsWith("study_makeup.");
+  if (!attendance && !teaching && !makeup && !["study_sessions.scheduled", "study_session.postponed", "study_session.revoked", "study_session.cancelled", "study_session.replacement_scheduled"].includes(entry.event)) return null;
   let details = entry.details;
   if (typeof details === "string") { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;
@@ -26,6 +27,16 @@ export function StudySessionAuditDetails({ entry }: { entry: AuditEntry }) {
       {groupId && sessionId ? <p><Link href={`/admin/groups/${encodeURIComponent(groupId)}/sessions/${encodeURIComponent(sessionId)}/teaching`}>فتح سجل التدريس</Link></p> : null}
       <p>قبل:</p>{list(data.before)}<p>بعد:</p>{list(data.after)}
       {typeof data.reason === "string" ? <p>سبب التصحيح: {data.reason}</p> : null}
+    </details>;
+  }
+  if (makeup) {
+    const groupId = typeof data.group_id === "string" ? data.group_id : "";
+    const sessionId = typeof data.session_id === "string" ? data.session_id : "";
+    return <details><summary>تفاصيل حضور التعويض</summary>
+      <p>المحاولة: <bdi dir="ltr">{typeof data.attempt_id === "string" ? data.attempt_id : "غير مسجلة"}</bdi></p>
+      {groupId && sessionId ? <p><Link href={`/admin/groups/${encodeURIComponent(groupId)}/sessions/${encodeURIComponent(sessionId)}/attendance`}>كشف محاضرة التعويض</Link></p> : null}
+      <p>{entry.event === "study_makeup.booked" ? "حُجز التعويض دون احتساب تغطية." : "قبل: دون حضور تعويض · بعد: حاضر محتسب."}</p>
+      {typeof data.reason === "string" ? <p>سبب الإثبات: {data.reason}</p> : null}
     </details>;
   }
   if (attendance) {

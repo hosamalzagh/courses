@@ -80,6 +80,11 @@ class CenterStudyAttendanceController extends Controller
             $this->open($session, (int) $data['revision']);
             $eligible = $this->roster($session)->where('attempts.id', $data['attempt_id'])->first();
             abort_unless($eligible, 404);
+            $sessionDate = (new DateTimeImmutable($session->scheduled_at))
+                ->setTimezone(new DateTimeZone('Africa/Cairo'))->format('Y-m-d');
+            abort_if($eligible->attempt_status === 'withdrawn'
+                && ($eligible->withdrawn_on === null || $eligible->withdrawn_on <= $sessionDate), 409,
+                'سُحبت محاولة الطالب قبل تسجيل الحضور.');
             if ($eligible->student_status === 'suspended' || $eligible->suspended_at !== null) {
                 $this->conflict('student_suspended_for_session');
             }
@@ -161,7 +166,15 @@ class CenterStudyAttendanceController extends Controller
                     ->where('session_id', $sessionId)->where('status', 'absent')->count()]);
             }
             $this->open($session, (int) $data['revision']);
+            $date = (new DateTimeImmutable($session->scheduled_at))->setTimezone(new DateTimeZone('Africa/Cairo'))->format('Y-m-d');
             $pending = $this->roster($session)->whereNull('entries.status')
+                ->whereExists(function ($query) use ($session, $date): void {
+                    $query->selectRaw('1')->from('study_attempt_group_periods as regular_periods')
+                        ->whereColumn('regular_periods.attempt_id', 'attempts.id')
+                        ->where('regular_periods.group_id', $session->group_id)
+                        ->where('regular_periods.joined_on', '<=', $date)
+                        ->where(fn ($period) => $period->whereNull('regular_periods.left_on')->orWhere('regular_periods.left_on', '>', $date));
+                })
                 ->addSelect('session_suspensions.id as suspension_id')->get();
             $unrecorded = $pending->filter(fn ($student) => $student->suspension_id === null);
             $suspended = $pending->filter(fn ($student) => $student->suspension_id !== null);
@@ -380,8 +393,12 @@ class CenterStudyAttendanceController extends Controller
 
         $roster = DB::connection('tenant')->table('study_attempts as attempts')
             ->join('students', 'students.id', '=', 'attempts.student_id')
+            ->leftJoin('study_attempt_withdrawals as withdrawals', 'withdrawals.attempt_id', '=', 'attempts.id')
             ->leftJoin('study_attendance_entries as entries', function ($join) use ($session): void {
                 $join->on('entries.attempt_id', '=', 'attempts.id')->where('entries.session_id', $session->id);
+            })
+            ->leftJoin('study_makeup_bookings as bookings', function ($join) use ($session): void {
+                $join->on('bookings.attempt_id', '=', 'attempts.id')->where('bookings.session_id', $session->id);
             })
             ->leftJoin('student_suspensions as session_suspensions', function ($join) use ($session): void {
                 $join->on('session_suspensions.student_id', '=', 'students.id')
@@ -396,20 +413,31 @@ class CenterStudyAttendanceController extends Controller
                     ->whereNotNull('entries.status')
                     ->whereRaw("attendance_notes.event_type = 'attendance:' || entries.revision::text");
             })
-            ->select(['attempts.id as attempt_id', 'students.id as student_id', 'students.name', 'students.student_number',
+            ->select(['attempts.id as attempt_id', 'attempts.status as attempt_status',
+                'withdrawals.withdrawn_on',
+                'students.id as student_id', 'students.name', 'students.student_number',
                 'students.status as student_status', 'entries.id as entry_id', 'entries.status',
                 'entries.revision as entry_revision', 'entries.recorded_by',
+                'bookings.id as booking_id',
                 'session_suspensions.suspended_at', 'session_suspensions.lifted_at',
                 'attendance_notes.body as note_body', 'attendance_notes.important as note_important']);
         if ($session->closed_at) {
-            return $roster->whereNotNull('entries.id');
+            return $roster->where(fn (Builder $query) => $query->whereNotNull('entries.id')
+                ->orWhere(fn (Builder $booked) => $booked->whereNotNull('bookings.id')
+                    ->where(fn (Builder $active) => $active->where('attempts.status', '<>', 'withdrawn')
+                        ->orWhere('withdrawals.withdrawn_on', '>', $date))));
         }
 
-        return $roster->whereExists(function ($query) use ($session, $date): void {
-            $query->selectRaw('1')->from('study_attempt_group_periods as periods')
-                ->whereColumn('periods.attempt_id', 'attempts.id')->where('periods.group_id', $session->group_id)
-                ->where('periods.joined_on', '<=', $date)
-                ->where(fn ($query) => $query->whereNull('periods.left_on')->orWhere('periods.left_on', '>', $date));
+        return $roster->where(function (Builder $query) use ($session, $date): void {
+            $query->where(fn (Builder $booked) => $booked->whereNotNull('bookings.id')
+                ->where(fn (Builder $active) => $active->where('attempts.status', '<>', 'withdrawn')
+                    ->orWhere('withdrawals.withdrawn_on', '>', $date)))
+                ->orWhereExists(function ($periods) use ($session, $date): void {
+                    $periods->selectRaw('1')->from('study_attempt_group_periods as periods')
+                        ->whereColumn('periods.attempt_id', 'attempts.id')->where('periods.group_id', $session->group_id)
+                        ->where('periods.joined_on', '<=', $date)
+                        ->where(fn ($period) => $period->whereNull('periods.left_on')->orWhere('periods.left_on', '>', $date));
+                });
         });
     }
 

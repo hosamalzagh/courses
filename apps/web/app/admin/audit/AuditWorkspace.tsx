@@ -73,6 +73,8 @@ const eventNames: Record<string, string> = {
   "study_attendance.undone": "التراجع عن حضور طالب",
   "study_attendance.closed": "إغلاق كشف حضور محاضرة",
   "study_attendance.corrected": "تصحيح حضور في كشف مغلق",
+  "study_makeup.booked": "حجز حضور تعويض",
+  "study_makeup.proved": "إثبات حضور تعويض بعد الإغلاق",
   "study_session.revoked": "إلغاء اعتماد محاضرة منعقدة",
   "study_session.teaching_recorded": "تسجيل التدريس الفعلي لمحاضرة",
   "study_session.teaching_corrected": "تصحيح التدريس الفعلي لمحاضرة",
