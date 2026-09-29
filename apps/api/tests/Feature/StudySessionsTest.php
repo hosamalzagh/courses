@@ -1050,7 +1050,7 @@ class StudySessionsTest extends TestCase
             $absent = [];
             foreach ($fillerSessionIds as $index => $fillerId) {
                 DB::table('study_sessions')->where('id', $fillerId)->update([
-                    'scheduled_at' => $sourceAt->copy()->subDays($index + 2),
+                    'scheduled_at' => $sourceAt->copy()->addMinutes($index + 1),
                     'status' => 'held', 'closed_at' => now(), 'closed_by' => $this->owner->id,
                 ]);
                 $absent[] = ['id' => (string) Str::uuid(), 'session_id' => $fillerId,
@@ -1063,7 +1063,7 @@ class StudySessionsTest extends TestCase
             ->assertJsonCount(20, 'source_absences')->assertJsonPath('pagination.has_more', true);
         $olderAbsences = $this->getJson("{$makeupPath}/absences?page=2")->assertOk()
             ->assertJsonCount(2, 'source_absences')->assertJsonPath('pagination.has_more', false);
-        $this->assertContains($fillerSessionIds[20], array_column($olderAbsences->json('source_absences'), 'id'));
+        $this->assertContains($sourceSession['id'], array_column($olderAbsences->json('source_absences'), 'id'));
         $this->assertLessThanOrEqual(6, (int) $firstAbsences->headers->get('X-Courses-Query-Count'));
         $this->assertLessThanOrEqual(6, (int) $olderAbsences->headers->get('X-Courses-Query-Count'));
         $booking = ['session_id' => $session['id'], 'source_session_id' => $sourceSession['id'],
@@ -1072,6 +1072,11 @@ class StudySessionsTest extends TestCase
         $this->postJson("{$makeupPath}/book", [...$booking, 'session_revision' => $session['revision'] + 1,
             'request_id' => (string) Str::uuid()])->assertConflict();
         $this->postJson("{$makeupPath}/book", $booking)->assertCreated();
+        $booked = $this->getJson("{$makeupPath}?q=needle")->assertOk()
+            ->assertJsonPath('sessions.0.booked_source.id', $sourceSession['id'])
+            ->assertJsonPath('sessions.0.booked_source.group_name', $source['name']);
+        $this->assertNotContains($sourceSession['id'], array_column($firstAbsences->json('source_absences'), 'id'));
+        $this->assertLessThanOrEqual(6, (int) $booked->headers->get('X-Courses-Query-Count'));
         $this->postJson("{$makeupPath}/book", $booking)->assertOk()->assertJsonPath('replayed', true);
         $this->postJson("{$makeupPath}/book", [...$booking, 'request_id' => (string) Str::uuid()])->assertConflict();
         $coveragePath = "{$this->base}/groups/{$source['id']}/coverage";

@@ -84,6 +84,19 @@ test('books makeup without granting coverage and hides the attempt from unauthor
     });
     expect(enrolled.status).toBe(201);
     const attemptId = enrolled.body.attempt.id;
+    const sourceSession = await write(owner, `groups/${source.id}/sessions`, { kind: 'single', revision: source.revision,
+      start_at: scheduled, plan_lecture_number: 1, request_id: crypto.randomUUID() });
+    expect(sourceSession.status).toBe(201);
+    const sourceSessionId = sourceSession.body.sessions[0].id as string;
+    expect(sourceSessionId).toMatch(/^[a-f0-9-]{36}$/);
+    expect(source.id).toMatch(/^[a-f0-9-]{36}$/);
+    expect((await write(owner, `groups/${source.id}/start`, { revision: sourceSession.body.group_revision })).status).toBe(200);
+    execFileSync('psql', ['-h', '127.0.0.1', '-p', process.env.COURSES_TRANSFER_DB_PORT!, '-U', 'postgres',
+      '-d', `courses_center_${centerId}`, '-c',
+      `UPDATE study_groups SET started_at = now() - interval '3 days' WHERE id = '${source.id}'; UPDATE study_sessions SET scheduled_at = now() - interval '2 days' WHERE id = '${sourceSessionId}'`], { stdio: 'ignore' });
+    expect((await write(owner, `groups/${source.id}/sessions/${sourceSessionId}/close`, {
+      revision: sourceSession.body.sessions[0].revision, request_id: crypto.randomUUID(),
+    })).status).toBe(200);
     const start = queryRows().length;
     await owner.setViewportSize({ width: 390, height: 844 });
     await owner.goto(`${origin}/admin/students/${studentId}/enrollments`);
@@ -109,6 +122,7 @@ test('books makeup without granting coverage and hides the attempt from unauthor
     expect(await owner.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
     const row = editor.getByRole('row').filter({ hasText: target.name });
     await row.getByRole('button', { name: 'حجز تعويض' }).click();
+    await editor.getByLabel('الغياب الأصلي المرتبط، إن وجد').selectOption(sourceSessionId);
     await owner.getByRole('button', { name: 'تأكيد حجز التعويض' }).click();
     await expect(editor.getByText('حُجز التعويض. لا تُحسب التغطية حتى تسجيل الحضور المحتسب.')).toBeVisible();
     const coverage = await owner.request.get(`${origin}/api/v1/center/groups/${source.id}/coverage`);
@@ -139,7 +153,15 @@ test('books makeup without granting coverage and hides the attempt from unauthor
     await expect(historicalProof).toBeVisible();
     const historicalOptions = await (await owner.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments/${attemptId}/makeup`)).json();
     expect(historicalOptions.sessions[0]).toMatchObject({ id: sessionId, can_book: false, can_prove: true });
+    expect(historicalOptions.sessions[0].booked_source).toMatchObject({ id: sourceSessionId, group_name: source.name });
+    await owner.route(`**/enrollments/${attemptId}/makeup/absences?page=1`, async route => {
+      const response = await route.fetch();
+      const data = await response.json();
+      await route.fulfill({ response, json: { ...data, source_absences: [] } });
+    });
     await historicalProof.click();
+    await expect(historical.getByLabel('الغياب الأصلي المرتبط، إن وجد')).toHaveValue(sourceSessionId);
+    await expect(historical.getByRole('option', { name: /مصدر الحجز/ })).toBeAttached();
     await historical.getByLabel('سبب إثبات الحضور بعد الإغلاق').fill('إثبات حضور سابق للانسحاب');
     await owner.getByRole('button', { name: 'حفظ إثبات التعويض' }).click();
     await expect(historical.getByText('ثُبت حضور التعويض في المحاضرة المغلقة مع السبب وسجل التدقيق.')).toBeVisible();

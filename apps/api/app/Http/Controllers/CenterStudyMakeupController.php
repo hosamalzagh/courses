@@ -62,24 +62,37 @@ class CenterStudyMakeupController extends Controller
                 'sessions.status', 'sessions.revision', 'sessions.plan_lecture_id', 'groups.name as group_name',
                 'groups.plan_version_id', 'courses.branch_id', 'bookings.id as booking_id',
                 'bookings.source_session_id', 'bookings.booked_at', 'bookings.proved_at',
-                'entries.status as attendance_status', 'source_courses.branch_id as source_branch_id'])
+                'entries.status as attendance_status', 'source_courses.branch_id as source_branch_id',
+                'source_groups.name as source_group_name', 'source_sessions.number as source_number',
+                'source_sessions.scheduled_at as source_scheduled_at'])
             ->orderByRaw('CASE WHEN bookings.id IS NULL THEN 1 ELSE 0 END')
             ->orderByDesc('sessions.scheduled_at')->orderBy('sessions.id')
             ->offset(($page - 1) * 20)->limit(21)->get();
 
         return response()->json(['attempt' => $attempt,
-            'sessions' => $sessions->take(20)->map(fn ($session): array => [
-                ...array_diff_key((array) $session, ['source_branch_id' => true]),
-                'source_session_id' => $session->source_branch_id !== null
-                    && $permissions->can('read', (int) $session->source_branch_id) ? $session->source_session_id : null,
-                'can_book' => $attempt->status !== 'withdrawn' && $attempt->student_status === 'active'
-                    && $permissions->can('attendance.record', (int) $session->branch_id)
-                    && new DateTimeImmutable($session->scheduled_at) > now()->toImmutable(),
-                'can_prove' => $attempt->student_status === 'active'
-                    && ($attempt->withdrawn_on === null || $attempt->withdrawn_on > (new DateTimeImmutable($session->scheduled_at))
-                        ->setTimezone(new DateTimeZone('Africa/Cairo'))->format('Y-m-d'))
-                    && $permissions->can('attendance.correct', (int) $session->branch_id),
-            ])->values(),
+            'sessions' => $sessions->take(20)->map(function ($session) use ($attempt, $permissions): array {
+                $canReadSource = $session->source_branch_id !== null
+                    && $permissions->can('read', (int) $session->source_branch_id);
+
+                return [
+                    ...array_diff_key((array) $session, ['source_branch_id' => true,
+                        'source_group_name' => true, 'source_number' => true, 'source_scheduled_at' => true]),
+                    'source_session_id' => $canReadSource ? $session->source_session_id : null,
+                    'booked_source' => $canReadSource && $session->source_session_id !== null ? [
+                        'id' => $session->source_session_id, 'group_name' => $session->source_group_name,
+                        'number' => $session->source_number, 'scheduled_at' => $session->source_scheduled_at,
+                        'branch_id' => $session->source_branch_id,
+                    ] : null,
+                    'can_book' => $attempt->status !== 'withdrawn' && $attempt->student_status === 'active'
+                        && $permissions->can('attendance.record', (int) $session->branch_id)
+                        && new DateTimeImmutable($session->scheduled_at) > now()->toImmutable(),
+                    'can_prove' => $attempt->student_status === 'active'
+                        && ($session->source_session_id === null || $canReadSource)
+                        && ($attempt->withdrawn_on === null || $attempt->withdrawn_on > (new DateTimeImmutable($session->scheduled_at))
+                            ->setTimezone(new DateTimeZone('Africa/Cairo'))->format('Y-m-d'))
+                        && $permissions->can('attendance.correct', (int) $session->branch_id),
+                ];
+            })->values(),
             'pagination' => ['page' => $page, 'has_more' => $sessions->count() > 20]])
             ->header('Cache-Control', 'private, no-store');
     }

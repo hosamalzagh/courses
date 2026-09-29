@@ -19,7 +19,7 @@ type Session = { id: string; group_id: string; group_name: string; branch_id: nu
   title: string | null; scheduled_at: string; status: "planned" | "held" | "cancelled";
   revision: number; plan_lecture_id: string | null; can_book: boolean; can_prove: boolean;
   booking_id: string | null; source_session_id: string | null; booked_at: string | null;
-  proved_at: string | null; attendance_status: string | null };
+  booked_source: Absence | null; proved_at: string | null; attendance_status: string | null };
 type Absence = { id: string; group_name: string; number: number; scheduled_at: string; branch_id: number };
 type Workspace = { attempt: { id: string; revision: number; status: string }; sessions: Session[];
   pagination: { page: number; has_more: boolean } };
@@ -52,6 +52,8 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const selected = workspace?.sessions.find(session => session.id === selectedId);
+  const availableAbsences = selected?.booked_source && !sourceAbsences.some(absence => absence.id === selected.booked_source?.id)
+    ? [selected.booked_source, ...sourceAbsences] : sourceAbsences;
   const dirty = Boolean(selectedId || sourceId || reason);
   const endpoint = `students/${studentId}/enrollments/${attempt.id}/makeup`;
   const workspacePath = `${endpoint}?page=${page}${searchTerm ? `&q=${encodeURIComponent(searchTerm)}` : ""}`;
@@ -177,8 +179,9 @@ export function StudyMakeupEditor({ studentId, attempt, onClose, onDirtyChange }
           <Field><FieldLabel htmlFor={`${prefix}-source`}>الغياب الأصلي المرتبط، إن وجد</FieldLabel>
             <NativeSelect id={`${prefix}-source`} value={sourceId} onChange={event => { setSourceId(event.target.value); pendingId.current = null; }} disabled={busy || uncertain || absencesLoading}>
               <NativeSelectOption value="">محتوى ناقص دون ربط بغياب محدد</NativeSelectOption>
-              {sourceAbsences.map(absence => <NativeSelectOption key={absence.id} value={absence.id}>
+              {availableAbsences.map(absence => <NativeSelectOption key={absence.id} value={absence.id}>
                 {absence.group_name} — المحاضرة {absence.number} — {formatSessionTime(absence.scheduled_at)}
+                {absence.id === selected.booked_source?.id ? " (مصدر الحجز)" : ""}
               </NativeSelectOption>)}
             </NativeSelect>{absencesLoading ? <FieldDescription>جارٍ تحميل الغيابات الأصلية…</FieldDescription> : null}</Field>
           {hasMoreAbsences || absencesFailed ? <Button type="button" disabled={busy || uncertain || absencesLoading}
