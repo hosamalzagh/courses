@@ -15,6 +15,7 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -154,7 +155,7 @@ class CenterStudentFinanceController extends Controller
             ],
             'recordable_branches' => $branches->take(50)->values(),
             'payments' => $payments->take(20)->map(fn (object $row) => [
-                ...(array) $row,
+                ...Arr::except((array) $row, ['hidden_allocation_count']),
                 'allocated_amount' => StudentMoney::format(StudentMoney::cents($row->allocated_amount)),
                 'refunded_amount' => StudentMoney::format(StudentMoney::cents($row->refunded_amount)),
                 'available_amount' => StudentMoney::format(StudentMoney::cents($row->amount) - StudentMoney::cents($row->allocated_amount)

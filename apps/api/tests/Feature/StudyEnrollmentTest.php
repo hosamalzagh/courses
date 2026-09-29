@@ -2471,7 +2471,8 @@ class StudyEnrollmentTest extends TestCase
         $url = "{$paymentUrl}/corrections";
         $this->grant([$this->north => ['accounting', 'branch_auditor']]);
         $this->asUser($this->staff);
-        $this->getJson($accountUrl)->assertJsonPath('payments.0.can_view_corrections', false);
+        $this->getJson($accountUrl)->assertJsonPath('payments.0.can_view_corrections', false)
+            ->assertJsonMissingPath('payments.0.hidden_allocation_count');
         $this->getJson($url)->assertNotFound();
         $input = ['correct_amount' => '50.00', 'allocations' => [
             ['id' => $allocation['id'], 'amount' => '40.00']],
