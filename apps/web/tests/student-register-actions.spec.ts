@@ -83,6 +83,8 @@ test('student rows expose authorized actions and the profile keeps its summary f
 
   await page.getByRole('link', { name: 'تقرير الطالب' }).click();
   await expect(page.getByRole('article', { name: 'تقرير الطالب' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('article', { name: 'تقرير الطالب' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'ملخص الغياب الحالي' })).toBeVisible();
   await expect(page.getByText('هذا العدد يخص المجموعات الحالية فقط.')).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('student-report-mobile.png') });
