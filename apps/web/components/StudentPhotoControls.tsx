@@ -142,13 +142,16 @@ export function StudentPhotoControls({ student }: { student: Student }) {
         aria-label={`صورة الطالب ${current.name}`}
         onSubmit={save}
         noValidate
-        className="context-card form-stack"
+        className="context-card form-stack student-photo-card"
       >
+        <h2>صورة الطالب</h2>
         <Field data-invalid={Boolean(error)} data-disabled={busy}>
-          <FieldLabel htmlFor={`${formId}-file`}>اختيار صورة الطالب</FieldLabel>
+          <FieldLabel className="sr-only" htmlFor={`${formId}-file`}>اختيار صورة الطالب</FieldLabel>
           <Input
             ref={input}
             id={`${formId}-file`}
+            className="sr-only"
+            style={{ width: 1, height: 1, minWidth: 0 }}
             type="file"
             accept="image/jpeg,image/png,image/webp"
             disabled={busy}
@@ -161,10 +164,12 @@ export function StudentPhotoControls({ student }: { student: Student }) {
               setNotice("");
             }}
           />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" disabled={busy} onClick={() => input.current?.click()}>اختيار صورة</Button>
+            <span className="muted text-sm">{file?.name ?? 'لم تُحدّد صورة جديدة'}</span>
+          </div>
           <FieldDescription id={`${formId}-hint`}>
-            صورة شخصية للتعرف على الطالب، بصيغة JPEG أو PNG أو WebP حتى 10 MB.
-            وثائق الهوية لها مسار مقيد مستقل. تبقى الصورة الحالية حتى نجاح
-            الحفظ.
+            JPEG أو PNG أو WebP حتى 10 MB. تبقى الصورة الحالية حتى نجاح الحفظ.
           </FieldDescription>
           {error ? (
             <FieldError id={`${formId}-error`}>{error}</FieldError>
@@ -173,9 +178,9 @@ export function StudentPhotoControls({ student }: { student: Student }) {
         {notice ? <InlineNotice>{notice}</InlineNotice> : null}
       </form>
       <CenterHeaderActions>
-        <Button form={formId} type="submit" busy={busy} disabled={conflict}>
+        {file ? <Button form={formId} type="submit" busy={busy} disabled={conflict}>
           حفظ صورة الطالب
-        </Button>
+        </Button> : null}
         {file ? (
           <Button disabled={busy} onClick={() => clear()}>
             إلغاء اختيار الصورة

@@ -10,7 +10,7 @@ function subscribe(callback: () => void) {
   return () => window.removeEventListener(changed, callback);
 }
 
-export function useTablePreferences(id: string, columns: { key: string; actions?: boolean }[]) {
+export function useTablePreferences(id: string, columns: { key: string; actions?: boolean; defaultHidden?: boolean }[]) {
   const user = useContext(TablePreferenceUser);
   const name = `courses_table_${encodeURIComponent(user)}_${encodeURIComponent(id)}`;
   const saved = useSyncExternalStore(subscribe, () => {
@@ -18,14 +18,19 @@ export function useTablePreferences(id: string, columns: { key: string; actions?
     return cookie?.slice(name.length + 1) ?? fallback.get(`${location.host}:${name}`) ?? "";
   }, () => "");
   const movable = columns.filter((column) => !column.actions).map((column) => column.key);
+  const defaultHidden = columns.filter((column) => column.defaultHidden && !column.actions && column.key !== movable[0]).map((column) => column.key);
   let order = movable;
-  let hidden: string[] = [];
+  let hidden: string[] = defaultHidden;
   try {
     const parsed: unknown = JSON.parse(decodeURIComponent(saved));
     if (parsed && typeof parsed === "object") {
       const data = parsed as { order?: unknown; hidden?: unknown };
-      if (Array.isArray(data.order)) order = [...new Set([...data.order.filter((key): key is string => typeof key === "string" && movable.includes(key)), ...movable])];
-      if (Array.isArray(data.hidden)) hidden = data.hidden.filter((key): key is string => typeof key === "string" && movable.includes(key) && key !== movable[0]);
+      const savedOrder = Array.isArray(data.order) ? data.order.filter((key): key is string => typeof key === "string" && movable.includes(key)) : [];
+      if (Array.isArray(data.order)) order = [...new Set([...savedOrder, ...movable])];
+      if (Array.isArray(data.hidden)) hidden = [...new Set([
+        ...data.hidden.filter((key): key is string => typeof key === "string" && movable.includes(key) && key !== movable[0]),
+        ...defaultHidden.filter((key) => !savedOrder.includes(key)),
+      ])];
     }
   } catch { /* Absent or invalid display preferences use the defaults. */ }
   const ordered = [...order, ...columns.filter((column) => column.actions).map((column) => column.key)];
@@ -44,6 +49,6 @@ export function useTablePreferences(id: string, columns: { key: string; actions?
   }
   return { ordered, movable: order, hidden, move,
     toggle: (key: string) => { if (movable.includes(key) && key !== movable[0]) save(order, hidden.includes(key) ? hidden.filter((item) => item !== key) : [...hidden, key]); },
-    reset: () => save(movable, []),
+    reset: () => save(movable, defaultHidden),
   };
 }
