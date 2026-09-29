@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
 use App\Support\StudyCoverageCredits;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -203,6 +204,17 @@ class CenterGroupRequirementController extends Controller
             abort_unless($requirement, 409, 'متطلب المحاضرة لم يعد معتمدًا.');
             $hasAttendance = $db->table('study_attendance_entries')->where('session_id', $row->id)->exists();
             $hasReplacement = $db->table('study_sessions')->where('replaces_session_id', $row->id)->exists();
+            $hasMakeupBooking = $db->table('study_sessions as requirement_sessions')
+                ->where('requirement_sessions.group_requirement_id', $requirement->id)
+                ->whereExists(fn (Builder $query) => $query->selectRaw('1')
+                    ->from('study_makeup_bookings as bookings')
+                    ->where(fn (Builder $linked) => $linked
+                        ->whereColumn('bookings.session_id', 'requirement_sessions.id')
+                        ->orWhereColumn('bookings.source_session_id', 'requirement_sessions.id')))
+                ->exists();
+            if ($hasMakeupBooking) {
+                $this->conflict('makeup_booking_exists');
+            }
             if ($row->closed_at !== null || $hasAttendance || $hasReplacement
                 || ! in_array($row->status, ['planned', 'cancelled'], true)
                 || ($row->status === 'cancelled' && ($row->cancelled_at === null

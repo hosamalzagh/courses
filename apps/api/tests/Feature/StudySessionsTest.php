@@ -331,6 +331,49 @@ class StudySessionsTest extends TestCase
             ->assertJsonPath('after.required_count', 1);
     }
 
+    public function test_final_reduction_rejects_a_booked_makeup_session_without_partial_changes(): void
+    {
+        $sourceGroup = $this->group($this->north, 'Makeup source', 2);
+        $targetGroup = $this->postJson("{$this->base}/groups", [
+            'level_id' => $sourceGroup['level_id'], 'plan_version_id' => $sourceGroup['plan_version_id'],
+            'name' => 'Makeup target', 'approved_price' => '100.00',
+            'instructor_ids' => array_column($sourceGroup['instructors'], 'id'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $path = "{$this->base}/groups/{$targetGroup['id']}";
+        $session = $this->postJson("{$path}/sessions", [
+            'kind' => 'single', 'revision' => 1,
+            'start_at' => now('Africa/Cairo')->addDays(14)->setTime(16, 0)->format('Y-m-d\\TH:i'),
+            'plan_lecture_number' => 1, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('sessions.0');
+        $change = ['kind' => 'reduce', 'session_id' => $session['id'], 'decision' => 'none',
+            'reason' => 'لن تعقد المحاضرة ولن يوجد بديل'];
+        $preview = $this->postJson("{$path}/requirements/preview", $change)->assertOk()->json();
+
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $student = $this->student();
+        $this->enroll($student['id'], $sourceGroup, now('Africa/Cairo')->toDateString());
+        $attempt = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")
+            ->assertOk()->json('attempts.0');
+        $this->postJson("{$this->base}/students/{$student['id']}/enrollments/{$attempt['id']}/makeup/book", [
+            'session_id' => $session['id'], 'attempt_revision' => $attempt['revision'],
+            'session_revision' => $session['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+
+        $this->postJson("{$path}/requirements/preview", $change)->assertConflict()
+            ->assertJsonPath('code', 'makeup_booking_exists');
+        $this->postJson("{$path}/requirements", [...$change,
+            'group_revision' => $preview['group_revision'], 'preview_token' => $preview['preview_token'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertConflict()->assertJsonPath('code', 'makeup_booking_exists');
+        $this->center->run(function () use ($targetGroup, $session): void {
+            $this->assertSame(2, DB::table('study_group_requirements')
+                ->where('group_id', $targetGroup['id'])->whereNull('retired_at')->count());
+            $this->assertSame('planned', DB::table('study_sessions')->where('id', $session['id'])->value('status'));
+            $this->assertSame(1, DB::table('study_makeup_bookings')->where('session_id', $session['id'])->count());
+        });
+    }
+
     public function test_unreplaced_academic_cancellation_can_be_finalized_with_audited_decision_change(): void
     {
         $group = $this->group($this->north, 'Academic cancellation finalized', 2);
