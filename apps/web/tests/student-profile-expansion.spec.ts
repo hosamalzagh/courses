@@ -57,7 +57,7 @@ function clearColdCache(): void {
     CACHE_STORE: "file",
     CACHE_PREFIX: "courses_issue82_final_",
   };
-  if (apiDirectory !== fixtureApiDirectory || !apiDirectory.includes("/.codex/worktrees/")
+  if (apiDirectory !== fixtureApiDirectory
     || databasePort !== expected.DB_PORT
     || process.env.COURSES_PROFILE_EXPANSION_DB_HOST !== expected.DB_HOST
     || process.env.COURSES_PROFILE_EXPANSION_DB_DATABASE !== expected.DB_DATABASE
@@ -69,7 +69,8 @@ function clearColdCache(): void {
     || realpathSync(cacheDirectory) !== cacheDirectory) {
     throw new Error("Cold cache clear requires the isolated #82 browser API, PostgreSQL database and local file cache.");
   }
-  execFileSync(process.env.COURSES_PROFILE_EXPANSION_PHP ?? "php85", ["artisan", "cache:clear", "--no-interaction"],
+  execFileSync(process.env.COURSES_PROFILE_EXPANSION_PHP ?? (process.platform === "darwin" ? "php85" : "php"),
+    ["artisan", "cache:clear", "--no-interaction"],
     { cwd: apiDirectory, env: { ...process.env, APP_ENV: "local", DB_CONNECTION: "pgsql", ...expected }, stdio: "pipe" });
 }
 
