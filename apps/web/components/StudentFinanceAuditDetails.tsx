@@ -1,7 +1,15 @@
 import type { AuditEntry } from "@/lib/server-context";
 import { paymentMethodLabels } from "@/lib/student-finance";
 
+const noteKinds: Record<string, string> = {
+  payment: 'الدفعة', allocation: 'التخصيص', allocation_correction: 'تصحيح التخصيص',
+  fee_adjustment: 'تسوية الرسوم', refund: 'الاسترداد',
+  refund_correction: 'تصحيح الاسترداد', payment_correction: 'تصحيح الدفعة',
+};
+
 export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
+  const noteType = entry.event.match(/^student\.(.+)_note_(?:created|updated)$/)?.[1];
+  const noteKind = noteType ? noteKinds[noteType] : undefined;
   if (!['student.payment_recorded', 'student.payment_corrected', 'student.payment_allocated', 'student.payment_allocation_reversed',
     'student.payment_allocation_corrected',
     'student.refund_recorded', 'student.refund_corrected',
@@ -9,15 +17,15 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
     'student.payment_note_created', 'student.payment_note_updated',
     'student.allocation_note_created', 'student.allocation_note_updated',
     'center.financial_currency_changed', 'student.enrolled', 'student.study_repeated', 'student.study_withdrawn',
-    'student.study_waitlisted', 'student.study_reattached', 'student.study_transferred', 'student.study_bulk_waitlist_skipped'].includes(entry.event)) return null;
+    'student.study_waitlisted', 'student.study_reattached', 'student.study_transferred', 'student.study_bulk_waitlist_skipped'].includes(entry.event) && !noteKind) return null;
   let details = entry.details;
   if (typeof details === "string") { try { details = JSON.parse(details); } catch { return null; } }
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;
   const data = details as Record<string, unknown>;
-  if (entry.event.startsWith('student.payment_note_') || entry.event.startsWith('student.allocation_note_')) {
+  if (noteKind) {
     return <details><summary>تفاصيل ملاحظة الحركة المالية</summary>
       <p>الطالب: <bdi dir="ltr">{String(data.student_id ?? "")}</bdi></p>
-      <p>{entry.event.startsWith('student.payment_note_') ? 'الدفعة' : 'التخصيص'}: <bdi dir="ltr">{String(data.event_id ?? "")}</bdi></p>
+      <p>{noteKind}: <bdi dir="ltr">{String(data.event_id ?? "")}</bdi></p>
       <p>نسخة <bdi dir="ltr">{String(data.revision ?? "")}</bdi> — {data.important ? 'مهمة' : 'عادية'}. نص الملاحظة متاح من الحركة المالية ضمن صلاحياتها.</p>
     </details>;
   }

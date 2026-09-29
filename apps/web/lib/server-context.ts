@@ -73,13 +73,18 @@ export type StudentSearchPolicy = { enabled: boolean; revision: number; default_
 export type StudentSearchResult = { id: string; student_number: number; name: string; phone: string | null; within_scope: boolean };
 export type StudentSearchContext = CenterContext & { policy: StudentSearchPolicy; students: StudentSearchResult[]; pagination: { page: number; has_more: boolean }; can_search: boolean };
 export type StudentPayment = { id: string; branch_id: number; branch_name?: string; amount: string; allocated_amount: string; refunded_amount: string; available_amount: string; can_refund: boolean; can_view_corrections: boolean; currency: string; method: string; received_on: string; actor_name: string; created_at: string };
+export type StudentFinancialEvent = { event_type: "allocation_correction" | "fee_adjustment" | "refund" | "refund_correction" | "payment_correction";
+  event_id: string; branch_id: number; related_branch_id: number; second_related_branch_id: number | null;
+  payment_id: string | null; fee_id: string | null; amount_before: string; amount_after: string; reason: string;
+  actor_name: string; created_at: string; original_id: string | null; replacement_id: string | null; related_branch_ids: number[] | null };
 export type StudentFee = { id: string; attempt_id: string; branch_id: number; branch_name: string; group_name: string | null; status: string; withdrawn_on: string | null; net_amount: string; current_due: string; paid_amount: string; remaining_amount: string; currency: string; created_at: string; can_approve: boolean };
 export type StudentAccountContext = CenterContext & {
   account: { student_id: string; student_name: string; student_number: number; student_status: 'active' | 'suspended'; version: string; currency: string | null; currency_revision: number; currency_locked: boolean; received_total: string; due_total: string; paid_total: string; allocated_total: string; refunded_total: string; available_balance: string; debt: string };
   recordable_branches: { id: number; name: string }[];
   payments: StudentPayment[];
   fees: StudentFee[];
-  pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean; fees_page: number; fees_has_more: boolean };
+  events: StudentFinancialEvent[];
+  pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean; fees_page: number; fees_has_more: boolean; events_page: number; events_has_more: boolean };
 };
 export type StudyEnrollmentContext = CenterContext & {
   student: { id: string; name: string; student_number: number; status: "active" | "suspended"; currency: string | null; currency_revision: number; version: string };

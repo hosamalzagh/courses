@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
+use App\Support\StudentFinancialEvents;
 use App\Support\StudentPhotos;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
@@ -31,6 +32,20 @@ class CenterStudentFinancialNoteController extends Controller
     public function saveAllocation(Request $request, string $studentId, string $eventId): JsonResponse
     {
         return $this->save($request, $studentId, $eventId, 'allocation');
+    }
+
+    public function financialEvent(Request $request, string $studentId, string $type, string $eventId): JsonResponse
+    {
+        abort_unless(in_array($type, StudentFinancialEvents::TYPES, true), 404);
+
+        return $this->show($request, $studentId, $eventId, $type);
+    }
+
+    public function saveFinancialEvent(Request $request, string $studentId, string $type, string $eventId): JsonResponse
+    {
+        abort_unless(in_array($type, StudentFinancialEvents::TYPES, true), 404);
+
+        return $this->save($request, $studentId, $eventId, $type);
     }
 
     private function show(Request $request, string $studentId, string $eventId, string $type): JsonResponse
@@ -130,7 +145,7 @@ class CenterStudentFinancialNoteController extends Controller
                 'event' => $note === null ? "student.{$type}_note_created" : "student.{$type}_note_updated",
                 'details' => json_encode(['student_id' => $studentId, 'event_type' => $type, 'event_id' => $eventId,
                     'note_id' => $noteId, 'revision' => $newRevision, 'important' => $data['important'],
-                    ...($type === 'allocation' ? ['related_branch_ids' => [(int) $event->target_branch_id]] : [])]),
+                    ...($this->relatedBranches($event, $type) ? ['related_branch_ids' => $this->relatedBranches($event, $type)] : [])]),
                 'created_at' => $now,
             ]);
 
@@ -141,6 +156,26 @@ class CenterStudentFinancialNoteController extends Controller
 
     private function event(string $studentId, string $eventId, string $type, CenterPermissions $permissions, bool $lock = false, bool $withNote = false): object
     {
+        if (in_array($type, StudentFinancialEvents::TYPES, true)) {
+            abort_unless(StudentPhotos::visibleStudent($studentId, $permissions, 'finance.read')->exists(), 404);
+            $query = StudentFinancialEvents::page($studentId, $permissions, 1, $type, $eventId);
+            if ($withNote) {
+                $query = DB::connection('tenant')->query()->fromSub($query, 'financial_event')
+                    ->leftJoin('student_event_notes as notes', function ($join) use ($type): void {
+                        $join->on('notes.event_id', '=', 'financial_event.event_id')->where('notes.event_type', $type);
+                    })->select('financial_event.*')->addSelect([
+                        'notes.id as note_id', 'notes.student_id as note_student_id',
+                        'notes.branch_id as note_branch_id', 'notes.body as note_body',
+                        'notes.important as note_important', 'notes.revision as note_revision',
+                        'notes.created_by_name as note_created_by_name', 'notes.updated_by_name as note_updated_by_name',
+                        'notes.created_at as note_created_at', 'notes.updated_at as note_updated_at',
+                    ]);
+            }
+            $event = $query->first();
+            abort_unless($event, 404);
+
+            return $event;
+        }
         $students = StudentPhotos::visibleStudent($studentId, $permissions, 'finance.read');
         $query = $type === 'payment'
             ? $students->join('student_payments as events', 'events.student_id', '=', 'students.id')
@@ -164,13 +199,84 @@ class CenterStudentFinancialNoteController extends Controller
 
     private function authorize(CenterPermissions $permissions, object $event, string $type): void
     {
+        if (in_array($type, StudentFinancialEvents::TYPES, true)) {
+            foreach ([$event->branch_id, ...$this->relatedBranches($event, $type)] as $branchId) {
+                abort_unless($permissions->can('finance.read', (int) $branchId), 404);
+            }
+
+            return;
+        }
         abort_unless($permissions->can('finance.read', (int) $event->branch_id)
             && ($type !== 'allocation' || $permissions->can('finance.read', (int) $event->target_branch_id)), 404);
     }
 
     private function canEdit(CenterPermissions $permissions, object $event, string $type): bool
     {
+        if ($type === 'fee_adjustment') {
+            return $permissions->can('finance.approve', (int) $event->branch_id);
+        }
+        if ($type === 'refund') {
+            return $permissions->can('payments.record', (int) $event->branch_id)
+                && $permissions->can('finance.approve', (int) $event->branch_id);
+        }
+        if ($type === 'refund_correction') {
+            return $permissions->can('payments.correct', (int) $event->branch_id)
+                && $permissions->can('finance.approve', (int) $event->branch_id);
+        }
+        if ($type === 'payment_correction') {
+            $source = (int) $event->branch_id;
+            if (! $permissions->can('payments.correct', $source)) {
+                return false;
+            }
+            $related = $this->relatedBranches($event, $type);
+            if ($related && ! $permissions->can('payments.allocate', $source)) {
+                return false;
+            }
+            foreach ($related as $branchId) {
+                if (! $permissions->can('payments.correct', $branchId)
+                    || ($branchId !== $source && (! $permissions->can('payments.allocate', $branchId)
+                        || ! $permissions->can('finance.approve', $source)
+                        || ! $permissions->can('finance.approve', $branchId)))) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        if ($type === 'allocation_correction') {
+            $source = (int) $event->branch_id;
+            if (! $permissions->can('payments.correct', $source)) {
+                return false;
+            }
+            foreach ($this->relatedBranches($event, $type) as $branchId) {
+                if ($branchId !== $source && (! $permissions->can('payments.correct', $branchId)
+                    || ! $permissions->can('finance.approve', $source)
+                    || ! $permissions->can('finance.approve', $branchId))) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         return $permissions->can($type === 'payment' ? 'payments.record' : 'payments.allocate', (int) $event->branch_id);
+    }
+
+    private function relatedBranches(object $event, string $type): array
+    {
+        if ($type === 'allocation') {
+            return [(int) $event->target_branch_id];
+        }
+        if ($type === 'allocation_correction') {
+            return array_values(array_unique(array_map('intval', array_filter([
+                $event->related_branch_id, $event->second_related_branch_id,
+            ]))));
+        }
+        if ($type === 'payment_correction' || $type === 'fee_adjustment') {
+            return array_map('intval', json_decode($event->related_branch_ids ?? '[]', true) ?? []);
+        }
+
+        return [];
     }
 
     private function present(object $row): array

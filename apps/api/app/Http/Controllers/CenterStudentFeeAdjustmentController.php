@@ -6,8 +6,8 @@ use App\Support\ActiveStudentAllocations;
 use App\Support\ActiveStudentRefunds;
 use App\Support\CenterPermissions;
 use App\Support\CenterWrites;
-use App\Support\EffectiveStudyFees;
 use App\Support\EffectiveStudentPayments;
+use App\Support\EffectiveStudyFees;
 use App\Support\StudentAccountVersion;
 use App\Support\StudentMoney;
 use App\Support\StudentPhotos;
@@ -122,6 +122,14 @@ class CenterStudentFeeAdjustmentController extends Controller
                 $studentId, $fee, 'settlement', $afterReversal, $target, $reason, $request, $now,
                 null, $replacement?->id);
             DB::connection('tenant')->table('study_fee_adjustments')->insert($rows);
+            $relatedBranches = array_values(array_unique(array_map(
+                fn (array $entry): int => (int) $entry['allocation']->source_branch_id, $release)));
+            if ($relatedBranches !== []) {
+                DB::connection('tenant')->table('study_fee_adjustment_related_branches')->insert(
+                    array_merge(...array_map(fn (array $row): array => array_map(
+                        fn (int $branchId): array => ['adjustment_id' => $row['id'], 'branch_id' => $branchId],
+                        $relatedBranches), $rows)));
+            }
             $this->releaseAllocations($studentId, $fee, $release, $reason, $request, $now);
             DB::connection('tenant')->table('students')->where('id', $studentId)->update([
                 'financial_account_revision' => $student->financial_account_revision + 1,
@@ -136,8 +144,7 @@ class CenterStudentFeeAdjustmentController extends Controller
                     'before_due' => $preview['fee_before'], 'after_due' => $preview['fee_after'],
                     'account_before' => $preview['account_before'], 'account_after' => $preview['account_after'],
                     'released_allocations' => $preview['released_allocations'],
-                    'related_branch_ids' => array_values(array_unique(array_map(
-                        fn (array $entry): int => (int) $entry['allocation']->source_branch_id, $release))),
+                    'related_branch_ids' => $relatedBranches,
                     'currency' => $fee->currency]),
                 'created_at' => $now,
             ]);

@@ -152,6 +152,9 @@ class InstructorProfilesTest extends TestCase
             $waitlistMigration = glob(database_path('migrations/tenant/*_create_study_attempt_waitlists.php'))[0];
             (require $waitlistMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($waitlistMigration, PATHINFO_FILENAME))->delete();
+            $visibilityMigration = glob(database_path('migrations/tenant/*_scope_fee_adjustments_and_index_financial_events.php'))[0];
+            (require $visibilityMigration)->down();
+            DB::table('migrations')->where('migration', pathinfo($visibilityMigration, PATHINFO_FILENAME))->delete();
             $adjustmentsMigration = glob(database_path('migrations/tenant/*_create_study_fee_adjustments.php'))[0];
             (require $adjustmentsMigration)->down();
             DB::table('migrations')->where('migration', pathinfo($adjustmentsMigration, PATHINFO_FILENAME))->delete();

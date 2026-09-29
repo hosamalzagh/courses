@@ -1368,6 +1368,13 @@ class StudyEnrollmentTest extends TestCase
         }
         $this->center->run(fn () => $this->assertSame(0, DB::table('student_payment_allocation_reversals')->count()));
         $saved = $this->postJson($url, $payload)->assertCreated()->json();
+        $allocationEventId = $saved['reversal']['id'];
+        $this->getJson("{$accountUrl}?financial_event_type=allocation_correction&financial_event_id={$allocationEventId}")
+            ->assertOk()->assertJsonCount(1, 'events')
+            ->assertJsonPath('events.0.amount_before', '400.00')
+            ->assertJsonPath('events.0.amount_after', '400.00');
+        $allocationEventNote = "{$this->base}/students/{$student['id']}/financial-events/allocation_correction/{$allocationEventId}/note";
+        $this->getJson($allocationEventNote)->assertOk()->assertJsonPath('can_edit', true);
         $this->postJson($url, $payload)->assertOk()->assertJsonPath('allocation.id', $saved['allocation']['id']);
         $this->postJson($url, [...$payload, 'reason' => 'سبب مختلف'])->assertConflict()
             ->assertJsonPath('code', 'allocation_request_changed');
@@ -1396,6 +1403,8 @@ class StudyEnrollmentTest extends TestCase
         });
         $this->grant([$this->north => ['accounting', 'branch_auditor', 'financial_approval']]);
         $this->asUser($this->staff);
+        $this->getJson($allocationEventNote)->assertNotFound();
+        $this->getJson($accountUrl)->assertJsonCount(0, 'events');
         $this->postJson($url, $payload)->assertNotFound();
         $this->getJson("{$paymentUrl}/allocation-options")->assertOk()->assertJsonCount(0, 'history');
         $this->assertStringNotContainsString('student.payment_allocation_corrected',
@@ -1503,6 +1512,10 @@ class StudyEnrollmentTest extends TestCase
         }
         $this->center->run(fn () => $this->assertSame(0, DB::table('student_refunds')->count()));
         $refund = $this->postJson($refundUrl, $refundRequest)->assertCreated()->json('refund');
+        $this->getJson("{$accountUrl}?financial_event_type=refund&financial_event_id={$refund['id']}")
+            ->assertOk()->assertJsonCount(1, 'events')->assertJsonPath('events.0.amount_after', '200.00');
+        $this->getJson("{$this->base}/students/{$student['id']}/financial-events/refund/{$refund['id']}/note")
+            ->assertOk()->assertJsonPath('can_edit', true);
         $this->postJson($refundUrl, $refundRequest)->assertOk()->assertJsonPath('refund.id', $refund['id']);
         $this->postJson($refundUrl, [...$refundRequest, 'amount' => '201.00'])->assertConflict()
             ->assertJsonPath('code', 'refund_request_changed');
@@ -1534,6 +1547,12 @@ class StudyEnrollmentTest extends TestCase
         $correction = ['correct_amount' => '100.00', 'reason' => 'المدفوع فعليًا مئة فقط',
             'version' => $version, 'request_id' => (string) Str::uuid()];
         $saved = $this->postJson($correctionUrl, $correction)->assertCreated()->json();
+        $refundCorrectionId = $saved['reversal']['id'];
+        $this->getJson("{$accountUrl}?financial_event_type=refund_correction&financial_event_id={$refundCorrectionId}")
+            ->assertOk()->assertJsonCount(1, 'events')->assertJsonPath('events.0.amount_before', '200.00')
+            ->assertJsonPath('events.0.amount_after', '100.00');
+        $this->getJson("{$this->base}/students/{$student['id']}/financial-events/refund_correction/{$refundCorrectionId}/note")
+            ->assertOk()->assertJsonPath('can_edit', true);
         $this->postJson($correctionUrl, $correction)->assertOk()
             ->assertJsonPath('replacement.id', $saved['replacement']['id']);
         $this->postJson($correctionUrl, [...$correction, 'reason' => 'سبب مختلف'])->assertConflict();
@@ -1920,6 +1939,11 @@ class StudyEnrollmentTest extends TestCase
             'replaces_adjustment_id' => null, 'version' => $preview->json('version'),
             'request_id' => (string) Str::uuid()];
         $settlement = $this->postJson($url, $payload)->assertCreated()->json('adjustments.0');
+        $this->getJson("{$accountUrl}?financial_event_type=fee_adjustment&financial_event_id={$settlement['id']}")
+            ->assertOk()->assertJsonCount(1, 'events')->assertJsonPath('events.0.amount_before', '1000.00')
+            ->assertJsonPath('events.0.amount_after', '800.00');
+        $feeEventNote = "{$this->base}/students/{$student['id']}/financial-events/fee_adjustment/{$settlement['id']}/note";
+        $this->getJson($feeEventNote)->assertOk()->assertJsonPath('can_edit', true);
         $this->getJson($url)->assertOk()->assertJsonPath('latest_active_adjustment_id', $settlement['id']);
         $this->postJson($url, $payload)->assertOk()->assertJsonPath('adjustments.0.id', $settlement['id']);
         $this->postJson($url, [...$payload, 'new_due' => '700.00'])->assertConflict();
@@ -1942,6 +1966,17 @@ class StudyEnrollmentTest extends TestCase
         $replacement = $this->postJson($url, $correction)->assertCreated()->assertJsonCount(2, 'adjustments')
             ->assertJsonPath('preview.account_after.due_total', '1000.00')
             ->assertJsonPath('preview.account_after.debt', '200.00')->json('adjustments.1');
+        $reversalId = $this->center->run(fn () => DB::table('study_fee_adjustments')
+            ->where('reverses_id', $settlement['id'])->value('id'));
+        $this->getJson("{$accountUrl}?financial_event_type=fee_adjustment&financial_event_id={$settlement['id']}")
+            ->assertJsonPath('events.0.original_id', null)
+            ->assertJsonPath('events.0.replacement_id', $replacement['id']);
+        $this->getJson("{$accountUrl}?financial_event_type=fee_adjustment&financial_event_id={$reversalId}")
+            ->assertJsonPath('events.0.original_id', $settlement['id'])
+            ->assertJsonPath('events.0.replacement_id', $replacement['id']);
+        $this->getJson("{$accountUrl}?financial_event_type=fee_adjustment&financial_event_id={$replacement['id']}")
+            ->assertJsonPath('events.0.original_id', $settlement['id'])
+            ->assertJsonPath('events.0.replacement_id', null);
         $olderPage = $this->getJson("{$url}?history_page=2")->assertOk()->assertJsonCount(0, 'history')
             ->assertJsonPath('latest_active_adjustment_id', $replacement['id']);
         $this->assertLessThanOrEqual(6, (int) $olderPage->headers->get('X-Courses-Query-Count'));
@@ -1962,6 +1997,86 @@ class StudyEnrollmentTest extends TestCase
                 $this->assertStringContainsString('Cannot roll back', $exception->getMessage());
             }
         });
+    }
+
+    public function test_released_cross_branch_allocation_hides_fee_event_and_important_note_from_target_only_staff(): void
+    {
+        $group = $this->group($this->south, '100.00');
+        $student = $this->student([$this->north, $this->south]);
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $enrollments = "{$this->base}/students/{$student['id']}/enrollments";
+        $workspace = $this->getJson($enrollments)->json();
+        $attempt = $this->postJson($enrollments, [
+            'group_id' => $group['id'], 'group_revision' => $group['revision'],
+            'currency_revision' => $workspace['student']['currency_revision'], 'joined_on' => '2026-09-28',
+            'discount' => '0.00', 'discount_reason' => null, 'version' => $workspace['student']['version'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('attempt');
+        $accountUrl = "{$this->base}/students/{$student['id']}/account";
+        $payment = $this->postJson("{$this->base}/students/{$student['id']}/payments", [
+            'branch_id' => $this->north, 'method' => 'cash', 'received_on' => '2026-09-28',
+            'amount' => '90.00', 'version' => $this->getJson($accountUrl)->json('account.version'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('payment');
+        $paymentUrl = "{$this->base}/students/{$student['id']}/payments/{$payment['id']}";
+        $this->postJson("{$paymentUrl}/allocations", [
+            'targets' => [['attempt_id' => $attempt['id'], 'amount' => '90.00']],
+            'version' => $this->getJson("{$paymentUrl}/allocation-options")->json('version'),
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->postJson("{$enrollments}/{$attempt['id']}/withdraw", [
+            'withdrawn_on' => '2026-09-28', 'reason' => 'انسحاب بعد السداد',
+            'revision' => $attempt['revision'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $feeUrl = "{$this->base}/students/{$student['id']}/fees/{$attempt['fee']['id']}/adjustments";
+        $preview = $this->getJson("{$feeUrl}?new_due=80.00")->assertOk()->json();
+        $settlement = $this->postJson($feeUrl, [
+            'new_due' => '80.00', 'reason' => 'تسوية تخصيص من فرع آخر',
+            'replaces_adjustment_id' => null, 'version' => $preview['version'],
+            'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('adjustments.0');
+        $eventId = $settlement['id'];
+        $noteUrl = "{$this->base}/students/{$student['id']}/financial-events/fee_adjustment/{$eventId}/note";
+        $ownerAccount = $this->getJson("{$accountUrl}?financial_event_type=fee_adjustment&financial_event_id={$eventId}")
+            ->assertJsonCount(1, 'events')->assertJsonPath('events.0.related_branch_ids.0', $this->north);
+        $this->assertLessThanOrEqual(6, (int) $ownerAccount->headers->get('X-Courses-Query-Count'));
+        $this->putJson($noteUrl, [
+            'body' => 'تسوية مرتبطة بمقبوض فرع الشمال', 'important' => true,
+            'revision' => 0, 'request_id' => (string) Str::uuid(),
+        ])->assertCreated();
+        $this->center->run(fn () => DB::table('center_audit_logs')->insert([
+            'actor_id' => $this->owner->id, 'branch_id' => $this->south,
+            'event' => 'student.fee_adjustment_note_updated',
+            'details' => json_encode(['student_id' => $student['id'], 'event_id' => $eventId]),
+            'created_at' => now(),
+        ]));
+        $this->center->run(fn () => $this->assertSame(1, DB::table('study_fee_adjustment_related_branches')
+            ->where('adjustment_id', $eventId)->where('branch_id', $this->north)->count()));
+
+        $this->grant([$this->south => ['accounting', 'branch_auditor', 'financial_approval']]);
+        $this->asUser($this->staff);
+        $staffAccount = $this->getJson("{$accountUrl}?financial_event_type=fee_adjustment&financial_event_id={$eventId}")
+            ->assertOk()->assertJsonCount(0, 'events');
+        $this->assertLessThanOrEqual(6, (int) $staffAccount->headers->get('X-Courses-Query-Count'));
+        $this->getJson($noteUrl)->assertNotFound();
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=notes")
+            ->assertOk()->assertJsonCount(0, 'important_notes')->assertJsonCount(0, 'student_notes.entries');
+        $audit = $this->getJson("{$this->base}/branches/{$this->south}/audit")->assertOk()->getContent();
+        $this->assertStringNotContainsString('student.fee_settled', $audit);
+        $this->assertStringNotContainsString('student.fee_adjustment_note_created', $audit);
+        $this->assertStringNotContainsString('student.fee_adjustment_note_updated', $audit);
+        $this->assertStringNotContainsString($eventId, $audit);
+
+        $this->grant([$this->north => ['accounting'], $this->south => ['accounting', 'branch_auditor']]);
+        $this->asUser($this->staff);
+        $this->getJson("{$accountUrl}?financial_event_type=fee_adjustment&financial_event_id={$eventId}")
+            ->assertJsonCount(1, 'events');
+        $this->getJson($noteUrl)->assertOk()->assertJsonPath('note.important', true);
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=notes")
+            ->assertJsonCount(1, 'important_notes');
+        $audit = $this->getJson("{$this->base}/branches/{$this->south}/audit")->assertOk()->getContent();
+        $this->assertStringContainsString('student.fee_settled', $audit);
+        $this->assertStringContainsString('student.fee_adjustment_note_created', $audit);
     }
 
     public function test_fee_settlement_requires_financial_approval_and_hides_other_branches(): void
@@ -2756,6 +2871,30 @@ class StudyEnrollmentTest extends TestCase
         });
         $saved = $this->postJson($correctionUrl, $request)->assertCreated()->json();
         $this->getJson($correctionUrl)->assertJsonPath('history.0.amount', '500.00');
+        $eventId = $saved['reversal']['id'];
+        $focused = $this->getJson("{$accountUrl}?financial_event_type=payment_correction&financial_event_id={$eventId}")
+            ->assertOk()->assertJsonCount(1, 'events')->assertJsonPath('events.0.event_id', $eventId)
+            ->assertJsonPath('events.0.amount_before', '1000.00')->assertJsonPath('events.0.amount_after', '500.00');
+        $this->assertLessThanOrEqual(6, (int) $focused->headers->get('X-Courses-Query-Count'));
+        $eventNoteUrl = "{$this->base}/students/{$student['id']}/financial-events/payment_correction/{$eventId}/note";
+        $noteRead = $this->getJson($eventNoteUrl)->assertOk()->assertJsonPath('note', null)->assertJsonPath('can_edit', true);
+        $this->assertLessThanOrEqual(6, (int) $noteRead->headers->get('X-Courses-Query-Count'));
+        $accountBeforeNote = $this->getJson($accountUrl)->json('account');
+        $noteRequest = ['body' => 'إيصال التصحيح راجعه المحاسب', 'important' => true, 'revision' => 0,
+            'request_id' => (string) Str::uuid()];
+        $note = $this->putJson($eventNoteUrl, $noteRequest)->assertCreated()->json('note');
+        $this->getJson("{$this->base}/students/{$student['id']}")
+            ->assertJsonPath('important_notes.0.event_id', $eventId);
+        $this->putJson($eventNoteUrl, $noteRequest)->assertOk()->assertJsonPath('note.id', $note['id']);
+        $this->putJson($eventNoteUrl, [...$noteRequest, 'body' => 'تغيير الطلب'])->assertConflict()
+            ->assertJsonPath('code', 'note_request_changed');
+        $this->putJson($eventNoteUrl, [...$noteRequest, 'request_id' => (string) Str::uuid()])->assertConflict()
+            ->assertJsonPath('code', 'note_changed');
+        $this->putJson($eventNoteUrl, ['body' => 'راجع المحاسب التصحيح مرة ثانية', 'important' => false,
+            'revision' => 1, 'request_id' => (string) Str::uuid()])->assertOk()->assertJsonPath('note.revision', 2);
+        $this->getJson($eventNoteUrl)->assertJsonCount(2, 'versions');
+        $this->assertSame($accountBeforeNote, $this->getJson($accountUrl)->json('account'));
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=notes")->assertJsonPath('student_notes.entries.0.event_id', $eventId);
         $this->postJson($correctionUrl, $request)->assertOk()->assertJsonPath('replacement.id', $saved['replacement']['id']);
         $this->postJson($correctionUrl, [...$request, 'reason' => 'سبب مختلف'])->assertConflict()
             ->assertJsonPath('code', 'payment_correction_request_changed');
@@ -2871,11 +3010,18 @@ class StudyEnrollmentTest extends TestCase
             $this->south => ['accounting', 'financial_approval']]);
         $this->asUser($this->staff);
         $input['version'] = $this->getJson($accountUrl)->json('account.version');
-        $this->postJson($url, [...$input, 'reason' => 'تصحيح المقبوض بين فرعين',
-            'request_id' => (string) Str::uuid()])->assertCreated();
+        $saved = $this->postJson($url, [...$input, 'reason' => 'تصحيح المقبوض بين فرعين',
+            'request_id' => (string) Str::uuid()])->assertCreated()->json();
+        $eventId = $saved['reversal']['id'];
+        $eventUrl = "{$this->base}/students/{$student['id']}/financial-events/payment_correction/{$eventId}/note";
+        $this->getJson("{$accountUrl}?financial_event_type=payment_correction&financial_event_id={$eventId}")
+            ->assertJsonCount(1, 'events')->assertJsonPath('events.0.event_id', $eventId);
+        $this->getJson($eventUrl)->assertOk();
         $this->getJson($accountUrl)->assertJsonPath('account.available_balance', '10.00')
             ->assertJsonPath('account.debt', '60.00');
         $this->asUser($this->owner);
+        $this->putJson($eventUrl, ['body' => 'ملاحظة تصحيح عابر للفروع', 'important' => true,
+            'revision' => 0, 'request_id' => (string) Str::uuid()])->assertCreated();
         $replacement = $this->center->run(fn () => ActiveStudentAllocations::query()
             ->where('allocations.payment_id', $payment['id'])->value('allocations.id'));
         $this->postJson("{$this->base}/students/{$student['id']}/allocations/{$replacement}/corrections", [
@@ -2888,8 +3034,15 @@ class StudyEnrollmentTest extends TestCase
             ->assertJsonPath('account.debt', '100.00');
         $this->grant([$this->north => ['accounting', 'branch_auditor', 'financial_approval']]);
         $this->asUser($this->staff);
-        $this->assertStringNotContainsString('student.payment_corrected',
-            $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent());
+        $this->getJson("{$accountUrl}?financial_event_type=payment_correction&financial_event_id={$eventId}")
+            ->assertJsonCount(0, 'events');
+        $this->getJson($eventUrl)->assertNotFound();
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=notes")
+            ->assertJsonCount(0, 'student_notes.entries');
+        $audit = $this->getJson("{$this->base}/branches/{$this->north}/audit")->assertOk()->getContent();
+        $this->assertStringNotContainsString('student.payment_corrected', $audit);
+        $this->assertStringNotContainsString('student.payment_correction_note_created', $audit);
+        $this->assertStringNotContainsString($eventId, $audit);
     }
 
     private function group(int $branchId, string $price, int $lectureCount = 1): array

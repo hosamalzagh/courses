@@ -68,6 +68,7 @@ test("allocates a payment, reverses it with a reason, and updates the visible ba
   const studentId = student.body.student.id;
   const accountPath = `students/${studentId}/account`;
   const settings = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  expect(settings.events).toHaveLength(0);
   if (!settings.account.currency) expect((await write(page, "financial-currency", { currency: "EGP", revision: settings.account.currency_revision }, "PATCH")).status).toBe(200);
   const enrollment = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
   expect((await write(page, `students/${studentId}/enrollments`, { group_id: group.id, group_revision: group.revision,
@@ -506,6 +507,7 @@ test("suspended student with an incomplete old profile can settle existing fees 
   const studentId = student.body.student.id;
   const accountPath = `students/${studentId}/account`;
   const settings = await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
+  expect(settings.events).toHaveLength(0);
   if (!settings.account.currency) expect((await write(page, "financial-currency", { currency: "EGP", revision: settings.account.currency_revision }, "PATCH")).status).toBe(200);
   const enrollment = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/enrollments`)).json();
   expect((await write(page, `students/${studentId}/enrollments`, {
@@ -521,6 +523,7 @@ test("suspended student with an incomplete old profile can settle existing fees 
   expect((await write(page, `students/${studentId}/status`, {
     status: "suspended", reason: "توقف مؤقت", status_revision: 1, request_id: crypto.randomUUID(),
   })).status).toBe(200);
+  expect((await (await page.request.get(`${origin}/api/v1/center/${accountPath}`)).json()).events).toHaveLength(0);
   await page.goto(`${origin}/admin/students/${studentId}`);
   await expect(page.getByText("الملف ينقصه ١ من الحقول المطلوبة", { exact: false })).toBeVisible();
   const queryLog = process.env.COURSES_FINANCE_QUERY_LOG;
@@ -551,6 +554,7 @@ test("suspended student with an incomplete old profile can settle existing fees 
   const accountResponse = await page.request.get(`${origin}/api/v1/center/${accountPath}`);
   expect(Number(accountResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
   const account = await accountResponse.json();
+  expect(account.events).toHaveLength(0);
   const retry = await write(page, `students/${studentId}/payments`, submittedPayment!);
   expect(retry.status).toBe(200);
   expect(retry.body.payment.id).toBe(account.payments[0].id);
@@ -560,7 +564,9 @@ test("suspended student with an incomplete old profile can settle existing fees 
   await expect(page.getByText("حُفظ التخصيص", { exact: false })).toBeVisible();
   const final = await page.request.get(`${origin}/api/v1/center/${accountPath}`);
   expect(Number(final.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
-  expect((await final.json()).account).toMatchObject({
+  const afterPayment = await final.json();
+  expect(afterPayment.events).toHaveLength(0);
+  expect(afterPayment.account).toMatchObject({
     student_status: "suspended", due_total: "100.00", received_total: "60.00",
     allocated_total: "40.00", paid_total: "40.00", available_balance: "20.00", debt: "60.00",
   });
@@ -1132,10 +1138,45 @@ test("corrects a receipt and two allocations together, and rejects stale or hidd
     expect(after.account).toMatchObject({ received_total: "500.00", paid_total: "500.00",
       available_balance: "0.00", debt: "500.00" });
     expect(after.payments[0].original_amount).toBe("1000.00");
+    const financialEvent = after.events.find((event: { event_type: string }) => event.event_type === "payment_correction");
+    expect(financialEvent).toMatchObject({ amount_before: "1000.00", amount_after: "500.00",
+      reason: "تصحيح المقبوض وتخصيصين" });
+    const eventNotePath = `students/${studentId}/financial-events/payment_correction/${financialEvent.event_id}/note`;
+    const focusedResponse = await owner.request.get(`${origin}/api/v1/center/${accountPath}?financial_event_type=payment_correction&financial_event_id=${financialEvent.event_id}`);
+    expect(Number(focusedResponse.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+    await owner.goto(`${origin}/admin/students/${studentId}/account?financial_event_type=payment_correction&financial_event_id=${financialEvent.event_id}`);
+    await owner.getByRole("button", { name: "ملاحظة هذه الحركة وتاريخها" }).click();
+    const eventNote = owner.getByRole("region", { name: "ملاحظة تصحيح دفعة وتخصيصاتها" });
+    await expect(eventNote).toBeVisible();
+    await eventNote.getByLabel("نص الملاحظة").fill("مراجعة إيصال التصحيح مع ولي الأمر");
+    await eventNote.getByRole("checkbox", { name: "ملاحظة مهمة" }).click();
+    await owner.getByRole("button", { name: "إضافة الملاحظة" }).click();
+    await expect(eventNote).toContainText("حُفظت الملاحظة وتاريخ تعديلها");
+    const savedNote = await (await owner.request.get(`${origin}/api/v1/center/${eventNotePath}`)).json();
+    expect(savedNote.note).toMatchObject({ body: "مراجعة إيصال التصحيح مع ولي الأمر", important: true, revision: 1 });
+    const concurrentRequests = ["اعتماد المراجعة الأولى", "اعتماد المراجعة الثانية"].map(body =>
+      ({ body, important: true, revision: 1, request_id: crypto.randomUUID() }));
+    const concurrentNotes = await Promise.all(concurrentRequests.map(payload => write(owner, eventNotePath, payload, "PUT")));
+    expect(concurrentNotes.map(result => result.status).sort()).toEqual([200, 409]);
+    const acceptedIndex = concurrentNotes.findIndex(result => result.status === 200);
+    const repeated = await write(owner, eventNotePath, concurrentRequests[acceptedIndex], "PUT");
+    expect(repeated.status).toBe(200);
+    expect(repeated.body.note.revision).toBe(2);
+    expect((await (await owner.request.get(`${origin}/api/v1/center/${eventNotePath}`)).json()).versions).toHaveLength(2);
+    await owner.goto(`${origin}/admin/students/${studentId}`);
+    await expect(owner.getByRole("region", { name: "الملاحظات المهمة" }))
+      .toContainText(concurrentNotes[acceptedIndex].body.note.body);
+    await owner.goto(`${origin}/admin/students/${studentId}?tab=notes`);
+    await owner.getByRole("link", { name: "فتح الحدث الأصلي" }).first().click();
+    await expect(owner).toHaveURL(new RegExp(`financial_event_id=${financialEvent.event_id}`));
+    await expect(owner.getByRole("heading", { name: "تصحيح دفعة وتخصيصاتها" })).toBeVisible();
     await owner.setViewportSize({ width: 390, height: 844 });
     expect(await owner.locator("html").getAttribute("dir")).toBe("rtl");
     expect(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await owner.goto(`${origin}/admin/audit`);
+    await expect(owner.getByText("إضافة ملاحظة على تصحيح الدفعة")).toBeVisible();
+    await owner.getByText("تفاصيل ملاحظة الحركة المالية").first().click();
+    await expect(owner.getByText(financialEvent.event_id).first()).toBeVisible();
     await owner.getByText("تفاصيل تصحيح الدفعة وتخصيصاتها").first().click();
     await expect(owner.getByText("تصحيح المقبوض وتخصيصين").first()).toBeVisible();
 
@@ -1148,6 +1189,11 @@ test("corrects a receipt and two allocations together, and rejects stale or hidd
     const staffAccount = await (await staff.request.get(`${origin}/api/v1/center/${accountPath}`)).json();
     expect(staffAccount.payments[0].can_view_corrections).toBe(false);
     expect(staffAccount.payments[0]).not.toHaveProperty("hidden_allocation_count");
+    expect(staffAccount.events).toHaveLength(0);
+    expect((await staff.request.get(`${origin}/api/v1/center/${eventNotePath}`)).status()).toBe(404);
+    const restrictedAudit = await (await staff.request.get(`${origin}/api/v1/center/branches/${north.id}/audit`)).text();
+    expect(restrictedAudit).not.toContain("student.payment_correction_note_created");
+    expect(restrictedAudit).not.toContain(financialEvent.event_id);
     await staff.goto(`${origin}/admin/students/${studentId}/account`);
     await expect(staff.getByRole("button", { name: "تصحيح الدفعة" })).toHaveCount(0);
     expect((await write(staff, `${paymentPath}/corrections/preview`, {

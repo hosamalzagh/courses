@@ -32,6 +32,26 @@ final class StudentEventNotes
             ->leftJoin('student_payment_allocations as allocation', function ($join): void {
                 $join->on('allocation.id', '=', 'notes.event_id')->where('notes.event_type', 'allocation');
             })
+            ->leftJoin('study_fee_adjustments as fee_adjustment', function ($join): void {
+                $join->on('fee_adjustment.id', '=', 'notes.event_id')->where('notes.event_type', 'fee_adjustment');
+            })
+            ->leftJoin('student_refunds as refund', function ($join): void {
+                $join->on('refund.id', '=', 'notes.event_id')->where('notes.event_type', 'refund');
+            })
+            ->leftJoin('student_refund_reversals as refund_correction', function ($join): void {
+                $join->on('refund_correction.id', '=', 'notes.event_id')->where('notes.event_type', 'refund_correction');
+            })
+            ->leftJoin('student_refunds as corrected_refund', 'corrected_refund.id', '=', 'refund_correction.refund_id')
+            ->leftJoin('student_payment_reversals as payment_correction', function ($join): void {
+                $join->on('payment_correction.id', '=', 'notes.event_id')->where('notes.event_type', 'payment_correction');
+            })
+            ->leftJoin('student_payments as corrected_payment', 'corrected_payment.id', '=', 'payment_correction.payment_id')
+            ->leftJoin('student_payment_allocation_reversals as allocation_correction', function ($join): void {
+                $join->on('allocation_correction.id', '=', 'notes.event_id')->where('notes.event_type', 'allocation_correction');
+            })
+            ->leftJoin('student_allocation_submissions as allocation_submission', 'allocation_submission.request_id', '=', 'allocation_correction.submission_id')
+            ->leftJoin('student_payment_allocations as corrected_allocation', 'corrected_allocation.id', '=', 'allocation_correction.allocation_id')
+            ->leftJoin('student_payment_allocations as replacement_allocation', 'replacement_allocation.submission_id', '=', 'allocation_correction.submission_id')
             ->where(function (Builder $query) use ($read, $finance): void {
                 $query->where(function (Builder $event) use ($read): void {
                     $event->where('notes.event_type', 'study_attempt')
@@ -56,6 +76,42 @@ final class StudentEventNotes
                         ->whereColumn('allocation.source_branch_id', 'notes.branch_id')
                         ->when($finance !== null, fn (Builder $rows) => $rows->whereIn('notes.branch_id', $finance)
                             ->whereIn('allocation.target_branch_id', $finance));
+                })->orWhere(function (Builder $event) use ($finance): void {
+                    $event->where('notes.event_type', 'fee_adjustment')
+                        ->whereColumn('fee_adjustment.student_id', 'notes.student_id')
+                        ->whereColumn('fee_adjustment.branch_id', 'notes.branch_id')
+                        ->when($finance !== null, fn (Builder $rows) => $rows->whereIn('notes.branch_id', $finance)
+                            ->whereNotExists(DB::connection('tenant')->table('study_fee_adjustment_related_branches as related')
+                                ->whereColumn('related.adjustment_id', 'fee_adjustment.id')
+                                ->whereNotIn('related.branch_id', $finance)->selectRaw('1')));
+                })->orWhere(function (Builder $event) use ($finance): void {
+                    $event->where('notes.event_type', 'refund')
+                        ->whereColumn('refund.student_id', 'notes.student_id')
+                        ->whereColumn('refund.branch_id', 'notes.branch_id')
+                        ->when($finance !== null, fn (Builder $rows) => $rows->whereIn('notes.branch_id', $finance));
+                })->orWhere(function (Builder $event) use ($finance): void {
+                    $event->where('notes.event_type', 'refund_correction')
+                        ->whereColumn('refund_correction.student_id', 'notes.student_id')
+                        ->whereColumn('corrected_refund.branch_id', 'notes.branch_id')
+                        ->when($finance !== null, fn (Builder $rows) => $rows->whereIn('notes.branch_id', $finance));
+                })->orWhere(function (Builder $event) use ($finance): void {
+                    $event->where('notes.event_type', 'payment_correction')
+                        ->whereColumn('corrected_payment.student_id', 'notes.student_id')
+                        ->whereColumn('corrected_payment.branch_id', 'notes.branch_id')
+                        ->when($finance !== null, fn (Builder $rows) => $rows->whereIn('notes.branch_id', $finance)
+                            ->whereNotExists(DB::connection('tenant')->table('student_payment_correction_allocations as links')
+                                ->join('student_payment_allocations as original', 'original.id', '=', 'links.original_allocation_id')
+                                ->whereColumn('links.payment_reversal_id', 'payment_correction.id')
+                                ->whereNotIn('original.target_branch_id', $finance)->selectRaw('1')));
+                })->orWhere(function (Builder $event) use ($finance): void {
+                    $event->where('notes.event_type', 'allocation_correction')
+                        ->whereColumn('allocation_correction.student_id', 'notes.student_id')
+                        ->where('allocation_submission.kind', 'correct')
+                        ->whereColumn('corrected_allocation.source_branch_id', 'notes.branch_id')
+                        ->when($finance !== null, fn (Builder $rows) => $rows->whereIn('notes.branch_id', $finance)
+                            ->whereIn('corrected_allocation.target_branch_id', $finance)
+                            ->where(fn (Builder $visible) => $visible->whereNull('replacement_allocation.id')
+                                ->orWhereIn('replacement_allocation.target_branch_id', $finance)));
                 });
             })
             ->select(['notes.id', 'notes.event_type', 'notes.event_id', 'notes.branch_id', 'notes.body',
