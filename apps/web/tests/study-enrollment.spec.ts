@@ -94,6 +94,28 @@ test("enrolls through the employee page and preserves SSR, credit, RTL, and the 
   expect(body.attempts[0].requirements_count).toBe(1);
   const html = await page.request.get(`${origin}/admin/students/${studentId}/enrollments`);
   expect(await html.text()).toContain("1300.00");
+  const studyUrl = `${origin}/admin/students/${studentId}?tab=study`;
+  const beforeStudy = process.env.COURSES_STUDY_QUERY_LOG ? readFileSync(process.env.COURSES_STUDY_QUERY_LOG, "utf8").trim().split("\n").length : 0;
+  const studyHtml = await (await page.request.get(studyUrl)).text();
+  expect(studyHtml).toContain(body.attempts[0].course_name);
+  if (process.env.COURSES_STUDY_QUERY_LOG) {
+    const reads = readFileSync(process.env.COURSES_STUDY_QUERY_LOG, "utf8").trim().split("\n").slice(beforeStudy)
+      .map(line => JSON.parse(line) as { path: string; count: number | null })
+      .filter(read => read.path === `/api/v1/center/students/${studentId}?tab=study`);
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every(read => Number.isInteger(read.count) && read.count! <= 6)).toBe(true);
+  }
+  await page.goto(studyUrl);
+  await expect(page.getByRole("heading", { name: "الدراسة", exact: true })).toBeVisible();
+  await expect(page.getByRole("row", { name: new RegExp(body.attempts[0].course_name) })).toContainText("يدرس المستوى");
+  await page.getByRole("link", { name: "إتمام الكورس" }).click();
+  await expect(page.getByText("الكورس لم يكتمل دراسيًا")).toBeVisible();
+  const suspended = await write(page, `students/${studentId}/status`, { status: "suspended", reason: "مراجعة الملف", status_revision: 1, request_id: crypto.randomUUID() });
+  expect(suspended.status).toBe(200);
+  await page.goto(studyUrl);
+  await expect(page.getByText(/الملف موقوف حاليًا/)).toBeVisible();
+  await expect(page.getByRole("row", { name: new RegExp(body.attempts[0].course_name) })).toContainText("يدرس المستوى");
+  expect((await write(page, `students/${studentId}/status`, { status: "active", reason: "انتهت المراجعة", status_revision: suspended.body.status_revision, request_id: crypto.randomUUID() })).status).toBe(200);
   await page.goto(`${origin}/admin/students/${studentId}/account`);
   await expect(page.getByText("المديونية المتبقية", { exact: false })).toBeVisible();
   await expect(page.getByText("1300.00 EGP").first()).toBeVisible();
@@ -123,6 +145,15 @@ test("restricted registration staff cannot see another branch or enroll its stud
     const shared = await write(owner, "students", { name: `مشترك ${Date.now()}`, branch_ids: [north.id, south.id], request_id: crypto.randomUUID() });
     const hidden = await write(owner, "students", { name: `محجوب ${Date.now()}`, branch_ids: [south.id], request_id: crypto.randomUUID() });
     expect(shared.status).toBe(201); expect(hidden.status).toBe(201);
+    const account = await (await owner.request.get(`${origin}/api/v1/center/students/${shared.body.student.id}/account`)).json();
+    if (!account.account.currency) expect((await write(owner, "financial-currency", { currency: "EGP", revision: account.account.currency_revision }, "PATCH")).status).toBe(200);
+    const enrollment = await (await owner.request.get(`${origin}/api/v1/center/students/${shared.body.student.id}/enrollments`)).json();
+    const hiddenAttempt = await write(owner, `students/${shared.body.student.id}/enrollments`, {
+      group_id: hiddenGroup.id, group_revision: hiddenGroup.revision, currency_revision: enrollment.student.currency_revision,
+      joined_on: new Date().toLocaleDateString("sv-SE", { timeZone: "Africa/Cairo" }), discount: "0.00", discount_reason: null,
+      version: enrollment.student.version, request_id: crypto.randomUUID(),
+    });
+    expect(hiddenAttempt.status).toBe(201);
     expect((await write(owner, `members/${credentials.staff.membership_id}/grants`, { center_roles: [], branch_roles: { [north.id]: ["registration"] } }, "PUT")).status).toBe(200);
     await signIn(staff, "staff");
     await staff.goto(`${origin}/admin/students/${shared.body.student.id}/enrollments`);
@@ -130,9 +161,16 @@ test("restricted registration staff cannot see another branch or enroll its stud
     const visible = await staff.request.get(`${origin}/api/v1/center/students/${shared.body.student.id}/enrollments`);
     expect(Number(visible.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
     expect((await visible.json()).groups).not.toContainEqual(expect.objectContaining({ id: hiddenGroup.id }));
+    await staff.goto(`${origin}/admin/students/${shared.body.student.id}?tab=study`);
+    await expect(staff.getByText("لا توجد محاولات دراسة في الفروع المصرح بها.")).toBeVisible();
+    expect(await staff.locator("body").innerText()).not.toContain(hiddenGroup.name);
+    const study = await staff.request.get(`${origin}/api/v1/center/students/${shared.body.student.id}?tab=study`);
+    expect(Number(study.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
+    expect((await study.json()).study.attempts).toHaveLength(0);
     await staff.goto(`${origin}/admin/students/${hidden.body.student.id}/enrollments`);
     await expect(staff.getByRole("heading", { name: "ملف الطالب غير متاح" })).toBeVisible();
     expect((await staff.request.get(`${origin}/api/v1/center/students/${hidden.body.student.id}/enrollments`)).status()).toBe(404);
+    expect((await staff.request.get(`${origin}/api/v1/center/students/${hidden.body.student.id}?tab=study`)).status()).toBe(404);
   } finally { await owner.close(); await staff.close(); }
 });
 

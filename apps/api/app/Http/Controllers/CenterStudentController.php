@@ -35,7 +35,8 @@ class CenterStudentController extends Controller
             'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'status_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'branches_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
-            'tab' => ['sometimes', 'in:custom-history,attachments,enrollment-notes,notes'],
+            'tab' => ['sometimes', 'in:custom-history,attachments,enrollment-notes,notes,study'],
+            'study_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'custom_history_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'attachments_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'notes_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
@@ -154,6 +155,35 @@ class CenterStudentController extends Controller
             $query->selectSub(DB::connection('tenant')->query()->fromSub($notes, 'note_rows')
                 ->selectRaw('json_agg(note_rows)'), 'student_notes');
         }
+        if ($studentId !== null && ($data['tab'] ?? '') === 'study') {
+            $studyPage = (int) ($data['study_page'] ?? 1);
+            $readableBranches = $permissions->isCenterManager() ? null : $this->branchScope($permissions, 'read');
+            $attempts = DB::connection('tenant')->table('study_attempts as attempts')
+                ->join('levels as study_levels', 'study_levels.id', '=', 'attempts.level_id')
+                ->join('stages as study_stages', 'study_stages.id', '=', 'study_levels.stage_id')
+                ->join('courses as study_courses', 'study_courses.id', '=', 'study_stages.course_id')
+                ->join('branches as study_branches', 'study_branches.id', '=', 'attempts.branch_id')
+                ->leftJoin('study_groups as current_groups', 'current_groups.id', '=', 'attempts.current_group_id')
+                ->leftJoin('study_attempt_withdrawals as withdrawals', 'withdrawals.attempt_id', '=', 'attempts.id')
+                ->leftJoin('study_attempt_completion_decisions as decisions', 'decisions.attempt_id', '=', 'attempts.id')
+                ->whereColumn('attempts.student_id', 'students.id')
+                ->whereExists(DB::connection('tenant')->table('student_branches as study_associations')
+                    ->whereColumn('study_associations.student_id', 'attempts.student_id')
+                    ->whereColumn('study_associations.branch_id', 'attempts.branch_id')->selectRaw('1'))
+                ->when($readableBranches !== null, fn (Builder $rows) => $rows->whereIn('attempts.branch_id', $readableBranches))
+                ->orderByDesc('attempts.created_at')->orderByDesc('attempts.id')
+                ->offset(($studyPage - 1) * 20)->limit(21)
+                ->select(['attempts.id', 'attempts.branch_id', 'attempts.status', 'attempts.joined_on',
+                    'attempts.created_at', 'study_levels.name as level_name',
+                    'study_courses.id as course_id', 'study_courses.name as course_name',
+                    'study_branches.name as branch_name', 'current_groups.name as current_group_name',
+                    'withdrawals.withdrawn_on', 'decisions.approved_at', 'decisions.exceptional'])
+                ->selectRaw('(SELECT row_to_json(waitlist) FROM (SELECT entered_on, left_on, reason FROM study_attempt_waitlists WHERE attempt_id = attempts.id AND branch_id = attempts.branch_id ORDER BY entered_on DESC, created_at DESC LIMIT 1) AS waitlist) AS latest_waitlist')
+                ->selectRaw('(SELECT previous_groups.name FROM study_attempt_group_periods AS periods JOIN study_groups AS previous_groups ON previous_groups.id = periods.group_id JOIN levels AS previous_levels ON previous_levels.id = previous_groups.level_id JOIN stages AS previous_stages ON previous_stages.id = previous_levels.stage_id JOIN courses AS previous_courses ON previous_courses.id = previous_stages.course_id WHERE periods.attempt_id = attempts.id AND previous_courses.branch_id = attempts.branch_id ORDER BY periods.joined_on DESC, periods.created_at DESC LIMIT 1) AS previous_group_name')
+                ->selectRaw('(SELECT max(transferred_on) FROM study_attempt_transfers WHERE attempt_id = attempts.id AND to_branch_id = attempts.branch_id'.($readableBranches === null ? '' : ' AND from_branch_id IN ('.(implode(',', array_map('intval', $readableBranches)) ?: 'NULL').')').') AS last_visible_transfer_on');
+            $query->selectSub(DB::connection('tenant')->query()->fromSub($attempts, 'study_rows')
+                ->selectRaw('json_agg(study_rows ORDER BY created_at DESC, id DESC)'), 'study_attempts');
+        }
         $students = $query->orderBy('student_number')->offset(($page - 1) * 50)->limit(51)->get();
         if ($studentId !== null) {
             abort_if($students->isEmpty(), 404);
@@ -177,6 +207,8 @@ class CenterStudentController extends Controller
             ...($studentId !== null ? ['important_notes' => json_decode($students->first()->important_notes ?? '[]', true) ?? []] : []),
             ...($studentId !== null && ($data['tab'] ?? '') === 'notes' ? ['student_notes' => ['entries' => array_slice(json_decode($students->first()->student_notes ?? '[]', true) ?? [], 0, 20),
                 'pagination' => ['page' => $notesPage, 'has_more' => count(json_decode($students->first()->student_notes ?? '[]', true) ?? []) > 20]]] : []),
+            ...($studentId !== null && ($data['tab'] ?? '') === 'study' ? ['study' => ['attempts' => array_slice(json_decode($students->first()->study_attempts ?? '[]', true) ?? [], 0, 20),
+                'pagination' => ['page' => $studyPage, 'has_more' => count(json_decode($students->first()->study_attempts ?? '[]', true) ?? []) > 20]]] : []),
             'pagination' => ['page' => $page, 'has_more' => $students->count() > 50, 'branches_page' => $branchPage, 'branches_has_more' => $branches->count() > 50],
         ])->header('Cache-Control', 'private, no-store');
     }

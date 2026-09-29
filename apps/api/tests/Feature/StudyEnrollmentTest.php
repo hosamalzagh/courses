@@ -154,6 +154,55 @@ class StudyEnrollmentTest extends TestCase
             $this->getJson("{$this->base}/audit")->assertOk()->getContent());
     }
 
+    public function test_profile_study_tab_preserves_attempts_during_suspension_and_hides_other_branches(): void
+    {
+        $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
+        $north = $this->group($this->north, '0.00');
+        $south = $this->group($this->south, '0.00');
+        $student = $this->student([$this->north, $this->south]);
+        foreach ([$north, $south] as $group) {
+            $workspace = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")->assertOk();
+            $this->postJson("{$this->base}/students/{$student['id']}/enrollments", [
+                'group_id' => $group['id'], 'group_revision' => $group['revision'],
+                'currency_revision' => $workspace->json('student.currency_revision'),
+                'joined_on' => now('Africa/Cairo')->format('Y-m-d'), 'discount' => '0.00',
+                'discount_reason' => null, 'version' => $workspace->json('student.version'),
+                'request_id' => (string) Str::uuid(),
+            ])->assertCreated();
+        }
+        $path = "{$this->base}/students/{$student['id']}?tab=study";
+        $before = $this->getJson($path)->assertOk()->assertJsonCount(2, 'study.attempts')
+            ->assertJsonPath('study.attempts.0.status', 'active');
+        $this->assertLessThanOrEqual(6, (int) $before->headers->get('X-Courses-Query-Count'));
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'suspended', 'reason' => 'مراجعة ملف الطالب', 'status_revision' => 1,
+            'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $suspended = $this->getJson($path)->assertOk()->assertJsonPath('students.0.status', 'suspended')
+            ->assertJsonCount(2, 'study.attempts')->assertJsonPath('study.attempts.0.status', 'active');
+        $this->assertLessThanOrEqual(6, (int) $suspended->headers->get('X-Courses-Query-Count'));
+        $this->postJson("{$this->base}/students/{$student['id']}/status", [
+            'status' => 'active', 'reason' => 'انتهت المراجعة', 'status_revision' => 2,
+            'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $this->getJson($path)->assertOk()->assertJsonPath('students.0.status', 'active')
+            ->assertJsonCount(2, 'study.attempts');
+
+        $this->center->run(fn () => DB::table('student_branches')
+            ->where('student_id', $student['id'])->where('branch_id', $this->south)->delete());
+        $this->getJson($path)->assertOk()->assertJsonCount(1, 'study.attempts')
+            ->assertJsonPath('study.attempts.0.branch_id', $this->north);
+
+        $this->grant([$this->north => ['branch_viewer']]);
+        $this->asUser($this->staff);
+        $visible = $this->getJson($path)->assertOk()->assertJsonCount(1, 'study.attempts')
+            ->assertJsonPath('study.attempts.0.branch_id', $this->north);
+        $this->assertLessThanOrEqual(6, (int) $visible->headers->get('X-Courses-Query-Count'));
+        $this->assertStringNotContainsString('South', $visible->getContent());
+        $this->getJson("{$this->base}/students/{$student['id']}?tab=study&study_page=2")->assertOk()
+            ->assertJsonCount(0, 'study.attempts');
+    }
+
     public function test_enrollment_snapshots_price_plan_and_late_join_without_allocating_advance(): void
     {
         $group = $this->group($this->north, '1500.00');

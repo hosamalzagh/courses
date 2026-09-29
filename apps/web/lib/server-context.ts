@@ -61,7 +61,12 @@ export type StudentEventNote = {id:string;event_type:string;event_id:string;bran
 export type StudentEventNotePage = {entries:StudentEventNote[];pagination:{page:number;has_more:boolean}};
 export type Student = { photo: StudentPhoto | null; photo_revision:number;attachment_revision:number;custom_values?:StudentCustomValues;missing_custom_fields:number; identity?: StudentIdentityData; can_read_identity: boolean; can_manage_identity: boolean } & StudentGeneralData & StudentContactsData & { legacy_phone: string | null; manual_code: string | null } & { profile_choices: Partial<Record<StudentChoiceKind, StudentProfileChoice>>; age: number | null; created_by: number; created_at: string; id: string; student_number: number; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean; sharing_enabled: boolean; status: 'active' | 'suspended'; status_revision: number; can_change_status: boolean };
 export type StudentSuspension = { id: string; suspended_by: number; suspended_by_name: string; suspended_reason: string; suspended_at: string; lifted_by: number | null; lifted_by_name: string | null; lifted_reason: string | null; lifted_at: string | null };
-export type StudentContext = CenterContext & {custom_history?:StudentCustomHistory;attachments?:StudentAttachmentPage;enrollment_notes?:StudentEnrollmentNotePage;student_notes?:StudentEventNotePage;important_notes?:StudentEventNote[];custom_fields:StudentCustomFieldList; student_code_settings: {enabled:boolean;label:string;revision:number}; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
+export type StudentStudyAttempt = { id: string; branch_id: number; branch_name: string; course_id: string; course_name: string; level_name: string;
+  status: "active" | "withdrawn" | "completed"; joined_on: string; created_at: string;
+  current_group_name: string | null; previous_group_name: string | null;
+  latest_waitlist: { entered_on: string; left_on: string | null; reason: string } | null;
+  last_visible_transfer_on: string | null; withdrawn_on: string | null; approved_at: string | null; exceptional: boolean | null };
+export type StudentContext = CenterContext & {custom_history?:StudentCustomHistory;attachments?:StudentAttachmentPage;enrollment_notes?:StudentEnrollmentNotePage;student_notes?:StudentEventNotePage;study?:{attempts:StudentStudyAttempt[];pagination:{page:number;has_more:boolean}};important_notes?:StudentEventNote[];custom_fields:StudentCustomFieldList; student_code_settings: {enabled:boolean;label:string;revision:number}; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type Instructor = { id: string; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
 export type InstructorContext = CenterContext & { instructors: Instructor[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type StudentSearchPolicy = { enabled: boolean; revision: number; default_sharing_enabled: boolean };
@@ -265,7 +270,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   const detail = path.match(/^\/admin\/(students|instructors|curriculum)\/([^/]+)$/);
   if (detail) {
     const id = decodeURIComponent(detail[2]);
-    if (detail[1] === "students") return loadStudentWorkspace(query(["status_page", "tab", "custom_history_page", "attachments_page", "attachments_status"]), id);
+    if (detail[1] === "students") return loadStudentWorkspace(query(["status_page", "tab", "custom_history_page", "attachments_page", "attachments_status", "study_page"]), id);
     if (detail[1] === "instructors") return loadInstructorWorkspace("", id);
     return loadCurriculumWorkspace(query(["plan_version", "versions_page"]), id);
   }
