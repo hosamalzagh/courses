@@ -301,30 +301,57 @@ class StudyEnrollmentTest extends TestCase
     public function test_profile_study_tab_preserves_attempts_during_suspension_and_hides_other_branches(): void
     {
         $this->patchJson("{$this->base}/financial-currency", ['currency' => 'EGP', 'revision' => 1])->assertOk();
-        $north = $this->group($this->north, '0.00');
-        $south = $this->group($this->south, '0.00');
+        $north = $this->group($this->north, '100.00');
+        $south = $this->group($this->south, '200.00');
         $transferTarget = $this->group($this->south, '0.00');
         $this->center->run(fn () => DB::table('study_groups')->where('id', $north['id'])
             ->update(['name' => 'Northern group']));
         $student = $this->student([$this->north, $this->south]);
         $northAttemptId = null;
+        $southAttemptId = null;
         foreach ([$north, $south] as $group) {
             $workspace = $this->getJson("{$this->base}/students/{$student['id']}/enrollments")->assertOk();
             $enrolled = $this->postJson("{$this->base}/students/{$student['id']}/enrollments", [
                 'group_id' => $group['id'], 'group_revision' => $group['revision'],
                 'currency_revision' => $workspace->json('student.currency_revision'),
-                'joined_on' => now('Africa/Cairo')->format('Y-m-d'), 'discount' => '0.00',
+                'joined_on' => now('Africa/Cairo')->subDays(2)->format('Y-m-d'), 'discount' => '0.00',
                 'discount_reason' => null, 'version' => $workspace->json('student.version'),
                 'request_id' => (string) Str::uuid(),
             ])->assertCreated();
             if ($group['id'] === $north['id']) {
                 $northAttemptId = $enrolled->json('attempt.id');
+            } else {
+                $southAttemptId = $enrolled->json('attempt.id');
             }
         }
+        $absenceSessionIds = $this->center->run(function () use ($north, $south, $northAttemptId, $southAttemptId): array {
+            $ids = [];
+            foreach ([[$north, $northAttemptId], [$south, $southAttemptId]] as [$group, $attemptId]) {
+                $sessionId = (string) Str::uuid();
+                $lectureId = DB::table('plan_lectures')->where('plan_version_id', $group['plan_version_id'])->value('id');
+                DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $group['id'],
+                    'plan_lecture_id' => $lectureId, 'number' => 1, 'scheduled_at' => now()->subDay(),
+                    'status' => 'held', 'created_by' => $this->owner->id, 'created_by_name' => $this->owner->name,
+                    'created_at' => now(), 'updated_at' => now()]);
+                DB::table('study_attendance_entries')->insert(['id' => (string) Str::uuid(),
+                    'session_id' => $sessionId, 'attempt_id' => $attemptId, 'status' => 'absent',
+                    'recorded_by' => $this->owner->id, 'recorded_at' => now(),
+                    'created_at' => now(), 'updated_at' => now()]);
+                $ids[] = $sessionId;
+            }
+
+            return $ids;
+        });
         $path = "{$this->base}/students/{$student['id']}?tab=study";
         $before = $this->getJson($path)->assertOk()->assertJsonCount(2, 'study.attempts')
-            ->assertJsonPath('study.attempts.0.status', 'active');
+            ->assertJsonPath('study.attempts.0.status', 'active')
+            ->assertJsonCount(2, 'summary.current_study')
+            ->assertJsonPath('summary.current_group_absences', 2)
+            ->assertJsonPath('summary.financial.debt', '300.00')
+            ->assertJsonPath('summary.financial.currency', 'EGP');
         $this->assertLessThanOrEqual(6, (int) $before->headers->get('X-Courses-Query-Count'));
+        $this->center->run(fn () => DB::table('study_sessions')->where('id', $absenceSessionIds[0])->update(['status' => 'cancelled']));
+        $this->getJson($path)->assertOk()->assertJsonPath('summary.current_group_absences', 1);
         $this->postJson("{$this->base}/students/{$student['id']}/status", [
             'status' => 'suspended', 'reason' => 'مراجعة ملف الطالب', 'status_revision' => 1,
             'request_id' => (string) Str::uuid(),
@@ -352,9 +379,23 @@ class StudyEnrollmentTest extends TestCase
                 'plan_version_id' => $transferTarget['plan_version_id'], 'current_group_id' => $transferTarget['id'],
             ]);
         });
-        $transferred = $this->getJson($path)->assertOk()->assertJsonCount(3, 'study.attempts');
+        $transferred = $this->getJson($path)->assertOk()->assertJsonCount(3, 'study.attempts')
+            ->assertJsonPath('summary.current_group_absences', 1);
         $this->assertCount(1, collect($transferred->json('study.attempts'))
             ->where('branch_id', $this->north)->where('status', 'transferred'));
+        $this->center->run(function () use ($southAttemptId, $south): void {
+            $today = now('Africa/Cairo')->toDateString();
+            DB::table('study_attempt_group_periods')->where('attempt_id', $southAttemptId)
+                ->whereNull('left_on')->update(['left_on' => $today]);
+            DB::table('study_attempt_group_periods')->insert([
+                'id' => (string) Str::uuid(), 'attempt_id' => $southAttemptId,
+                'group_id' => $south['id'], 'joined_on' => $today, 'created_at' => now(),
+            ]);
+        });
+        $rejoined = $this->getJson($path)->assertOk()
+            ->assertJsonPath('summary.current_group_absences', 0)
+            ->assertJsonPath('summary.financial.debt', '300.00');
+        $this->assertLessThanOrEqual(6, (int) $rejoined->headers->get('X-Courses-Query-Count'));
         $searched = $this->getJson($path.'&study_q='.urlencode('Northern group'))->assertOk()
             ->assertJsonCount(1, 'study.attempts')->assertJsonPath('study.attempts.0.branch_id', $this->north);
         $this->assertLessThanOrEqual(6, (int) $searched->headers->get('X-Courses-Query-Count'));
@@ -362,12 +403,23 @@ class StudyEnrollmentTest extends TestCase
         $this->center->run(fn () => DB::table('student_branches')
             ->where('student_id', $student['id'])->where('branch_id', $this->south)->delete());
         $this->getJson($path)->assertOk()->assertJsonCount(1, 'study.attempts')
-            ->assertJsonPath('study.attempts.0.branch_id', $this->north);
+            ->assertJsonPath('study.attempts.0.branch_id', $this->north)
+            ->assertJsonCount(0, 'summary.current_study')
+            ->assertJsonPath('summary.current_group_absences', 0);
+
+        $this->grant([$this->north => ['accounting']]);
+        $this->asUser($this->staff);
+        $accounting = $this->getJson($path)->assertOk()->assertJsonCount(0, 'summary.current_study')
+            ->assertJsonPath('summary.financial.debt', '100.00')
+            ->assertJsonPath('summary.current_group_absences', 0);
+        $this->assertLessThanOrEqual(6, (int) $accounting->headers->get('X-Courses-Query-Count'));
+        $this->assertStringNotContainsString('South', $accounting->getContent());
 
         $this->grant([$this->north => ['branch_viewer']]);
         $this->asUser($this->staff);
         $visible = $this->getJson($path)->assertOk()->assertJsonCount(1, 'study.attempts')
-            ->assertJsonPath('study.attempts.0.branch_id', $this->north);
+            ->assertJsonPath('study.attempts.0.branch_id', $this->north)
+            ->assertJsonPath('summary.financial', null);
         $this->assertLessThanOrEqual(6, (int) $visible->headers->get('X-Courses-Query-Count'));
         $this->assertStringNotContainsString('South', $visible->getContent());
         $this->getJson("{$this->base}/students/{$student['id']}?tab=study&study_page=2")->assertOk()
