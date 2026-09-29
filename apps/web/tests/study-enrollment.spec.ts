@@ -51,6 +51,7 @@ test("enrolls through the employee page and preserves SSR, credit, RTL, and the 
   await signIn(page);
   const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
   const branchId = workspace.branches[0].id;
+  const branchName = workspace.branches[0].name as string;
   const createdGroup = await group(page, branchId, "1500.00");
   const created = await write(page, "students", { name: `طالب تسجيل ${Date.now()}`, branch_ids: [branchId], request_id: crypto.randomUUID() });
   expect(created.status).toBe(201);
@@ -111,6 +112,15 @@ test("enrolls through the employee page and preserves SSR, credit, RTL, and the 
   await page.getByRole("searchbox", { name: "بحث في محاولات الدراسة" }).fill(body.attempts[0].course_name);
   await page.getByRole("button", { name: "بحث في جميع محاولات الدراسة" }).click();
   await expect(page).toHaveURL(/study_q=/);
+  await expect(page.getByRole("row", { name: new RegExp(body.attempts[0].course_name) })).toBeVisible();
+  await page.getByRole("searchbox", { name: "بحث في محاولات الدراسة" }).fill(branchName);
+  await page.getByRole("button", { name: "بحث في جميع محاولات الدراسة" }).click();
+  await expect(page.getByRole("row", { name: new RegExp(body.attempts[0].course_name) })).toContainText(branchName);
+  await page.getByRole("searchbox", { name: "بحث في محاولات الدراسة" }).fill("محاولة غير موجودة إطلاقًا");
+  await page.getByRole("button", { name: "بحث في جميع محاولات الدراسة" }).click();
+  await expect(page.getByText("لا توجد محاولات تطابق البحث.")).toBeVisible();
+  await page.getByRole("searchbox", { name: "بحث في محاولات الدراسة" }).fill(body.attempts[0].course_name);
+  await page.getByRole("button", { name: "بحث في جميع محاولات الدراسة" }).click();
   await expect(page.getByRole("row", { name: new RegExp(body.attempts[0].course_name) })).toBeVisible();
   await page.getByRole("link", { name: "إتمام الكورس" }).click();
   await expect(page.getByText("الكورس لم يكتمل دراسيًا")).toBeVisible();

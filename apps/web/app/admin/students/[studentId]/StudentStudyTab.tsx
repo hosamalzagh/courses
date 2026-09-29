@@ -31,7 +31,7 @@ export function StudentStudyTab({ context, search }: { context: StudentContext; 
       description="المحاولات والمجموعات الحالية والسابقة، حتى ٢٠ سجلًا في كل دفعة."
       searchText={attempt => `${attempt.course_name} ${attempt.level_name} ${attempt.branch_name} ${attempt.current_group_name ?? ""}`}
       serverSearch={{ value: search, onSearch: value => router.push(href(1, value)) }}
-      emptyMessage="لا توجد محاولات دراسة في الفروع المصرح بها."
+      emptyMessage={search.trim() ? "لا توجد محاولات تطابق البحث." : "لا توجد محاولات دراسة في الفروع المصرح بها."}
       pageSize={20}
       serverPagination={{ page: study.pagination.page, hasMore: study.pagination.has_more, batchSize: 20,
         previousHref: href(Math.max(1, study.pagination.page - 1)), nextHref: href(study.pagination.page + 1) }}

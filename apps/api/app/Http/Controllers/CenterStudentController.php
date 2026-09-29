@@ -179,6 +179,7 @@ class CenterStudentController extends Controller
                     $term = '%'.addcslashes($studySearch, '%_\\').'%';
                     $matched->where('study_courses.name', 'ILIKE', $term)
                         ->orWhere('study_levels.name', 'ILIKE', $term)
+                        ->orWhere('study_branches.name', 'ILIKE', $term)
                         ->orWhere('period_groups.name', 'ILIKE', $term);
                 }))
                 ->orderByDesc('periods.joined_on')->orderByDesc('periods.id')
@@ -193,7 +194,20 @@ class CenterStudentController extends Controller
                 ->selectRaw('CASE WHEN study_courses.branch_id = attempts.branch_id THEN withdrawals.withdrawn_on END AS withdrawn_on')
                 ->selectRaw('CASE WHEN study_courses.branch_id = attempts.branch_id THEN decisions.approved_at END AS approved_at')
                 ->selectRaw('CASE WHEN study_courses.branch_id = attempts.branch_id THEN decisions.exceptional END AS exceptional')
-                ->selectRaw('(SELECT row_to_json(waitlist) FROM (SELECT entered_on, left_on, reason FROM study_attempt_waitlists WHERE attempt_id = attempts.id AND branch_id = study_courses.branch_id ORDER BY entered_on DESC, created_at DESC LIMIT 1) AS waitlist) AS latest_waitlist')
+                ->selectRaw(<<<'SQL'
+                    (SELECT row_to_json(waitlist) FROM (
+                        SELECT entered_on, left_on, reason FROM study_attempt_waitlists
+                        WHERE attempt_id = attempts.id AND branch_id = study_courses.branch_id
+                            AND periods.id = (
+                                SELECT origin.id FROM study_attempt_group_periods AS origin
+                                WHERE origin.attempt_id = study_attempt_waitlists.attempt_id
+                                    AND origin.group_id = study_attempt_waitlists.from_group_id
+                                    AND origin.left_on = study_attempt_waitlists.entered_on
+                                ORDER BY origin.created_at DESC, origin.id DESC LIMIT 1
+                            )
+                        ORDER BY entered_on DESC, created_at DESC LIMIT 1
+                    ) AS waitlist) AS latest_waitlist
+                    SQL)
                 ->selectRaw('(SELECT max(transferred_on) FROM study_attempt_transfers WHERE attempt_id = attempts.id AND (from_branch_id = study_courses.branch_id OR to_branch_id = study_courses.branch_id)) AS last_visible_transfer_on');
             $query->selectSub(DB::connection('tenant')->query()->fromSub($attempts, 'study_rows')
                 ->selectRaw('json_agg(study_rows ORDER BY joined_on DESC, period_id DESC)'), 'study_attempts');

@@ -262,11 +262,33 @@ class StudyEnrollmentTest extends TestCase
                 'current_group_id' => $later['id'],
             ]);
         });
+        $today = now('Africa/Cairo')->toDateString();
+        $this->center->run(function () use ($attempt, $later, $today): void {
+            DB::table('branches')->where('id', $this->north)->update(['name' => 'Study branch sentinel']);
+            DB::table('study_attempt_group_periods')->where('attempt_id', $attempt['id'])
+                ->whereNull('left_on')->update(['left_on' => $today]);
+            DB::table('study_attempts')->where('id', $attempt['id'])->update(['current_group_id' => null]);
+            DB::table('study_attempt_waitlists')->insert([
+                'id' => (string) Str::uuid(), 'attempt_id' => $attempt['id'],
+                'from_group_id' => $later['id'], 'branch_id' => $this->north,
+                'entered_on' => $today, 'reason' => 'انتظار بعد المجموعة الأخيرة',
+                'entered_by' => $this->owner->id, 'entered_by_name' => $this->owner->name,
+                'entry_request_id' => (string) Str::uuid(), 'entry_request_hash' => str_repeat('a', 64),
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        });
         $path = "{$this->base}/students/{$student['id']}?tab=study";
         $firstPage = $this->getJson($path)->assertOk()->assertJsonCount(20, 'study.attempts')
-            ->assertJsonPath('study.pagination.has_more', true);
+            ->assertJsonPath('study.pagination.has_more', true)
+            ->assertJsonPath('study.attempts.0.latest_waitlist.entered_on', $today)
+            ->assertJsonPath('study.attempts.1.latest_waitlist', null)
+            ->assertJsonPath('study.attempts.1.status', 'transferred');
         $this->assertLessThanOrEqual(6, (int) $firstPage->headers->get('X-Courses-Query-Count'));
         $this->getJson($path.'&study_page=2')->assertOk()->assertJsonCount(2, 'study.attempts');
+        $byBranch = $this->getJson($path.'&study_q='.urlencode('Study branch sentinel'))->assertOk()
+            ->assertJsonCount(20, 'study.attempts')->assertJsonPath('study.pagination.has_more', true)
+            ->assertJsonPath('study.attempts.0.branch_name', 'Study branch sentinel');
+        $this->assertLessThanOrEqual(6, (int) $byBranch->headers->get('X-Courses-Query-Count'));
         $searched = $this->getJson($path.'&study_q=Original%20searchable%20group')->assertOk()
             ->assertJsonCount(1, 'study.attempts')
             ->assertJsonPath('study.attempts.0.previous_group_name', 'Original searchable group');
