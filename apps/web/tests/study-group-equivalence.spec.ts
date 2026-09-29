@@ -100,6 +100,20 @@ test("approved group-added content equivalence is visible, reversible, scoped an
   await page.getByRole("button", { name: "سحب الاعتماد" }).click();
   await page.getByRole("button", { name: "سحب الاعتماد", exact: true }).last().click();
   await expect(page.getByText("سُحب الاعتماد؛ سيُعاد حساب الرصيد دون هذا الربط.")).toBeVisible();
+  await page.route(/\/requirement-equivalences\/options\?/, async route => {
+    const requestedPage = Number(new URL(route.request().url()).searchParams.get("page"));
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      group_revision: 1, candidates: [], pagination: { page: requestedPage, has_more: requestedPage === 1 },
+    }) });
+  });
+  await page.getByRole("button", { name: "بحث", exact: true }).click();
+  await expect(page.getByRole("button", { name: "عرض المزيد" })).toBeVisible();
+  await page.getByRole("textbox", { name: "بحث عن المجموعة أو المحتوى المقابل" }).fill("بحث لم يُطبّق بعد");
+  const nextPageRequest = page.waitForRequest(request => request.url().includes("/requirement-equivalences/options?")
+    && new URL(request.url()).searchParams.get("page") === "2");
+  await page.getByRole("button", { name: "عرض المزيد" }).click();
+  expect(new URL((await nextPageRequest).url()).searchParams.has("q")).toBe(false);
+  await page.unroute(/\/requirement-equivalences\/options\?/);
   const members = await (await page.request.get(`${origin}/api/v1/center/member-workspace`)).json();
   const staff = members.members.find((item: { user: { email: string } }) => item.user.email === credentials.staff.email);
   expect((await write(page, `members/${staff.id}/grants`, {
