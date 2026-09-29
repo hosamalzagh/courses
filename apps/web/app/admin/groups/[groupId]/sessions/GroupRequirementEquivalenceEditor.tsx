@@ -39,6 +39,7 @@ export function GroupRequirementEquivalenceEditor({ group, onClose }: {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [reason, setReason] = useState("");
   const [decision, setDecision] = useState<Decision | null>(null);
   const [requestId, setRequestId] = useState(newSubmissionId);
@@ -86,6 +87,7 @@ export function GroupRequirementEquivalenceEditor({ group, onClose }: {
       setCandidates(current => nextPage > 1 ? [...current, ...result.candidates] : result.candidates);
       setGroupRevision(result.group_revision); setPage(nextPage);
       setHasMore(result.pagination.has_more); setConflict(false);
+      if (nextPage === 1) setAppliedSearch(q.trim());
     } catch { setError("تعذر تحميل المتطلبات المضافة في المجموعات الأخرى."); }
     finally { busyRef.current = false; setBusy(false); }
   }, [prefix]);
@@ -114,7 +116,7 @@ export function GroupRequirementEquivalenceEditor({ group, onClose }: {
       setDecision(null); setReason(""); setRequestId(newSubmissionId());
       setNotice(current.kind === "approve" ? "اعتمد تكافؤ المتطلبين وسُجل سببه." : "سُحب الاعتماد؛ سيُعاد حساب الرصيد دون هذا الربط.");
       busyRef.current = false; setBusy(false);
-      await load(selected.id, 1, search);
+      await load(selected.id, 1, appliedSearch);
       requestAnimationFrame(() => document.getElementById(`${formId}-required`)?.focus());
     } catch { setError("تعذر التأكد من القرار. أعد التأكيد بنفس الطلب للتحقق من نتيجته."); }
     finally { busyRef.current = false; setBusy(false); }
@@ -136,7 +138,7 @@ export function GroupRequirementEquivalenceEditor({ group, onClose }: {
       <NativeSelect id={`${formId}-required`} value={requiredId} disabled={busy}
         onChange={event => { const item = required.find(requirement => requirement.id === event.target.value);
           setRetainedHistorical(item?.historical ? item as HistoricalRequirement : null);
-          setRequiredId(event.target.value); setSearch(""); setCandidates([]); setDecision(null); setError(""); setNotice(""); }}>
+          setRequiredId(event.target.value); setSearch(""); setAppliedSearch(""); setCandidates([]); setDecision(null); setError(""); setNotice(""); }}>
         <NativeSelectOption value="">اختر محاضرة مضافة</NativeSelectOption>
         {required.map(item => <NativeSelectOption key={item.id} value={item.id}>
           {item.number.toLocaleString("ar-EG")} · {item.title || item.content}{item.historical ? " · اعتماد تاريخي" : ""}
@@ -149,7 +151,7 @@ export function GroupRequirementEquivalenceEditor({ group, onClose }: {
         onChange={setSearch} disabled={busy} />
       <CenterHeaderActions>
         <Button disabled={busy} onClick={() => void load(requiredId, 1, search)}>بحث</Button>
-        {hasMore ? <Button disabled={busy} onClick={() => void load(requiredId, page + 1, search)}>عرض المزيد</Button> : null}
+        {hasMore ? <Button disabled={busy} onClick={() => void load(requiredId, page + 1, appliedSearch)}>عرض المزيد</Button> : null}
       </CenterHeaderActions>
       <FormField id={`${formId}-reason`} label="سبب الاعتماد أو السحب" value={reason}
         onChange={value => { setReason(value); setRequestId(newSubmissionId()); }} disabled={busy} required />
@@ -169,7 +171,7 @@ export function GroupRequirementEquivalenceEditor({ group, onClose }: {
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     <CenterHeaderActions>
-      {conflict && selected ? <Button disabled={busy} onClick={() => void load(selected.id, 1, search)}>تحميل أحدث البيانات</Button> : null}
+      {conflict && selected ? <Button disabled={busy} onClick={() => void load(selected.id, 1, appliedSearch)}>تحميل أحدث البيانات</Button> : null}
       <Button disabled={busy} onClick={onClose}>رجوع للجدول</Button>
     </CenterHeaderActions>
     {decision ? <ConfirmationDialog
