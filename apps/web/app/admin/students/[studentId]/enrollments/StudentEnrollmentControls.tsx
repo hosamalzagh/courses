@@ -270,6 +270,7 @@ export function StudentEnrollmentControls({ initial, search, linkedAttemptId }: 
       emptyMessage="لا توجد محاولات دراسة في فروع صلاحيتك." description="آخر ٢٠ محاولة في الدفعة الحالية. الرسوم المعتمدة محفوظة مع سبب الخصم والموظف."
       columns={[
         { key: "group", label: "المجموعة / المستوى", render: row => `${row.group_name ?? "انتظار المستوى"} — ${row.level_name}` },
+        { key: "course", label: "الكورس", render: row => <PrefetchLink href={`/admin/students/${studentId}/courses/${row.course_id}/completion`}>{row.course_name} · حالة الإتمام</PrefetchLink> },
         { key: "joined", label: "الانضمام", render: row => <bdi dir="ltr">{row.joined_on}</bdi> },
         { key: "status", label: "الحالة", render: row => <span>{row.status === "active" ? row.current_group_id ? "نشطة" : `انتظار منذ ${row.latest_waitlist?.entered_on ?? "—"}` : row.status === "withdrawn" ? `انسحب في ${row.withdrawal?.withdrawn_on ?? "—"}` : "مكتملة"}{row.repeated_from_attempt_id ? " — إعادة دراسة" : ""}{row.withdrawal ? <small className="muted"> — {row.withdrawal.reason} ({row.withdrawal.actor_name})</small> : null}</span> },
         { key: "requirements", label: "متطلبات الخطة", render: row => row.requirements_count.toLocaleString("ar-EG") },

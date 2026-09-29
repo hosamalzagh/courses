@@ -5,6 +5,7 @@ use App\Http\Controllers\CenterAuditController;
 use App\Http\Controllers\CenterAuthController;
 use App\Http\Controllers\CenterBranchController;
 use App\Http\Controllers\CenterContentEquivalenceController;
+use App\Http\Controllers\CenterCourseCompletionController;
 use App\Http\Controllers\CenterCurriculumController;
 use App\Http\Controllers\CenterCurriculumCopyController;
 use App\Http\Controllers\CenterInstructorController;
@@ -102,6 +103,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('students/{studentId}/fees/{feeId}/adjustments', [CenterStudentFeeAdjustmentController::class, 'show']);
         Route::post('students/{studentId}/fees/{feeId}/adjustments', [CenterStudentFeeAdjustmentController::class, 'store']);
         Route::get('students/{studentId}/enrollments', [CenterStudyEnrollmentController::class, 'workspace']);
+        Route::get('students/{studentId}/courses/{courseId}/completion', [CenterCourseCompletionController::class, 'show']);
         Route::post('students/{studentId}/enrollments', [CenterStudyEnrollmentController::class, 'store']);
         Route::post('students/{studentId}/enrollments/{attemptId}/withdraw', [CenterStudyEnrollmentController::class, 'withdraw']);
         Route::get('students/{studentId}/enrollments/{attemptId}/waitlist', [CenterStudyWaitlistController::class, 'options']);

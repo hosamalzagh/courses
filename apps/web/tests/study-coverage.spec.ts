@@ -97,6 +97,15 @@ test("coverage is provisional until closure and hidden branch data stays denied"
       .map(line => JSON.parse(line) as { path: string; count: number | null }).filter(read => read.path === `/api/v1/center/${path}`);
     expect(reads.length).toBeGreaterThan(0);
     expect(reads.every(read => Number.isInteger(read.count) && read.count! <= 6)).toBe(true);
+    const coursePath = `students/${student.body.student.id}/courses/${course.body.course.id}/completion`;
+    const courseUrl = `${origin}/admin/${coursePath}`;
+    const beforeCourseSsr = readFileSync(process.env.COURSES_COVERAGE_QUERY_LOG!, "utf8").trim().split("\n").length;
+    const courseHtml = await (await owner.request.get(courseUrl)).text();
+    expect(courseHtml).toContain("الكورس لم يكتمل دراسيًا");
+    const courseReads = readFileSync(process.env.COURSES_COVERAGE_QUERY_LOG!, "utf8").trim().split("\n").slice(beforeCourseSsr)
+      .map(line => JSON.parse(line) as { path: string; count: number | null }).filter(read => read.path === `/api/v1/center/${coursePath}`);
+    expect(courseReads.length).toBeGreaterThan(0);
+    expect(courseReads.every(read => Number.isInteger(read.count) && read.count! <= 6)).toBe(true);
     await owner.goto(`${origin}/admin/groups/${groupId}/sessions`);
     await owner.locator("header.center-topbar").getByRole("link", { name: "تقرير تغطية المحتوى وأهلية الإتمام" }).click();
     await expect(owner).toHaveURL(url);
@@ -204,6 +213,13 @@ test("coverage is provisional until closure and hidden branch data stays denied"
     await owner.reload();
     await expect(owner.getByRole("row", { name: new RegExp(secondStudent.body.student.name) })).toContainText("اكتمل استثنائيًا بقرار محفوظ");
     await expect(owner.getByRole("row", { name: new RegExp(secondStudent.body.student.name) })).toContainText("قرار استثنائي بعد مراجعة النواقص");
+    await owner.getByRole("row", { name: new RegExp(student.body.student.name) }).getByRole("link", { name: "حالة الكورس" }).click();
+    await expect(owner).toHaveURL(courseUrl);
+    await expect(owner.getByText("اكتمل الكورس دراسيًا")).toBeVisible();
+    await expect(owner.getByText("مكتمل بقرار محفوظ")).toBeVisible();
+    await owner.goto(`${origin}/admin/students/${secondStudent.body.student.id}/courses/${course.body.course.id}/completion`);
+    await expect(owner.getByText("مكتمل استثنائيًا بقرار محفوظ")).toBeVisible();
+    await expect(owner.getByText(/قرار استثنائي بعد مراجعة النواقص/)).toBeVisible();
     await owner.setViewportSize({ width: 390, height: 844 });
     expect(await owner.locator("html").getAttribute("dir")).toBe("rtl");
     await owner.getByRole("button", { name: "القائمة" }).click();

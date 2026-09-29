@@ -79,7 +79,7 @@ export type CoverageRow = {
 };
 
 export type CoverageContext = CenterContext & {
-  group: { id: string; name: string; status: StudyGroup["status"]; branch_id: number; revision: number; can_complete: boolean;
+  group: { id: string; name: string; status: StudyGroup["status"]; branch_id: number; course_id: string; revision: number; can_complete: boolean;
     completion_threshold: number; required_count: number;
     requirements: { number: number; title: string | null; content: string }[] };
   students: CoverageRow[];

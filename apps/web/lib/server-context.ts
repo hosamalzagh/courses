@@ -80,8 +80,21 @@ export type StudyEnrollmentContext = CenterContext & {
   student: { id: string; name: string; student_number: number; status: "active" | "suspended"; currency: string | null; currency_revision: number; version: string };
   balance: { available_credit: string; debt: string };
   groups: { id: string; name: string; status: string; approved_price: string; revision: number; level_id: string; plan_version_id: string; branch_id: number; branch_name: string; level_name: string }[];
-  attempts: { id: string; level_id: string; plan_version_id: string; current_group_id: string | null; branch_id: number; event_branch_id: number | null; joined_on: string; status: string; revision: number; repeated_from_attempt_id: string | null; has_repeat: boolean; withdrawal: { withdrawn_on: string; reason: string; actor_name: string } | null; created_at: string; group_name: string | null; level_name: string; requirements_count: number; latest_waitlist: { id: string; from_group_id: string; to_group_id: string | null; entered_on: string; left_on: string | null; reason: string; entered_by_name: string; left_by_name: string | null } | null; fee: { id: string; original_price: string; discount: string; net_amount: string; current_due: string; currency: string; discount_reason: string | null; actor_name: string } | null; note: StudyAttemptNote | null }[];
+  attempts: { id: string; level_id: string; plan_version_id: string; current_group_id: string | null; branch_id: number; event_branch_id: number | null; joined_on: string; status: string; revision: number; repeated_from_attempt_id: string | null; has_repeat: boolean; withdrawal: { withdrawn_on: string; reason: string; actor_name: string } | null; created_at: string; group_name: string | null; level_name: string; course_id: string; course_name: string; requirements_count: number; latest_waitlist: { id: string; from_group_id: string; to_group_id: string | null; entered_on: string; left_on: string | null; reason: string; entered_by_name: string; left_by_name: string | null } | null; fee: { id: string; original_price: string; discount: string; net_amount: string; current_due: string; currency: string; discount_reason: string | null; actor_name: string } | null; note: StudyAttemptNote | null }[];
   pagination: { page: number; has_more: boolean; groups_page: number; groups_has_more: boolean };
+};
+
+export type CourseCompletionContext = CenterContext & {
+  student: { id: string; name: string; student_number: number };
+  course: { id: string; name: string; branch_id: number; branch_name: string;
+    required_levels: number; completed_levels: number; completed: boolean };
+  levels: { id: string; name: string; stage_id: string; stage_name: string; attempt: null | {
+    id: string; status: string; current_group_id: string | null; group_name: string | null;
+    approved_at: string | null; approved_by_name: string | null; exceptional: boolean | null;
+    reason: string | null; covered_count: number | null; required_count: number | null;
+    completion_threshold: number | null;
+  } }[];
+  pagination: { page: number; has_more: boolean };
 };
 
 export type StudyAttemptNote = { id: string; body: string; important: boolean; revision: number; updated_by_name: string };
@@ -157,6 +170,10 @@ export function loadStudyEnrollments(studentId: string, query = ""): Promise<Stu
   return fetchCenterPayload<StudyEnrollmentContext>(`students/${encodeURIComponent(studentId)}/enrollments${query ? `?${query}` : ""}`);
 }
 
+export function loadCourseCompletion(studentId: string, courseId: string, query = ""): Promise<CourseCompletionContext | CenterAccessFailure> {
+  return fetchCenterPayload<CourseCompletionContext>(`students/${encodeURIComponent(studentId)}/courses/${encodeURIComponent(courseId)}/completion${query ? `?${query}` : ""}`);
+}
+
 export function loadInstructorWorkspace(query = "", instructorId?: string): Promise<InstructorContext | CenterAccessFailure> {
   return fetchCenterPayload<InstructorContext>(`${instructorId ? `instructors/${encodeURIComponent(instructorId)}` : "instructor-workspace"}${query ? `?${query}` : ""}`);
 }
@@ -223,6 +240,8 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   if (studentEdit) return loadStudentWorkspace("", decodeURIComponent(studentEdit[1]));
   const studentAccount = path.match(/^\/admin\/students\/([^/]+)\/account$/);
   if (studentAccount) return loadStudentAccount(decodeURIComponent(studentAccount[1]), query(["page", "branches_page", "fees_page", "q", "payment_id"]));
+  const courseCompletion = path.match(/^\/admin\/students\/([^/]+)\/courses\/([^/]+)\/completion$/);
+  if (courseCompletion) return loadCourseCompletion(decodeURIComponent(courseCompletion[1]), decodeURIComponent(courseCompletion[2]), query(["page"]));
   const studentEnrollments = path.match(/^\/admin\/students\/([^/]+)\/enrollments$/);
   if (studentEnrollments) return loadStudyEnrollments(decodeURIComponent(studentEnrollments[1]), query(["page", "groups_page", "q", "attempt_id"]));
   if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q", "identifier"]));

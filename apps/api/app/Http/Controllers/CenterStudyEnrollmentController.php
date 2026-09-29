@@ -331,6 +331,8 @@ class CenterStudyEnrollmentController extends Controller
         return DB::connection('tenant')->table('study_attempts')
             ->leftJoin('study_groups', 'study_groups.id', '=', 'study_attempts.current_group_id')
             ->join('levels', 'levels.id', '=', 'study_attempts.level_id')
+            ->join('stages', 'stages.id', '=', 'levels.stage_id')
+            ->join('courses', 'courses.id', '=', 'stages.course_id')
             ->leftJoin('study_attempt_fees as fees', function ($join) use ($permissions): void {
                 $join->on('fees.attempt_id', '=', 'study_attempts.id');
                 if (! $permissions->isCenterManager()) {
@@ -358,6 +360,7 @@ class CenterStudyEnrollmentController extends Controller
                 'study_attempts.current_group_id', 'study_attempts.branch_id', 'study_attempts.joined_on',
                 'study_attempts.status', 'study_attempts.revision', 'study_attempts.repeated_from_attempt_id',
                 'study_attempts.created_at', 'study_groups.name as group_name', 'levels.name as level_name',
+                'courses.id as course_id', 'courses.name as course_name',
                 'withdrawal.withdrawn_on', 'withdrawal.reason as withdrawal_reason', 'withdrawal.actor_name as withdrawal_actor_name'])
             ->selectRaw('(SELECT count(*) FROM plan_lectures WHERE plan_version_id = study_attempts.plan_version_id) AS requirements_count')
             ->selectRaw('CASE WHEN EXISTS (SELECT 1 FROM study_attempts AS repeated WHERE repeated.repeated_from_attempt_id = study_attempts.id) THEN 1 ELSE 0 END AS has_repeat')
@@ -381,6 +384,7 @@ class CenterStudyEnrollmentController extends Controller
                 'reason' => $row->withdrawal_reason, 'actor_name' => $row->withdrawal_actor_name],
             'created_at' => $row->created_at,
             'group_name' => $row->group_name, 'level_name' => $row->level_name,
+            'course_id' => $row->course_id, 'course_name' => $row->course_name,
             'requirements_count' => (int) $row->requirements_count,
             'latest_waitlist' => $row->latest_waitlist === null ? null : json_decode($row->latest_waitlist, true),
             'fee' => $row->fee_id === null ? null : ['id' => $row->fee_id, 'original_price' => $row->original_price,
