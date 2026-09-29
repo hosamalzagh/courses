@@ -14,6 +14,10 @@ function attemptStatus(attempt: StudentStudyAttempt) {
   return "يدرس المستوى";
 }
 
+function currentStudy(attempt: StudentStudyAttempt) {
+  return Boolean(attempt.current_group_name || (attempt.latest_waitlist && !attempt.latest_waitlist.left_on));
+}
+
 export function StudentStudyTab({ context, search }: { context: StudentContext; search: string }) {
   const router = useRouter();
   const student = context.students[0];
@@ -41,9 +45,9 @@ export function StudentStudyTab({ context, search }: { context: StudentContext; 
         { key: "group", label: "المجموعة", render: attempt => attempt.current_group_name ?? attempt.previous_group_name ?? "لم يلتحق بمجموعة" },
         { key: "status", label: "حالة المحاولة", render: attemptStatus },
         { key: "links", label: "الرحلة", actions: true, render: attempt => <div className="flex flex-wrap gap-2">
-          {attempt.current_group_name && canManage(attempt.branch_id) ? <Link href={`/admin/students/${student.id}/enrollments?attempt_id=${attempt.id}`}>فتح التسجيل</Link> : null}
-          {attempt.current_group_name ? <Link href={`/admin/students/${student.id}/courses/${attempt.course_id}/completion`}>إتمام الكورس</Link> : null}
-          {!attempt.current_group_name ? <span className="muted">سجل تاريخي لهذا الفرع</span> : null}
+          {currentStudy(attempt) && canManage(attempt.branch_id) ? <Link href={`/admin/students/${student.id}/enrollments?attempt_id=${attempt.id}`}>فتح التسجيل</Link> : null}
+          {currentStudy(attempt) ? <Link href={`/admin/students/${student.id}/courses/${attempt.course_id}/completion`}>إتمام الكورس</Link> : null}
+          {!currentStudy(attempt) ? <span className="muted">سجل تاريخي لهذا الفرع</span> : null}
         </div> },
       ]}
       expanded={attempt => <div className="space-y-2">
