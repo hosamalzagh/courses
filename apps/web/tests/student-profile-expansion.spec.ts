@@ -1,14 +1,17 @@
 import { expect, test, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const origin = process.env.COURSES_PROFILE_EXPANSION_ORIGIN;
 const credentialsFile = process.env.COURSES_PROFILE_EXPANSION_CREDENTIALS;
 const queryLog = process.env.COURSES_PROFILE_EXPANSION_QUERY_LOG;
+const databasePort = process.env.COURSES_PROFILE_EXPANSION_DB_PORT;
 const image = { name: "student.png", mimeType: "image/png", buffer: Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAIAAAAC64paAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAAHUlEQVQ4jWMUSbFhIBcwka1zVPOo5lHNo5qpohkAvIEA3Cu5xEYAAAAASUVORK5CYII=",
   "base64",
 ) };
-test.skip(!origin || !credentialsFile || !queryLog, "Requires an isolated two-center PostgreSQL fixture and measured Next.js proxy.");
+test.skip(!origin || !credentialsFile || !queryLog || databasePort !== "5558",
+  "Requires an isolated two-center PostgreSQL fixture on port 5558 and measured Next.js proxy.");
 test.setTimeout(120_000);
 
 const credentials = credentialsFile ? JSON.parse(readFileSync(credentialsFile, "utf8")) : {};
@@ -58,6 +61,7 @@ test("one authorized profile keeps real study, payment and note data across meas
   await signIn(page);
   const workspace = await (await page.request.get(`${origin}/api/v1/center/student-workspace`)).json();
   const branch = workspace.branches[0].id as number;
+  const centerId = workspace.center.id as string;
   const unique = crypto.randomUUID().slice(0, 8);
 
   const course = await write(page, "courses", { branch_id: branch, name: `Acceptance ${unique}`, request_id: crypto.randomUUID() });
@@ -91,6 +95,20 @@ test("one authorized profile keeps real study, payment and note data across meas
     currency_revision: enrollment.student.currency_revision, joined_on: "2026-09-28", discount: "0.00", discount_reason: null,
     version: enrollment.student.version, request_id: crypto.randomUUID() });
   expect(attempt.status).toBe(201);
+  const groupId = group.body.group.id as string;
+  const scheduled = new Date(Date.now() + 14 * 86_400_000).toLocaleString("sv-SE", { timeZone: "Africa/Cairo" }).slice(0, 16).replace(" ", "T");
+  const session = await write(page, `groups/${groupId}/sessions`, { kind: "single", revision: group.body.group.revision,
+    start_at: scheduled, plan_lecture_number: 1, request_id: crypto.randomUUID() });
+  expect(session.status).toBe(201);
+  const sessionId = session.body.sessions[0].id as string;
+  expect((await write(page, `groups/${groupId}/start`, { revision: session.body.group_revision })).status).toBe(200);
+  for (const id of [centerId, groupId, sessionId]) expect(id).toMatch(/^[a-f0-9-]{36}$/);
+  execFileSync("psql", ["-h", "127.0.0.1", "-p", databasePort!, "-U", "postgres", "-d", `courses_center_${centerId}`,
+    "-c", `UPDATE study_groups SET started_at = now() - interval '1 day' WHERE id = '${groupId}'; UPDATE study_sessions SET scheduled_at = now() - interval '1 hour' WHERE id = '${sessionId}'`], { stdio: "ignore" });
+  const attendanceRoute = `groups/${groupId}/sessions/${sessionId}/attendance`;
+  const roster = await (await page.request.get(`${origin}/api/v1/center/${attendanceRoute}`)).json();
+  expect((await write(page, attendanceRoute, { attempt_id: attempt.body.attempt.id, status: "counted",
+    revision: roster.session.revision, request_id: crypto.randomUUID() })).status).toBe(201);
   const account = await (await page.request.get(`${origin}/api/v1/center/students/${studentId}/account`)).json();
   const payment = await write(page, `students/${studentId}/payments`, { branch_id: branch, method: "cash", received_on: "2026-09-28",
     amount: "30.00", version: account.account.version, request_id: crypto.randomUUID() });
@@ -102,6 +120,7 @@ test("one authorized profile keeps real study, payment and note data across meas
   const paths = [
     { path: "", text: `قبول التوسعة ${unique}` },
     { path: "?tab=study", text: `Group ${unique}` },
+    { path: "?tab=attendance", text: "حضور محتسب" },
     { path: "?tab=attachments", text: "لا توجد مرفقات متاحة ضمن صلاحياتك." },
     { path: "?tab=custom-history", text: "لا يوجد تاريخ متاح ضمن صلاحياتك." },
     { path: "?tab=notes", text: `متابعة مالية ${unique}` },
@@ -131,7 +150,7 @@ test("one authorized profile keeps real study, payment and note data across meas
     if (request.resourceType() === "document") documentRequests++;
   };
   page.on("request", countDocuments);
-  for (const [label, expected] of [["الدراسة", `Group ${unique}`], ["الحساب المالي", "30.00 EGP"]] as const) {
+  for (const [label, expected] of [["الدراسة", `Group ${unique}`], ["الحضور والغياب", "حضور محتسب"], ["الحساب المالي", "30.00 EGP"]] as const) {
     const before = cursor();
     await page.getByRole("navigation", { name: "أقسام ملف الطالب" }).getByRole("link", { name: label, exact: true }).click();
     await expect(page.getByText(expected, { exact: false }).first()).toBeVisible();
