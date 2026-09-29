@@ -365,7 +365,9 @@ class CenterStudyEnrollmentController extends Controller
                 'courses.id as course_id', 'courses.name as course_name',
                 'withdrawal.withdrawn_on', 'withdrawal.reason as withdrawal_reason', 'withdrawal.actor_name as withdrawal_actor_name'])
             ->selectRaw(<<<'SQL'
-CASE WHEN study_attempts.current_group_id IS NULL
+CASE WHEN study_attempts.required_lectures IS NOT NULL
+    THEN jsonb_array_length(study_attempts.required_lectures)
+    WHEN study_attempts.current_group_id IS NULL
     THEN COALESCE((SELECT jsonb_array_length(periods.required_credit_ids)
         FROM study_attempt_waitlists AS waitlists
         JOIN study_attempt_group_periods AS periods ON periods.id = waitlists.origin_period_id

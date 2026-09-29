@@ -712,6 +712,10 @@ class StudyCoverageTest extends TestCase
         $this->assertSame(1, $rows[$firstAttempt['id']]['covered_count']);
         $this->assertSame([2, 3], $rows[$firstAttempt['id']]['missing_numbers']);
         $this->assertSame(2, $rows[$secondAttempt['id']]['required_count']);
+        $enrollments = $this->getJson("{$this->base}/students/{$first['id']}/enrollments")->assertOk();
+        $this->assertSame(3, $enrollments->json('attempts.0.requirements_count'));
+        $this->getJson("{$this->base}/students/{$second['id']}/enrollments")->assertOk()
+            ->assertJsonPath('attempts.0.requirements_count', 2);
         $instructorId = $this->center->run(fn () => DB::table('study_group_instructors')
             ->where('group_id', $group['id'])->value('instructor_id'));
         $makeupGroup = $this->postJson("{$this->base}/groups", [

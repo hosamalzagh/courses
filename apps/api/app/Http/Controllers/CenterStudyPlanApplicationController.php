@@ -221,13 +221,22 @@ SQL)
         $approvals = $approvalRows->map(fn (object $row): array => ['id' => $row->id,
             'source_lecture_ids' => json_decode($row->source_lecture_ids, true),
             'target_lecture_ids' => json_decode($row->target_lecture_ids, true)])->all();
+        $groupApprovals = $db->table('study_group_requirement_equivalences')
+            ->where('required_group_id', $group->id)->whereNull('revoked_at')->orderBy('id')
+            ->get(['id', 'candidate_requirement_id', 'required_requirement_id'])
+            ->map(fn (object $row): array => ['id' => $row->id,
+                'source_lecture_ids' => [$row->candidate_requirement_id],
+                'target_lecture_ids' => [$row->required_requirement_id]])->all();
+        $approvals = [...$approvals, ...$groupApprovals];
         $students = $rows->map(function (object $row) use ($groupRequirements, $targetRequirements, $approvals): array {
             $beforeRequirements = $row->required_lectures === null
                 ? $groupRequirements : json_decode($row->required_lectures, true);
             $credits = StudyCoverageCredits::resolve(json_decode($row->attendance_rows, true), $approvals);
             $before = $this->coverage($beforeRequirements, $credits, (int) $row->completion_threshold);
             $after = $this->coverage($targetRequirements, $credits, (int) $row->completion_threshold);
-            $approvalIds = collect($targetRequirements)->flatMap(fn (array $lecture): array => $credits['dependencies'][$lecture['id']] ?? [])->unique()->sort()->values()->all();
+            $approvalIds = collect([...$beforeRequirements, ...$targetRequirements])
+                ->flatMap(fn (array $lecture): array => $credits['dependencies'][$lecture['id']] ?? [])
+                ->unique()->sort()->values()->all();
 
             return ['attempt_id' => $row->id, 'attempt_revision' => (int) $row->revision,
                 'name' => $row->name, 'student_number' => (int) $row->student_number,
