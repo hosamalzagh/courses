@@ -371,6 +371,7 @@ class CenterStudentAllocationController extends Controller
                     'related_branch_ids' => array_values(array_unique(array_filter([
                         (int) $allocation->target_branch_id, $replacement['target_branch_id'] ?? null,
                     ]))),
+                    'account_scope_branch_ids' => $plan['account']['branch_ids'],
                     'account_before' => ['available_balance' => $plan['account']['available_before'],
                         'debt' => $plan['account']['debt_before']],
                     'account_after' => ['available_balance' => $plan['account']['available_after'],
@@ -443,7 +444,11 @@ class CenterStudentAllocationController extends Controller
                 'remaining_after' => StudentMoney::format($remaining - $amount)];
         }
         $paymentAvailable = StudentMoney::cents($allocation->received_amount) - $this->used($allocation->payment_id);
-        $account = $this->visibleAccountBalance($studentId, $permissions);
+        $accountBranches = array_values(array_unique(array_filter([
+            (int) $allocation->source_branch_id, (int) $allocation->target_branch_id,
+            $target['branch_id'] ?? null,
+        ])));
+        $account = $this->correctionBranchBalance($studentId, $accountBranches);
 
         return [
             'source' => ['payment_id' => $allocation->payment_id, 'branch_id' => (int) $allocation->source_branch_id,
@@ -457,27 +462,25 @@ class CenterStudentAllocationController extends Controller
                 'amount' => $allocation->amount, 'remaining_before' => StudentMoney::format($oldRemaining),
                 'remaining_after' => StudentMoney::format($oldRemaining + $amount)],
             'target' => $target,
-            'account' => ['available_before' => $account['available'],
+            'account' => ['branch_ids' => $accountBranches, 'available_before' => $account['available'],
                 'available_after' => StudentMoney::format(StudentMoney::cents($account['available']) + ($target === null ? $amount : 0)),
                 'debt_before' => $account['debt'],
                 'debt_after' => StudentMoney::format(StudentMoney::cents($account['debt']) + ($target === null ? $amount : 0))],
         ];
     }
 
-    private function visibleAccountBalance(string $studentId, CenterPermissions $permissions): array
+    private function correctionBranchBalance(string $studentId, array $branchIds): array
     {
-        $readable = array_keys(array_filter($permissions->branchRoles,
-            fn (array $roles): bool => in_array('finance.read', CenterPermissions::actions($roles), true)));
         $received = DB::connection('tenant')->table('student_payments')->where('student_id', $studentId)
-            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('branch_id', $readable))->sum('amount');
+            ->whereIn('branch_id', $branchIds)->sum('amount');
         $due = DB::connection('tenant')->table('study_attempt_fees as fees')->where('fees.student_id', $studentId)
-            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('fees.branch_id', $readable))
+            ->whereIn('fees.branch_id', $branchIds)
             ->selectRaw('COALESCE(SUM('.EffectiveStudyFees::amount('fees').'), 0) AS total')->value('total');
         $used = ActiveStudentAllocations::query()->where('allocations.student_id', $studentId)
-            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.source_branch_id', $readable))
+            ->whereIn('allocations.source_branch_id', $branchIds)
             ->sum('allocations.amount');
         $paid = ActiveStudentAllocations::query()->where('allocations.student_id', $studentId)
-            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.target_branch_id', $readable))
+            ->whereIn('allocations.target_branch_id', $branchIds)
             ->sum('allocations.amount');
 
         return ['available' => StudentMoney::format(StudentMoney::cents($received) - StudentMoney::cents($used)),

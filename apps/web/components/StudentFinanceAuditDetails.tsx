@@ -105,7 +105,7 @@ export function StudentFinanceAuditDetails({ entry }: { entry: AuditEntry }) {
       <p>الدفعة: <bdi dir="ltr">{String(data.payment_id ?? "")}</bdi> — التخصيص الأصلي: <bdi dir="ltr">{String(data.original_allocation_id ?? "")}</bdi></p>
       <p>من {String(previous?.branch_name ?? "")} إلى {String(next?.branch_name ?? "الرصيد المتاح")}: <bdi dir="ltr">{String(data.amount ?? "")} {String(data.currency ?? "")}</bdi></p>
       {next ? <p>التخصيص الصحيح: <bdi dir="ltr">{String(data.replacement_allocation_id ?? "")}</bdi> — رسوم: <bdi dir="ltr">{String(next.fee_id ?? "")}</bdi></p> : null}
-      <p>الرصيد: <bdi dir="ltr">{String(before?.available_balance ?? "")}</bdi> ← <bdi dir="ltr">{String(after?.available_balance ?? "")}</bdi>؛ المديونية: <bdi dir="ltr">{String(before?.debt ?? "")}</bdi> ← <bdi dir="ltr">{String(after?.debt ?? "")}</bdi></p>
+      <p>رصيد الفروع المعنية: <bdi dir="ltr">{String(before?.available_balance ?? "")}</bdi> ← <bdi dir="ltr">{String(after?.available_balance ?? "")}</bdi>؛ المديونية: <bdi dir="ltr">{String(before?.debt ?? "")}</bdi> ← <bdi dir="ltr">{String(after?.debt ?? "")}</bdi></p>
       <p>السبب: {String(data.reason ?? "")}</p>
     </details>;
   }
