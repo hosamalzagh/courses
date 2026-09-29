@@ -204,8 +204,14 @@ test("records whole-session attendance, undoes the last entry, closes absences, 
     const studentSummary = await owner.request.get(`${origin}/api/v1/center/students/${students[1].id}`);
     expect(Number(studentSummary.headers()["x-courses-query-count"])).toBeLessThanOrEqual(6);
     expect((await studentSummary.json()).summary.current_group_absences).toBe(1);
+    const beforeProfileSsr = readFileSync(logPath, "utf8").trim().split("\n").length;
     await owner.goto(`${origin}/admin/students/${students[1].id}`);
     await expect(owner.getByRole("region", { name: "ملخص الطالب" })).toContainText("غيابات مسجلة في المجموعات الحالية: ١");
+    const profileReads = readFileSync(logPath, "utf8").trim().split("\n").slice(beforeProfileSsr)
+      .map(line => JSON.parse(line) as { path: string; count: number | null })
+      .filter(read => read.path === `/api/v1/center/students/${students[1].id}`);
+    expect(profileReads.length).toBeGreaterThan(0);
+    expect(profileReads.every(read => Number.isInteger(read.count) && read.count! <= 6)).toBe(true);
     expect(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await owner.goto(`${origin}/admin/audit`);
     const auditRow = owner.getByRole("row").filter({ hasText: "إغلاق كشف حضور محاضرة" });
