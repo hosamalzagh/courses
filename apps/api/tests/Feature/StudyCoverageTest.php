@@ -424,6 +424,118 @@ class StudyCoverageTest extends TestCase
         });
     }
 
+    public function test_course_completion_requires_a_saved_decision_for_each_level_in_its_visible_branch(): void
+    {
+        $first = $this->group($this->north, 1);
+        $curriculum = $this->center->run(fn () => DB::table('levels')
+            ->join('stages', 'stages.id', '=', 'levels.stage_id')
+            ->where('levels.id', $first['level_id'])->first(['stages.id as stage_id', 'stages.course_id']));
+        $level = $this->postJson("{$this->base}/stages/{$curriculum->stage_id}/levels", [
+            'name' => 'Second level', 'request_id' => (string) Str::uuid(),
+            'lectures' => [['number' => 1, 'content' => 'Second requirement', 'planned_hours' => 1]],
+        ])->assertCreated()->json('level');
+        $second = $this->postJson("{$this->base}/groups", [
+            'level_id' => $level['id'], 'plan_version_id' => $level['plan']['id'],
+            'name' => 'Second level group', 'approved_price' => '0.00',
+            'instructor_ids' => array_column($first['instructors'], 'id'), 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('group');
+        $student = $this->student();
+        $firstAttempt = $this->enroll($student['id'], $first, now('Africa/Cairo')->format('Y-m-d'));
+        $secondAttempt = $this->enroll($student['id'], $second, now('Africa/Cairo')->format('Y-m-d'));
+        $this->center->run(function () use ($first, $second, $firstAttempt): void {
+            DB::table('study_groups')->whereIn('id', [$first['id'], $second['id']])->update(['status' => 'started']);
+            $lecture = DB::table('plan_lectures')->where('plan_version_id', $first['plan_version_id'])->firstOrFail();
+            $sessionId = (string) Str::uuid();
+            DB::table('study_sessions')->insert(['id' => $sessionId, 'group_id' => $first['id'],
+                'plan_lecture_id' => $lecture->id, 'number' => 1, 'scheduled_at' => now()->subDay(),
+                'status' => 'held', 'revision' => 2, 'created_by' => $this->owner->id,
+                'created_by_name' => $this->owner->name, 'closed_at' => now(), 'closed_by' => $this->owner->id,
+                'created_at' => now(), 'updated_at' => now()]);
+            DB::table('study_attendance_entries')->insert(['id' => (string) Str::uuid(), 'session_id' => $sessionId,
+                'attempt_id' => $firstAttempt['id'], 'status' => 'counted', 'revision' => 1,
+                'recorded_by' => $this->owner->id, 'recorded_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+        });
+        $coursePath = "{$this->base}/students/{$student['id']}/courses/{$curriculum->course_id}/completion";
+        $before = $this->getJson($coursePath)->assertOk()->assertJsonPath('course.completed', false)
+            ->assertJsonPath('course.required_levels', 2)->assertJsonPath('course.completed_levels', 0)
+            ->assertJsonPath('levels.0.attempt.status', 'active')
+            ->assertJsonPath('levels.1.attempt.status', 'active');
+        $this->assertLessThanOrEqual(6, (int) $before->headers->get('X-Courses-Query-Count'));
+        $selection = ['complete_group' => true, 'decisions' => [['attempt_id' => $firstAttempt['id']]]];
+        $preview = $this->postJson("{$this->base}/groups/{$first['id']}/completion-preview", $selection)
+            ->assertOk()->assertJsonPath('students.0.exceptional', false)->json();
+        $this->postJson("{$this->base}/groups/{$first['id']}/completion", [
+            ...$selection, 'group_revision' => $preview['group']['revision'],
+            'preview_token' => $preview['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $partial = $this->getJson($coursePath)->assertOk()->assertJsonPath('course.completed', false)
+            ->assertJsonPath('course.completed_levels', 1);
+        $this->assertFalse(collect($partial->json('levels'))->firstWhere('id', $first['level_id'])['attempt']['exceptional']);
+        $this->assertLessThanOrEqual(6, (int) $partial->headers->get('X-Courses-Query-Count'));
+        $exception = ['complete_group' => true, 'decisions' => [['attempt_id' => $secondAttempt['id'],
+            'exception_reason' => 'إتمام استثنائي مع بقاء النقص الحقيقي']]];
+        $this->postJson("{$this->base}/groups/{$second['id']}/completion-preview", [
+            'complete_group' => true, 'decisions' => [['attempt_id' => $secondAttempt['id']]],
+        ])->assertConflict()->assertJsonPath('code', 'completion_exception_reason_required');
+        $secondPreview = $this->postJson("{$this->base}/groups/{$second['id']}/completion-preview", $exception)
+            ->assertOk()->assertJsonPath('students.0.exceptional', true)->json();
+        $this->postJson("{$this->base}/groups/{$second['id']}/completion", [
+            ...$exception, 'group_revision' => $secondPreview['group']['revision'],
+            'preview_token' => $secondPreview['preview_token'], 'request_id' => (string) Str::uuid(),
+        ])->assertOk();
+        $completed = $this->getJson($coursePath)->assertOk()->assertJsonPath('course.completed', true)
+            ->assertJsonPath('course.completed_levels', 2);
+        $secondResult = collect($completed->json('levels'))->firstWhere('id', $level['id'])['attempt'];
+        $this->assertTrue($secondResult['exceptional']);
+        $this->assertSame(0, $secondResult['covered_count']);
+        $this->assertSame($exception['decisions'][0]['exception_reason'], $secondResult['reason']);
+        $this->assertLessThanOrEqual(6, (int) $completed->headers->get('X-Courses-Query-Count'));
+
+        $hidden = $this->group($this->south, 1);
+        $hiddenCourseId = $this->center->run(fn () => DB::table('levels')
+            ->join('stages', 'stages.id', '=', 'levels.stage_id')
+            ->where('levels.id', $hidden['level_id'])->value('stages.course_id'));
+        $this->center->run(fn () => DB::table('student_branches')->insert([
+            'student_id' => $student['id'], 'branch_id' => $this->south,
+            'created_at' => now(),
+        ]));
+        $this->putJson("{$this->base}/members/{$this->viewerMembership->id}/grants", [
+            'center_roles' => [], 'branch_roles' => [$this->north => ['branch_viewer']],
+        ])->assertOk();
+        $this->asUser($this->viewer);
+        $this->getJson($coursePath)->assertOk()->assertJsonPath('course.completed', true);
+        $this->getJson("{$this->base}/students/{$student['id']}/courses/{$hiddenCourseId}/completion")->assertNotFound();
+        $this->getJson("{$this->base}/students/{$student['id']}/courses/not-a-uuid/completion")->assertNotFound();
+    }
+
+    public function test_course_completion_searches_levels_beyond_the_first_page_without_changing_the_summary(): void
+    {
+        $group = $this->group($this->north, 1);
+        $student = $this->student();
+        $curriculum = $this->center->run(fn () => DB::table('levels')->join('stages', 'stages.id', '=', 'levels.stage_id')
+            ->where('levels.id', $group['level_id'])->first(['stages.id as stage_id', 'stages.course_id']));
+        $this->center->run(function () use ($curriculum): void {
+            $rows = [];
+            for ($index = 1; $index <= 51; $index++) {
+                $created = now()->addMinute()->addSeconds($index);
+                $rows[] = ['id' => (string) Str::uuid(), 'stage_id' => $curriculum->stage_id,
+                    'name' => "Target {$index}", 'created_at' => $created, 'updated_at' => $created];
+            }
+            DB::table('levels')->insert($rows);
+        });
+        $path = "{$this->base}/students/{$student['id']}/courses/{$curriculum->course_id}/completion";
+        $first = $this->getJson($path)->assertOk()->assertJsonPath('course.required_levels', 52)
+            ->assertJsonCount(50, 'levels')->assertJsonPath('pagination.has_more', true);
+        $this->assertLessThanOrEqual(6, (int) $first->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$path}?page=2")->assertOk()->assertJsonCount(2, 'levels');
+        $found = $this->getJson("{$path}?q=Target%2051")->assertOk()
+            ->assertJsonPath('course.required_levels', 52)->assertJsonCount(1, 'levels')
+            ->assertJsonPath('levels.0.name', 'Target 51');
+        $this->assertLessThanOrEqual(6, (int) $found->headers->get('X-Courses-Query-Count'));
+        $this->getJson("{$path}?q=missing")->assertOk()->assertJsonCount(0, 'levels')
+            ->assertJsonPath('course.required_levels', 52);
+    }
+
     private function group(int $branchId, int $lectureCount): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => 'Coverage '.Str::random(5),

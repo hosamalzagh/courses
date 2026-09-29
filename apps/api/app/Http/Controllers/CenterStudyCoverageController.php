@@ -24,7 +24,8 @@ class CenterStudyCoverageController extends Controller
             ->join('stages', 'stages.id', '=', 'levels.stage_id')
             ->join('courses', 'courses.id', '=', 'stages.course_id')
             ->where('groups.id', $groupId)
-            ->select(['groups.id', 'groups.name', 'groups.status', 'groups.revision', 'groups.plan_version_id', 'courses.branch_id'])
+            ->select(['groups.id', 'groups.name', 'groups.status', 'groups.revision', 'groups.plan_version_id',
+                'courses.id as course_id', 'courses.branch_id'])
             ->selectRaw('COALESCE(groups.completion_threshold, levels.completion_threshold, stages.completion_threshold, courses.completion_threshold) AS completion_threshold')
             ->selectRaw("COALESCE((SELECT json_agg(json_build_object('id', id, 'number', number, 'title', title, 'content', content) ORDER BY number) FROM plan_lectures WHERE plan_version_id = groups.plan_version_id), '[]'::json) AS requirements")
             ->first();
@@ -105,7 +106,8 @@ SQL);
             'group' => ['id' => $group->id, 'name' => $group->name, 'status' => $group->status,
                 'revision' => (int) $group->revision,
                 'can_complete' => $permissions->can('study.complete', (int) $group->branch_id),
-                'branch_id' => $group->branch_id, 'completion_threshold' => $threshold,
+                'branch_id' => $group->branch_id, 'course_id' => $group->course_id,
+                'completion_threshold' => $threshold,
                 'required_count' => $requiredCount, 'requirements' => $requirements],
             'students' => $report->values(),
             'pagination' => ['page' => $page, 'has_more' => $rows->count() > 20],

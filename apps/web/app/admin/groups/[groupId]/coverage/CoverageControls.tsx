@@ -283,7 +283,7 @@ export function CoverageControls({ context, search }: { context: CoverageContext
               });
               setCompletionPreview(null);
             }} /> }] : []),
-        { key: "student", label: "الطالب", render: row => <Link href={`/admin/students/${row.student_id}`}>{row.name} · {row.student_number.toLocaleString("ar-EG")}</Link> },
+        { key: "student", label: "الطالب", render: row => <><Link href={`/admin/students/${row.student_id}`}>{row.name} · {row.student_number.toLocaleString("ar-EG")}</Link>{" · "}<Link href={`/admin/students/${row.student_id}/courses/${group.course_id}/completion`}>حالة الكورس</Link></> },
         { key: "coverage", label: "التغطية", render: row => `${row.covered_count.toLocaleString("ar-EG")}/${row.required_count.toLocaleString("ar-EG")} · ${row.percentage.toLocaleString("ar-EG")}%` },
         { key: "missing", label: "الناقص", render: row => row.missing_numbers.length.toLocaleString("ar-EG") },
         { key: "result", label: "أهلية الإتمام", render: result },

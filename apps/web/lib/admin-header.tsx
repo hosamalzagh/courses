@@ -26,6 +26,7 @@ export function getAdminHeader(path: string, context: CenterContext): { title: s
   if (/^\/admin\/groups\/[^/]+\/sessions\/[^/]+\/teaching$/.test(path)) return { title: "التدريس الفعلي للمحاضرة", description: "سجّل من درّس ومدة كل محاضر، سواء بالتتابع أو في الوقت نفسه. سجل الطالب لا يُوزن بالدقائق." };
   if (path === "/admin/students/new") return { title: 'إنشاء ملف طالب', description: 'ابدأ بالاسم وفرع مصرح به، ثم استكمل البيانات الاختيارية.' };
   if (path.endsWith('/account') && path.startsWith('/admin/students/')) return { title: 'حساب الطالب', description: 'الدفعات المقدمة غير مخصصة لمجموعة بعد. المبالغ المعروضة ضمن فروع صلاحيتك فقط.' };
+  if (/^\/admin\/students\/[^/]+\/courses\/[^/]+\/completion$/.test(path)) return { title: 'حالة إتمام الكورس', description: 'يلزم اعتماد إتمام كل مستوى مطلوب على حدة. الإتمام الدراسي لا يعني نجاح امتحان أو إصدار شهادة.' };
   if (path.endsWith('/enrollments') && path.startsWith('/admin/students/')) return { title: 'تسجيل الطالب', description: 'محاولات الدراسة ورسومها حسب فروع صلاحيتك، دون تخصيص الدفعات تلقائيًا.' };
   if (path.startsWith("/admin/students/")) return { title: path.endsWith('/edit') ? 'تعديل بيانات الطالب' : 'ملف الطالب', description: headers["/admin/students"].description };
   if (path.startsWith("/admin/instructors/")) return headers["/admin/instructors"];
