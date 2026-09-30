@@ -124,6 +124,31 @@ test('student settings header shows only relevant actions on desktop and mobile'
   }
 });
 
+test('unsaved branch setting blocks browser Back while the code setting is clean', async ({ page }) => {
+  await page.getByRole('link', { name: 'الإعدادات', exact: true }).click();
+  await page.getByRole('tab', { name: 'الطلاب', exact: true }).click();
+  const checkbox = page.getByRole('checkbox', { name: 'ربط كل ملف طالب جديد بجميع فروع المركز', exact: true });
+  const original = await checkbox.isChecked();
+  await checkbox.click();
+  await expect(page.locator('.center-topbar').getByRole('button', { name: 'حفظ إعداد الفروع', exact: true })).toBeVisible();
+
+  await page.evaluate(() => window.history.back());
+  const confirmation = page.getByRole('alertdialog', { name: 'مغادرة دون حفظ' });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: 'إلغاء', exact: true }).click();
+  await expect(page).toHaveURL(`${origin}/admin/settings?tab=students`);
+  await expect(checkbox).toBeChecked({ checked: !original });
+
+  await checkbox.click();
+  const codeLabel = page.getByRole('textbox', { name: 'اسم الباركود الإضافي', exact: true });
+  const draft = `${await codeLabel.inputValue()} مسودة`;
+  await codeLabel.fill(draft);
+  await page.evaluate(() => window.history.back());
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: 'إلغاء', exact: true }).click();
+  await expect(codeLabel).toHaveValue(draft);
+});
+
 test('student form keeps header actions visible on a narrow dark screen', async ({ page }) => {
   await page.getByRole('button', { name: 'تفعيل الوضع الداكن', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });

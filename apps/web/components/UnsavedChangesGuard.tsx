@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { ConfirmationDialog } from "./ConfirmationDialog";
 
 type HistoryTraversal = { from: number; to: number };
-let historyGuard: ((event: PopStateEvent, traversal: HistoryTraversal) => void) | null = null;
+type HistoryGuard = (event: PopStateEvent, traversal: HistoryTraversal) => boolean;
+const historyGuards = new Set<HistoryGuard>();
 let historyIndex: number | null = null;
 
 function trackNavigationHistory() {
@@ -26,7 +27,9 @@ function trackNavigationHistory() {
     if (!Number.isInteger(next)) return;
     const traversal = { from: historyIndex ?? next, to: next };
     historyIndex = next;
-    historyGuard?.(event, traversal);
+    for (const guard of [...historyGuards].reverse()) {
+      if (guard(event, traversal)) break;
+    }
   }, true);
 }
 
@@ -55,19 +58,20 @@ export function UnsavedChangesGuard({ dirty, guardHistory = false, blockDiscard 
     trackNavigationHistory();
     leaving.current = false;
     let restoring = false;
-    function traverse(event: PopStateEvent, traversal: HistoryTraversal) {
-      if (restoring) { event.stopImmediatePropagation(); restoring = false; return; }
-      if (!dirtyRef.current || leaving.current) return;
+    function traverse(event: PopStateEvent, traversal: HistoryTraversal): boolean {
+      if (restoring) { event.stopImmediatePropagation(); restoring = false; return true; }
+      if (!dirtyRef.current || leaving.current) return false;
       const delta = traversal.to - traversal.from;
-      if (delta === 0) return;
+      if (delta === 0) return false;
       event.stopImmediatePropagation();
       historyDelta.current = delta;
       restoring = true;
       window.history.go(-delta);
       setDestination("history");
+      return true;
     }
-    historyGuard = traverse;
-    return () => { if (historyGuard === traverse) historyGuard = null; };
+    historyGuards.add(traverse);
+    return () => { historyGuards.delete(traverse); };
   }, [guardHistory]);
 
   useEffect(() => {
