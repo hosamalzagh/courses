@@ -29,6 +29,18 @@ class StudentProfilesTest extends TestCase
             ->assertJsonPath('settings.student_all_branches_revision', 2);
     }
 
+    public function test_student_creation_initializes_a_missing_center_settings_row(): void
+    {
+        $this->center->run(fn () => DB::table('center_settings')->where('id', 1)->delete());
+
+        $this->postJson("{$this->base}/students", [
+            'name' => 'طالب بإعدادات افتراضية', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->assertJsonPath('student.branch_ids', [$this->north]);
+        $this->getJson("{$this->base}/settings")->assertOk()
+            ->assertJsonPath('settings.student_all_branches_enabled', false)
+            ->assertJsonPath('settings.student_all_branches_revision', 1);
+    }
+
     public function test_center_can_link_new_student_profiles_to_all_branches_without_changing_existing_profiles(): void
     {
         $this->getJson("{$this->base}/user?include=student-settings")->assertOk()

@@ -450,6 +450,7 @@ class CenterStudentController extends Controller
 
                 return response()->json(['student' => $this->read($existing->id, $permissions)]);
             }
+            DB::connection('tenant')->table('center_settings')->insertOrIgnore(['id' => 1, 'created_at' => now(), 'updated_at' => now()]);
             $settings = DB::connection('tenant')->table('center_settings')->where('id', 1)->lockForUpdate()
                 ->first(['student_number_start', 'student_all_branches_enabled', 'student_all_branches_revision']);
             if (isset($data['student_branch_settings_revision']) && (int) $data['student_branch_settings_revision'] !== (int) $settings->student_all_branches_revision) {
