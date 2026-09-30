@@ -7,6 +7,7 @@ import { ConfirmationDialog } from "./ConfirmationDialog";
 type HistoryTraversal = { from: number; to: number };
 type HistoryGuard = (event: PopStateEvent, traversal: HistoryTraversal) => boolean;
 const historyGuards = new Set<HistoryGuard>();
+const resetLeavingGuards = new Set<() => void>();
 let historyIndex: number | null = null;
 
 function trackNavigationHistory() {
@@ -50,6 +51,18 @@ export function UnsavedChangesGuard({ dirty, guardHistory = false, blockDiscard 
   const leaving = useRef(false);
   const dirtyRef = useRef(dirty);
   const historyDelta = useRef<number | null>(null);
+
+  useEffect(() => {
+    const resetLeaving = () => { leaving.current = false; };
+    resetLeavingGuards.add(resetLeaving);
+    return () => { resetLeavingGuards.delete(resetLeaving); };
+  }, []);
+
+  function cancelNavigation() {
+    historyDelta.current = null;
+    setDestination(null);
+    for (const resetLeaving of resetLeavingGuards) resetLeaving();
+  }
 
   useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
 
@@ -104,9 +117,9 @@ export function UnsavedChangesGuard({ dirty, guardHistory = false, blockDiscard 
 
   if (destination && dirty && blockDiscard) return <ConfirmationDialog title={blockDiscardTitle}
     description={blockDiscardDescription}
-    cancelLabel="العودة للتحقق" onCancel={() => { historyDelta.current = null; setDestination(null); }} />;
+    cancelLabel="العودة للتحقق" onCancel={cancelNavigation} />;
 
-  return destination && dirty ? <ConfirmationDialog title="مغادرة دون حفظ" description="لديك بيانات لم تُحفظ. يمكنك إلغاء المغادرة ومتابعة تعديلها، أو مغادرة الصفحة دون حفظها." confirmLabel="مغادرة دون حفظ" onCancel={() => { historyDelta.current = null; setDestination(null); }} onConfirm={() => {
+  return destination && dirty ? <ConfirmationDialog title="مغادرة دون حفظ" description="لديك بيانات لم تُحفظ. يمكنك إلغاء المغادرة ومتابعة تعديلها، أو مغادرة الصفحة دون حفظها." confirmLabel="مغادرة دون حفظ" onCancel={cancelNavigation} onConfirm={() => {
     leaving.current = true;
     onDiscard?.();
     setDestination(null);

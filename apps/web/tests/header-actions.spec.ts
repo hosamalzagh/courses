@@ -124,7 +124,7 @@ test('student settings header shows only relevant actions on desktop and mobile'
   }
 });
 
-test('unsaved branch setting blocks browser Back while the code setting is clean', async ({ page }) => {
+test('unsaved student settings stay guarded through separate and combined browser Back attempts', async ({ page }) => {
   await page.getByRole('link', { name: 'الإعدادات', exact: true }).click();
   await page.getByRole('tab', { name: 'الطلاب', exact: true }).click();
   const checkbox = page.getByRole('checkbox', { name: 'ربط كل ملف طالب جديد بجميع فروع المركز', exact: true });
@@ -143,6 +143,19 @@ test('unsaved branch setting blocks browser Back while the code setting is clean
   const codeLabel = page.getByRole('textbox', { name: 'اسم الباركود الإضافي', exact: true });
   const draft = `${await codeLabel.inputValue()} مسودة`;
   await codeLabel.fill(draft);
+  await page.evaluate(() => window.history.back());
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: 'إلغاء', exact: true }).click();
+  await expect(codeLabel).toHaveValue(draft);
+
+  await checkbox.click();
+  await page.evaluate(() => window.history.back());
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: 'مغادرة دون حفظ', exact: true }).click();
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: 'إلغاء', exact: true }).click();
+  await expect(page).toHaveURL(`${origin}/admin/settings?tab=students`);
+  await checkbox.click();
   await page.evaluate(() => window.history.back());
   await expect(confirmation).toBeVisible();
   await confirmation.getByRole('button', { name: 'إلغاء', exact: true }).click();
