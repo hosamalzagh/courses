@@ -53,6 +53,7 @@ class CenterSettingsController extends Controller
 
         return CenterWrites::run($request, function ($permissions) use ($request, $data): JsonResponse {
             abort_unless($permissions->isCenterManager(), 403);
+            DB::connection('tenant')->table('center_settings')->insertOrIgnore(['id' => 1, 'created_at' => now(), 'updated_at' => now()]);
             $settings = DB::connection('tenant')->table('center_settings')->where('id', 1)->lockForUpdate()->first();
             $enabled = (bool) $data['enabled'];
             if ((bool) $settings->student_all_branches_enabled !== $enabled) {

@@ -122,7 +122,16 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
       if (!response.ok) {
         if (editor === 'new' && response.status === 409 && (await response.clone().json().catch(() => ({}))).code === 'student_branch_settings_changed') {
           const current = await centerRequest('student-workspace', 'GET');
-          if (current.ok) setBranchSettings(((await current.json()) as StudentContext).student_branch_settings);
+          if (!current.ok) {
+            setError('تغير إعداد ربط الطلاب بالفروع وتعذر تحميل أحدث إعداد. أعد تحميل الصفحة قبل الحفظ؛ بياناتك محفوظة.');
+            return;
+          }
+          const latest = await current.json() as StudentContext;
+          setBranchSettings(latest.student_branch_settings);
+          setBranches((existing) => [...existing, ...latest.branches.filter((branch) => !existing.some((saved) => saved.id === branch.id))]);
+          setBranchIds((selected) => selected.length ? selected : latest.branches
+            .filter((branch) => context.permissions.can_manage_center || (context.permissions.branch_actions?.[String(branch.id)] ?? []).includes('students.manage'))
+            .slice(0, 1).map((branch) => branch.id));
           setError('تغير إعداد ربط الطلاب بالفروع أثناء تحرير الملف. راجع اختيار الفروع ثم احفظ مرة أخرى؛ بياناتك محفوظة.');
           return;
         }

@@ -17,6 +17,18 @@ class StudentProfilesTest extends TestCase
 {
     use CleansCenterDatabases, RefreshDatabase;
 
+    public function test_owner_can_enable_all_branch_linking_when_center_settings_row_is_missing(): void
+    {
+        $this->center->run(fn () => DB::table('center_settings')->where('id', 1)->delete());
+
+        $this->getJson("{$this->base}/settings")->assertOk()
+            ->assertJsonPath('settings.student_all_branches_enabled', false)
+            ->assertJsonPath('settings.student_all_branches_revision', 1);
+        $this->patchJson("{$this->base}/student-branch-settings", ['enabled' => true, 'revision' => 1])->assertOk()
+            ->assertJsonPath('settings.student_all_branches_enabled', true)
+            ->assertJsonPath('settings.student_all_branches_revision', 2);
+    }
+
     public function test_center_can_link_new_student_profiles_to_all_branches_without_changing_existing_profiles(): void
     {
         $this->getJson("{$this->base}/user?include=student-settings")->assertOk()

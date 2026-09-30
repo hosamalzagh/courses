@@ -139,8 +139,11 @@ test('student form keeps header actions visible on a narrow dark screen', async 
     await expect(page.getByRole('checkbox').first()).toHaveAttribute('data-slot', 'checkbox');
   }
   await expect(page.getByRole('radio').first()).toHaveAttribute('data-slot', 'radio-group-item');
+  await page.getByRole('textbox', { name: 'تاريخ الميلاد', exact: true }).fill('2020-09-15');
   await page.getByRole('button', { name: 'اختيار تاريخ الميلاد', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'اختيار تاريخ الميلاد' })).toBeVisible();
+  const datePicker = page.getByRole('dialog', { name: 'اختيار تاريخ الميلاد' });
+  await expect(datePicker).toBeVisible();
+  await expect(datePicker.locator('select').first().locator('option:checked')).toHaveText('سبتمبر');
   await page.keyboard.press('Escape');
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   await expect(page.locator('.center-topbar').getByRole('button', { name: 'حفظ ملف الطالب', exact: true })).toBeInViewport();
@@ -180,4 +183,41 @@ test('center-wide student linking updates the owner creation form', async ({ pag
   } finally {
     await setBranchLinking(original);
   }
+});
+
+test('student creation recovers a changed branch setting without losing entered data', async ({ page }) => {
+  await page.goto(`${origin}/admin/students/new`);
+  const workspaceResponse = await page.request.get(`${origin}/api/v1/center/student-workspace`);
+  expect(workspaceResponse.ok()).toBe(true);
+  const workspace = await workspaceResponse.json();
+  const latest = {
+    ...workspace,
+    student_branch_settings: {
+      enabled: !workspace.student_branch_settings.enabled,
+      revision: workspace.student_branch_settings.revision + 1,
+    },
+  };
+  let workspaceUnavailable = true;
+  await page.route('**/api/v1/center/student-workspace', (route) => route.fulfill({
+    status: workspaceUnavailable ? 500 : 200,
+    contentType: 'application/json',
+    body: JSON.stringify(workspaceUnavailable ? { message: 'Unavailable' } : latest),
+  }));
+  await page.route('**/api/v1/center/students/similar?*', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ students: [] }) }));
+  await page.route('**/api/v1/center/students', (route) => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ code: 'student_branch_settings_changed' }) }));
+
+  const name = `طالب تعارض الفروع ${Date.now()}`;
+  const nameInput = page.getByRole('textbox', { name: 'اسم الطالب', exact: true });
+  await nameInput.fill(name);
+  const requiredSku = page.getByRole('textbox', { name: 'sku', exact: true });
+  if (await requiredSku.count()) await requiredSku.fill(`SKU-${Date.now()}`);
+  await page.locator('.center-topbar').getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click();
+  await expect(page.getByText(/تعذر تحميل أحدث إعداد/)).toBeVisible();
+  await expect(nameInput).toHaveValue(name);
+
+  workspaceUnavailable = false;
+  await page.locator('.center-topbar').getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click();
+  await expect(page.getByText(/راجع اختيار الفروع ثم احفظ مرة أخرى/)).toBeVisible();
+  await expect(nameInput).toHaveValue(name);
+  await expect(page.getByRole('region', { name: 'الفروع', exact: true })).toHaveCount(latest.student_branch_settings.enabled ? 0 : 1);
 });
