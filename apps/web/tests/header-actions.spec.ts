@@ -176,10 +176,16 @@ test('center-wide student linking updates the owner creation form', async ({ pag
   }
 
   try {
-    await setBranchLinking(true);
+    await setBranchLinking(!original);
     await page.goto(`${origin}/admin/students/new`);
-    await expect(page.getByRole('region', { name: 'الفروع', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'الفروع', exact: true })).toHaveCount(original ? 1 : 0);
     await expect(page.locator('.center-topbar').getByRole('button', { name: 'حفظ ملف الطالب', exact: true })).toBeVisible();
+    await page.goto(`${origin}/admin/audit`);
+    const change = page.getByRole('row').filter({ hasText: 'تغيير ربط ملفات الطلاب الجديدة بالفروع' }).first();
+    await expect(change).toBeVisible();
+    await change.getByText('عرض تغيير ربط الفروع', { exact: true }).click();
+    await expect(change.getByText(`قبل التغيير: ${original ? 'مفعّل' : 'مغلق'}`, { exact: true })).toBeVisible();
+    await expect(change.getByText(`بعد التغيير: ${original ? 'مغلق' : 'مفعّل'}`, { exact: true })).toBeVisible();
   } finally {
     await setBranchLinking(original);
   }
