@@ -130,9 +130,9 @@ class CenterAuthController extends Controller
             return response()->json(['status' => 'mfa_challenge_required'], 202);
         }
 
-        $this->finishLogin($request, $user);
+        $destination = $this->finishLogin($request, $user);
 
-        return response()->json(['status' => 'authenticated']);
+        return response()->json(['status' => 'authenticated', 'destination' => $destination]);
     }
 
     public function mfaChallenge(Request $request, Google2FA $totp): JsonResponse
@@ -153,9 +153,9 @@ class CenterAuthController extends Controller
             abort_unless(Cache::add($key, true, 90), 422);
         }
 
-        $this->finishLogin($request, $user);
+        $destination = $this->finishLogin($request, $user);
 
-        return response()->json(['status' => 'authenticated']);
+        return response()->json(['status' => 'authenticated', 'destination' => $destination]);
     }
 
     public function logout(Request $request): JsonResponse
@@ -227,11 +227,15 @@ class CenterAuthController extends Controller
         return $user;
     }
 
-    private function finishLogin(Request $request, User $user): void
+    private function finishLogin(Request $request, User $user): string
     {
+        abort_unless(CenterMembership::query()->where('tenant_id', $request->attributes->get('center')->id)
+            ->where('user_id', $user->id)->value('status') === 'active', 403);
         Auth::login($user);
         $request->session()->regenerate();
         $request->session()->forget(['pending_center_login', 'pending_center_mfa_secret']);
         $request->session()->put('center_id', $request->attributes->get('center')->id);
+
+        return CenterWorkspaceController::afterLogin($request);
     }
 }

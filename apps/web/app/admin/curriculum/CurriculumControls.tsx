@@ -9,7 +9,8 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/field";
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
+import { useWorkspaceRouter } from '@/components/WorkspaceNavigation';
 import { CurriculumCopyControls } from './CurriculumCopyControls';
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
@@ -42,13 +43,13 @@ function lectureSummary(lecture?: PlanLecture) {
 }
 export function CurriculumControls({ context, detail = false, section = 'courses' }: { context: CurriculumContext; detail?: boolean; section?: 'courses' | 'stages' | 'levels' }) {
   const formPrefix = useId();
-  const router = useRouter();
+  const router = useWorkspaceRouter();
   const searchParams = useSearchParams();
   const levelListParams = () => {
     const params = new URLSearchParams({ tab: 'levels' });
-    for (const key of ['courses_page', 'stages_page', 'levels_page', 'branches_page']) {
+    for (const key of ['courses_page', 'stages_page', 'levels_page', 'branches_page', 'course_id', 'stage_id']) {
       const value = searchParams.get(key);
-      if (value && /^\d+$/.test(value)) params.set(key, value);
+      if (value) params.set(key, value);
     }
     return params;
   };
@@ -296,7 +297,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
             <p className='muted'>تطبق النسبة على التسجيلات الجديدة. تغيير تسجيلات قائمة يحتاج معاينة واعتمادًا مستقلًا.</p>
             {fieldErrors.completion_threshold ? <p className='field-error' role='alert'>{fieldErrors.completion_threshold}</p> : null}
           </Field> : null}
-          {editor.kind === 'course' ? <FieldSet ><FieldLegend>الفرع الذي يملك الكورس</FieldLegend><Field data-invalid={Boolean(fieldErrors.branch_id)}><RadioGroup disabled={busy} aria-invalid={Boolean(fieldErrors.branch_id)} name='curriculum-branch' value={String(branchId)} onValueChange={(value) => setBranchId(Number(value))}>{manageable.map((branch) => <FieldLabel className="flex items-center gap-2" key={branch.id}><RadioGroupItem value={String(branch.id)} />{branch.name}</FieldLabel>)}</RadioGroup></Field>{fieldErrors.branch_id ? <p className='field-error' role='alert'>{fieldErrors.branch_id}</p> : null}</FieldSet> : null}
+          {editor.kind === 'course' && context.workspace?.mode !== 'branch' ? <FieldSet ><FieldLegend>الفرع الذي يملك الكورس</FieldLegend><Field data-invalid={Boolean(fieldErrors.branch_id)}><RadioGroup disabled={busy} aria-invalid={Boolean(fieldErrors.branch_id)} name='curriculum-branch' value={String(branchId)} onValueChange={(value) => setBranchId(Number(value))}>{manageable.map((branch) => <FieldLabel className="flex items-center gap-2" key={branch.id}><RadioGroupItem value={String(branch.id)} />{branch.name}</FieldLabel>)}</RadioGroup></Field>{fieldErrors.branch_id ? <p className='field-error' role='alert'>{fieldErrors.branch_id}</p> : null}</FieldSet> : null}
           {editor.kind === 'level' || editor.kind === 'plan' || editor.kind === 'new-version' ? <>
             <p className='muted'>{editor.kind === 'new-version' ? `يبدأ الإصدار ${editor.level.plan.version + 1} من أحدث خطة. راجع تغييرات المحتوى والعناوين والساعات قبل الحفظ؛ لا تنتقل المجموعات أو محاولات الدراسة إليه تلقائيًا. ` : ''}كل بند محاضرة مطلوبة كاملة. الترقيم متتابع والعنوان اختياري، حتى ٢٠٠ محاضرة.</p>
             {lectures.map((lecture, index) => <FieldSet className="form-stack" key={index}><FieldLegend>المحاضرة المطلوبة رقم {(index + 1).toLocaleString('ar-EG')}</FieldLegend>
@@ -312,7 +313,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
       </FieldGroup>
 </form> : null;
   const courses = <>        <DataTable id='curriculum-courses' title='الكورسات' description='المناهج المتاحة في الفروع المصرح بها. البحث والتصفية ضمن الدفعة المعروضة.' rows={context.courses} rowKey={(row) => row.id} searchText={(row) => `${row.name} ${branchName(row.branch_id)}`} emptyMessage='لا توجد كورسات متاحة. أنشئ كورسًا إذا كانت لديك صلاحية الإدارة الأكاديمية.' columns={[
-          { key: 'name', label: 'الكورس', filterText: (row) => row.name, render: (row) => <><h3>{row.name}</h3>{row.source_course_name && row.source_branch_name ? <p className='muted'>نسخة من {row.source_course_name} · {row.source_branch_name}</p> : null}</> },
+          { key: 'name', label: 'الكورس', filterText: (row) => row.name, render: (row) => <><h3><Link href={`/admin/curriculum?tab=stages&course_id=${encodeURIComponent(row.id)}`}>{row.name}</Link></h3>{row.source_course_name && row.source_branch_name ? <p className='muted'>نسخة من {row.source_course_name} · {row.source_branch_name}</p> : null}</> },
           { key: 'branch', label: 'الفرع', filterText: (row) => branchName(row.branch_id), render: (row) => branchName(row.branch_id) },
           { key: 'threshold', label: 'نسبة الإتمام', render: (row) => `${row.completion_threshold.toLocaleString('ar-EG')}٪` },
           { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => row.can_manage || manageable.some(branch => branch.id !== row.branch_id)
@@ -323,7 +324,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
         ]} />{batch('courses')}
 </>;
   const stages = <>        <DataTable id='curriculum-stages' title='المراحل الدراسية' rows={context.stages} rowKey={(row) => row.id} searchText={(row) => `${row.name} ${row.course_name}`} emptyMessage='لا توجد مراحل دراسية متاحة. أضف مرحلة من الكورس.' columns={[
-          { key: 'name', label: 'المرحلة الدراسية', filterText: (row) => row.name, render: (row) => <h3>{row.name}</h3> },
+          { key: 'name', label: 'المرحلة الدراسية', filterText: (row) => row.name, render: (row) => <h3><Link href={`/admin/curriculum?tab=levels&stage_id=${encodeURIComponent(row.id)}`}>{row.name}</Link></h3> },
           { key: 'course', label: 'الكورس والفرع', filterText: (row) => `${row.course_name} ${branchName(row.branch_id)}`, render: (row) => `${row.course_name} · ${branchName(row.branch_id)}` },
           { key: 'threshold', label: 'نسبة الإتمام', render: (row) => row.completion_threshold === null ? 'موروثة من الكورس' : `${row.completion_threshold.toLocaleString('ar-EG')}٪` },
           { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => row.can_manage ? <span className='flex flex-wrap gap-2'><Button data-curriculum-edit={row.id} disabled={busy || editor !== null} onClick={() => open({ kind: 'level', stage: row })}>إضافة مستوى وخطته</Button><Button disabled={busy || editor !== null} onClick={() => open({ kind: 'threshold', scope: 'stage', record: row })}>تحديد نسبة الإتمام</Button></span> : 'عرض فقط' },
@@ -341,6 +342,7 @@ export function CurriculumControls({ context, detail = false, section = 'courses
   const branchChoices = <>      {!detail && (context.pagination.branches.has_more || context.pagination.branches.page > 1) ? <section className='context-card'><p>فروع إنشاء الكورس في هذه الدفعة.</p>{batch('branches')}</section> : null}
 </>;
   return <>
+    {context.navigation ? <Link href="/admin/curriculum">الكورسات</Link> : null}
     <CenterPageActions context={context} actions={!detail && manageable.length ? <Button hidden={editor !== null || copyCourse !== null} variant='primary' disabled={busy || editor !== null || copyCourse !== null} onClick={() => open({ kind: 'course' })}>إنشاء كورس</Button> : undefined} />
       <UnsavedChangesGuard dirty={dirty} guardHistory />
       {busy && !editor ? <InlineNotice>جارٍ تحميل خطة المستوى الحالية…</InlineNotice> : null}

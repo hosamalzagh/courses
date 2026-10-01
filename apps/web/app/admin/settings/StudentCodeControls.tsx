@@ -1,6 +1,6 @@
 'use client';
 import { useId, useRef, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { CenterHeaderActions } from '@/components/CenterShell';
 import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard';
 import { Button } from '@/components/Button';

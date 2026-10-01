@@ -8,6 +8,9 @@ import type { AttendanceContext, CoverageContext, GroupContext, SessionContext, 
 export type Branch = { id: number; name: string; slug: string; address: string | null };
 export type CenterSettings = { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number; student_code_enabled?: boolean; student_code_label?: string; student_code_revision?: number; student_all_branches_enabled?: boolean; student_all_branches_revision?: number; financial_currency?: string | null; financial_currency_revision?: number; financial_currency_locked_at?: string | null };
 export type CenterContext = {
+  workspace?: import("./workspace").CenterWorkspace | null;
+  workspace_scope?: "selected" | "authorized_branches";
+  workspace_can_switch?: boolean;
   user: { id: number; name: string; email: string; mfa_enabled?: boolean; mfa_required_for_platform?: boolean };
   membership: { status: string; grants_version: number };
   center: { id: string; name: string; slug: string };
@@ -122,12 +125,15 @@ const fetchCenterPayload = cache(async function fetchCenterPayload<T>(path: stri
 
   if (!/^[a-z][a-z0-9-]{1,62}\.courses\.test$/.test(host)) notFound();
 
+  const adminUrl = new URL(incoming.get("x-courses-admin-url") ?? "/admin", "http://courses.test");
+  const workspace = adminUrl.searchParams.get("workspace");
   let response: Response;
   try {
     response = await fetch(`${process.env.COURSES_INTERNAL_API_ORIGIN?.replace('{host}', host) ?? `http://${host}${process.env.COURSES_API_PORT ? `:${process.env.COURSES_API_PORT}` : ""}`}/api/v1/center/${path}`, {
       headers: {
         Cookie: incoming.get("cookie") ?? "",
         Accept: "application/json",
+        ...(workspace ? { "X-Courses-Workspace": workspace } : {}),
       },
       cache: "no-store",
       redirect: "manual",
@@ -139,6 +145,10 @@ const fetchCenterPayload = cache(async function fetchCenterPayload<T>(path: stri
   if (response.status === 401) {
     const hadSession = /(?:^|;\s*)[A-Za-z0-9_-]*session=/i.test(incoming.get("cookie") ?? "");
     redirect(hadSession ? "/login?expired=1" : "/login");
+  }
+  if (response.status === 409) {
+    const data = await response.json().catch(() => ({}));
+    if (["workspace_required", "workspace_expired"].includes(data.code)) redirect(`/admin/workspaces?expired=${data.code === "workspace_expired" ? "1" : "0"}&return_to=${encodeURIComponent(adminUrl.pathname)}`);
   }
   if (response.status === 403) {
     const data = await response.json().catch(() => ({}));
@@ -153,6 +163,11 @@ const fetchCenterPayload = cache(async function fetchCenterPayload<T>(path: stri
 
   return response.json() as Promise<T>;
 });
+
+export type WorkspaceOptionsContext = CenterContext & { pagination: { page: number; has_more: boolean } };
+export function loadWorkspaceOptions(page = "1"): Promise<WorkspaceOptionsContext | CenterAccessFailure> {
+  return fetchCenterPayload<WorkspaceOptionsContext>(`workspaces?page=${encodeURIComponent(page)}`);
+}
 
 export function loadCenterContext(include?: "settings" | "student-settings" | "audit"): Promise<CenterContext | CenterAccessFailure> {
   return fetchCenterPayload<CenterContext>(`user${include ? `?include=${include}` : ""}`);
@@ -240,6 +255,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
     }
     return result.toString();
   }
+  if (path === "/admin/workspaces") return loadWorkspaceOptions(url.searchParams.get("page") ?? "1");
   if (path === "/admin" || path === "/admin/security" || path === "/admin/student-custom-fields" || path === "/admin/student-profile-choices") return loadCenterContext();
   if (path === "/admin/settings") {
     const tab = url.searchParams.get("tab");
@@ -265,7 +281,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   const studentEnrollments = path.match(/^\/admin\/students\/([^/]+)\/enrollments$/);
   if (studentEnrollments) return loadStudyEnrollments(decodeURIComponent(studentEnrollments[1]), query(["page", "groups_page", "q", "attempt_id"]));
   if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q", "identifier"]));
-  if (path === "/admin/curriculum") return loadCurriculumWorkspace(query(["courses_page", "stages_page", "levels_page", "branches_page"]));
+  if (path === "/admin/curriculum") return loadCurriculumWorkspace(query(["courses_page", "stages_page", "levels_page", "branches_page", "course_id", "stage_id"]));
   if (path === "/admin/equivalences") return loadContentEquivalences(query(["page", "q"]));
   if (path === "/admin/groups") return loadGroupWorkspace(query(["page", "levels_page", "instructors_page"]));
   const groupCoverage = path.match(/^\/admin\/groups\/([^/]+)\/coverage$/);

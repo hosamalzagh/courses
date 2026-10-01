@@ -5,7 +5,7 @@ import { useId, useRef, useState, type FormEvent } from 'react';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useRouter } from 'next/navigation';
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard';
 import { buttonVariants } from "@/components/ui/button";

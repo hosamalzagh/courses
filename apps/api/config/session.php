@@ -4,6 +4,9 @@ use Illuminate\Support\Str;
 
 return [
 
+    // Concurrent tabs must not overwrite each other's immutable workspace entries.
+    'block' => true,
+
     /*
     |--------------------------------------------------------------------------
     | Default Session Driver

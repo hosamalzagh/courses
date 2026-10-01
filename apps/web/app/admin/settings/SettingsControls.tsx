@@ -3,7 +3,7 @@
 import { useId, useRef, useState, type FormEvent } from "react";
 import { FieldGroup } from "@/components/ui/field";
 import { Button } from "@/components/Button";
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { CenterPageActions } from "@/components/CenterShell";
 import type { CenterContext } from "@/lib/server-context";
 import { FormField } from "@/components/FormField";

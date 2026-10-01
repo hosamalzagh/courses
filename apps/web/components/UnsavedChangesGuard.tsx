@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { ConfirmationDialog } from "./ConfirmationDialog";
 
 type HistoryTraversal = { from: number; to: number };

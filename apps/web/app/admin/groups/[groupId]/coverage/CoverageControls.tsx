@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions, CenterPageActions } from "@/components/CenterShell";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";

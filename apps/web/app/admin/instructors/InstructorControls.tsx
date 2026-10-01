@@ -7,7 +7,7 @@ import { FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/f
 
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
 import { WorkspaceSections } from '@/components/WorkspaceSections';

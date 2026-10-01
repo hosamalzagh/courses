@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { DataTable } from "@/components/DataTable";
 import { ChoiceField } from "@/components/ChoiceField";
 import { PrefetchLink as Link } from "@/components/PrefetchLink";

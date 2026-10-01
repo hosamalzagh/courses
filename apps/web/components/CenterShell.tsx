@@ -4,7 +4,9 @@ import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState
 import { useLinkStatus } from "next/link";
 import { PrefetchLink as Link } from "./PrefetchLink";
 import { getAdminHeader } from "@/lib/admin-header";
-import { usePathname } from "next/navigation";
+import { WorkspaceNavigation, useWorkspaceId } from "./WorkspaceNavigation";
+import { workspaceSection } from "@/lib/workspace";
+import { usePathname, useSearchParams } from "next/navigation";
 import type { CenterContext } from "@/lib/server-context";
 import { centerRequest, responseMessage } from "@/lib/client-api";
 import { Button } from "./Button";
@@ -22,8 +24,8 @@ const navigationIcons: Record<string, ReactNode> = {
   security: <><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3Z" /><path d="m8 12 3 3 5-6" /></>,
 };
 
-type PageHeader = { context: CenterContext; title: string; description?: ReactNode; path: string };
-type PageActions = { context?: CenterContext; actions?: ReactNode; path: string };
+type PageHeader = { context: CenterContext; title: string; description?: ReactNode; path: string; workspace: string | null };
+type PageActions = { context?: CenterContext; actions?: ReactNode; path: string; workspace: string | null };
 const PageRegistration = createContext<{ register: Dispatch<SetStateAction<PageHeader | null>>; registerActions: Dispatch<SetStateAction<Record<string, PageActions>>> } | null>(null);
 
 function NavigationPending() {
@@ -35,22 +37,24 @@ function NavigationPending() {
 export function CenterPageRegistration({ context, title, description }: { context: CenterContext; title: string; description?: ReactNode }) {
   const register = useContext(PageRegistration)?.register;
   const path = usePathname();
+  const workspace = context.workspace?.id ?? null;
   useLayoutEffect(() => {
     if (!register) return;
-    const page = { context, title, description, path };
+    const page = { context, title, description, path, workspace };
     register(page);
     return () => register((current) => current === page ? null : current);
-  }, [register, context, title, description, path]);
+  }, [register, context, title, description, path, workspace]);
   return null;
 }
 
 export function CenterPageActions({ context, actions }: { context?: CenterContext; actions?: ReactNode }) {
   const register = useContext(PageRegistration)?.registerActions;
   const path = usePathname();
+  const workspace = useWorkspaceId();
   const id = useId();
   useLayoutEffect(() => {
     if (!register) return;
-    const page = { context, actions, path };
+    const page = { context, actions, path, workspace };
     register((current) => ({ ...current, [id]: page }));
     return () => register((current) => {
       if (current[id] !== page) return current;
@@ -58,7 +62,7 @@ export function CenterPageActions({ context, actions }: { context?: CenterContex
       delete next[id];
       return next;
     });
-  }, [register, context, actions, path, id]);
+  }, [register, context, actions, path, workspace, id]);
   return null;
 }
 
@@ -70,12 +74,14 @@ export function CenterHeaderActions({ children }: { children: ReactNode }) {
 
 export function CenterLayout({ initialContext, children }: { initialContext: CenterContext; children: ReactNode }) {
   const path = usePathname();
+  const workspace = useSearchParams().get("workspace") ?? initialContext.workspace?.id ?? null;
   const [page, register] = useState<PageHeader | null>(null);
   const [pageActions, registerActions] = useState<Record<string, PageActions>>({});
   const registration = useMemo(() => ({ register, registerActions }), []);
-  const currentActions = Object.entries(pageActions).filter(([, item]) => item.path === path).sort(([a, left], [b, right]) => Number(!left.context) - Number(!right.context) || a.localeCompare(b));
-  const context = currentActions.find(([, item]) => item.context)?.[1].context ?? (page?.path === path ? page.context : initialContext);
-  const currentPage = page?.path === path ? page : null;
+  const currentActions = Object.entries(pageActions).filter(([, item]) => item.path === path && (path === "/admin/workspaces" || item.workspace === workspace)).sort(([a, left], [b, right]) => Number(!left.context) - Number(!right.context) || a.localeCompare(b));
+  const context = currentActions.find(([, item]) => item.context)?.[1].context ?? (page?.path === path && (path === "/admin/workspaces" || page.workspace === workspace) ? page.context : initialContext);
+  const workspaceResolved = !workspace || context.workspace?.id === workspace || path === "/admin/workspaces";
+  const currentPage = page?.path === path && (path === "/admin/workspaces" || page.workspace === workspace) ? page : null;
   const fallbackHeader = getAdminHeader(path, context);
   const title = currentPage?.title ?? fallbackHeader.title;
   const description = currentPage?.description ?? fallbackHeader.description;
@@ -139,7 +145,7 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
     </div>;
   }
 
-  return <PageRegistration.Provider value={registration}><TablePreferenceUser.Provider value={String(context.user.id)}><Sheet open={menuOpen} onOpenChange={setMenuOpen}><div className={`center-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
+  return <WorkspaceNavigation.Provider value={workspace ?? context.workspace?.id ?? null}><PageRegistration.Provider value={registration}><TablePreferenceUser.Provider value={String(context.user.id)}><Sheet open={menuOpen} onOpenChange={setMenuOpen}><div className={`center-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
     <a className="skip-link" href="#center-content">انتقل إلى المحتوى</a>
     <aside className="center-sidebar">
       <Link className="brand" href="/admin" aria-label="Courses — الرئيسية"><span className="brand-mark" aria-hidden="true">C</span>{!collapsed ? <span>Courses</span> : null}</Link>
@@ -151,7 +157,7 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
     </aside>
     <div className="center-frame">
       <header className="center-topbar">
-        <div className="topbar-context"><SheetTrigger render={<Button ref={menuButton} className="hidden min-w-0 max-[900px]:inline-flex" />}>القائمة</SheetTrigger><div><nav className="page-breadcrumbs" aria-label="مسار الصفحة"><Link href="/admin">{context.center.name}<NavigationPending /></Link><span aria-hidden="true">‹</span><span aria-current="page">{title}</span></nav><h1>{title}</h1>{description ? <p className="page-description">{description}</p> : null}</div></div>
+        <div className="topbar-context"><SheetTrigger render={<Button ref={menuButton} className="hidden min-w-0 max-[900px]:inline-flex" />}>القائمة</SheetTrigger><div><nav className="page-breadcrumbs" aria-label="مسار الصفحة"><Link href="/admin">{context.center.name}<NavigationPending /></Link><span aria-hidden="true">‹</span><span aria-current="page">{title}</span></nav><h1>{title}</h1><div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm"><span className="break-words" data-workspace-name>{!workspaceResolved ? "جارٍ تحميل مساحة العمل…" : context.workspace?.mode === "branch" ? context.workspace.branch?.name : context.workspace?.mode === "center" ? "إدارة المركز" : "اختر مساحة العمل"}</span>{path !== "/admin/workspaces" && context.workspace_can_switch ? <Link className="text-link" href={`/admin/workspaces?return_to=${encodeURIComponent(workspaceSection(path))}`}>تبديل مساحة العمل</Link> : null}{context.workspace?.mode === "branch" && context.workspace_scope === "authorized_branches" && path !== "/admin/workspaces" ? <span className="muted">نطاق الصفحة: الفروع المصرح بها</span> : null}</div>{description ? <p className="page-description">{description}</p> : null}</div></div>
         <div className="topbar-actions">{actions}</div>
       </header>
       <div id="center-content" tabIndex={-1} className="center-content">{error ? <InlineNotice tone="error">{error}</InlineNotice> : null}{children}</div>
@@ -161,5 +167,5 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
       <SheetHeader><div className="flex items-center justify-between gap-2"><SheetTitle>{context.center.name}</SheetTitle><SheetClose ref={drawerClose} render={<Button />}>إغلاق القائمة</SheetClose></div></SheetHeader>
       <div className="sidebar-navigation">{navigation(true)}</div><div className="sidebar-bottom">{navigation(true, true)}{account(true)}</div>
     </SheetContent>
-  </div></Sheet></TablePreferenceUser.Provider></PageRegistration.Provider>;
+  </div></Sheet></TablePreferenceUser.Provider></PageRegistration.Provider></WorkspaceNavigation.Provider>;
 }

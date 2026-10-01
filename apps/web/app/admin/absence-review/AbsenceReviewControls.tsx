@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef, useState, type FormEvent, type SetStateAction } from "react";
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { AbsenceBulkWaitlist, AbsenceSelectionCell, MAX_BULK_SELECTION } from "./AbsenceBulkWaitlist";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions } from "@/components/CenterShell";

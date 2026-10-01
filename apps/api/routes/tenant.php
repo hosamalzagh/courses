@@ -42,6 +42,7 @@ use App\Http\Controllers\CenterStudySessionController;
 use App\Http\Controllers\CenterStudyTeachingController;
 use App\Http\Controllers\CenterStudyTransferController;
 use App\Http\Controllers\CenterStudyWaitlistController;
+use App\Http\Controllers\CenterWorkspaceController;
 use App\Http\Middleware\MeasureCenterQueries;
 use App\Http\Middleware\RequireCenterMember;
 use App\Http\Middleware\ResolveCenter;
@@ -59,6 +60,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
     Route::post('auth/forgot-password', [CenterAuthController::class, 'forgotPassword'])->middleware('throttle:center-route');
     Route::post('auth/reset-password', [CenterAuthController::class, 'resetPassword'])->middleware('throttle:center-route');
     Route::middleware(RequireCenterMember::class)->group(function (): void {
+        Route::get('workspaces', [CenterWorkspaceController::class, 'index']);
+        Route::post('workspaces', [CenterWorkspaceController::class, 'store']);
         Route::get('user', function (Request $request) {
             $permissions = $request->attributes->get('center_permissions');
             $branches = Branch::query()->orderBy('name');

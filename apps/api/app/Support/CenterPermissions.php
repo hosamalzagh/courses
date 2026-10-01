@@ -53,18 +53,41 @@ class CenterPermissions
         public array $branchRoles,
     ) {}
 
-    public static function forUser(int $userId): self
+    public ?CenterWorkspace $workspace = null;
+
+    public bool $hasBranches = false;
+
+    public static function forUser(int $userId, bool $resolveWorkspace = true): self
     {
-        $rows = DB::connection('tenant')->table('center_grants')
-            ->selectRaw('NULL::bigint AS branch_id, role')->where('user_id', $userId)
+        $request = request();
+        $entry = $resolveWorkspace && $request->hasSession() ? CenterWorkspace::entry($request) : null;
+        $query = DB::connection('tenant')->table('center_grants')
+            ->selectRaw('NULL::bigint AS branch_id, role, NULL::jsonb AS workspace_branch, EXISTS (SELECT 1 FROM branches) AS has_branches')->where('user_id', $userId)
             ->unionAll(DB::connection('tenant')->table('branch_grants')
-                ->select(['branch_id', 'role'])->where('user_id', $userId))
-            ->get();
+                ->selectRaw('branch_id, role, NULL::jsonb AS workspace_branch, EXISTS (SELECT 1 FROM branches) AS has_branches')->where('user_id', $userId));
+        if ($entry && $entry['mode'] === 'branch') {
+            $query->unionAll(DB::connection('tenant')->table('branches')
+                ->selectRaw('NULL::bigint AS branch_id, NULL::varchar AS role, to_jsonb(branches) AS workspace_branch, TRUE AS has_branches')
+                ->where('id', $entry['branch_id']));
+        }
+        $rows = $query->get();
+        $branch = $rows->first(fn ($row) => $row->workspace_branch !== null)?->workspace_branch;
+        $rows = $rows->filter(fn ($row) => $row->role !== null);
         $centerRoles = $rows->whereNull('branch_id')->pluck('role')->all();
         $branchRoles = $rows->whereNotNull('branch_id')->groupBy('branch_id')
             ->map(fn ($grants) => $grants->pluck('role')->all())->all();
 
-        return new self($centerRoles, $branchRoles);
+        $permissions = new self($centerRoles, $branchRoles);
+        $permissions->hasBranches = (bool) $rows->first()?->has_branches;
+        $permissions->workspace = CenterWorkspace::resolve($entry, $permissions, $branch ? array_intersect_key(json_decode($branch, true), array_flip(['id', 'name', 'slug', 'address'])) : null);
+
+        return $permissions;
+    }
+
+    /** Raw readable destinations, deliberately independent of the selected workspace. */
+    public function readableBranchIds(): array
+    {
+        return array_keys(array_filter($this->branchRoles, fn (array $roles): bool => in_array('read', self::actions($roles), true)));
     }
 
     public function isCenterManager(): bool

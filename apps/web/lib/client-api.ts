@@ -7,10 +7,12 @@ export function newSubmissionId(): string {
 }
 
 export async function centerRequest(path: string, method: "GET" | "POST" | "PATCH" | "PUT", body?: object, signal?: AbortSignal): Promise<Response> {
+  const workspace = new URLSearchParams(window.location.search).get("workspace");
   if (method !== "GET") {
     await fetch("/sanctum/csrf-cookie", { credentials: "same-origin", cache: "no-store" });
   }
 
+  if (!path.startsWith("auth/") && workspace !== new URLSearchParams(window.location.search).get("workspace")) throw new DOMException("Workspace changed", "AbortError");
   const xsrf = document.cookie.split("; ").find((part) => part.startsWith("XSRF-TOKEN="))?.split("=")[1];
 
   const response = await fetch(`/api/v1/center/${path}`, {
@@ -20,12 +22,14 @@ export async function centerRequest(path: string, method: "GET" | "POST" | "PATC
     cache: "no-store",
     headers: {
       Accept: "application/json",
+      ...(workspace ? { "X-Courses-Workspace": workspace } : {}),
       ...(body && !(body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
       ...(xsrf ? { "X-XSRF-TOKEN": decodeURIComponent(xsrf) } : {}),
     },
     ...(body ? { body: body instanceof FormData ? body : JSON.stringify(body) } : {}),
   });
 
+  if (!path.startsWith("auth/") && workspace !== new URLSearchParams(window.location.search).get("workspace")) throw new DOMException("Workspace changed", "AbortError");
   if (response.status === 401 && !path.startsWith("auth/")) {
     window.location.replace("/login?expired=1");
   }
@@ -37,6 +41,10 @@ export async function centerRequest(path: string, method: "GET" | "POST" | "PATC
     window.location.replace("/admin");
   }
 
+  if (response.status === 409 && !path.startsWith("auth/") && path !== "workspaces" &&
+    ["workspace_required", "workspace_expired"].includes((await response.clone().json().catch(() => ({}))).code)) {
+    window.location.replace(`/admin/workspaces?expired=1&return_to=${encodeURIComponent(window.location.pathname)}`);
+  }
   return response;
 }
 

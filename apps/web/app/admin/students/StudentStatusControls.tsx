@@ -8,7 +8,7 @@ import { FieldGroup, FieldSet } from "@/components/ui/field";
 import { CenterHeaderActions } from "@/components/CenterShell";
 
 import { useRef, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { Button } from '@/components/Button';
 import { FormField } from '@/components/FormField';
 import { InlineNotice } from '@/components/InlineNotice';

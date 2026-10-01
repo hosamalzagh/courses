@@ -18,6 +18,8 @@ class CenterCurriculumController extends Controller
     public function workspace(Request $request, ?string $levelId = null): JsonResponse
     {
         $data = $request->validate([
+            'course_id' => ['sometimes', 'uuid'],
+            'stage_id' => ['sometimes', 'uuid'],
             'courses_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'stages_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'levels_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
@@ -29,6 +31,13 @@ class CenterCurriculumController extends Controller
             abort_unless(Str::isUuid($levelId), 404);
         }
         $permissions = $request->attributes->get('center_permissions');
+        // Ancestors are single records, independent of the child-list cursor.
+        if (isset($data['course_id']) || isset($data['stage_id']) || $levelId !== null) {
+            $data['courses_page'] = 1;
+        }
+        if (isset($data['stage_id']) || $levelId !== null) {
+            $data['stages_page'] = 1;
+        }
         $pagination = [];
         foreach (['courses', 'stages', 'levels', 'branches'] as $kind) {
             $pagination[$kind] = ['page' => (int) ($data[$kind.'_page'] ?? 1), 'has_more' => false];
@@ -37,6 +46,7 @@ class CenterCurriculumController extends Controller
         if (! $permissions->isCenterManager()) {
             $branches->whereIn('id', $this->scope($permissions));
         }
+        $permissions->workspace?->constrain($branches, 'id');
         $branches = $branches->offset(($pagination['branches']['page'] - 1) * 50)->limit(51)->get(['id', 'name', 'slug', 'address']);
         $pagination['branches']['has_more'] = $branches->count() > 50;
         $queries = [];
@@ -44,6 +54,22 @@ class CenterCurriculumController extends Controller
             $query = $this->records($kind, $permissions, $levelId !== null,
                 $levelId !== null ? ($data['plan_version'] ?? null) : null,
                 $levelId !== null ? (int) ($data['versions_page'] ?? 1) : 1, $levelId !== null);
+            if ($levelId !== null || isset($data['stage_id'])) {
+                $stageIds = DB::connection('tenant')->table('stages')->select('id');
+                if ($levelId !== null) {
+                    $stageIds->whereIn('id', DB::connection('tenant')->table('levels')->select('stage_id')->where('id', $levelId));
+                } else {
+                    $stageIds->where('id', $data['stage_id']);
+                }
+                if ($kind === 'courses') {
+                    $query->whereIn('courses.id', (clone $stageIds)->select('course_id'));
+                } else {
+                    $query->whereIn($kind === 'stages' ? 'stages.id' : 'levels.stage_id', $stageIds);
+                }
+            }
+            if (isset($data['course_id'])) {
+                $query->where($kind === 'courses' ? 'courses.id' : 'stages.course_id', $data['course_id']);
+            }
             if ($kind === 'levels' && $levelId !== null) {
                 $query->where('levels.id', $levelId);
             }
@@ -79,7 +105,16 @@ class CenterCurriculumController extends Controller
             abort_if($records['levels']->isEmpty(), 404);
         }
 
+        $navigation = null;
+        if (isset($data['course_id']) || isset($data['stage_id']) || $levelId !== null) {
+            abort_if($records['courses']->isEmpty(), 404);
+            abort_if((isset($data['stage_id']) || $levelId !== null) && $records['stages']->isEmpty(), 404);
+            $navigation = ['course' => $records['courses']->first(),
+                'stage' => isset($data['stage_id']) || $levelId !== null ? $records['stages']->first() : null];
+        }
+
         return response()->json([
+            'navigation' => $navigation,
             'user' => $request->user()->only(['id', 'name', 'email']),
             'membership' => $request->attributes->get('center_membership')->only(['status', 'grants_version']),
             'center' => $request->attributes->get('center')->only(['id', 'name', 'slug']),
@@ -302,6 +337,7 @@ class CenterCurriculumController extends Controller
         if (! $permissions->isCenterManager()) {
             $query->whereIn('courses.branch_id', $this->scope($permissions));
         }
+        $permissions->workspace?->constrain($query, 'courses.branch_id');
         $query->select([$kind.'.id', $kind.'.name', $kind.'.completion_threshold', $kind.'.completion_revision', 'courses.branch_id']);
         if ($kind === 'courses') {
             $query->addSelect(['copies.source_course_id', 'copies.source_course_name',
@@ -453,12 +489,13 @@ SQL);
 
     private function authorize(CenterPermissions $permissions, int $branchId): void
     {
+        $permissions->workspace?->assertBranch($branchId);
         abort_unless($permissions->can('curriculum.manage', $branchId), 403);
     }
 
     private function scope(CenterPermissions $permissions): array
     {
-        return array_keys(array_filter($permissions->branchRoles, fn (array $roles): bool => in_array('read', CenterPermissions::actions($roles), true)));
+        return $permissions->readableBranchIds();
     }
 
     private function audit(Request $request, string $event, int $branchId, string $kind, ?array $before, array $after): void
