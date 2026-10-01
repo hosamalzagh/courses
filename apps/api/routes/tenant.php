@@ -9,6 +9,7 @@ use App\Http\Controllers\CenterContentEquivalenceController;
 use App\Http\Controllers\CenterCourseCompletionController;
 use App\Http\Controllers\CenterCurriculumController;
 use App\Http\Controllers\CenterCurriculumCopyController;
+use App\Http\Controllers\CenterCurriculumExplorerController;
 use App\Http\Controllers\CenterGroupRequirementController;
 use App\Http\Controllers\CenterGroupRequirementEquivalenceController;
 use App\Http\Controllers\CenterInstructorController;
@@ -42,6 +43,7 @@ use App\Http\Controllers\CenterStudySessionController;
 use App\Http\Controllers\CenterStudyTeachingController;
 use App\Http\Controllers\CenterStudyTransferController;
 use App\Http\Controllers\CenterStudyWaitlistController;
+use App\Http\Controllers\CenterWorkspaceController;
 use App\Http\Middleware\MeasureCenterQueries;
 use App\Http\Middleware\RequireCenterMember;
 use App\Http\Middleware\ResolveCenter;
@@ -59,6 +61,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
     Route::post('auth/forgot-password', [CenterAuthController::class, 'forgotPassword'])->middleware('throttle:center-route');
     Route::post('auth/reset-password', [CenterAuthController::class, 'resetPassword'])->middleware('throttle:center-route');
     Route::middleware(RequireCenterMember::class)->group(function (): void {
+        Route::get('workspaces', [CenterWorkspaceController::class, 'index']);
+        Route::post('workspaces', [CenterWorkspaceController::class, 'store']);
         Route::get('user', function (Request $request) {
             $permissions = $request->attributes->get('center_permissions');
             $branches = Branch::query()->orderBy('name');
@@ -82,8 +86,9 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
 
             if ($request->query('include') === 'settings' && $permissions->isCenterManager()) {
                 $payload['settings'] = DB::connection('tenant')->table('center_settings')->where('id', 1)
-                    ->first(['contact_email', 'phone', 'address', 'student_number_start', 'student_number_revision', 'student_code_enabled', 'student_code_label', 'student_code_revision', 'financial_currency', 'financial_currency_revision', 'financial_currency_locked_at']) ?: [
+                    ->first(['contact_email', 'phone', 'address', 'student_number_start', 'student_number_revision', 'student_code_enabled', 'student_code_label', 'student_code_revision', 'student_all_branches_enabled', 'student_all_branches_revision', 'financial_currency', 'financial_currency_revision', 'financial_currency_locked_at']) ?: [
                         'contact_email' => null, 'phone' => null, 'address' => null, 'student_number_start' => 1, 'student_number_revision' => 1,
+                        'student_all_branches_enabled' => false, 'student_all_branches_revision' => 1,
                         'financial_currency' => null, 'financial_currency_revision' => 1, 'financial_currency_locked_at' => null,
                     ];
             }
@@ -94,7 +99,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
                     ->where('settings.id', 1)->where('policy.id', 1)
                     ->first([
                         'settings.student_number_start', 'settings.student_number_revision', 'settings.student_code_enabled',
-                        'settings.student_code_label', 'settings.student_code_revision',
+                        'settings.student_code_label', 'settings.student_code_revision', 'settings.student_all_branches_enabled', 'settings.student_all_branches_revision',
                         'policy.enabled as policy_enabled', 'policy.revision as policy_revision',
                         'policy.default_sharing_enabled as policy_default_sharing_enabled',
                     ]);
@@ -104,6 +109,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
                     'student_code_enabled' => (bool) $studentSettings->student_code_enabled,
                     'student_code_label' => $studentSettings->student_code_label,
                     'student_code_revision' => $studentSettings->student_code_revision,
+                    'student_all_branches_enabled' => (bool) $studentSettings->student_all_branches_enabled,
+                    'student_all_branches_revision' => $studentSettings->student_all_branches_revision,
                 ];
                 $payload['student_search_policy'] = [
                     'enabled' => (bool) $studentSettings->policy_enabled,
@@ -207,6 +214,10 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('curriculum/submissions/{requestId}', [CenterCurriculumController::class, 'submission']);
         Route::get('levels/{levelId}', [CenterCurriculumController::class, 'workspace']);
         Route::post('courses', [CenterCurriculumController::class, 'storeCourse']);
+        Route::delete('courses/{courseId}', [CenterCurriculumController::class, 'destroyCourse']);
+        Route::delete('stages/{stageId}', [CenterCurriculumController::class, 'destroyStage']);
+        Route::delete('levels/{levelId}', [CenterCurriculumController::class, 'destroyLevel']);
+        Route::get('courses/{courseId}/copy-destinations', [CenterCurriculumCopyController::class, 'destinations']);
         Route::get('courses/{courseId}/copy-preview', [CenterCurriculumCopyController::class, 'preview']);
         Route::post('courses/{courseId}/copies', [CenterCurriculumCopyController::class, 'store']);
         Route::post('courses/{courseId}/stages', [CenterCurriculumController::class, 'storeStage']);
@@ -216,6 +227,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::patch('courses/{courseId}/completion-threshold', [CenterCurriculumController::class, 'updateCourseThreshold']);
         Route::patch('stages/{stageId}/completion-threshold', [CenterCurriculumController::class, 'updateStageThreshold']);
         Route::patch('levels/{levelId}/completion-threshold', [CenterCurriculumController::class, 'updateLevelThreshold']);
+        Route::get('curriculum-explorer', [CenterCurriculumExplorerController::class, 'workspace']);
+        Route::get('curriculum-explorer/children', [CenterCurriculumExplorerController::class, 'children']);
         Route::get('group-workspace', [CenterStudyGroupController::class, 'workspace']);
         Route::get('absence-review', [CenterAbsenceReviewController::class, 'workspace']);
         Route::post('absence-review/waitlist-batches', [CenterAbsenceReviewController::class, 'previewWaitlistBatch']);
@@ -272,6 +285,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::put('members/{membership}/grants', [CenterMemberController::class, 'updateGrants']);
         Route::get('settings', [CenterSettingsController::class, 'show']);
         Route::patch('student-code-settings', [CenterStudentController::class, 'updateCodeSettings']);
+        Route::patch('student-branch-settings', [CenterSettingsController::class, 'updateStudentBranches']);
         Route::patch('student-numbering', [CenterStudentNumberingController::class, 'update']);
         Route::patch('settings', [CenterSettingsController::class, 'update']);
         Route::get('audit', [CenterAuditController::class, 'index']);

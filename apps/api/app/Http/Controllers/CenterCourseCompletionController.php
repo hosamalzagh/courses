@@ -24,7 +24,7 @@ class CenterCourseCompletionController extends Controller
             ->where('courses.id', $courseId)->where('students.id', $studentId)
             ->first(['courses.id', 'courses.name', 'courses.branch_id', 'branches.name as branch_name',
                 'students.name as student_name', 'students.student_number']);
-        abort_unless($course && $permissions->can('read', (int) $course->branch_id), 404);
+        abort_unless($course && $permissions->canInWorkspace('read', (int) $course->branch_id), 404);
 
         $countsQuery = $db->table('levels')
             ->join('stages', 'stages.id', '=', 'levels.stage_id')

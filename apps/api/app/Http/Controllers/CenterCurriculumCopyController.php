@@ -13,6 +13,23 @@ use Illuminate\Support\Str;
 
 class CenterCurriculumCopyController extends Controller
 {
+    public function destinations(Request $request, string $courseId): JsonResponse
+    {
+        abort_unless(Str::isUuid($courseId), 404);
+        $data = $request->validate(['page' => ['sometimes', 'integer', 'min:1', 'max:100000']]);
+        $permissions = $request->attributes->get('center_permissions');
+        $source = DB::connection('tenant')->table('courses')->where('id', $courseId)->first(['branch_id']);
+        abort_unless($source && $permissions->canInWorkspace('read', (int) $source->branch_id), 404);
+        $page = (int) ($data['page'] ?? 1);
+        $allowed = array_keys(array_filter($permissions->branchRoles,
+            fn (array $roles): bool => in_array('curriculum.manage', CenterPermissions::actions($roles), true)));
+        $rows = DB::connection('tenant')->table('branches')->where('id', '!=', $source->branch_id)
+            ->when(! $permissions->isCenterManager(), fn ($query) => $query->whereIn('id', $allowed))
+            ->orderBy('id')->offset(($page - 1) * 50)->limit(51)->get(['id', 'name']);
+
+        return response()->json(['branches' => $rows->take(50)->values(), 'page' => $page, 'has_more' => $rows->count() > 50]);
+    }
+
     public function preview(Request $request, string $courseId): JsonResponse
     {
         abort_unless(Str::isUuid($courseId), 404);
@@ -141,7 +158,7 @@ class CenterCurriculumCopyController extends Controller
                 'courses.completion_revision', 'courses.absence_mode', 'courses.absence_limit',
                 'courses.absence_revision', 'branches.name as branch_name', 'target_branch.name as target_branch_name',
             ]);
-        abort_unless($source && $permissions->can('read', (int) $source->branch_id), 404);
+        abort_unless($source && $permissions->canInWorkspace('read', (int) $source->branch_id), 404);
 
         return [$source, (object) ['id' => $targetBranchId, 'name' => $source->target_branch_name]];
     }

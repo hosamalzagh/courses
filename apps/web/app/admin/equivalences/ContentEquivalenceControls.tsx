@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { Button } from '@/components/Button';
 import { CenterHeaderActions, CenterPageActions } from '@/components/CenterShell';
@@ -147,6 +148,7 @@ export function ContentEquivalenceControls({ context }: { context: ContentEquiva
 
   const available = (selected: EquivalencePlan | null) => selected && !options.some(option => option.id === selected.id)
     ? [selected, ...options] : options;
+  const sourceOptions = available(source).filter(option => context.workspace?.mode !== 'branch' || option.branch_id === context.workspace.branch?.id);
   const pageHref = (page: number) => {
     const params = new URLSearchParams(searchParams.toString());
     if (page > 1) params.set('page', String(page)); else params.delete('page');
@@ -171,9 +173,9 @@ export function ContentEquivalenceControls({ context }: { context: ContentEquiva
       <div className='form-grid'>
         <Field><FieldLabel htmlFor={`${formId}-source`}>إصدار المصدر</FieldLabel>
           <NativeSelect id={`${formId}-source`} value={source?.id ?? ''} disabled={busy || uncertain} aria-invalid={Boolean(fieldErrors.source_plan_version_id)}
-            onChange={event => { setSource(available(source).find(option => option.id === event.target.value) ?? null); setSourceIds([]); setFieldErrors({}); }}>
+            onChange={event => { setSource(sourceOptions.find(option => option.id === event.target.value) ?? null); setSourceIds([]); setFieldErrors({}); }}>
             <NativeSelectOption value=''>اختر خطة المحاضرات البديلة</NativeSelectOption>
-            {available(source).map(option => <NativeSelectOption key={option.id} value={option.id}>{planLabel(option)}</NativeSelectOption>)}
+            {sourceOptions.map(option => <NativeSelectOption key={option.id} value={option.id}>{planLabel(option)}</NativeSelectOption>)}
           </NativeSelect></Field>
         <Field><FieldLabel htmlFor={`${formId}-target`}>إصدار المتطلبات المستهدفة</FieldLabel>
           <NativeSelect id={`${formId}-target`} value={target?.id ?? ''} disabled={busy || uncertain} aria-invalid={Boolean(fieldErrors.target_plan_version_id)}

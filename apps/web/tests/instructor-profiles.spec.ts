@@ -1,3 +1,4 @@
+import { workspaceUrl } from "./workspace-testhelpers";
 import { test, expect, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -58,7 +59,7 @@ function metricsAfter(cursor: number, host: string): Metrics {
 async function verifyPageBudget(page: Page, url: string, cold: boolean): Promise<Metrics> {
   const cursor = telescopeCursor();
   if (cold) execFileSync(php, ["artisan", "cache:clear", "--no-interaction"], { cwd: apiDirectory, stdio: "pipe" });
-  const response = await page.goto(url);
+  const response = await page.goto(workspaceUrl(page, url));
   expect(response?.status()).toBe(200);
   const host = new URL(url).hostname;
   await expect.poll(() => metricsAfter(cursor, host).requests, { timeout: 10_000 }).toBeGreaterThan(0);
@@ -105,8 +106,23 @@ test('instructor profiles are created without accounts, reused across branches a
   await page.getByRole('link', { name: 'المحاضرون', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'ملفات المحاضرين', exact: true })).toBeVisible();
   await page.setViewportSize({ width: 1920, height: 1080 });
-  expect(await page.locator('.center-content').evaluate((element) => element.getBoundingClientRect().width)).toBeLessThanOrEqual(1280);
+  const verifyFluidShell = async () => {
+    const bounds = await page.locator('.center-content').evaluate(element => {
+      const content = element.getBoundingClientRect();
+      const frame = element.parentElement!.getBoundingClientRect();
+      return { left: content.left, right: content.right, width: content.width, frameLeft: frame.left, frameRight: frame.right,
+        viewport: window.innerWidth, documentWidth: document.documentElement.scrollWidth };
+    });
+    expect(bounds.width).toBeGreaterThan(0);
+    expect(bounds.left).toBeGreaterThanOrEqual(bounds.frameLeft - 1);
+    expect(bounds.right).toBeLessThanOrEqual(bounds.frameRight + 1);
+    expect(bounds.left).toBeGreaterThanOrEqual(0);
+    expect(bounds.right).toBeLessThanOrEqual(bounds.viewport);
+    expect(bounds.documentWidth).toBeLessThanOrEqual(bounds.viewport);
+  };
+  await verifyFluidShell();
   await page.setViewportSize({ width: 1280, height: 720 });
+  await verifyFluidShell();
   await verifyPageBudget(page, `${host}/admin/instructors`, true);
   await verifyPageBudget(page, `${host}/admin/instructors`, false);
   await page.getByRole('button', { name: 'إنشاء ملف محاضر', exact: true }).click();
@@ -144,7 +160,8 @@ test('instructor profiles are created without accounts, reused across branches a
   const form = page.getByRole('form', { name: `تعديل ملف ${firstName}` });
   await form.getByRole('textbox', { name: 'اسم المحاضر', exact: true }).fill(`${firstName} معدل`);
   await form.getByRole('checkbox', { name: 'الفرع الجنوبي', exact: true }).check();
-  await form.getByRole('button', { name: 'حفظ بيانات المحاضر', exact: true }).click();
+  await expect(form.getByRole('button', { name: 'حفظ بيانات المحاضر', exact: true })).toHaveCount(0);
+  await page.locator('.center-topbar').getByRole('button', { name: 'حفظ بيانات المحاضر', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'حُفظت بيانات المحاضر' })).toBeVisible();
   await expect(row).toContainText('الفرع الجنوبي');
   await expect(row).toContainText('الفرع الشمالي');
@@ -155,9 +172,11 @@ test('instructor profiles are created without accounts, reused across branches a
   const newer = await write(page, `instructors/${first.id}`, 'PATCH', { name: `${firstName} جديد`, phone, branch_ids: [], revision: 2 });
   expect(newer.status).toBe(200);
   await edit.getByRole('textbox', { name: 'اسم المحاضر', exact: true }).fill(`${firstName} قديم`);
-  await edit.getByRole('button', { name: 'حفظ بيانات المحاضر', exact: true }).click();
+  await expect(edit.getByRole('button', { name: 'حفظ بيانات المحاضر', exact: true })).toHaveCount(0);
+  await page.locator('.center-topbar').getByRole('button', { name: 'حفظ بيانات المحاضر', exact: true }).click();
   await expect(page.getByRole('alert').filter({ hasText: 'تغيّرت بيانات الملف' })).toBeVisible();
-  await edit.getByRole('button', { name: 'تحميل أحدث بيانات المحاضر' }).click();
+  await expect(edit.getByRole('button', { name: 'تحميل أحدث بيانات المحاضر', exact: true })).toHaveCount(0);
+  await page.locator('.center-topbar').getByRole('button', { name: 'تحميل أحدث بيانات المحاضر', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'اسم المحاضر', exact: true })).toHaveValue(`${firstName} جديد`);
   await page.getByRole('button', { name: 'إلغاء', exact: true }).click();
   await expect(page.getByRole('button', { name: 'تعديل ملف المحاضر', exact: true })).toBeFocused();
@@ -170,7 +189,7 @@ test('instructor profiles are created without accounts, reused across branches a
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: '/tmp/courses-issue23/instructors-mobile.png', fullPage: true });
   await page.getByRole('button', { name: 'إلغاء', exact: true }).click();
-  await page.goto(`${host}/admin/audit`);
+  await page.goto(workspaceUrl(page, `${host}/admin/audit`));
   await page.getByText('عرض تغيير ملف المحاضر', { exact: true }).first().click();
   await expect(page.getByText('بعد التغيير:', { exact: false }).first()).toContainText(firstName);
 });
@@ -202,14 +221,23 @@ test('academic administration scope hides another branch and center and an open 
     expect((await staff.request.get(`${host}/api/v1/center/instructors/${hidden.body.instructor.id}`)).status()).toBe(404);
     const scoped = await (await staff.request.get(`${host}/api/v1/center/instructor-workspace`)).json() as InstructorContext;
     expect(scoped.instructors.every((instructor) => !instructor.branch_ids.includes(south.id))).toBe(true);
-    await staff.goto(`${host}/admin/instructors/${hidden.body.instructor.id}`);
+    await staff.goto(workspaceUrl(staff, `${host}/admin/instructors/${hidden.body.instructor.id}`));
     await expect(staff.getByRole('heading', { name: 'ملف المحاضر غير متاح' })).toBeVisible();
-    await staff.goto(`${host}/admin/instructors/${visible.body.instructor.id}`);
+    await staff.goto(workspaceUrl(staff, `${host}/admin/instructors/${visible.body.instructor.id}`));
     await staff.getByRole('button', { name: 'تعديل ملف المحاضر' }).click();
     await staff.getByRole('textbox', { name: 'اسم المحاضر', exact: true }).fill(`تعديل ممنوع ${stamp}`);
     expect((await write(owner, `members/${original.id}/grants`, 'PUT', { center_roles: [], branch_roles: {} })).status).toBe(200);
-    await staff.getByRole('button', { name: 'حفظ بيانات المحاضر', exact: true }).click();
-    await expect(staff.getByRole('alert').filter({ hasText: 'لم يعد متاحًا ضمن صلاحيتك' })).toBeVisible();
+    const sourcePath = new URL(staff.url()).pathname;
+    const deniedSave = staff.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/center/instructors/${visible.body.instructor.id}` && response.request().method() === 'PATCH');
+    await staff.locator('.center-topbar').getByRole('button', { name: 'حفظ بيانات المحاضر', exact: true }).click();
+    const denied = await deniedSave;
+    expect(denied.status()).toBe(409);
+    expect((await denied.json()).code).toBe('workspace_expired');
+    await expect(staff).toHaveURL(`${host}/admin/workspaces?expired=1&return_to=${encodeURIComponent(sourcePath)}`);
+    await expect(staff.getByRole('heading', { name: 'اختيار مساحة العمل', exact: true })).toBeVisible();
+    await expect(staff.getByRole('textbox', { name: 'اسم المحاضر', exact: true })).toHaveCount(0);
+    const untouched = await (await owner.request.get(`${host}/api/v1/center/instructors/${visible.body.instructor.id}`)).json();
+    expect(untouched.instructors[0].name).toBe(visible.body.instructor.name);
     await signIn(beta, 'http://beta.courses.test', betaCredentials.email, betaCredentials.password);
     expect((await beta.request.get(`http://beta.courses.test/api/v1/center/instructors/${visible.body.instructor.id}`)).status()).toBe(404);
     const requestId = crypto.randomUUID();
@@ -234,7 +262,7 @@ test('a committed creation whose response is lost is recovered before editing wi
   const owner = credentials('alpha');
   const name = `استعادة ${Date.now()}`;
   await signIn(page, host, owner.email, owner.password);
-  await page.goto(`${host}/admin/instructors`);
+  await page.goto(workspaceUrl(page, `${host}/admin/instructors`));
   await page.getByRole('button', { name: 'إنشاء ملف محاضر', exact: true }).click();
   await page.getByRole('textbox', { name: 'اسم المحاضر', exact: true }).fill(name);
   let savedId = '';

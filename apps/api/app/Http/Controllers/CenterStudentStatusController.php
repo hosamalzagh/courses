@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Center;
 use App\Models\CenterMembership;
 use App\Support\CenterPermissions;
+use App\Support\StudentPhotos;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -33,9 +34,10 @@ class CenterStudentStatusController extends Controller
             abort_unless(CenterMembership::query()->where('tenant_id', $centerId)->where('user_id', $request->user()->id)->value('status') === 'active', 403);
 
             return DB::connection('tenant')->transaction(function () use ($request, $studentId, $data): JsonResponse {
-                abort_unless(CenterPermissions::forUser($request->user()->id)->isCenterManager(), 403);
+                $permissions = CenterPermissions::forUser($request->user()->id);
+                abort_unless($permissions->isCenterManager(), 403);
                 $db = DB::connection('tenant');
-                $student = $db->table('students')->where('id', $studentId)->lockForUpdate()->first();
+                $student = StudentPhotos::visibleStudent($studentId, $permissions, 'read')->lockForUpdate()->first();
                 abort_unless($student, 404);
                 $hash = hash('sha256', json_encode([$studentId, $data['status'], $data['reason'], (int) $data['status_revision']]));
                 $existing = $db->table('student_suspensions')->where('suspended_request_id', $data['request_id'])->orWhere('lifted_request_id', $data['request_id'])->first();

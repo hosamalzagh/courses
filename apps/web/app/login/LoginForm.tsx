@@ -38,10 +38,9 @@ export function LoginForm({ expired }: { expired: boolean }) {
         setError(await responseMessage(response));
         return;
       }
-      const data: { status: string } = await response.json();
+      const data: { status: string; destination: string } = await response.json();
       if (data.status === "authenticated") {
-        router.replace("/admin");
-        router.refresh();
+        router.replace(data.destination);
         return;
       }
       if (data.status === "mfa_challenge_required") {
@@ -68,8 +67,8 @@ export function LoginForm({ expired }: { expired: boolean }) {
         setError(await responseMessage(response));
         return;
       }
-      router.replace("/admin");
-      router.refresh();
+      const data: { destination: string } = await response.json();
+      router.replace(data.destination);
     } catch {
       setError("تعذر التحقق من الرمز. حاول مرة أخرى.");
     } finally {

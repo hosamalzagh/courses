@@ -43,6 +43,11 @@ test("owner opens only the selected settings data and legacy links retain parame
     const response = await page.goto(`${origin}/admin/settings?tab=${tab}`);
     expect(response?.status()).toBe(200);
     await expect(page.getByRole("tab", { name: label, exact: true })).toHaveAttribute("aria-selected", "true");
+    if (tab === "students" || tab === "student-fields" || tab === "student-choices") {
+      await expect(page.getByRole("tablist", { name: "أقسام الإعدادات" }).getByRole("tab", { name: "الطلاب" })).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByRole("tablist", { name: "أقسام الطلاب" }).getByRole("tab", { name: tab === "students" ? "إعدادات الطلاب" : label })).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByRole("tablist", { name: "أقسام الإعدادات" }).getByRole("tab", { name: "الحقول الإضافية" })).toHaveCount(0);
+    }
     await expect(page.getByText(content, { exact: false }).first()).toBeVisible();
     const rows = readsSince(cursor);
     expect(rows).toHaveLength(1);
@@ -51,6 +56,10 @@ test("owner opens only the selected settings data and legacy links retain parame
     expect(rows[0].count).toBeLessThanOrEqual(6);
     if (tab === "general") await expect(page.getByRole("tabpanel", { name: "عام" }).getByText("مركز ألفا", { exact: true })).toBeVisible();
   }
+  await page.getByRole("tab", { name: "الطلاب", exact: true }).click();
+  await page.getByRole("tab", { name: "الحقول الإضافية", exact: true }).click();
+  await expect(page).toHaveURL(`${origin}/admin/settings?tab=student-fields`);
+  await expect(page.getByRole("tab", { name: "الطلاب", exact: true })).toHaveAttribute("aria-selected", "true");
   for (const [oldPath, expected] of [
     ["/admin/security", "tab=security"],
     ["/admin/student-custom-fields?page=2", "tab=student-fields&page=2"],
@@ -66,7 +75,7 @@ test("owner opens only the selected settings data and legacy links retain parame
     await ssr.goto(`${origin}/admin/settings?tab=branches`);
     await expect(ssr.getByRole("table", { name: "الفروع" })).toContainText("الفرع الشمالي");
   } finally { await noScript.close(); }
-  await page.getByRole("link", { name: "Courses — الرئيسية" }).click();
+  await page.getByRole("link", { name: / — الرئيسية$/ }).click();
   await expect(page).toHaveURL(`${origin}/admin`);
   await expect(page.locator("main").getByRole("table")).toHaveCount(0);
 });

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { workspaceApiHref } from "@/lib/workspace";
+import { useWorkspaceId } from "@/components/WorkspaceNavigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { Button } from "./Button";
 import { ConfirmationDialog } from "./ConfirmationDialog";
 import { CenterHeaderActions } from "./CenterShell";
@@ -20,6 +22,7 @@ type Selection = { file: File; title: string; classification: "general" | "ident
 
 export function StudentAttachments({ student, page, canRestore }: { student: Student; page: StudentAttachmentPage; canRestore: boolean }) {
   const router = useRouter();
+  const workspaceId = useWorkspaceId();
   const formId = useId();
   const fileInput = useRef<HTMLInputElement>(null);
   const saving = useRef(false);
@@ -136,8 +139,8 @@ export function StudentAttachments({ student, page, canRestore }: { student: Stu
         { key: "type", label: "التصنيف", render: row => row.classification === "identity" ? "هوية" : "عام" },
         { key: "size", label: "الحجم", render: row => `${(row.size_bytes / 1024 / 1024).toFixed(2)} MB` },
         { key: "actions", label: "الإجراءات", actions: true, render: row => <span className="flex flex-wrap gap-2">
-          <a className={buttonVariants({ variant: "outline", size: "sm" })} href={row.preview_url} target="_blank" rel="noopener noreferrer">معاينة {row.title}</a>
-          <a className={buttonVariants({ variant: "outline", size: "sm" })} href={row.download_url}>تنزيل {row.title}</a>
+          <a className={buttonVariants({ variant: "outline", size: "sm" })} href={workspaceApiHref(row.preview_url, workspaceId)} target="_blank" rel="noopener noreferrer">معاينة {row.title}</a>
+          <a className={buttonVariants({ variant: "outline", size: "sm" })} href={workspaceApiHref(row.download_url, workspaceId)}>تنزيل {row.title}</a>
           <Button disabled={Boolean(selectedAttachment)} onClick={event => { selectionTrigger.current = event.currentTarget; setSelectedAttachment(row); }}>نسخ وإجراءات {row.title}</Button>
         </span> },
       ]} />
@@ -207,6 +210,7 @@ function StudentAttachmentManagement({ student, attachment, revision, onRevision
   student: Student; attachment: StudentAttachment; revision: number; onRevision: (value: number) => void; onDirtyChange: (value: boolean) => void; canRestore: boolean; onClose: (message?: string) => void;
 }) {
   const router = useRouter();
+  const workspaceId = useWorkspaceId();
   const formId = useId();
   const fileInput = useRef<HTMLInputElement>(null);
   const titleInput = useRef<HTMLInputElement>(null);
@@ -340,8 +344,8 @@ function StudentAttachmentManagement({ student, attachment, revision, onRevision
     {loadingVersions ? <p role="status">جارٍ تحميل النسخ…</p> : versions.length ? <ul className="form-stack">
       {versions.map(version => <li key={version.id} className="flex flex-wrap items-center gap-2">
         <span>نسخة {version.version.toLocaleString("ar-EG")} — {version.classification === "identity" ? "هوية" : "عام"} — {version.actor_name ?? `موظف رقم ${version.actor_id.toLocaleString("ar-EG")}`} — {new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium", timeStyle: "short", timeZone: "Africa/Cairo" }).format(new Date(version.created_at.replace(" ", "T") + "Z"))}</span>
-        <a className={buttonVariants({ variant: "outline", size: "sm" })} href={version.preview_url} target="_blank" rel="noopener noreferrer">معاينة النسخة {version.version}</a>
-        <a className={buttonVariants({ variant: "outline", size: "sm" })} href={version.download_url}>تنزيل النسخة {version.version}</a>
+        <a className={buttonVariants({ variant: "outline", size: "sm" })} href={workspaceApiHref(version.preview_url, workspaceId)} target="_blank" rel="noopener noreferrer">معاينة النسخة {version.version}</a>
+        <a className={buttonVariants({ variant: "outline", size: "sm" })} href={workspaceApiHref(version.download_url, workspaceId)}>تنزيل النسخة {version.version}</a>
       </li>)}
     </ul> : <p>لا توجد نسخ متاحة.</p>}
     {canEdit && !current.archived_at ? <>

@@ -33,13 +33,14 @@ class CenterStudyWaitlistController extends Controller
             ->first(['attempts.id', 'attempts.level_id', 'attempts.plan_version_id',
                 'attempts.branch_id', 'attempts.status', 'attempts.current_group_id',
                 'attempts.required_lectures', 'attempts.revision']);
-        abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
+        abort_unless($attempt && $permissions->canInWorkspace('enrollment.manage', (int) $attempt->branch_id), 404);
         $page = (int) ($data['page'] ?? 1);
         $historyPage = (int) ($data['history_page'] ?? 1);
         $readableBranches = array_keys(array_filter($permissions->branchRoles,
             fn (array $roles): bool => in_array('read', CenterPermissions::actions($roles), true)));
         $history = DB::connection('tenant')->table('study_attempt_waitlists')->where('attempt_id', $attemptId)
             ->when(! $permissions->isCenterManager(), fn ($query) => $query->whereIn('branch_id', $readableBranches))
+            ->tap(fn ($query) => $permissions->workspace?->constrain($query, 'branch_id'))
             ->orderByDesc('entered_on')->orderByDesc('created_at')->orderByDesc('id')
             ->offset(($historyPage - 1) * 20)->limit(21)->get();
         $groups = collect();
@@ -147,7 +148,7 @@ class CenterStudyWaitlistController extends Controller
                 ->where('groups.id', $data['group_id'])->lockForUpdate()
                 ->first(['groups.id', 'groups.level_id', 'groups.plan_version_id', 'groups.status',
                     'groups.revision', 'courses.branch_id']);
-            abort_unless($group && $permissions->can('enrollment.manage', (int) $group->branch_id), 404);
+            abort_unless($group && $permissions->canInWorkspace('enrollment.manage', (int) $group->branch_id), 404);
             $appliedInGroup = $group->plan_version_id !== $attempt->plan_version_id
                 && $attempt->required_lectures !== null
                 && DB::connection('tenant')->table('study_attempt_plan_applications')
@@ -203,7 +204,7 @@ class CenterStudyWaitlistController extends Controller
     {
         $attempt = DB::connection('tenant')->table('study_attempts')->where('id', $attemptId)
             ->where('student_id', $studentId)->lockForUpdate()->first();
-        abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
+        abort_unless($attempt && $permissions->canInWorkspace('enrollment.manage', (int) $attempt->branch_id), 404);
 
         return $attempt;
     }

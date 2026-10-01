@@ -16,6 +16,7 @@ export type GroupPlanChoice = {
 };
 export type GroupInstructorChoice = { id: string; name: string; branch_id: number };
 export type GroupContext = CenterContext & {
+  navigation?: { course_id: string; course_name: string; stage_id: string; stage_name: string; level_id: string; level_name: string } | null;
   groups: StudyGroup[]; level_choices: GroupPlanChoice[];
   pagination: {
     groups: { page: number; has_more: boolean };
@@ -33,7 +34,7 @@ export type StudySession = {
 };
 export type SessionContext = CenterContext & {
   group: { id: string; name: string; status: StudyGroup["status"]; revision: number;
-    plan_version_id: string; branch_id: number; level_name: string; can_manage: boolean;
+    plan_version_id: string; branch_id: number; level_name: string; course_id: string; course_name: string; stage_id: string; stage_name: string; level_id: string; can_manage: boolean;
     requirements: { id: string; plan_lecture_id: string | null; number: number; title: string | null; content: string }[];
     historical_requirements: { id: string; plan_lecture_id: null; number: number; title: string | null; content: string }[];
     historical_requirements_has_more: boolean;

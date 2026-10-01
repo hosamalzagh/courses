@@ -8,7 +8,7 @@ import { FieldGroup, FieldSet } from "@/components/ui/field";
 import { CenterHeaderActions } from "@/components/CenterShell";
 
 import { useRef, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { Button } from "@/components/Button";
 import { FormField } from "@/components/FormField";
@@ -28,6 +28,7 @@ export function StudentNumberingControls({ start, revision }: { start: number; r
   const [notice, setNotice] = useState("");
   const [conflict, setConflict] = useState(false);
   const saving = useRef(false);
+  const dirty = value !== savedValue;
 
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -69,13 +70,13 @@ export function StudentNumberingControls({ start, revision }: { start: number; r
   return <form id={`${formPrefix}-0`} className="settings-list" noValidate onSubmit={save} aria-label="ترقيم الطلاب">
     <SettingsRow title="ترقيم الطلاب" description="تسلسل واحد لكل فروع المركز. تغيير البداية يحفظ الأرقام الحالية ولا يعيد استعمال رقم صدر سابقًا.">
       <FieldGroup>
-    <UnsavedChangesGuard dirty={value !== savedValue} />
+    <UnsavedChangesGuard dirty={dirty} />
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
     <FieldSet disabled={busy} className="form-stack" style={{ border: 0, margin: 0, padding: 0 }}>
-    <FormField id="student-number-start" label="بداية ترقيم الطلاب" value={value} onChange={(next) => { setValue(next); setFieldError(""); }} type="number" direction="ltr" required error={fieldError} />
+    <FormField id="student-number-start" label="بداية ترقيم الطلاب" value={value} onChange={(next) => { setValue(next); setFieldError(""); setError(""); }} type="number" direction="ltr" required error={fieldError} />
     <CenterHeaderActions>
-      <Button form={`${formPrefix}-0`} variant="primary" type="submit" disabled={busy || conflict} busy={busy} busyLabel="جارٍ الحفظ…">حفظ بداية الترقيم</Button>
+      {dirty ? <Button form={`${formPrefix}-0`} variant="primary" type="submit" disabled={busy || conflict} busy={busy} busyLabel="جارٍ الحفظ…">حفظ بداية الترقيم</Button> : null}
       {conflict ? <Button type="button" disabled={busy} onClick={reload}>تحميل إعداد الترقيم الحالي</Button> : null}
     </CenterHeaderActions>
     </FieldSet>

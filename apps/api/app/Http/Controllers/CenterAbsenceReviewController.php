@@ -29,7 +29,7 @@ class CenterAbsenceReviewController extends Controller
         $branches = array_map('intval', array_keys($permissions->branchRoles));
         abort_unless($permissions->isCenterManager() || count($branches) > 0, 403);
         if (isset($data['branch_id'])) {
-            abort_unless($permissions->can('read', (int) $data['branch_id']), 404);
+            abort_unless($permissions->canInWorkspace('read', (int) $data['branch_id']), 404);
         }
 
         $choices = $this->options($permissions, $data);
@@ -57,7 +57,7 @@ class CenterAbsenceReviewController extends Controller
         $permissions = $request->attributes->get('center_permissions');
         abort_unless($permissions->isCenterManager() || count($permissions->branchRoles) > 0, 403);
         if (isset($data['branch_id'])) {
-            abort_unless($permissions->can('read', (int) $data['branch_id']), 404);
+            abort_unless($permissions->canInWorkspace('read', (int) $data['branch_id']), 404);
         }
 
         return response()->json($this->options($permissions, [
@@ -86,8 +86,8 @@ class CenterAbsenceReviewController extends Controller
             return DB::connection('tenant')->transaction(function () use ($request, $kind, $id, $data): JsonResponse {
                 $permissions = CenterPermissions::forUser($request->user()->id);
                 $row = $this->ruleRow($kind, $id, true);
-                abort_unless($row && $permissions->can('read', (int) $row->branch_id), 404);
-                abort_unless($permissions->can('curriculum.manage', (int) $row->branch_id), 403);
+                abort_unless($row && $permissions->canInWorkspace('read', (int) $row->branch_id), 404);
+                abort_unless($permissions->canInWorkspace('curriculum.manage', (int) $row->branch_id), 403);
                 $before = ['mode' => $row->absence_mode, 'limit' => $row->absence_limit, 'revision' => (int) $row->absence_revision];
                 $after = ['mode' => $data['mode'] === 'inherit' ? null : $data['mode'], 'limit' => isset($data['limit']) ? (int) $data['limit'] : null];
                 if ($before['mode'] === $after['mode'] && $before['limit'] === $after['limit']) {
@@ -135,7 +135,7 @@ class CenterAbsenceReviewController extends Controller
 
         return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $data, $reason, $selected, $scope): JsonResponse {
             if (isset($scope['branch_id'])) {
-                abort_unless($permissions->can('enrollment.manage', (int) $scope['branch_id']), 404);
+                abort_unless($permissions->canInWorkspace('enrollment.manage', (int) $scope['branch_id']), 404);
             }
             $batchId = (string) Str::uuid();
             $now = now();
@@ -159,7 +159,7 @@ class CenterAbsenceReviewController extends Controller
                             $seen[$row['id']] = true;
                         }
                     }
-                    $manageable = array_values(array_filter($visible, fn (array $row) => $row['student_status'] === 'active' && $permissions->can('enrollment.manage', (int) $row['branch_id'])));
+                    $manageable = array_values(array_filter($visible, fn (array $row) => $row['student_status'] === 'active' && $permissions->canInWorkspace('enrollment.manage', (int) $row['branch_id'])));
                     $eligible = $this->previewEligibleIds($manageable, $data['entered_on']);
                     $items = [];
                     foreach ($manageable as $row) {
@@ -220,7 +220,7 @@ class CenterAbsenceReviewController extends Controller
                 $reason = null;
                 $waitlistId = null;
                 if ($row === null || $row['student_status'] !== 'active' ||
-                    ! $permissions->can('enrollment.manage', (int) $row['branch_id']) ||
+                    ! $permissions->canInWorkspace('enrollment.manage', (int) $row['branch_id']) ||
                     (int) $row['branch_id'] !== (int) $item->branch_id ||
                     (int) $row['attempt_revision'] !== (int) $item->attempt_revision ||
                     $row['current_group_id'] !== $item->group_id) {
@@ -294,7 +294,7 @@ class CenterAbsenceReviewController extends Controller
         $branches = DB::connection('tenant')->table('study_waitlist_batch_items')
             ->where('batch_id', $batchId)->distinct()->pluck('branch_id');
         foreach ($branches as $branchId) {
-            abort_unless($permissions->can('enrollment.manage', (int) $branchId), 404);
+            abort_unless($permissions->canInWorkspace('enrollment.manage', (int) $branchId), 404);
         }
 
         return $batch;
@@ -498,10 +498,15 @@ SQL;
 
     private function scopeSql(CenterPermissions $permissions, string $column): array
     {
+        if ($permissions->workspace?->mode === 'branch') {
+            $id = (int) $permissions->workspace->branch['id'];
+
+            return ['sql' => $permissions->can('read', $id) ? "{$column} = ?" : 'FALSE', 'bindings' => $permissions->can('read', $id) ? [$id] : []];
+        }
         if ($permissions->isCenterManager()) {
             return ['sql' => 'TRUE', 'bindings' => []];
         }
-        $ids = array_values(array_map('intval', array_filter(array_keys($permissions->branchRoles), fn ($id) => $permissions->can('read', (int) $id))));
+        $ids = array_values(array_map('intval', array_filter(array_keys($permissions->branchRoles), fn ($id) => $permissions->canInWorkspace('read', (int) $id))));
 
         return ['sql' => $ids ? "{$column} IN (".implode(', ', array_fill(0, count($ids), '?')).')' : 'FALSE', 'bindings' => $ids];
     }

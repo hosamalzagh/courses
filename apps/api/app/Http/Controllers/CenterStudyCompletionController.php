@@ -148,8 +148,8 @@ class CenterStudyCompletionController extends Controller
             $query->lock('FOR UPDATE OF groups');
         }
         $group = $query->first();
-        abort_unless($group && $permissions->can('read', (int) $group->branch_id), 404);
-        abort_unless($permissions->can('study.complete', (int) $group->branch_id), 403);
+        abort_unless($group && $permissions->canInWorkspace('read', (int) $group->branch_id), 404);
+        abort_unless($permissions->canInWorkspace('study.complete', (int) $group->branch_id), 403);
 
         return $group;
     }

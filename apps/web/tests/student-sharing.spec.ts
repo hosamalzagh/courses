@@ -60,10 +60,11 @@ test('owner configures new defaults and audited sharing separately in RTL and na
   const first = await write(page, 'students', 'POST', { name: `Earlier sharing ${suffix}`, branch_ids: [branch.body.branch.id], request_id: crypto.randomUUID() }); expect(first.status).toBe(201);
   await budget(page, () => page.goto(`${host}/admin/students?scope=center`), true);
   await page.goto(`${host}/admin/settings?tab=students`);
-  await page.getByRole('button', { name: 'تغيير افتراضي المشاركة', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'السماح بمشاركة الملفات الجديدة', exact: true }).click();
   await expect(page.getByRole('alertdialog')).toContainText('تبقى اختيارات الطلاب الموجودين محفوظة');
   await page.getByRole('alertdialog').getByRole('button', { name: 'غلق المشاركة للملفات الجديدة', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'حُفظ افتراضي' })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'السماح بمشاركة الملفات الجديدة', exact: true })).not.toBeChecked();
+  await expect(page.getByText('حُفظ افتراضي مشاركة الملفات الجديدة.', { exact: true })).toHaveCount(0);
   expect((await (await page.request.get(`${host}/api/v1/center/student-search-workspace`)).json()).policy.enabled).toBe(false);
   expect((await (await page.request.get(`${host}/api/v1/center/students/${first.body.student.id}`)).json()).students[0].sharing_enabled).toBe(true);
   await page.goto(`${host}/admin/students`); await page.getByRole('link', { name: 'إنشاء ملف طالب', exact: true }).click();

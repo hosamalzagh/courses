@@ -19,7 +19,7 @@ class CenterAttemptThresholdController extends Controller
         $change = $this->change($request);
         $permissions = $request->attributes->get('center_permissions');
         $group = $this->group($groupId, $permissions);
-        abort_unless($permissions->can('curriculum.manage', $group->branch_id), 403);
+        abort_unless($permissions->canInWorkspace('curriculum.manage', $group->branch_id), 403);
 
         return response()->json($this->impact($group, $change))
             ->header('Cache-Control', 'private, no-store');
@@ -37,7 +37,7 @@ class CenterAttemptThresholdController extends Controller
 
         return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $groupId, $change, $confirmation, $hash): JsonResponse {
             $group = $this->group($groupId, $permissions, true);
-            abort_unless($permissions->can('curriculum.manage', $group->branch_id), 403);
+            abort_unless($permissions->canInWorkspace('curriculum.manage', $group->branch_id), 403);
             $db = DB::connection('tenant');
             $previous = $db->table('study_threshold_submissions')
                 ->where('request_id', $confirmation['request_id'])->first();
@@ -123,7 +123,7 @@ class CenterAttemptThresholdController extends Controller
             $query->lockForUpdate();
         }
         $group = $query->first();
-        abort_unless($group && $permissions->can('read', (int) $group->branch_id), 404);
+        abort_unless($group && $permissions->canInWorkspace('read', (int) $group->branch_id), 404);
 
         return $group;
     }

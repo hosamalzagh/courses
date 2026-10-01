@@ -1,12 +1,15 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+import { curriculumExplorerHref } from "@/lib/curriculum-explorer";
 import { useId, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions, CenterPageActions } from "@/components/CenterShell";
 import { DataTable } from "@/components/DataTable";
 import { FormField } from "@/components/FormField";
 import { InlineNotice } from "@/components/InlineNotice";
+import { levelGroupsHref } from "@/lib/curriculum-navigation";
 import { PrefetchLink as Link } from "@/components/PrefetchLink";
 import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
@@ -23,8 +26,10 @@ type CancelPreview = { group_revision: number; session_revision: number; plan_le
 type ReplacementPreview = { group_revision: number; session_revision: number; number: number; plan_lecture_number: number; local_at: string; title: string | null; preview_token: string };
 const initialDraft: Draft = { kind: "single", start_at: "", count: "1", interval_weeks: "1", plan_lecture_number: "", title: "" };
 
-export function SessionControls({ context }: { context: SessionContext }) {
+export function SessionControls({ context, explorer = false }: { context: SessionContext; explorer?: boolean }) {
   const router = useRouter();
+  const params = useSearchParams();
+  function pageHref(page: number) { const next = new URLSearchParams(params.toString()); if (page > 1) next.set("sessions_page", String(page)); else next.delete("sessions_page"); return `/admin/curriculum?${next}`; }
   const formId = useId();
   const busyRef = useRef(false);
   const [group, setGroup] = useState(context.group);
@@ -256,7 +261,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
     <CenterPageActions context={context} actions={<>
       {group.can_manage && group.status !== "completed" ? <Button id="add-group-requirement" disabled={busy || Boolean(selected || cancelTarget || replacementTarget || requirementEditor || equivalenceEditor)} onClick={() => { setRequirementEditor({ kind: "add" }); setError(""); }}>محاضرة إضافية</Button> : null}
       {group.can_manage && (group.requirements.some(item => item.plan_lecture_id === null) || group.historical_requirements.length > 0) ? <Button id="group-requirement-equivalence" disabled={busy || Boolean(selected || cancelTarget || replacementTarget || requirementEditor || equivalenceEditor)} onClick={() => { setEquivalenceEditor(true); setError(""); }}>تكافؤ المحاضرات المضافة</Button> : null}
-      <Link href={`/admin/groups/${group.id}/coverage`}>تقرير تغطية المحتوى وأهلية الإتمام</Link><Link href="/admin/groups">العودة للمجموعات</Link>
+      <Link href={`/admin/groups/${group.id}/coverage`}>تقرير تغطية المحتوى وأهلية الإتمام</Link><Link href={explorer ? curriculumExplorerHref({ kind: "level", id: group.level_id, name: group.level_name }, params.toString()) : levelGroupsHref(context.group.level_id)}>العودة للمجموعات</Link>
     </>} />
     <UnsavedChangesGuard dirty={dirty} guardHistory />
     {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
@@ -357,7 +362,7 @@ export function SessionControls({ context }: { context: SessionContext }) {
         </span> },
       ]}
       serverPagination={{ page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 20,
-        previousHref: `/admin/groups/${group.id}/sessions${context.pagination.page > 2 ? `?page=${context.pagination.page - 1}` : ""}`,
-        nextHref: `/admin/groups/${group.id}/sessions?page=${context.pagination.page + 1}` }} />
+        previousHref: explorer ? pageHref(Math.max(1, context.pagination.page - 1)) : `/admin/groups/${group.id}/sessions${context.pagination.page > 2 ? `?page=${context.pagination.page - 1}` : ""}`,
+        nextHref: explorer ? pageHref(context.pagination.page + 1) : `/admin/groups/${group.id}/sessions?page=${context.pagination.page + 1}` }} />
   </>;
 }

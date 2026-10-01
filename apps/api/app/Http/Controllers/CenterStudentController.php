@@ -49,6 +49,7 @@ class CenterStudentController extends Controller
             'attachments_status' => ['sometimes', 'in:active,archived'],
             'q' => ['nullable', 'string', 'max:255'],
             'identifier' => ['nullable', 'string', 'max:50'],
+            'search_only' => ['sometimes', 'boolean'],
         ]);
         $permissions = $request->attributes->get('center_permissions');
         $page = (int) ($data['page'] ?? 1);
@@ -57,6 +58,7 @@ class CenterStudentController extends Controller
         if (! $permissions->isCenterManager()) {
             $branches->whereIn('id', $this->branchScope($permissions, 'read'));
         }
+        $permissions->workspace?->constrain($branches, 'id');
         $branchRows = $branches->offset(($branchPage - 1) * 50)->limit(51)->select(['id', 'name', 'slug', 'address']);
         $workspace = DB::connection('tenant')->query()
             ->selectSub(DB::connection('tenant')->query()->fromSub($branchRows, 'branch_rows')->selectRaw('json_agg(branch_rows)'), 'branches')
@@ -64,7 +66,8 @@ class CenterStudentController extends Controller
             ->selectSub(StudentCustomFields::initialQuery($permissions, $studentId), 'custom_fields')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('student_custom_fields_revision'), 'custom_fields_revision')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->selectRaw("json_build_object('enabled', student_code_enabled, 'label', student_code_label, 'revision', student_code_revision)"), 'code_settings')
-            ->selectSub(DB::connection('tenant')->table('student_search_policy')->where('id', 1)->select('enabled'), 'student_search_enabled')->first();
+            ->selectSub(DB::connection('tenant')->table('student_search_policy')->where('id', 1)->select('enabled'), 'student_search_enabled')
+            ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->selectRaw("json_build_object('enabled', student_all_branches_enabled, 'revision', student_all_branches_revision)"), 'branch_settings')->first();
         $branches = collect(json_decode($workspace->branches ?? '[]'));
         $choiceRows = collect(json_decode($workspace->choices ?? '[]', true));
         $choices = [];
@@ -126,6 +129,7 @@ class CenterStudentController extends Controller
                     ->whereColumn('summary_associations.student_id', 'students.id')
                     ->whereColumn('summary_associations.branch_id', 'summary_attempts.branch_id')->selectRaw('1'))
                 ->when(! $permissions->isCenterManager(), fn (Builder $rows) => $rows->whereIn('summary_attempts.branch_id', $this->branchScope($permissions, 'read')))
+                ->tap(fn (Builder $rows) => $permissions->workspace?->constrain($rows, 'summary_attempts.branch_id'))
                 ->orderByDesc('summary_attempts.updated_at')->orderByDesc('summary_attempts.id')->limit(4)
                 ->select(['summary_attempts.id', 'summary_attempts.branch_id', 'summary_attempts.updated_at',
                     'summary_branches.name as branch_name', 'summary_courses.name as course_name',
@@ -153,6 +157,7 @@ class CenterStudentController extends Controller
                     ->whereColumn('attendance_associations.student_id', 'students.id')
                     ->whereColumn('attendance_associations.branch_id', 'summary_courses.branch_id')->selectRaw('1'))
                 ->when(! $permissions->isCenterManager(), fn (Builder $rows) => $rows->whereIn('summary_courses.branch_id', $this->branchScope($permissions, 'read')))
+                ->tap(fn (Builder $rows) => $permissions->workspace?->constrain($rows, 'summary_courses.branch_id'))
                 ->selectRaw('COUNT(*)');
             $query->selectSub($absences, 'current_group_absences');
             $financeBranches = $this->branchScope($permissions, 'finance.read');
@@ -205,6 +210,7 @@ class CenterStudentController extends Controller
                 ->whereColumn('notes.student_id', 'students.id')->whereColumn('attempts.student_id', 'students.id')
                 ->where('notes.event_type', 'study_attempt')->whereColumn('notes.branch_id', 'fees.branch_id')
                 ->when(! $permissions->isCenterManager(), fn (Builder $rows) => $rows->whereIn('fees.branch_id', $this->branchScope($permissions, 'read')))
+                ->tap(fn (Builder $rows) => $permissions->workspace?->constrain($rows, 'fees.branch_id'))
                 ->orderByDesc('notes.updated_at')->orderByDesc('notes.id')
                 ->offset(($notesPage - 1) * 20)->limit(21)
                 ->select(['notes.event_id as attempt_id', 'notes.branch_id', 'notes.body', 'notes.important', 'notes.revision',
@@ -223,7 +229,7 @@ class CenterStudentController extends Controller
         if ($studentId !== null && ($data['tab'] ?? '') === 'study') {
             $studyPage = (int) ($data['study_page'] ?? 1);
             $studySearch = trim($data['study_q'] ?? '');
-            $readableBranches = $permissions->isCenterManager() ? null : $this->branchScope($permissions, 'read');
+            $readableBranches = $permissions->workspace?->mode === 'branch' ? [$permissions->workspace->branch['id']] : ($permissions->isCenterManager() ? null : $this->branchScope($permissions, 'read'));
             $currentPeriod = '(SELECT current_period.id FROM study_attempt_group_periods AS current_period WHERE current_period.attempt_id = attempts.id AND current_period.group_id = attempts.current_group_id ORDER BY (current_period.left_on IS NULL) DESC, (NOT EXISTS (SELECT 1 FROM study_attempt_waitlists AS prior_waitlists WHERE prior_waitlists.origin_period_id = current_period.id)) DESC, current_period.joined_on DESC, current_period.created_at DESC, current_period.id DESC LIMIT 1)';
             $legacyOrigin = static fn (string $alias): string => "(SELECT legacy_period.id FROM study_attempt_group_periods AS legacy_period WHERE legacy_period.attempt_id = {$alias}.attempt_id AND legacy_period.group_id = {$alias}.from_group_id AND legacy_period.left_on = {$alias}.entered_on AND legacy_period.created_at <= {$alias}.created_at ORDER BY legacy_period.created_at DESC, legacy_period.id DESC LIMIT 1)";
             $legacyWaitlistOrigin = $legacyOrigin('study_attempt_waitlists');
@@ -302,6 +308,7 @@ class CenterStudentController extends Controller
                 ->leftJoin('courses as source_courses', 'source_courses.id', '=', 'source_stages.course_id')
                 ->whereColumn('attempts.student_id', 'students.id')
                 ->when(! $permissions->isCenterManager(), fn (Builder $rows) => $rows->whereIn('courses.branch_id', $this->branchScope($permissions, 'read')))
+                ->tap(fn (Builder $rows) => $permissions->workspace?->constrain($rows, 'courses.branch_id'))
                 ->when($attendanceSearch !== '', function (Builder $rows) use ($attendanceSearch): void {
                     $term = '%'.addcslashes($attendanceSearch, '%_\\').'%';
                     $rows->where(function (Builder $matches) use ($term): void {
@@ -333,7 +340,9 @@ class CenterStudentController extends Controller
             $query->selectSub(DB::connection('tenant')->query()->fromSub($attendance, 'attendance_rows')
                 ->selectRaw('json_agg(attendance_rows ORDER BY scheduled_at DESC, id DESC)'), 'attendance_entries');
         }
-        $students = $query->orderBy('student_number')->offset(($page - 1) * 50)->limit(51)->get();
+        $emptySearch = $studentId === null && ($data['search_only'] ?? false)
+            && trim($data['q'] ?? '') === '' && trim($data['identifier'] ?? '') === '';
+        $students = $emptySearch ? collect() : $query->orderBy('student_number')->offset(($page - 1) * 50)->limit(51)->get();
         if ($studentId !== null) {
             abort_if($students->isEmpty(), 404);
         }
@@ -347,6 +356,7 @@ class CenterStudentController extends Controller
             'profile_choice_lists' => $choices,
             'student_code_settings' => json_decode($workspace->code_settings, true),
             'student_search_enabled' => (bool) $workspace->student_search_enabled,
+            'student_branch_settings' => json_decode($workspace->branch_settings, true),
             'custom_fields' => ['fields' => array_slice(json_decode($workspace->custom_fields ?? '[]', true) ?? [], 0, 50), 'revision' => (int) $workspace->custom_fields_revision, 'page' => 1, 'has_more' => count(json_decode($workspace->custom_fields ?? '[]', true) ?? []) > 50],
             'students' => $students->take(50)->map(fn (stdClass $student): array => $this->payload($student, $permissions))->values(),
             ...($studentId !== null ? ['suspensions' => array_slice(json_decode($students->first()->suspensions ?? '[]', true) ?? [], 0, 20), 'status_pagination' => ['page' => $statusPage, 'has_more' => count(json_decode($students->first()->suspensions ?? '[]', true) ?? []) > 20]] : []),
@@ -445,11 +455,20 @@ class CenterStudentController extends Controller
 
                 return response()->json(['student' => $this->read($existing->id, $permissions)]);
             }
+            DB::connection('tenant')->table('center_settings')->insertOrIgnore(['id' => 1, 'created_at' => now(), 'updated_at' => now()]);
+            $settings = DB::connection('tenant')->table('center_settings')->where('id', 1)->lockForUpdate()
+                ->first(['student_number_start', 'student_all_branches_enabled', 'student_all_branches_revision']);
+            if (isset($data['student_branch_settings_revision']) && (int) $data['student_branch_settings_revision'] !== (int) $settings->student_all_branches_revision) {
+                $this->conflict('student_branch_settings_changed');
+            }
+            if ($settings->student_all_branches_enabled && $permissions->isCenterManager()) {
+                $data['branch_ids'] = DB::connection('tenant')->table('branches')->orderBy('id')->pluck('id')->map(fn ($id): int => (int) $id)->all();
+            }
             StudentManualCodes::validate($data['manual_code'] ?? null);
             $identity = StudentIdentity::columns($data, $permissions, $data['branch_ids']);
             StudentProfileChoices::validate($data);
             $customValues = StudentCustomFields::validate($data, StudentIdentity::canManage($permissions, $data['branch_ids']));
-            $start = DB::connection('tenant')->table('center_settings')->where('id', 1)->value('student_number_start');
+            $start = $settings->student_number_start;
             $sequence = DB::connection('tenant')->selectOne('SELECT last_value, is_called FROM students_student_number_seq');
             $next = (int) $sequence->last_value + ($sequence->is_called ? 1 : 0);
             if (max($next, (int) $start) > 9007199254740991) {
@@ -622,9 +641,14 @@ class CenterStudentController extends Controller
 
     private function validateProfile(Request $request): array
     {
+        $workspace = $request->attributes->get('center_permissions')->workspace;
+        if ($workspace?->mode === 'branch' && ! $request->exists('branch_ids')) {
+            $request->merge(['branch_ids' => $request->isMethod('POST') ? [$workspace->branch['id']] : []]);
+        }
         $data = $request->validate([
             'custom_values' => ['sometimes', 'array', 'max:10000'],
             'custom_fields_revision' => ['sometimes', 'integer', 'min:1'],
+            'student_branch_settings_revision' => ['sometimes', 'integer', 'min:1'],
             'national_id' => ['sometimes', 'nullable', 'string', 'max:14'],
             'passport_number' => ['sometimes', 'nullable', 'string', 'max:50'],
             'manual_code' => ['sometimes', 'nullable', 'string', 'max:50'],
@@ -684,7 +708,7 @@ class CenterStudentController extends Controller
     private function authorizeBranches(CenterPermissions $permissions, array $branchIds): void
     {
         foreach ($branchIds as $branchId) {
-            abort_unless($permissions->can('students.manage', $branchId), 403);
+            abort_unless($permissions->canInWorkspace('students.manage', $branchId), 403);
         }
         abort_unless(DB::connection('tenant')->table('branches')->whereIn('id', $branchIds)->count() === count($branchIds), 403);
     }
@@ -700,11 +724,16 @@ class CenterStudentController extends Controller
         if (! $permissions->isCenterManager()) {
             $associations->whereIn('branch_id', $this->branchScope($permissions, 'read'));
         }
+        $permissions->workspace?->constrain($associations, 'branch_id');
 
         $identityBranches = array_intersect($this->branchScope($permissions, 'read'), $this->branchScope($permissions, 'students.identity'));
         $identityScope = $permissions->isCenterManager() ? 'true' : 'EXISTS (SELECT 1 FROM student_branches identity_branches WHERE identity_branches.student_id = students.id AND identity_branches.branch_id IN ('.(implode(',', array_map('intval', $identityBranches)) ?: 'NULL').'))';
 
+        $identityManageBranches = array_intersect($this->branchScope($permissions, 'students.manage'), $this->branchScope($permissions, 'students.identity'));
+        $identityManageScope = $permissions->isCenterManager() ? 'true' : 'EXISTS (SELECT 1 FROM student_branches identity_branches WHERE identity_branches.student_id = students.id AND identity_branches.branch_id IN ('.(implode(',', array_map('intval', $identityManageBranches)) ?: 'NULL').'))';
+
         return DB::connection('tenant')->table('students')
+            ->selectRaw("{$identityScope} AS can_read_identity, {$identityManageScope} AS can_manage_identity")
             ->when($includeProfileDetails, fn (Builder $query) => $query->selectRaw("CASE WHEN {$identityScope} THEN json_build_object('national_id', national_id, 'passport_number', passport_number) ELSE NULL END AS identity"))
             ->addSelect(['students.id', 'student_number', 'manual_code', 'name', 'students.phone as legacy_phone', 'contacts', 'channels', 'revision', 'created_by', 'created_at', 'sharing_enabled', 'status', 'status_revision', 'photo_revision', 'attachment_revision', ...self::GENERAL_FIELDS])
             ->selectRaw(StudentContacts::phoneSql().' as phone')
@@ -729,7 +758,7 @@ class CenterStudentController extends Controller
 
         return [...array_intersect_key((array) $row, array_flip(self::GENERAL_FIELDS)),
             ...(isset($row->identity) ? ['identity' => json_decode($row->identity, true)] : []),
-            'can_read_identity' => StudentIdentity::canRead($permissions, $branches), 'can_manage_identity' => StudentIdentity::canManage($permissions, $branches),
+            'can_read_identity' => (bool) $row->can_read_identity, 'can_manage_identity' => (bool) $row->can_manage_identity,
             'contacts' => json_decode($row->contacts, true), 'channels' => json_decode($row->channels, true), 'legacy_phone' => $row->legacy_phone,
             'missing_custom_fields' => (int) $row->missing_custom_fields,
             ...(isset($row->custom_values) ? ['custom_values' => (object) (json_decode($row->custom_values, true) ?? [])] : []),
@@ -755,8 +784,12 @@ class CenterStudentController extends Controller
 
     private function associate(string $id, array $branchIds): void
     {
-        foreach ($branchIds as $branchId) {
-            DB::connection('tenant')->table('student_branches')->insertOrIgnore(['student_id' => $id, 'branch_id' => $branchId, 'created_at' => now()]);
+        $createdAt = now();
+        foreach (array_chunk($branchIds, 500) as $chunk) {
+            DB::connection('tenant')->table('student_branches')->insertOrIgnore(array_map(
+                fn ($branchId): array => ['student_id' => $id, 'branch_id' => $branchId, 'created_at' => $createdAt],
+                $chunk,
+            ));
         }
     }
 
@@ -764,12 +797,17 @@ class CenterStudentController extends Controller
     {
         $basic = fn (?array $student): ?array => $student === null ? null : array_intersect_key($student, array_flip(['student_number', 'manual_code', 'name', 'phone', 'legacy_phone', 'contacts', 'channels', 'profile_choices', ...self::GENERAL_FIELDS]));
         $identityChanged = array_values(array_filter(StudentIdentity::FIELDS, fn (string $field): bool => ($before['identity'][$field] ?? null) !== ($after['identity'][$field] ?? null)));
-        foreach ($branchIds as $branchId) {
-            DB::connection('tenant')->table('center_audit_logs')->insert([
-                'actor_id' => $request->user()->id, 'branch_id' => $branchId, 'event' => $event,
-                'details' => json_encode(['student_id' => $after['id'], 'before' => $basic($before), 'after' => $basic($after), 'identity_changed' => $identityChanged, 'custom_fields_changed' => $customChangedFields,
-                    'associated_before' => in_array($branchId, $previousBranchIds, true), 'associated_after' => true]), 'created_at' => now(),
-            ]);
+        $details = ['student_id' => $after['id'], 'before' => $basic($before), 'after' => $basic($after),
+            'identity_changed' => $identityChanged, 'custom_fields_changed' => $customChangedFields, 'associated_after' => true];
+        $previous = array_fill_keys($previousBranchIds, true);
+        $actorId = $request->user()->id;
+        $createdAt = now();
+        foreach (array_chunk($branchIds, 500) as $chunk) {
+            DB::connection('tenant')->table('center_audit_logs')->insert(array_map(
+                fn ($branchId): array => ['actor_id' => $actorId, 'branch_id' => $branchId, 'event' => $event,
+                    'details' => json_encode([...$details, 'associated_before' => isset($previous[$branchId])]), 'created_at' => $createdAt],
+                $chunk,
+            ));
         }
     }
 

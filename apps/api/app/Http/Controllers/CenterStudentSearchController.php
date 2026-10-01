@@ -32,9 +32,11 @@ class CenterStudentSearchController extends Controller
             if (! $permissions->isCenterManager()) {
                 $scope->whereIn('branch_id', self::readableBranches($permissions));
             }
+            $openScope = clone $scope;
+            $permissions->workspace?->constrain($openScope, 'branch_id');
             $students = DB::connection('tenant')->table('students')->select(['students.id', 'student_number', 'name'])
                 ->selectRaw(StudentContacts::phoneSql().' as phone')
-                ->selectSub((clone $scope)->selectRaw('count(*) > 0'), 'within_scope')
+                ->selectSub((clone $openScope)->selectRaw('count(*) > 0'), 'within_scope')
                 ->where(function (Builder $rows) use ($scope): void {
                     $rows->where('students.sharing_enabled', true)->orWhereExists((clone $scope)->selectRaw('1'));
                 })

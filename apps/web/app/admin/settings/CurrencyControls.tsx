@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions } from "@/components/CenterShell";
 import { InlineNotice } from "@/components/InlineNotice";
@@ -81,14 +81,14 @@ export function CurrencyControls({ settings }: { settings: CenterSettings }) {
       {notice ? <InlineNotice>{notice}</InlineNotice> : null}
       {locked ? <p>العملة المعتمدة: <strong><bdi dir="ltr">{saved}</bdi></strong></p> : <Field data-invalid={Boolean(fieldError)}>
         <FieldLabel htmlFor={`${formId}-currency`}>عملة المركز</FieldLabel>
-        <NativeSelect id={`${formId}-currency`} value={value} disabled={busy || conflict} aria-invalid={Boolean(fieldError)} aria-describedby={fieldError ? `${formId}-currency-error` : undefined} onChange={event => { setValue(event.target.value); setFieldError(""); }}>
+        <NativeSelect id={`${formId}-currency`} value={value} disabled={busy || conflict} aria-invalid={Boolean(fieldError)} aria-describedby={fieldError ? `${formId}-currency-error` : undefined} onChange={event => { setValue(event.target.value); setFieldError(""); setError(""); }}>
           <NativeSelectOption value="">اختر العملة</NativeSelectOption>
           {currencies.map(currency => <NativeSelectOption key={currency} value={currency}>{currency}</NativeSelectOption>)}
         </NativeSelect>
         {fieldError ? <FieldError id={`${formId}-currency-error`}>{fieldError}</FieldError> : null}
       </Field>}
       <CenterHeaderActions>
-        {!locked ? <><Button form={formId} type="submit" variant="primary" busy={busy} disabled={busy || conflict || value === saved}>حفظ عملة المركز</Button><Button disabled={busy || value === saved} onClick={() => { setValue(saved); setFieldError(""); setError(""); }}>إلغاء تعديل العملة</Button></> : null}
+        {!locked && value !== saved ? <Button form={formId} type="submit" variant="primary" busy={busy} disabled={busy || conflict}>حفظ عملة المركز</Button> : null}
         {conflict ? <Button disabled={busy} onClick={reload}>تحميل أحدث إعداد للعملة</Button> : null}
       </CenterHeaderActions>
     </SettingsRow>

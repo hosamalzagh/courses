@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { DataTable } from "@/components/DataTable";
 import { ChoiceField } from "@/components/ChoiceField";
 import { PrefetchLink as Link } from "@/components/PrefetchLink";
@@ -69,10 +69,10 @@ export function StudentLookup(props: Props) {
     <div className="student-lookup-options">
       {canRead && canSearchCenter ? <FieldSet className="student-lookup-scope"><FieldLegend>نطاق البحث</FieldLegend>
         <RadioGroup value={scope} onValueChange={(next) => changeScope(String(next))} disabled={pending} className="student-lookup-scope-options">
-          <FieldLabel className="student-lookup-scope-option"><RadioGroupItem value="branches" />فروعي</FieldLabel>
+          <FieldLabel className="student-lookup-scope-option"><RadioGroupItem value="branches" />{context.workspace?.mode === "branch" ? "الفرع الحالي" : "فروعي"}</FieldLabel>
           <FieldLabel className="student-lookup-scope-option"><RadioGroupItem value="center" disabled={!centerEnabled && scope !== "center"} />كل المركز</FieldLabel>
         </RadioGroup>
-      </FieldSet> : <p className="student-lookup-current-scope">نطاق البحث: <strong>{scope === "center" ? "كل المركز" : "فروعي"}</strong></p>}
+      </FieldSet> : <p className="student-lookup-current-scope">نطاق البحث: <strong>{scope === "center" ? "كل المركز" : context.workspace?.mode === "branch" ? "الفرع الحالي" : "فروعي"}</strong></p>}
       {branchContext ? <div className="student-lookup-method"><ChoiceField id={`${methodId}-method`} label="طريقة البحث" value={mode} disabled={pending} onChange={changeMode} items={[
         { value: "general", label: "الاسم أو الرقم أو التواصل" },
         { value: "identifier", label: `الرقم الداخلي أو ${branchContext.student_code_settings.enabled ? branchContext.student_code_settings.label : "الباركود"}` },
@@ -83,7 +83,7 @@ export function StudentLookup(props: Props) {
       : "يمكن لمدير المركز تفعيله."}</p> : null}
     {scope === "center" && !centerEnabled ? null : <>
       {scope === "center" ? <p className="muted student-lookup-privacy">ملفات الفروع الأخرى تعرض الاسم والرقم الداخلي وهاتف الملخص فقط.</p> : null}
-      {roster && branchContext ? <DataTable id="students" title="الطلاب في فروعي" description="حتى ٥٠ ملفًا في الدفعة." rows={branchContext.students} rowKey={(student) => student.id}
+      {roster && branchContext ? <DataTable id="students" title={context.workspace?.mode === "branch" ? "طلاب الفرع الحالي" : "الطلاب في فروعي"} description="حتى ٥٠ ملفًا في الدفعة." rows={branchContext.students} rowKey={(student) => student.id}
         searchText={(student) => `${student.student_number} ${student.name} ${student.phone ?? ""}`} emptyMessage="لا توجد ملفات طلاب متاحة. أنشئ ملفًا إذا كانت لديك صلاحية التسجيل."
         serverSearch={search} serverPagination={{ page: branchContext.pagination.page, hasMore: branchContext.pagination.has_more, batchSize: 50, previousHref: href("", branchContext.pagination.page - 1), nextHref: href("", branchContext.pagination.page + 1) }}
         columns={[
@@ -107,7 +107,7 @@ export function StudentLookup(props: Props) {
           { key: "actions", label: "الإجراءات", actions: true, render: (student) => <div className="student-row-actions"><StudentRowActions student={student} permissions={branchContext.permissions} /><StudentSharingControls student={student} compact /></div> },
         ]} /> : <DataTable id={`student-lookup-${scope}`} title="نتائج البحث" description={started && rows.length ? "حتى ٥٠ نتيجة في الدفعة. انتقل إلى الدفعة التالية لمتابعة البحث." : undefined}
         pageSize={50} rows={rows} rowKey={(student) => student.id} searchText={(student) => `${student.student_number} ${student.name} ${student.phone ?? ""}`}
-        emptyMessage={!started ? mode === "identifier" ? "أدخل رقم الطالب الداخلي أو الباركود لبدء البحث." : "اكتب الاسم أو رقم الطالب الداخلي أو رقم التواصل لبدء البحث." : scope === "center" ? "لا يوجد طالب مطابق ضمن الملفات المتاحة للبحث." : "لا يوجد طالب مطابق ضمن فروعك."}
+        emptyMessage={!started ? mode === "identifier" ? "أدخل رقم الطالب الداخلي أو الباركود لبدء البحث." : "اكتب الاسم أو رقم الطالب الداخلي أو رقم التواصل لبدء البحث." : scope === "center" ? "لا يوجد طالب مطابق ضمن الملفات المتاحة للبحث." : context.workspace?.mode === "branch" ? "لا يوجد طالب مطابق في الفرع الحالي." : "لا يوجد طالب مطابق ضمن فروعك."}
         lookup={{ started }} serverSearch={search}
         serverPagination={started ? { page: context.pagination.page, hasMore: context.pagination.has_more, batchSize: 50, previousHref: href(value, context.pagination.page - 1), nextHref: href(value, context.pagination.page + 1) } : undefined}
         columns={[
@@ -115,7 +115,7 @@ export function StudentLookup(props: Props) {
           { key: "name", label: "الطالب", render: (student) => <h3>{student.name}</h3> },
           { key: "phone", label: "رقم التواصل", render: (student) => <bdi dir="ltr">{student.phone || "لم يُضف رقم تواصل"}</bdi> },
           { key: "access", label: "إجراءات الملف", actions: true, render: (student) => {
-            if (!student.within_scope) return <span className="muted">بيانات أساسية فقط · خارج فروعك</span>;
+            if (!student.within_scope) return <span className="muted">بيانات أساسية فقط · خارج {context.workspace?.mode === "branch" ? "الفرع الحالي" : "فروعك"}</span>;
             const profile = branchContext?.students.find((row) => row.id === student.id);
             return profile && branchContext
               ? <StudentRowActions student={profile} permissions={branchContext.permissions} />

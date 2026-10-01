@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { ConfirmationDialog } from "./ConfirmationDialog";
 
 type HistoryTraversal = { from: number; to: number };
-let historyGuard: ((event: PopStateEvent, traversal: HistoryTraversal) => void) | null = null;
+type HistoryGuard = (event: PopStateEvent, traversal: HistoryTraversal) => boolean;
+const historyGuards = new Set<HistoryGuard>();
+const resetLeavingGuards = new Set<() => void>();
 let historyIndex: number | null = null;
 
 function trackNavigationHistory() {
@@ -26,7 +28,9 @@ function trackNavigationHistory() {
     if (!Number.isInteger(next)) return;
     const traversal = { from: historyIndex ?? next, to: next };
     historyIndex = next;
-    historyGuard?.(event, traversal);
+    for (const guard of [...historyGuards].reverse()) {
+      if (guard(event, traversal)) break;
+    }
   }, true);
 }
 
@@ -48,6 +52,18 @@ export function UnsavedChangesGuard({ dirty, guardHistory = false, blockDiscard 
   const dirtyRef = useRef(dirty);
   const historyDelta = useRef<number | null>(null);
 
+  useEffect(() => {
+    const resetLeaving = () => { leaving.current = false; };
+    resetLeavingGuards.add(resetLeaving);
+    return () => { resetLeavingGuards.delete(resetLeaving); };
+  }, []);
+
+  function cancelNavigation() {
+    historyDelta.current = null;
+    setDestination(null);
+    for (const resetLeaving of resetLeavingGuards) resetLeaving();
+  }
+
   useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
 
   useEffect(() => {
@@ -55,19 +71,20 @@ export function UnsavedChangesGuard({ dirty, guardHistory = false, blockDiscard 
     trackNavigationHistory();
     leaving.current = false;
     let restoring = false;
-    function traverse(event: PopStateEvent, traversal: HistoryTraversal) {
-      if (restoring) { event.stopImmediatePropagation(); restoring = false; return; }
-      if (!dirtyRef.current || leaving.current) return;
+    function traverse(event: PopStateEvent, traversal: HistoryTraversal): boolean {
+      if (restoring) { event.stopImmediatePropagation(); restoring = false; return true; }
+      if (!dirtyRef.current || leaving.current) return false;
       const delta = traversal.to - traversal.from;
-      if (delta === 0) return;
+      if (delta === 0) return false;
       event.stopImmediatePropagation();
       historyDelta.current = delta;
       restoring = true;
       window.history.go(-delta);
       setDestination("history");
+      return true;
     }
-    historyGuard = traverse;
-    return () => { if (historyGuard === traverse) historyGuard = null; };
+    historyGuards.add(traverse);
+    return () => { historyGuards.delete(traverse); };
   }, [guardHistory]);
 
   useEffect(() => {
@@ -100,9 +117,9 @@ export function UnsavedChangesGuard({ dirty, guardHistory = false, blockDiscard 
 
   if (destination && dirty && blockDiscard) return <ConfirmationDialog title={blockDiscardTitle}
     description={blockDiscardDescription}
-    cancelLabel="العودة للتحقق" onCancel={() => { historyDelta.current = null; setDestination(null); }} />;
+    cancelLabel="العودة للتحقق" onCancel={cancelNavigation} />;
 
-  return destination && dirty ? <ConfirmationDialog title="مغادرة دون حفظ" description="لديك بيانات لم تُحفظ. يمكنك إلغاء المغادرة ومتابعة تعديلها، أو مغادرة الصفحة دون حفظها." confirmLabel="مغادرة دون حفظ" onCancel={() => { historyDelta.current = null; setDestination(null); }} onConfirm={() => {
+  return destination && dirty ? <ConfirmationDialog title="مغادرة دون حفظ" description="لديك بيانات لم تُحفظ. يمكنك إلغاء المغادرة ومتابعة تعديلها، أو مغادرة الصفحة دون حفظها." confirmLabel="مغادرة دون حفظ" onCancel={cancelNavigation} onConfirm={() => {
     leaving.current = true;
     onDiscard?.();
     setDestination(null);

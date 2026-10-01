@@ -45,6 +45,7 @@ class CenterStudentFinanceController extends Controller
             ->join('branches', 'branches.id', '=', 'student_branches.branch_id')
             ->whereColumn('student_branches.student_id', 'students.id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('branches.id', $recordable))
+            ->tap(fn (Builder $query) => $permissions->workspace?->constrain($query, 'branches.id'))
             ->orderBy('branches.id')->offset(($branchPage - 1) * 50)->limit(51)
             ->select(['branches.id', 'branches.name']);
         $balance = DB::connection('tenant')->table('student_payments')
@@ -223,6 +224,10 @@ class CenterStudentFinanceController extends Controller
     public function recordPayment(Request $request, string $studentId): JsonResponse
     {
         abort_unless(Str::isUuid($studentId), 404);
+        $workspace = $request->attributes->get('center_permissions')->workspace;
+        if ($workspace?->mode === 'branch' && ! $request->exists('branch_id')) {
+            $request->merge(['branch_id' => $workspace->branch['id']]);
+        }
         $data = $request->validate([
             'branch_id' => ['required', 'integer', 'min:1'],
             'method' => ['required', 'in:cash,bank_transfer,bank_card,mobile_wallet'],
@@ -235,7 +240,7 @@ class CenterStudentFinanceController extends Controller
         $hash = hash('sha256', json_encode([$studentId, $data['branch_id'], $data['method'], $data['received_on'], $data['amount']]));
 
         return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $studentId, $data, $hash): JsonResponse {
-            abort_unless($permissions->can('payments.record', (int) $data['branch_id']), 403);
+            abort_unless($permissions->canInWorkspace('payments.record', (int) $data['branch_id']), 403);
             $student = StudentPhotos::visibleStudent($studentId, $permissions, 'payments.record')
                 ->whereExists(DB::connection('tenant')->table('student_branches')
                     ->whereColumn('student_branches.student_id', 'students.id')->where('student_branches.branch_id', $data['branch_id'])->selectRaw('1'))
@@ -248,7 +253,7 @@ class CenterStudentFinanceController extends Controller
             if ($existing !== null) {
                 abort_unless($existing->student_id === $studentId && $existing->actor_id === $request->user()->id, 403);
                 if ((int) $existing->branch_id !== (int) $data['branch_id']) {
-                    abort_unless($permissions->can('payments.record', (int) $existing->branch_id), 403);
+                    abort_unless($permissions->canInWorkspace('payments.record', (int) $existing->branch_id), 403);
                     abort_unless(DB::connection('tenant')->table('student_branches')
                         ->where('student_id', $studentId)->where('branch_id', $existing->branch_id)->exists(), 404);
                 }

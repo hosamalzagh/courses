@@ -1,13 +1,17 @@
 import { cache } from "react";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
+import type { CurriculumExplorerContext } from "./curriculum-explorer";
 import type { CurriculumContext } from "./curriculum";
 import type { ContentEquivalenceContext } from "./content-equivalences";
 import type { AttendanceContext, CoverageContext, GroupContext, SessionContext, TeachingContext } from "./groups";
 
 export type Branch = { id: number; name: string; slug: string; address: string | null };
-export type CenterSettings = { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number; student_code_enabled?: boolean; student_code_label?: string; student_code_revision?: number; financial_currency?: string | null; financial_currency_revision?: number; financial_currency_locked_at?: string | null };
+export type CenterSettings = { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number; student_code_enabled?: boolean; student_code_label?: string; student_code_revision?: number; student_all_branches_enabled?: boolean; student_all_branches_revision?: number; financial_currency?: string | null; financial_currency_revision?: number; financial_currency_locked_at?: string | null };
 export type CenterContext = {
+  workspace?: import("./workspace").CenterWorkspace | null;
+  workspace_scope?: "selected" | "authorized_branches" | "authorized_financial_branches" | "center";
+  workspace_can_switch?: boolean;
   user: { id: number; name: string; email: string; mfa_enabled?: boolean; mfa_required_for_platform?: boolean };
   membership: { status: string; grants_version: number };
   center: { id: string; name: string; slug: string };
@@ -68,7 +72,7 @@ export type StudentStudyAttempt = { id: string; period_id: string; branch_id: nu
   latest_waitlist: { entered_on: string; left_on: string | null; reason: string; origin_uncertain: boolean } | null;
   last_visible_transfer_on: string | null; withdrawn_on: string | null; approved_at: string | null; exceptional: boolean | null };
 export type StudentAttendanceEntry = { id:string;status:'counted'|'not_counted'|'absent'|null;kind:'primary'|'makeup'|'suspended';revision:number;recorded_at:string|null;attempt_id:string;session_id:string;scheduled_at:string;session_number:number;session_title:string|null;session_status:'planned'|'held'|'cancelled';group_id:string;group_name:string;branch_id:number;branch_name:string;course_name:string;booking_id:string|null;source_session_id:string|null;source_group_id:string|null };
-export type StudentContext = CenterContext & {custom_history?:StudentCustomHistory;attachments?:StudentAttachmentPage;enrollment_notes?:StudentEnrollmentNotePage;student_notes?:StudentEventNotePage;study?:{attempts:StudentStudyAttempt[];pagination:{page:number;has_more:boolean}};attendance?:{entries:StudentAttendanceEntry[];pagination:{page:number;has_more:boolean}};important_notes?:StudentEventNote[];summary?:{current_study:{id:string;branch_id:number;branch_name:string;course_name:string;level_name:string;group_name:string|null}[];current_study_has_more:boolean;current_group_absences:number;financial:{debt:string;currency:string|null}|null};custom_fields:StudentCustomFieldList; student_code_settings: {enabled:boolean;label:string;revision:number}; student_search_enabled:boolean; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
+export type StudentContext = CenterContext & {custom_history?:StudentCustomHistory;attachments?:StudentAttachmentPage;enrollment_notes?:StudentEnrollmentNotePage;student_notes?:StudentEventNotePage;study?:{attempts:StudentStudyAttempt[];pagination:{page:number;has_more:boolean}};attendance?:{entries:StudentAttendanceEntry[];pagination:{page:number;has_more:boolean}};important_notes?:StudentEventNote[];summary?:{current_study:{id:string;branch_id:number;branch_name:string;course_name:string;level_name:string;group_name:string|null}[];current_study_has_more:boolean;current_group_absences:number;financial:{debt:string;currency:string|null}|null};custom_fields:StudentCustomFieldList; student_code_settings: {enabled:boolean;label:string;revision:number}; student_search_enabled:boolean; student_branch_settings: {enabled:boolean;revision:number}; profile_choice_lists: Record<StudentChoiceKind, StudentChoiceList>; students: Student[]; suspensions?: StudentSuspension[]; status_pagination?: { page: number; has_more: boolean }; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type Instructor = { id: string; name: string; phone: string | null; revision: number; branch_ids: number[]; can_manage: boolean };
 export type InstructorContext = CenterContext & { instructors: Instructor[]; pagination: { page: number; has_more: boolean; branches_page: number; branches_has_more: boolean } };
 export type StudentSearchPolicy = { enabled: boolean; revision: number; default_sharing_enabled: boolean };
@@ -111,7 +115,7 @@ export type CourseCompletionContext = CenterContext & {
 
 export type StudyAttemptNote = { id: string; body: string; important: boolean; revision: number; updated_by_name: string };
 
-export type CenterAccessFailure = "forbidden" | "suspended" | "unavailable" | "student_unavailable";
+export type CenterAccessFailure = "instructor_unavailable" | "curriculum_unavailable" | "forbidden" | "suspended" | "unavailable" | "student_unavailable";
 export type AbsenceOption = { kind: "courses" | "stages" | "levels" | "study_groups"; id: string; name: string; branch_id: number; branch_name: string; course_id: string | null; stage_id: string | null; level_id: string | null; course_name: string | null; stage_name: string | null; level_name: string | null; absence_mode: "consecutive" | "total" | "disabled" | null; absence_limit: number | null; absence_revision: number };
 export type AbsenceStudent = { id: string; student_id: string; student_name: string; student_number: number; student_status: string; attempt_revision: number; current_group_id: string; branch_id: number; branch_name: string; course_name: string; stage_name: string; level_name: string; group_name: string; effective_mode: "consecutive" | "total" | "disabled"; effective_limit: number | null; total_absences: number; consecutive_absences: number; historical_absences: number; needs_review: boolean };
 export type AbsenceContext = CenterContext & { options: AbsenceOption[]; students: AbsenceStudent[]; pagination: { page: number; has_more: boolean } };
@@ -122,12 +126,15 @@ const fetchCenterPayload = cache(async function fetchCenterPayload<T>(path: stri
 
   if (!/^[a-z][a-z0-9-]{1,62}\.courses\.test$/.test(host)) notFound();
 
+  const adminUrl = new URL(incoming.get("x-courses-admin-url") ?? "/admin", "http://courses.test");
+  const workspace = adminUrl.searchParams.get("workspace");
   let response: Response;
   try {
     response = await fetch(`${process.env.COURSES_INTERNAL_API_ORIGIN?.replace('{host}', host) ?? `http://${host}${process.env.COURSES_API_PORT ? `:${process.env.COURSES_API_PORT}` : ""}`}/api/v1/center/${path}`, {
       headers: {
         Cookie: incoming.get("cookie") ?? "",
         Accept: "application/json",
+        ...(workspace ? { "X-Courses-Workspace": workspace } : {}),
       },
       cache: "no-store",
       redirect: "manual",
@@ -140,12 +147,18 @@ const fetchCenterPayload = cache(async function fetchCenterPayload<T>(path: stri
     const hadSession = /(?:^|;\s*)[A-Za-z0-9_-]*session=/i.test(incoming.get("cookie") ?? "");
     redirect(hadSession ? "/login?expired=1" : "/login");
   }
+  if (response.status === 409) {
+    const data = await response.json().catch(() => ({}));
+    if (["workspace_required", "workspace_expired"].includes(data.code)) redirect(`/admin/workspaces?expired=${data.code === "workspace_expired" ? "1" : "0"}&return_to=${encodeURIComponent(adminUrl.pathname)}`);
+  }
   if (response.status === 403) {
     const data = await response.json().catch(() => ({}));
     return data.code === "membership_suspended" ? "suspended" : "forbidden";
   }
   if (response.status === 404) {
     if (path.startsWith('students/')) return 'student_unavailable';
+    if (path.startsWith('instructors/')) return 'instructor_unavailable';
+    if (path.startsWith('levels/') || path.startsWith('curriculum-workspace?') || path.startsWith("curriculum-explorer")) return 'curriculum_unavailable';
     notFound();
   }
   if (response.status === 423 || response.status === 503) return "unavailable";
@@ -153,6 +166,11 @@ const fetchCenterPayload = cache(async function fetchCenterPayload<T>(path: stri
 
   return response.json() as Promise<T>;
 });
+
+export type WorkspaceOptionsContext = CenterContext & { pagination: { page: number; has_more: boolean } };
+export function loadWorkspaceOptions(page = "1"): Promise<WorkspaceOptionsContext | CenterAccessFailure> {
+  return fetchCenterPayload<WorkspaceOptionsContext>(`workspaces?page=${encodeURIComponent(page)}`);
+}
 
 export function loadCenterContext(include?: "settings" | "student-settings" | "audit"): Promise<CenterContext | CenterAccessFailure> {
   return fetchCenterPayload<CenterContext>(`user${include ? `?include=${include}` : ""}`);
@@ -192,6 +210,16 @@ export function loadInstructorWorkspace(query = "", instructorId?: string): Prom
 
 export function loadStudentSearchWorkspace(query = ""): Promise<StudentSearchContext | CenterAccessFailure> {
   return fetchCenterPayload<StudentSearchContext>(`student-search-workspace${query ? `?${query}` : ""}`);
+}
+
+export const curriculumExplorerQueryKeys = ["kind", "id", "expanded", "q", "search_page", "courses_page", "stages_page", "levels_page", "branches_page", "groups_page", "course_id", "stage_id", "plan_version", "versions_page", "sessions_page", "students_page"];
+export function curriculumExplorerQuery(params: Record<string, string | string[] | undefined>) {
+  const query = new URLSearchParams();
+  for (const key of curriculumExplorerQueryKeys) if (typeof params[key] === "string") query.set(key, params[key]);
+  return query.toString();
+}
+export function loadCurriculumExplorer(query = ""): Promise<CurriculumExplorerContext | CenterAccessFailure> {
+  return fetchCenterPayload<CurriculumExplorerContext>(`curriculum-explorer${query ? `?${query}` : ""}`);
 }
 
 export function loadCurriculumWorkspace(query = "", levelId?: string): Promise<CurriculumContext | CenterAccessFailure> {
@@ -240,6 +268,7 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
     }
     return result.toString();
   }
+  if (path === "/admin/workspaces") return loadWorkspaceOptions(url.searchParams.get("page") ?? "1");
   if (path === "/admin" || path === "/admin/security" || path === "/admin/student-custom-fields" || path === "/admin/student-profile-choices") return loadCenterContext();
   if (path === "/admin/settings") {
     const tab = url.searchParams.get("tab");
@@ -265,9 +294,9 @@ export async function loadAdminLayoutContext(): Promise<CenterContext | CenterAc
   const studentEnrollments = path.match(/^\/admin\/students\/([^/]+)\/enrollments$/);
   if (studentEnrollments) return loadStudyEnrollments(decodeURIComponent(studentEnrollments[1]), query(["page", "groups_page", "q", "attempt_id"]));
   if (path === "/admin/instructors") return loadInstructorWorkspace(query(["page", "branches_page", "q", "identifier"]));
-  if (path === "/admin/curriculum") return loadCurriculumWorkspace(query(["courses_page", "stages_page", "levels_page", "branches_page"]));
+  if (path === "/admin/curriculum") return loadCurriculumExplorer(query(curriculumExplorerQueryKeys));
   if (path === "/admin/equivalences") return loadContentEquivalences(query(["page", "q"]));
-  if (path === "/admin/groups") return loadGroupWorkspace(query(["page", "levels_page", "instructors_page"]));
+  if (path === "/admin/groups") return loadGroupWorkspace(query(["page", "levels_page", "instructors_page", "level_id"]));
   const groupCoverage = path.match(/^\/admin\/groups\/([^/]+)\/coverage$/);
   if (groupCoverage) return loadGroupCoverage(decodeURIComponent(groupCoverage[1]), query(["page", "q"]));
   if (path === "/admin/absence-review") return loadAbsenceReview(query(["branch_id", "course_id", "stage_id", "level_id", "group_id", "view", "page", "q"]));

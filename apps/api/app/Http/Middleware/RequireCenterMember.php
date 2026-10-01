@@ -6,6 +6,7 @@ use App\Models\CenterMembership;
 use App\Support\CenterPermissions;
 use Closure;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -38,6 +39,21 @@ class RequireCenterMember
             abort(503, 'Center database is unavailable.');
         }
 
-        return $next($request);
+        $response = $next($request);
+        if ($response instanceof JsonResponse && $response->isSuccessful()) {
+            $payload = $response->getData(true);
+            if (isset($payload['permissions'])) {
+                $permissions = $request->attributes->get('center_permissions');
+                $payload['workspace'] = $permissions->workspace?->toArray();
+                // Account movements retain each independently authorized financial branch.
+                $payload['workspace_scope'] = $request->is('api/v1/center/students/*/account')
+                    ? 'authorized_financial_branches'
+                    : ($request->is('api/v1/center/members*', 'api/v1/center/audit*', 'api/v1/center/settings*', 'api/v1/center/dashboard*', 'api/v1/center/user') ? 'center' : 'selected');
+                $payload['workspace_can_switch'] = ($permissions->isCenterManager() && ($permissions->workspace?->mode === 'branch' || $permissions->hasBranches)) || count($permissions->readableBranchIds()) > 1;
+                $response->setData($payload);
+            }
+        }
+
+        return $response;
     }
 }

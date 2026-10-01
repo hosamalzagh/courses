@@ -1,6 +1,6 @@
 "use client";
 import { useId, useRef, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { PrefetchLink as Link } from "@/components/PrefetchLink";
 import { Button } from "@/components/Button";
 import { FormField } from "@/components/FormField";

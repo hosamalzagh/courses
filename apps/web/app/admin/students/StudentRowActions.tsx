@@ -1,5 +1,7 @@
 'use client';
 
+import { useWorkspaceId } from '@/components/WorkspaceNavigation';
+import { workspaceApiHref } from '@/lib/workspace';
 import { ChevronDown } from 'lucide-react';
 import { PrefetchLink } from '@/components/PrefetchLink';
 import { Button } from '@/components/ui/button';
@@ -18,6 +20,7 @@ export function StudentRowActions({ student, permissions }: {
   student: Student;
   permissions: StudentContext['permissions'];
 }) {
+  const workspaceId = useWorkspaceId();
   const profile = `/admin/students/${student.id}`;
   const canReadFinance = permissions.can_manage_center || student.branch_ids.some((id) =>
     permissions.branch_actions?.[String(id)]?.includes('finance.read'));
@@ -37,7 +40,7 @@ export function StudentRowActions({ student, permissions }: {
         {canReadFinance ? <DropdownMenuItem render={<PrefetchLink href={`${profile}/account`} />}>الحساب المالي</DropdownMenuItem> : null}
       </DropdownMenuGroup>
       <DropdownMenuSeparator />
-      <DropdownMenuItem render={<a href={`/api/v1/center/students/${student.id}/barcode`} target='_blank' rel='noopener noreferrer' />}>
+      <DropdownMenuItem render={<a href={workspaceApiHref(`/api/v1/center/students/${student.id}/barcode`, workspaceId)} target='_blank' rel='noopener noreferrer' />}>
         طباعة الباركود
       </DropdownMenuItem>
     </DropdownMenuContent>

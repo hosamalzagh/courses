@@ -3,6 +3,7 @@ import { GrantAuditDetails } from "@/components/GrantAuditDetails";
 import { StudentAuditDetails } from "@/components/StudentAuditDetails";
 import { InstructorAuditDetails } from "@/components/InstructorAuditDetails";
 import { StudentNumberingAuditDetails } from "@/components/StudentNumberingAuditDetails";
+import { StudentBranchSettingsAuditDetails } from "@/components/StudentBranchSettingsAuditDetails";
 import { StudentSearchAuditDetails } from "@/components/StudentSearchAuditDetails";
 import { CurriculumAuditDetails } from "@/components/CurriculumAuditDetails";
 import { StudentFinanceAuditDetails } from "@/components/StudentFinanceAuditDetails";
@@ -24,6 +25,7 @@ const eventNames: Record<string, string> = {
   "member.branch_grants_changed": "تغيير أدوار الفرع",
   "member.branch_status_changed": "تغيير حالة موظف الفرع",
   "center.student_numbering_changed": "تغيير بداية ترقيم الطلاب",
+  "center.student_all_branches_settings_changed": "تغيير ربط ملفات الطلاب الجديدة بالفروع",
   "center.settings_updated": "تعديل إعدادات المركز",
   "center.financial_currency_changed": "تغيير عملة المركز",
   "student.payment_recorded": "استلام دفعة مقدمة للطالب",
@@ -106,7 +108,7 @@ export function AuditWorkspace({ context, initialEntries }: { context: CenterCon
     time: new Date(entry.created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" }),
     createdAt: entry.created_at, branch: entry.branch_id !== null,
     search: `${eventNames[entry.event] ?? entry.event} ${entry.branch_id ?? ""} ${entry.actor_id ?? ""}`,
-    details: <><GrantAuditDetails entry={entry} /><StudentAuditDetails entry={entry} /><StudentFinanceAuditDetails entry={entry} /><StudentEventNoteAuditDetails entry={entry} /><InstructorAuditDetails entry={entry} /><StudentSearchAuditDetails entry={entry} /><StudentNumberingAuditDetails entry={entry} /><CurriculumAuditDetails entry={entry} /><ContentEquivalenceAuditDetails entry={entry} /><StudySessionAuditDetails entry={entry} /><StudyCompletionAuditDetails entry={entry} /><StudyPlanApplicationAuditDetails entry={entry} /><AbsenceAuditDetails entry={entry} /></>,
+    details: <><GrantAuditDetails entry={entry} /><StudentAuditDetails entry={entry} /><StudentFinanceAuditDetails entry={entry} /><StudentEventNoteAuditDetails entry={entry} /><InstructorAuditDetails entry={entry} /><StudentSearchAuditDetails entry={entry} /><StudentNumberingAuditDetails entry={entry} /><StudentBranchSettingsAuditDetails entry={entry} /><CurriculumAuditDetails entry={entry} /><ContentEquivalenceAuditDetails entry={entry} /><StudySessionAuditDetails entry={entry} /><StudyCompletionAuditDetails entry={entry} /><StudyPlanApplicationAuditDetails entry={entry} /><AbsenceAuditDetails entry={entry} /></>,
   }));
   return <CenterPage context={context} path="/admin/audit"><AuditControls rows={rows} /></CenterPage>;
 }

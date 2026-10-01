@@ -1,6 +1,6 @@
 'use client';
 import { useId, useRef, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { CenterHeaderActions } from '@/components/CenterShell';
 import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard';
 import { Button } from '@/components/Button';
@@ -8,7 +8,7 @@ import { FormField } from '@/components/FormField';
 import { InlineNotice } from '@/components/InlineNotice';
 import { SettingsRow } from '@/components/SettingsRow';
 import { Checkbox } from '@/components/ui/checkbox';
-import { FieldGroup, FieldSet, FieldLabel } from '@/components/ui/field';
+import { Field, FieldGroup, FieldSet, FieldLabel } from '@/components/ui/field';
 import { centerRequest, responseFieldErrors, responseMessage } from '@/lib/client-api';
 import type { CenterSettings } from '@/lib/server-context';
 
@@ -19,6 +19,7 @@ export function StudentCodeControls({ settings }: { settings: CenterSettings }) 
   const [saved, setSaved] = useState(() => codeSettings(settings)); const [draft, setDraft] = useState(saved);
   const [busy, setBusy] = useState(false); const [conflict, setConflict] = useState(false);
   const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [errors, setErrors] = useState<Record<string,string>>({});
+  const dirty = draft.enabled !== saved.enabled || draft.label !== saved.label;
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (saving.current) return;
     if (!draft.label.trim()) { setErrors({label:'أدخل اسم الباركود الإضافي.'}); return; }
@@ -41,12 +42,12 @@ export function StudentCodeControls({ settings }: { settings: CenterSettings }) 
   }
   return <form id={`${prefix}-code-settings`} className='settings-list' aria-label='إعداد الباركود الإضافي' noValidate onSubmit={submit}>
     <SettingsRow title='الباركود الإضافي' description='رمز يدوي باسم يختاره المركز. تعطيله يحفظ القيم السابقة ويوقف استخدامها في البحث.'>
-    <FieldGroup><UnsavedChangesGuard guardHistory dirty={JSON.stringify(draft) !== JSON.stringify(saved)} />
+    <FieldGroup><UnsavedChangesGuard guardHistory dirty={dirty} />
       {error ? <InlineNotice tone='error'>{error}</InlineNotice> : null}{notice ? <InlineNotice>{notice}</InlineNotice> : null}
       <FieldSet disabled={busy}>
-        <FieldLabel className='flex items-center gap-2'><Checkbox checked={draft.enabled} onCheckedChange={enabled => {setDraft({...draft,enabled:Boolean(enabled)});setNotice('');}} />تفعيل الباركود الإضافي</FieldLabel>
-        <FormField id={`${prefix}-code-label`} label='اسم الباركود الإضافي' required value={draft.label} error={errors.label} onChange={label => {setDraft({...draft,label});setErrors({});setNotice('');}} />
-        <CenterHeaderActions><Button type='submit' form={`${prefix}-code-settings`} variant='primary' busy={busy} disabled={conflict}>حفظ إعداد الباركود الإضافي</Button><Button disabled={busy} onClick={() => {setDraft(saved);setErrors({});setError('');setNotice('');}}>إلغاء إعداد الباركود</Button>{conflict ? <Button disabled={busy} onClick={reload}>تحميل إعداد الباركود الحالي</Button> : null}</CenterHeaderActions>
+        <Field orientation='horizontal'><Checkbox id={`${prefix}-code-enabled`} checked={draft.enabled} onCheckedChange={enabled => {setDraft({...draft,enabled:Boolean(enabled)});setError('');setNotice('');}} /><FieldLabel htmlFor={`${prefix}-code-enabled`}>تفعيل الباركود الإضافي</FieldLabel></Field>
+        <FormField id={`${prefix}-code-label`} label='اسم الباركود الإضافي' required value={draft.label} error={errors.label} onChange={label => {setDraft({...draft,label});setErrors({});setError('');setNotice('');}} />
+        <CenterHeaderActions>{dirty ? <Button type='submit' form={`${prefix}-code-settings`} variant='primary' busy={busy} disabled={conflict}>حفظ إعداد الباركود الإضافي</Button> : null}{conflict ? <Button disabled={busy} onClick={reload}>تحميل إعداد الباركود الحالي</Button> : null}</CenterHeaderActions>
       </FieldSet>
     </FieldGroup>
     </SettingsRow>

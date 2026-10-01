@@ -6,6 +6,7 @@ import { StudentCenterSearchWorkspace } from './StudentCenterSearchWorkspace';
 import { loadStudentSearchWorkspace } from '@/lib/server-context';
 import { canReadStudents, canSearchCenterStudents } from '@/lib/student-search-access';
 import { redirect } from 'next/navigation';
+import { workspaceHref } from '@/lib/workspace';
 
 export async function StudentsPageData({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
@@ -22,6 +23,6 @@ export async function StudentsPageData({ searchParams }: { searchParams: Promise
   }
   const context = await loadStudentWorkspace(query.toString());
   if (typeof context === 'string') return <CenterAccessState state={context} />;
-  if (!canReadStudents(context) && canSearchCenterStudents(context)) redirect('/admin/students?scope=center');
+  if (!canReadStudents(context) && canSearchCenterStudents(context)) redirect(workspaceHref('/admin/students?scope=center', typeof params.workspace === 'string' ? params.workspace : null));
   return <StudentWorkspace context={context} query={typeof params.q === 'string' ? params.q : ''} identifier={typeof params.identifier === 'string' ? params.identifier : ''} mode={params.mode === 'identifier' || params.identifier ? 'identifier' : 'general'} />;
 }

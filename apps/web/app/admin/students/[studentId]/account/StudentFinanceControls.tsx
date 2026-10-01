@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions, CenterPageActions } from "@/components/CenterShell";
 import { DataTable } from "@/components/DataTable";
@@ -212,9 +212,9 @@ export function StudentFinanceControls({ initial, search, paymentId, allocationI
     {current.permissions.can_manage_center && !current.account.currency_locked ? <p className="muted">اختر عملة المركز من <Link href="/admin/settings?tab=general">الإعدادات العامة</Link> قبل استلام أول دفعة.</p> : null}
     {current.recordable_branches.length ? <section className="context-card form-stack" aria-labelledby={`${formPrefix}-payment-title`}>
       <h2 id={`${formPrefix}-payment-title`}>استلام دفعة مقدمة</h2>
-      <p className="muted">حدد الفرع الذي استلم المبلغ وطريقة وتاريخ الاستلام. تُحفظ الدفعة في حساب الطالب دون تخصيص.</p>
+      <p className="muted">{current.workspace?.mode === "branch" ? `فرع الاستلام: ${current.workspace.branch?.name}. حدد طريقة وتاريخ الاستلام.` : "حدد الفرع الذي استلم المبلغ وطريقة وتاريخ الاستلام."} تُحفظ الدفعة في حساب الطالب دون تخصيص.</p>
       <form id={paymentForm} noValidate onSubmit={savePayment}><FieldSet disabled={uncertain} className="border-0 p-0"><FieldGroup>
-        <SelectField id={`${formPrefix}-branch_id`} label="فرع الاستلام" value={branch} options={current.recordable_branches.map((item) => ({ value: String(item.id), label: item.name }))} onChange={(value) => { setBranch(value); setFieldErrors({}); }} error={fieldErrors.branch_id} />
+        {current.workspace?.mode !== "branch" ? <SelectField id={`${formPrefix}-branch_id`} label="فرع الاستلام" value={branch} options={current.recordable_branches.map((item) => ({ value: String(item.id), label: item.name }))} onChange={(value) => { setBranch(value); setFieldErrors({}); }} error={fieldErrors.branch_id} /> : null}
         <SelectField id={`${formPrefix}-method`} label="طريقة الاستلام" value={method} options={Object.entries(paymentMethodLabels).map(([value, label]) => ({ value, label }))} onChange={(value) => { setMethod(value); setFieldErrors({}); }} error={fieldErrors.method} />
         <FormField id={`${formPrefix}-received_on`} label="تاريخ الاستلام" type="date" value={receivedOn} onChange={(value) => { setReceivedOn(value); setFieldErrors({}); }} error={fieldErrors.received_on} />
         <FormField id={`${formPrefix}-amount`} label={`المبلغ${current.account.currency ? ` (${current.account.currency})` : ""}`} type="text" direction="ltr" value={amount} onChange={(value) => { setAmount(value); setFieldErrors({}); }} error={fieldErrors.amount} hint="مبلغ موجب حتى منزلتين عشريتين." />

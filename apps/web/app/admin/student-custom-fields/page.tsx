@@ -3,10 +3,11 @@ export const metadata = { title: "الحقول الإضافية للطالب | C
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; workspace?: string }>;
 }) {
-  const { page } = await searchParams;
+  const { page, workspace } = await searchParams;
   const query = new URLSearchParams({ tab: "student-fields" });
   if (page) query.set("page", page);
+  if (workspace) query.set("workspace", workspace);
   redirect(`/admin/settings?${query}`);
 }

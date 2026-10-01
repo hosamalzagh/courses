@@ -650,6 +650,116 @@ class CurriculumTest extends TestCase
         ])->assertCreated()->assertJsonPath('counts.stages', 61);
     }
 
+    public function test_hierarchy_scopes_children_before_paging_and_preserves_authorized_ancestors(): void
+    {
+        $visible = $this->sequence($this->north, 'Visible');
+        $hidden = $this->sequence($this->south, 'Hidden');
+        $ids = array_map(fn () => (string) Str::uuid(), range(1, 52));
+        $this->center->run(function () use ($visible, $ids): void {
+            DB::table('stages')->insert(array_map(fn (string $id, int $index): array => [
+                'id' => $id, 'course_id' => $visible['course_id'], 'name' => "Extra {$index}",
+                'created_at' => now()->addSeconds($index + 1), 'updated_at' => now(),
+            ], $ids, array_keys($ids)));
+        });
+        $last = $this->level(end($ids), 'Last stage level');
+        $this->grant([$this->north => ['academic_admin']]);
+        $this->asUser($this->staff);
+        $path = "{$this->base}/curriculum-workspace?course_id={$visible['course_id']}";
+        $first = $this->getJson($path)->assertOk()->assertJsonCount(1, 'courses')
+            ->assertJsonCount(50, 'stages')->assertJsonPath('pagination.stages.has_more', true);
+        $second = $this->getJson("{$path}&stages_page=2&courses_page=99")->assertOk()
+            ->assertJsonCount(3, 'stages')->assertJsonPath('navigation.course.id', $visible['course_id']);
+        $stage = $this->getJson("{$this->base}/curriculum-workspace?stage_id={$last['stage_id']}&stages_page=99")
+            ->assertOk()->assertJsonCount(1, 'stages')->assertJsonCount(1, 'levels')
+            ->assertJsonPath('levels.0.id', $last['id']);
+        $empty = $this->getJson("{$this->base}/group-workspace?level_id={$last['id']}&page=2&levels_page=99")
+            ->assertOk()->assertJsonCount(0, 'groups')->assertJsonCount(0, 'level_choices')
+            ->assertJsonPath('navigation.stage_id', $last['stage_id']);
+        foreach ([$first, $second, $stage, $empty] as $response) {
+            $this->assertNotNull($response->headers->get('X-Courses-Query-Count'));
+            $this->assertLessThanOrEqual(6, (int) $response->headers->get('X-Courses-Query-Count'));
+            $this->assertStringNotContainsString('Hidden', $response->getContent());
+        }
+        $this->getJson("{$this->base}/curriculum-workspace?course_id={$hidden['course_id']}")->assertNotFound();
+        $this->getJson("{$this->base}/curriculum-workspace?stage_id={$hidden['stage_id']}")->assertNotFound();
+        $this->getJson("{$this->base}/curriculum-workspace?course_id={$visible['course_id']}&stage_id={$hidden['stage_id']}")->assertNotFound();
+        $this->getJson("{$this->base}/group-workspace?level_id={$hidden['id']}")->assertNotFound();
+        $this->getJson("{$this->base}/curriculum-workspace?course_id=invalid")->assertUnprocessable();
+    }
+
+    public function test_level_navigation_filters_groups_and_choices_without_changing_lifecycle(): void
+    {
+        $first = $this->sequence($this->north, 'First');
+        $other = $this->sequence($this->north, 'Other');
+        $teacher = $this->postJson("{$this->base}/instructors", [
+            'name' => 'Teacher', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(),
+        ])->json('instructor');
+        foreach ([$first, $other] as $level) {
+            $this->postJson("{$this->base}/groups", [
+                'level_id' => $level['id'], 'plan_version_id' => $level['plan']['id'], 'name' => $level['name'],
+                'approved_price' => 0, 'instructor_ids' => [$teacher['id']], 'request_id' => (string) Str::uuid(),
+            ])->assertCreated();
+        }
+        $response = $this->getJson("{$this->base}/group-workspace?level_id={$first['id']}")->assertOk()
+            ->assertJsonCount(1, 'groups')->assertJsonPath('groups.0.level_id', $first['id'])
+            ->assertJsonPath('groups.0.status', 'waiting')->assertJsonCount(1, 'level_choices')
+            ->assertJsonPath('level_choices.0.level_id', $first['id']);
+        $this->assertLessThanOrEqual(6, (int) $response->headers->get('X-Courses-Query-Count'));
+    }
+
+    public function test_unused_curriculum_can_be_deleted_bottom_up_with_audit_and_bounded_reads(): void
+    {
+        $level = $this->sequence($this->north, 'Disposable');
+        $workspace = $this->getJson("{$this->base}/curriculum-workspace")->assertOk()
+            ->assertJsonPath('courses.0.stage_count', 1)->assertJsonPath('courses.0.level_count', 1)
+            ->assertJsonPath('courses.0.group_count', 0)->assertJsonPath('stages.0.level_count', 1)
+            ->assertJsonPath('levels.0.can_delete', true)->assertJsonPath('courses.0.can_delete', false);
+        $this->assertNotNull($workspace->headers->get('X-Courses-Query-Count'));
+        $this->assertLessThanOrEqual(6, (int) $workspace->headers->get('X-Courses-Query-Count'));
+        $this->deleteJson("{$this->base}/courses/{$level['course_id']}")->assertConflict()->assertJsonPath('code', 'curriculum_in_use');
+        $this->deleteJson("{$this->base}/stages/{$level['stage_id']}")->assertConflict();
+        $this->deleteJson("{$this->base}/levels/{$level['id']}")->assertOk()->assertJsonPath('deleted_id', $level['id']);
+        $this->getJson("{$this->base}/levels/{$level['id']}")->assertNotFound();
+        $this->deleteJson("{$this->base}/levels/{$level['id']}")->assertNotFound();
+        $this->deleteJson("{$this->base}/stages/{$level['stage_id']}")->assertOk();
+        $this->deleteJson("{$this->base}/courses/{$level['course_id']}")->assertOk();
+        $this->getJson("{$this->base}/curriculum-workspace")->assertOk()->assertJsonCount(0, 'courses');
+        $this->center->run(function () use ($level): void {
+            $this->assertSame(0, DB::table('study_plan_versions')->where('level_id', $level['id'])->count());
+            $this->assertSame(0, DB::table('plan_lectures')->where('plan_version_id', $level['plan']['id'])->count());
+            $events = DB::table('center_audit_logs')->where('event', 'like', 'curriculum.%_deleted')->get();
+            $this->assertCount(3, $events);
+            $details = json_decode($events->first()->details, true);
+            $this->assertSame('Disposable', $details['before']['name']);
+            $this->assertTrue($details['after']['deleted']);
+        });
+    }
+
+    public function test_curriculum_deletion_rechecks_permission_and_preserves_versioned_and_used_plans(): void
+    {
+        $level = $this->sequence($this->north);
+        $other = $this->sequence($this->south);
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $this->deleteJson("{$this->base}/levels/{$level['id']}")->assertForbidden();
+        $this->deleteJson("{$this->base}/levels/{$other['id']}")->assertNotFound();
+        $this->grant([$this->north => ['academic_admin']]);
+        $this->asUser($this->owner);
+        $this->postJson("{$this->base}/levels/{$level['id']}/plan-versions", [
+            'base_plan_version_id' => $level['plan']['id'], 'base_revision' => 1, 'request_id' => (string) Str::uuid(),
+            'lectures' => [['number' => 1, 'content' => 'Version two', 'planned_hours' => 1]],
+        ])->assertCreated();
+        $this->asUser($this->staff);
+        $this->deleteJson("{$this->base}/levels/{$level['id']}")->assertConflict();
+        $this->getJson("{$this->base}/levels/{$level['id']}")->assertOk()->assertJsonPath('levels.0.can_delete', false)
+            ->assertJsonPath('levels.0.plan.version', 2);
+        $this->asUser($this->owner);
+        $this->center->run(fn () => DB::table('study_plan_versions')->where('id', $other['plan']['id'])->update(['used_at' => now()]));
+        $this->deleteJson("{$this->base}/levels/{$other['id']}")->assertConflict();
+        $this->getJson("{$this->base}/levels/{$other['id']}")->assertOk()->assertJsonPath('levels.0.can_delete', false);
+        $this->center->run(fn () => $this->assertSame(0, DB::table('center_audit_logs')->where('event', 'like', 'curriculum.%_deleted')->count()));
+    }
+
     private function sequence(int $branchId, string $name = 'Course'): array
     {
         $course = $this->postJson("{$this->base}/courses", ['branch_id' => $branchId, 'name' => $name, 'request_id' => (string) Str::uuid()])->assertCreated()->json('course');

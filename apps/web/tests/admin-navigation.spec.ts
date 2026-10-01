@@ -1,3 +1,4 @@
+import { expectWorkspaceUrl, workspaceUrl } from "./workspace-testhelpers";
 import { expect, test } from "@playwright/test";
 import { credentials, signIn } from "./local-fixtures";
 
@@ -10,12 +11,12 @@ test("keyboard intent preloads the SSR workspace before navigation", async ({ pa
     if (request.url().includes("/admin/members?")) requests.push(request.url());
   });
   // Focus the preceding link, then advance using the actual keyboard.
-  await page.getByRole("link", { name: "المناهج والخطط", exact: true }).focus();
+  await page.getByRole("link", { name: "مراجعة الغياب", exact: true }).focus();
   await page.keyboard.press("Tab");
   await expect(members).toBeFocused();
   await expect.poll(() => requests.length).toBeGreaterThan(0);
   await page.waitForLoadState("networkidle");
-  expect(page.url()).toBe("http://alpha.courses.test/admin");
+  await expectWorkspaceUrl(page, "/admin");
   const prefetched = requests.length;
   await members.click();
   await expect(page.getByRole("table", { name: "العضويات", exact: true })).toBeVisible();
@@ -28,9 +29,12 @@ test("admin content is available as SSR HTML without JavaScript", async ({ page,
   const context = await browser.newContext({ javaScriptEnabled: false, storageState: await page.context().storageState() });
   try {
     const serverPage = await context.newPage();
-    await serverPage.goto("http://alpha.courses.test/admin/members");
+    await serverPage.goto(workspaceUrl(page, "/admin/members"));
     await expect(serverPage.getByRole("heading", { name: "موظفو المركز", exact: true })).toBeVisible();
     await expect(serverPage.getByRole("table", { name: "العضويات", exact: true })).toBeVisible();
+    await serverPage.goto(workspaceUrl(page, "/admin/members?tab=invitations"));
+    await expect(serverPage.getByRole("heading", { name: "موظفو المركز", exact: true })).toBeVisible();
+    await expect(serverPage.getByRole("table", { name: "الدعوات", exact: true })).toBeVisible();
     await expect(serverPage.getByRole("textbox", { name: "البريد الإلكتروني", exact: true })).toBeVisible();
   } finally {
     await context.close();
@@ -69,6 +73,7 @@ test("admin navigation retains the document, sidebar and header", async ({ page 
 test("slow admin navigation keeps content and header geometry until the destination is ready", async ({ page }) => {
   const owner = credentials("alpha");
   await signIn(page, "http://alpha.courses.test", owner.email, owner.password);
+  const header = await page.locator(".center-topbar").elementHandle();
   const height = await page.locator(".center-topbar").evaluate((node) => node.getBoundingClientRect().height);
   let release!: () => void;
   let received!: () => void;
@@ -86,5 +91,9 @@ test("slow admin navigation keeps content and header geometry until the destinat
   expect(await page.locator(".center-topbar").evaluate((node) => node.getBoundingClientRect().height)).toBe(height);
   release();
   await expect(page.getByRole("table", { name: "العضويات", exact: true })).toBeVisible();
-  expect(await page.locator(".center-topbar").evaluate((node) => node.getBoundingClientRect().height)).toBe(height);
+  expect(await header!.evaluate(node => node === document.querySelector(".center-topbar"))).toBe(true);
+  const bounds = await page.locator(".center-topbar").evaluate(node => ({ left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right, width: window.innerWidth, documentWidth: document.documentElement.scrollWidth }));
+  expect(bounds.left).toBeGreaterThanOrEqual(0);
+  expect(bounds.right).toBeLessThanOrEqual(bounds.width);
+  expect(bounds.documentWidth).toBeLessThanOrEqual(bounds.width);
 });

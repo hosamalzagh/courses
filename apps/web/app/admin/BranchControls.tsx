@@ -6,7 +6,7 @@ import { FieldGroup } from "@/components/ui/field";
 
 
 import { useState, useRef, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { CenterPageActions, CenterHeaderActions } from "@/components/CenterShell";
 import { DataTable } from "@/components/DataTable";
 import { Button } from "@/components/Button";

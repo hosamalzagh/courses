@@ -4,6 +4,6 @@ import { InstructorControls } from "./InstructorControls";
 
 export function InstructorWorkspace(props: ComponentProps<typeof InstructorControls>) {
   return <CenterPage context={props.context} path="/admin/instructors">
-    <InstructorControls {...props} />
+    <InstructorControls key={props.context.workspace?.id ?? "center"} {...props} />
   </CenterPage>;
 }

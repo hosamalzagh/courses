@@ -7,7 +7,7 @@ import { FieldGroup, FieldSet, FieldLegend, FieldLabel } from "@/components/ui/f
 
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { PrefetchLink as Link } from '@/components/PrefetchLink';
 import { CenterPageActions, CenterHeaderActions } from '@/components/CenterShell';
 import { WorkspaceSections } from '@/components/WorkspaceSections';
@@ -146,14 +146,14 @@ export function InstructorControls({ context, query, detail = false, section = '
         <FieldSet disabled={busy} className="form-stack" style={{ border: 0, padding: 0, margin: 0 }}>
         <FormField id='instructor-name' label='اسم المحاضر' focusOnMount value={name} onChange={(value) => { setName(value); setFieldErrors({}); }} error={fieldErrors.name} required autoComplete='off' />
         <FormField id='instructor-phone' label='رقم التواصل' value={phone} onChange={(value) => { setPhone(value); setFieldErrors({}); }} error={fieldErrors.phone} type='tel' direction='ltr' autoComplete='off' hint='اختياري، ويمكن لأكثر من محاضر استخدام نفس الرقم.' />
-        <FieldSet id='instructor-branches' data-invalid={Boolean(fieldErrors.branch_ids)} aria-describedby={fieldErrors.branch_ids ? 'instructor-branches-error' : 'instructor-branches-hint'}><FieldLegend>الفروع المرتبطة بالمحاضر</FieldLegend>
+        {context.workspace?.mode !== 'branch' ? <FieldSet id='instructor-branches' data-invalid={Boolean(fieldErrors.branch_ids)} aria-describedby={fieldErrors.branch_ids ? 'instructor-branches-error' : 'instructor-branches-hint'}><FieldLegend>الفروع المرتبطة بالمحاضر</FieldLegend>
           <p id='instructor-branches-hint' className='muted'>اختر الفروع المصرح بها للإسناد. تبقى ارتباطات الملف السابقة محفوظة.</p>
           {manageable.map((branch) => {
             const associated = editor !== 'new' && editor.branch_ids.includes(branch.id);
             return <FieldLabel key={branch.id} className="flex items-center gap-2"><Checkbox aria-invalid={Boolean(fieldErrors.branch_ids)} checked={branchIds.includes(branch.id)} disabled={busy || associated} onCheckedChange={(checked) => { setBranchIds((ids) => checked ? [...ids, branch.id] : ids.filter((id) => id !== branch.id)); setFieldErrors({}); }} />{branch.name}{associated ? ' — مرتبط بالفعل' : ''}</FieldLabel>;
           })}
           {fieldErrors.branch_ids ? <p id='instructor-branches-error' className='field-error' role='alert'>{fieldErrors.branch_ids}</p> : null}
-        </FieldSet>
+        </FieldSet> : null}
 <CenterHeaderActions>{conflict ? <Button disabled={busy} onClick={reloadInstructor}>تحميل أحدث بيانات المحاضر</Button> : null}<Button form={`${formPrefix}-1`} type='submit' variant='primary' busy={busy} disabled={conflict}>{editor === 'new' ? 'حفظ ملف المحاضر' : 'حفظ بيانات المحاضر'}</Button><Button disabled={busy} onClick={close}>إلغاء</Button></CenterHeaderActions>
         </FieldSet>
       </FieldGroup>

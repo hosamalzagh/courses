@@ -1,3 +1,4 @@
+import { expectWorkspaceUrl, workspaceUrl } from "./workspace-testhelpers";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
@@ -13,7 +14,7 @@ test.beforeAll(async ({ browser }) => {
 });
 
 async function invite(page: Page, host: string, email: string) {
-  await page.goto(`${host}/admin/members`);
+  await page.goto(workspaceUrl(page, `${host}/admin/members`));
   await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(email);
   await page.getByRole("button", { name: "إرسال الدعوة" }).click();
   await expect(page.getByRole("status")).toContainText("أُرسلت الدعوة");
@@ -30,11 +31,14 @@ async function accept(page: Page, host: string, email: string, password: string)
 }
 
 async function grant(page: Page, host: string, email: string, branch: string, role: string) {
-  await page.goto(`${host}/admin/members`);
+  await page.goto(workspaceUrl(page, `${host}/admin/members`));
   const card = page.getByRole("row").filter({ hasText: email });
   await card.getByRole("button", { name: "تعديل الأدوار" }).click();
   await card.locator("xpath=following-sibling::tr[1]").getByRole("group", { name: branch }).getByRole("checkbox", { name: role }).check();
-  await card.locator("xpath=following-sibling::tr[1]").getByRole("button", { name: "حفظ الأدوار" }).click();
+  const saved = page.waitForResponse(response => /\/api\/v1\/center\/members\/[^/]+\/grants$/.test(response.url()) && response.request().method() === "PUT");
+  await page.locator(".center-topbar").getByRole("button", { name: "حفظ الأدوار", exact: true }).click();
+  expect((await saved).status()).toBe(200);
+  await expect(page.getByRole("status")).toContainText("حُفظت أدوار الموظف");
   await expect(card).toContainText("نشط");
 }
 
@@ -127,6 +131,8 @@ test("one central identity has separate alpha and beta grants, pages, and host s
     await grant(betaOwnerPage, beta, email, "beta-stable", "مدير الفرع");
 
     await signIn(alphaPage, alpha, email, password);
+    await alphaPage.goto(workspaceUrl(alphaPage, `${alpha}/admin/settings?tab=branches`));
+    await expectWorkspaceUrl(alphaPage, `${alpha}/admin/settings?tab=branches`);
     await expect(alphaPage.getByRole("heading", { name: "الفرع الشمالي" })).toBeVisible();
     await expect(alphaPage.getByText("beta-stable")).toHaveCount(0);
     await expect(alphaPage.getByText("صلاحية عرض فقط")).toBeVisible();
@@ -148,6 +154,8 @@ test("one central identity has separate alpha and beta grants, pages, and host s
     await expect(copiedPage).toHaveURL(`${beta}/login?expired=1`);
 
     await signIn(betaPage, beta, email, password);
+    await betaPage.goto(workspaceUrl(betaPage, `${beta}/admin/settings?tab=branches`));
+    await expectWorkspaceUrl(betaPage, `${beta}/admin/settings?tab=branches`);
     await expect(betaPage.getByRole("heading", { name: "beta-stable" })).toBeVisible();
     await expect(betaPage.getByText("الفرع الشمالي")).toHaveCount(0);
     await expect(betaPage.getByRole("button", { name: "تعديل بيانات الفرع" })).toBeVisible();

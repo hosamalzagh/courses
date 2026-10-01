@@ -26,7 +26,7 @@ class CenterGroupRequirementController extends Controller
         $page = (int) ($filters['page'] ?? 1);
         $permissions = $request->attributes->get('center_permissions');
         $group = $this->group($groupId, $permissions);
-        abort_unless($permissions->can('curriculum.manage', $group->branch_id), 403);
+        abort_unless($permissions->canInWorkspace('curriculum.manage', $group->branch_id), 403);
         abort_if($group->status === 'completed', 409, 'لا يمكن تغيير متطلبات مجموعة مكتملة.');
         $impact = $this->impact($group, $change, $page, trim($filters['q'] ?? ''));
 
@@ -46,7 +46,7 @@ class CenterGroupRequirementController extends Controller
 
         return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $groupId, $change, $confirmation, $hash): JsonResponse {
             $group = $this->group($groupId, $permissions, true);
-            abort_unless($permissions->can('curriculum.manage', $group->branch_id), 403);
+            abort_unless($permissions->canInWorkspace('curriculum.manage', $group->branch_id), 403);
             $db = DB::connection('tenant');
             $previous = $db->table('study_group_requirement_submissions')
                 ->where('request_id', $confirmation['request_id'])->first();
@@ -180,7 +180,7 @@ class CenterGroupRequirementController extends Controller
             $query->lockForUpdate();
         }
         $row = $query->first();
-        abort_unless($row && $permissions->can('read', (int) $row->branch_id), 404);
+        abort_unless($row && $permissions->canInWorkspace('read', (int) $row->branch_id), 404);
 
         return $row;
     }

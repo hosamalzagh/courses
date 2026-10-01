@@ -29,8 +29,10 @@ class CenterStudyEnrollmentController extends Controller
             'groups_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'q' => ['sometimes', 'string', 'max:100'],
             'attempt_id' => ['sometimes', 'uuid'],
+            'purpose' => ['sometimes', 'in:transfer'],
         ]);
         $permissions = $request->attributes->get('center_permissions');
+        abort_if(($data['purpose'] ?? null) === 'transfer' && ! isset($data['attempt_id']), 404);
         $scope = $this->scope($permissions);
         $groupsPage = (int) ($data['groups_page'] ?? 1);
         $search = trim($data['q'] ?? '');
@@ -44,6 +46,11 @@ class CenterStudyEnrollmentController extends Controller
                 ->whereColumn('student_branches.student_id', 'students.id')
                 ->whereColumn('student_branches.branch_id', 'courses.branch_id')->selectRaw('1'))
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('courses.branch_id', $scope))
+            ->tap(function (Builder $query) use ($permissions, $data): void {
+                if (($data['purpose'] ?? null) !== 'transfer') {
+                    $permissions->workspace?->constrain($query, 'courses.branch_id');
+                }
+            })
             ->when($search !== '', fn (Builder $query) => $query->where('study_groups.name', 'ILIKE', '%'.addcslashes($search, '%_\\').'%'))
             ->orderBy('study_groups.created_at')->orderBy('study_groups.id')
             ->offset(($groupsPage - 1) * 50)->limit(51)
@@ -69,6 +76,8 @@ class CenterStudyEnrollmentController extends Controller
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('allocations.target_branch_id', $scope))
             ->selectRaw('COALESCE(SUM(allocations.amount), 0)');
         $student = StudentPhotos::visibleStudent($studentId, $permissions, 'enrollment.manage')
+            ->when(($data['purpose'] ?? null) === 'transfer', fn (Builder $query) => $query->whereExists(
+                $this->attempts($studentId, $permissions)->where('study_attempts.id', $data['attempt_id'])))
             ->select(['students.id', 'students.name', 'students.student_number', 'students.status', 'students.financial_account_revision'])
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency'), 'currency')
             ->selectSub(DB::connection('tenant')->table('center_settings')->where('id', 1)->select('financial_currency_revision'), 'currency_revision')
@@ -132,7 +141,7 @@ class CenterStudyEnrollmentController extends Controller
                 ->first(['study_groups.id', 'study_groups.level_id', 'study_groups.plan_version_id',
                     'study_groups.approved_price', 'study_groups.revision', 'study_groups.status', 'courses.branch_id',
                     DB::raw('COALESCE(study_groups.completion_threshold, levels.completion_threshold, stages.completion_threshold, courses.completion_threshold) AS completion_threshold')]);
-            abort_unless($group && $permissions->can('enrollment.manage', (int) $group->branch_id), 404);
+            abort_unless($group && $permissions->canInWorkspace('enrollment.manage', (int) $group->branch_id), 404);
             $student = StudentPhotos::visibleStudent($studentId, $permissions, 'enrollment.manage')
                 ->whereExists(DB::connection('tenant')->table('student_branches')
                     ->whereColumn('student_branches.student_id', 'students.id')
@@ -169,7 +178,7 @@ class CenterStudyEnrollmentController extends Controller
                 $previous = DB::connection('tenant')->table('study_attempts')
                     ->where('id', $data['repeated_from_attempt_id'])->where('student_id', $studentId)
                     ->lockForUpdate()->first(['id', 'level_id', 'branch_id', 'status']);
-                abort_unless($previous && $permissions->can('enrollment.manage', (int) $previous->branch_id), 404);
+                abort_unless($previous && $permissions->canInWorkspace('enrollment.manage', (int) $previous->branch_id), 404);
                 abort_if($previous->status === 'active' || $previous->level_id !== $group->level_id, 409,
                     'اختر محاولة منتهية في المستوى نفسه لإعادة الدراسة.');
                 $endedOn = DB::connection('tenant')->table('study_attempt_group_periods')
@@ -269,7 +278,7 @@ class CenterStudyEnrollmentController extends Controller
             abort_unless($student, 404);
             $attempt = DB::connection('tenant')->table('study_attempts')
                 ->where('id', $attemptId)->where('student_id', $studentId)->lockForUpdate()->first();
-            abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
+            abort_unless($attempt && $permissions->canInWorkspace('enrollment.manage', (int) $attempt->branch_id), 404);
             $existing = DB::connection('tenant')->table('study_attempt_withdrawals')->where('request_id', $data['request_id'])->first();
             if ($existing !== null) {
                 abort_unless($existing->attempt_id === $attemptId && $existing->actor_id === $request->user()->id, 403);
@@ -358,6 +367,7 @@ class CenterStudyEnrollmentController extends Controller
                 ->whereColumn('current_association.student_id', 'study_attempts.student_id')
                 ->whereColumn('current_association.branch_id', 'study_attempts.branch_id')->selectRaw('1'))
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('study_attempts.branch_id', $this->scope($permissions)))
+            ->tap(fn (Builder $query) => $permissions->workspace?->constrain($query, 'study_attempts.branch_id'))
             ->select(['study_attempts.id', 'study_attempts.level_id', 'study_attempts.plan_version_id',
                 'study_attempts.current_group_id', 'study_attempts.branch_id', 'study_attempts.joined_on',
                 'study_attempts.status', 'study_attempts.revision', 'study_attempts.repeated_from_attempt_id',

@@ -25,7 +25,7 @@ class StudyWaitlistEntry
         abort_unless($student, 404);
         $attempt = DB::connection('tenant')->table('study_attempts')->where('id', $attemptId)
             ->where('student_id', $studentId)->lockForUpdate()->first();
-        abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
+        abort_unless($attempt && $permissions->canInWorkspace('enrollment.manage', (int) $attempt->branch_id), 404);
         abort_unless(DB::connection('tenant')->table('student_branches')->where('student_id', $studentId)
             ->where('branch_id', $attempt->branch_id)->exists(), 404);
 

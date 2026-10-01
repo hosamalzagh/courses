@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\CenterWrites;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -12,10 +13,11 @@ class CenterSettingsController extends Controller
     {
         abort_unless($request->attributes->get('center_permissions')->isCenterManager(), 403);
         $settings = DB::connection('tenant')->table('center_settings')->where('id', 1)
-            ->first(['contact_email', 'phone', 'address', 'student_number_start', 'student_number_revision', 'student_code_enabled', 'student_code_label', 'student_code_revision', 'financial_currency', 'financial_currency_revision', 'financial_currency_locked_at']);
+            ->first(['contact_email', 'phone', 'address', 'student_number_start', 'student_number_revision', 'student_code_enabled', 'student_code_label', 'student_code_revision', 'student_all_branches_enabled', 'student_all_branches_revision', 'financial_currency', 'financial_currency_revision', 'financial_currency_locked_at']);
 
         return response()->json(['settings' => $settings ?: [
             'contact_email' => null, 'phone' => null, 'address' => null, 'student_number_start' => 1, 'student_number_revision' => 1,
+            'student_all_branches_enabled' => false, 'student_all_branches_revision' => 1,
             'financial_currency' => null, 'financial_currency_revision' => 1, 'financial_currency_locked_at' => null,
         ]])->header('Cache-Control', 'private, no-store');
     }
@@ -39,5 +41,39 @@ class CenterSettingsController extends Controller
         });
 
         return $this->show($request);
+    }
+
+    public function updateStudentBranches(Request $request): JsonResponse
+    {
+        abort_unless($request->attributes->get('center_permissions')->isCenterManager(), 403);
+        $data = $request->validate([
+            'enabled' => ['required', 'boolean'],
+            'revision' => ['required', 'integer', 'min:1'],
+        ]);
+
+        return CenterWrites::run($request, function ($permissions) use ($request, $data): JsonResponse {
+            abort_unless($permissions->isCenterManager(), 403);
+            DB::connection('tenant')->table('center_settings')->insertOrIgnore(['id' => 1, 'created_at' => now(), 'updated_at' => now()]);
+            $settings = DB::connection('tenant')->table('center_settings')->where('id', 1)->lockForUpdate()->first();
+            $enabled = (bool) $data['enabled'];
+            if ((bool) $settings->student_all_branches_enabled !== $enabled) {
+                if ((int) $settings->student_all_branches_revision !== (int) $data['revision']) {
+                    return response()->json(['code' => 'student_all_branches_settings_changed', 'message' => 'تغير إعداد ربط الطلاب بالفروع. حمّل الإعداد الحالي.'], 409);
+                }
+                DB::connection('tenant')->table('center_settings')->where('id', 1)->update([
+                    'student_all_branches_enabled' => $enabled,
+                    'student_all_branches_revision' => (int) $settings->student_all_branches_revision + 1,
+                    'updated_at' => now(),
+                ]);
+                DB::connection('tenant')->table('center_audit_logs')->insert([
+                    'actor_id' => $request->user()->id,
+                    'event' => 'center.student_all_branches_settings_changed',
+                    'details' => json_encode(['before' => (bool) $settings->student_all_branches_enabled, 'after' => $enabled]),
+                    'created_at' => now(),
+                ]);
+            }
+
+            return $this->show($request);
+        });
     }
 }

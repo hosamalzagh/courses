@@ -14,8 +14,14 @@ class StudentPhotos
     {
         return DB::connection('tenant')->table('students')->where('students.id', $id)
             ->when(! $permissions->isCenterManager(), function (Builder $query) use ($permissions, $action): void {
-                $branches = array_keys(array_filter($permissions->branchRoles, fn (array $roles): bool => in_array($action, CenterPermissions::actions($roles), true)));
+                $independent = $action === 'students.identity' || str_starts_with($action, 'payments.') || str_starts_with($action, 'finance.');
+                $branches = array_values(array_filter(array_keys($permissions->branchRoles),
+                    fn (int $branchId): bool => $independent ? $permissions->can($action, $branchId) : $permissions->canInWorkspace($action, $branchId)));
                 $query->whereExists(DB::connection('tenant')->table('student_branches')->whereColumn('student_id', 'students.id')->whereIn('branch_id', $branches)->selectRaw('1'));
+            })
+            ->when($permissions->workspace?->mode === 'branch' && ! (str_starts_with($action, 'payments.') || str_starts_with($action, 'finance.')), function (Builder $query) use ($permissions): void {
+                $query->whereExists(DB::connection('tenant')->table('student_branches')
+                    ->whereColumn('student_id', 'students.id')->where('branch_id', $permissions->workspace->branch['id'])->selectRaw('1'));
             });
     }
 

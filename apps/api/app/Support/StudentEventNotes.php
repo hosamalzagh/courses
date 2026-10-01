@@ -122,6 +122,9 @@ final class StudentEventNotes
 
     private static function branches(CenterPermissions $permissions, string $action): ?array
     {
+        if ($action === 'read' && $permissions->workspace?->mode === 'branch') {
+            return $permissions->can('read', $permissions->workspace->branch['id']) ? [$permissions->workspace->branch['id']] : [];
+        }
         if ($permissions->isCenterManager()) {
             return null;
         }

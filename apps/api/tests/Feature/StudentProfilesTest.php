@@ -17,6 +17,74 @@ class StudentProfilesTest extends TestCase
 {
     use CleansCenterDatabases, RefreshDatabase;
 
+    public function test_owner_can_enable_all_branch_linking_when_center_settings_row_is_missing(): void
+    {
+        $this->center->run(fn () => DB::table('center_settings')->where('id', 1)->delete());
+
+        $this->getJson("{$this->base}/settings")->assertOk()
+            ->assertJsonPath('settings.student_all_branches_enabled', false)
+            ->assertJsonPath('settings.student_all_branches_revision', 1);
+        $this->patchJson("{$this->base}/student-branch-settings", ['enabled' => true, 'revision' => 1])->assertOk()
+            ->assertJsonPath('settings.student_all_branches_enabled', true)
+            ->assertJsonPath('settings.student_all_branches_revision', 2);
+    }
+
+    public function test_student_creation_initializes_a_missing_center_settings_row(): void
+    {
+        $this->center->run(fn () => DB::table('center_settings')->where('id', 1)->delete());
+
+        $this->postJson("{$this->base}/students", [
+            'name' => 'طالب بإعدادات افتراضية', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->assertJsonPath('student.branch_ids', [$this->north]);
+        $this->getJson("{$this->base}/settings")->assertOk()
+            ->assertJsonPath('settings.student_all_branches_enabled', false)
+            ->assertJsonPath('settings.student_all_branches_revision', 1);
+    }
+
+    public function test_center_can_link_new_student_profiles_to_all_branches_without_changing_existing_profiles(): void
+    {
+        $this->getJson("{$this->base}/user?include=student-settings")->assertOk()
+            ->assertJsonPath('settings.student_all_branches_enabled', false)
+            ->assertJsonPath('settings.student_all_branches_revision', 1);
+        $previous = $this->postJson("{$this->base}/students", [
+            'name' => 'ملف سابق', 'branch_ids' => [$this->north], 'request_id' => (string) Str::uuid(),
+        ])->assertCreated()->json('student');
+        $this->grant([$this->north => ['registration']]);
+        $this->asUser($this->staff);
+        $this->patchJson("{$this->base}/student-branch-settings", ['enabled' => true, 'revision' => 1])->assertForbidden();
+
+        $this->asUser($this->owner);
+        $this->patchJson("{$this->base}/student-branch-settings", ['enabled' => true, 'revision' => 1])->assertOk()
+            ->assertJsonPath('settings.student_all_branches_enabled', true)
+            ->assertJsonPath('settings.student_all_branches_revision', 2);
+        $this->patchJson("{$this->base}/student-branch-settings", ['enabled' => false, 'revision' => 1])->assertConflict();
+
+        $this->asUser($this->staff);
+        $this->getJson("{$this->base}/student-workspace")->assertOk()
+            ->assertJsonPath('student_branch_settings.enabled', true)
+            ->assertJsonPath('student_branch_settings.revision', 2);
+        $creation = ['name' => 'ملف كل الفروع', 'branch_ids' => [$this->north],
+            'student_branch_settings_revision' => 2, 'request_id' => (string) Str::uuid()];
+        $created = $this->postJson("{$this->base}/students", $creation)->assertCreated()
+            ->assertJsonPath('student.branch_ids', [$this->north])->json('student');
+        $this->postJson("{$this->base}/students", $creation)->assertOk()->assertJsonPath('student.id', $created['id']);
+        $this->postJson("{$this->base}/students", [...$creation, 'request_id' => (string) Str::uuid(), 'branch_ids' => [$this->south]])->assertForbidden();
+
+        $this->asUser($this->owner);
+        $this->getJson("{$this->base}/students/{$previous['id']}")->assertOk()->assertJsonPath('students.0.branch_ids', [$this->north]);
+        $this->getJson("{$this->base}/students/{$created['id']}")->assertOk()->assertJsonPath('students.0.branch_ids', [$this->north]);
+        $ownerCreated = $this->postJson("{$this->base}/students", [...$creation, 'name' => 'ملف المالك لكل الفروع', 'request_id' => (string) Str::uuid()])
+            ->assertCreated()->assertJsonPath('student.branch_ids', [$this->north, $this->south])->json('student');
+        $this->getJson("{$this->base}/students/{$ownerCreated['id']}")->assertOk()->assertJsonPath('students.0.branch_ids', [$this->north, $this->south]);
+        $this->patchJson("{$this->base}/student-branch-settings", ['enabled' => false, 'revision' => 2])->assertOk()
+            ->assertJsonPath('settings.student_all_branches_revision', 3);
+        $this->asUser($this->staff);
+        $this->postJson("{$this->base}/students", [...$creation, 'request_id' => (string) Str::uuid()])->assertConflict()
+            ->assertJsonPath('code', 'student_branch_settings_changed');
+        $this->postJson("{$this->base}/students", [...$creation, 'request_id' => (string) Str::uuid(), 'student_branch_settings_revision' => 3])
+            ->assertCreated()->assertJsonPath('student.branch_ids', [$this->north]);
+    }
+
     public function test_profile_numbering_sharing_and_suspension_preserve_each_other_across_retries_and_edits(): void
     {
         $this->patchJson("{$this->base}/student-numbering", ['start' => 7000, 'revision' => 1])->assertOk();
@@ -385,6 +453,12 @@ class StudentProfilesTest extends TestCase
     {
         $this->createStudent('Student 00', [$this->north]);
         $single = $this->getJson("{$this->base}/student-workspace")->assertOk();
+        $blankSearch = $this->getJson("{$this->base}/student-workspace?search_only=1")
+            ->assertOk()->assertJsonCount(0, 'students')->assertJsonPath('pagination.has_more', false);
+        $this->assertLessThan(
+            (int) $single->headers->get('X-Courses-Query-Count'),
+            (int) $blankSearch->headers->get('X-Courses-Query-Count'),
+        );
         for ($number = 1; $number <= 51; $number++) {
             $this->createStudent(sprintf('Student %02d', $number), [$this->north, $this->south]);
         }
@@ -393,6 +467,8 @@ class StudentProfilesTest extends TestCase
         $this->assertSame($single->headers->get('X-Courses-Query-Count'), $many->headers->get('X-Courses-Query-Count'));
         $this->getJson("{$this->base}/student-workspace?page=2")->assertOk()->assertJsonCount(2, 'students')->assertJsonPath('pagination.has_more', false);
         $this->getJson("{$this->base}/student-workspace?q=Student%2051")->assertOk()->assertJsonCount(1, 'students');
+        $this->getJson("{$this->base}/student-workspace?search_only=1&q=Student%2051")
+            ->assertOk()->assertJsonCount(1, 'students')->assertJsonPath('students.0.name', 'Student 51');
         $this->getJson("{$this->base}/student-workspace?q=999999999999999999999999999999")->assertOk()->assertJsonCount(0, 'students');
         $this->getJson("{$this->base}/student-workspace?page=-1")->assertUnprocessable();
     }

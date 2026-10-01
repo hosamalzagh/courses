@@ -51,7 +51,7 @@ class CenterStudyTransferController extends Controller
                 ->whereColumn('student_branches.student_id', 'students.id')
                 ->whereColumn('student_branches.branch_id', 'attempts.branch_id')->selectRaw('1'))
             ->first(['attempts.branch_id']);
-        abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
+        abort_unless($attempt && $permissions->canInWorkspace('enrollment.manage', (int) $attempt->branch_id), 404);
 
         return response()->json($this->historyPage($attemptId, $permissions, (int) ($data['history_page'] ?? 1)))
             ->header('Cache-Control', 'private, no-store');
@@ -80,7 +80,7 @@ class CenterStudyTransferController extends Controller
             $prior = DB::connection('tenant')->table('study_attempt_transfers')->where('request_id', $data['request_id'])->first();
             if ($prior) {
                 abort_unless($prior->attempt_id === $attemptId && (int) $prior->actor_id === (int) $request->user()->id
-                    && $permissions->can('read', (int) $prior->from_branch_id)
+                    && $permissions->canInWorkspace('enrollment.manage', (int) $prior->from_branch_id)
                     && $permissions->can('read', (int) $prior->to_branch_id)
                     && $permissions->can('enrollment.manage', (int) $prior->to_branch_id), 404);
                 if ($prior->request_hash !== $requestHash) {
@@ -258,7 +258,7 @@ SQL, [$data['transferred_on']]);
             ->selectSub($sum('study_attempt_fees', EffectiveStudyFees::amount('study_attempt_fees'), 'branch_id'), 'due_total')
             ->selectSub($used, 'used_total')->selectSub($refunded, 'refunded_total')->selectSub($paid, 'paid_total');
         $row = ($lock ? $query->lock('FOR UPDATE OF attempts, groups') : $query)->first();
-        abort_unless($row && $permissions->can('enrollment.manage', (int) $row->branch_id), 404);
+        abort_unless($row && $permissions->canInWorkspace('enrollment.manage', (int) $row->branch_id), 404);
         $attempt = (object) ['id' => $row->id, 'revision' => $row->revision, 'branch_id' => $row->branch_id,
             'level_id' => $row->level_id, 'plan_version_id' => $row->plan_version_id,
             'current_group_id' => $row->current_group_id, 'status' => $row->status];

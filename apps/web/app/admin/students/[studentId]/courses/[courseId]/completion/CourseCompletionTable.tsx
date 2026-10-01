@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { DataTable } from "@/components/DataTable";
 import { PrefetchLink as Link } from "@/components/PrefetchLink";
 import type { CourseCompletionContext } from "@/lib/server-context";

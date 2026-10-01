@@ -1,3 +1,4 @@
+import { expectWorkspaceUrl, workspaceUrl } from "./workspace-testhelpers";
 import { randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
@@ -19,6 +20,8 @@ test("alpha and beta keep pages, sessions, and cached data separate", async ({ b
   const betaPage = await browser.newPage();
   try {
     await signIn(alphaPage, alpha, alphaOwner.email, alphaOwner.password);
+    await alphaPage.goto(workspaceUrl(alphaPage, `${alpha}/admin/settings?tab=branches`));
+    await expectWorkspaceUrl(alphaPage, `${alpha}/admin/settings?tab=branches`);
     await expect(alphaPage.getByRole("heading", { name: "الفرع الشمالي" })).toBeVisible();
     await expect(alphaPage.getByText("beta-stable")).toHaveCount(0);
     await alphaPage.getByRole("button", { name: "إنشاء فرع" }).click();
@@ -27,11 +30,11 @@ test("alpha and beta keep pages, sessions, and cached data separate", async ({ b
     await alphaPage.getByRole("button", { name: "حفظ الفرع" }).click();
     await expect(alphaPage.getByRole("textbox", { name: "رمز الفرع" })).toHaveAttribute("aria-invalid", "true");
     await expect(alphaPage.locator("#branch-slug-error")).toBeVisible();
-    await alphaPage.goto(`${alpha}/admin/members`);
+    await alphaPage.goto(workspaceUrl(alphaPage, `${alpha}/admin/members`));
     const staffCard = alphaPage.getByRole("row").filter({ has: alphaPage.getByRole("heading", { name: "Staff Demo" }) });
     await staffCard.getByRole("button", { name: "إيقاف العضوية" }).click();
-    await expect(alphaPage.getByRole("dialog")).toContainText("سيفقد هذا الموظف الوصول");
-    await alphaPage.getByRole("dialog").getByRole("button", { name: "إلغاء" }).click();
+    await expect(alphaPage.getByRole("alertdialog")).toContainText("سيفقد هذا الموظف الوصول");
+    await alphaPage.getByRole("alertdialog").getByRole("button", { name: "إلغاء" }).click();
     await expect(staffCard).toContainText("نشط");
     const csrfStatus = await alphaPage.evaluate(async () => {
       const response = await fetch("/api/v1/center/settings", {
@@ -44,10 +47,12 @@ test("alpha and beta keep pages, sessions, and cached data separate", async ({ b
     expect(csrfStatus).toBe(419);
     await alphaPage.goto(`${beta}/admin`);
     await expect(alphaPage).toHaveURL(`${beta}/login`);
-    await alphaPage.goto(`${alpha}/admin`);
+    await alphaPage.goto(workspaceUrl(alphaPage, `${alpha}/admin/settings?tab=branches`));
     await expect(alphaPage.getByRole("heading", { name: "الفرع الشمالي" })).toBeVisible();
 
     await signIn(betaPage, beta, betaOwner.email, betaOwner.password);
+    await betaPage.goto(workspaceUrl(betaPage, `${beta}/admin/settings?tab=branches`));
+    await expectWorkspaceUrl(betaPage, `${beta}/admin/settings?tab=branches`);
     await expect(betaPage.getByRole("heading", { name: "beta-stable" })).toBeVisible();
     await expect(betaPage.getByText("الفرع الشمالي")).toHaveCount(0);
     await betaPage.reload();
@@ -67,6 +72,8 @@ test("Landlord suspension is audited and blocks private Next.js pages until reac
   const page = await browser.newPage();
   const landlord = await browser.newPage();
   await signIn(page, beta, betaOwner.email, betaOwner.password);
+  await page.goto(workspaceUrl(page, `${beta}/admin/settings?tab=branches`));
+  await expectWorkspaceUrl(page, `${beta}/admin/settings?tab=branches`);
   await expect(page.getByRole("heading", { name: "beta-stable" })).toBeVisible();
 
   try {
@@ -163,8 +170,10 @@ test("Mailpit password reset changes the local staff password and permits login"
   const replayResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/center/auth/reset-password") && response.request().method() === "POST");
   await page.getByRole("button", { name: "حفظ كلمة المرور" }).click();
   expect((await replayResponse).status()).toBe(422);
-  await expect(page.locator(".notice[role=alert]")).toContainText("استُخدم بالفعل");
+  await expect(page.getByRole("alert").filter({ hasText: "استُخدم بالفعل" })).toContainText("استُخدم بالفعل");
 
   await signIn(page, alpha, staff.email, newPassword);
+  await page.goto(workspaceUrl(page, `${alpha}/admin/settings?tab=branches`));
+  await expectWorkspaceUrl(page, `${alpha}/admin/settings?tab=branches`);
   await expect(page.getByRole("heading", { name: "الفرع الشمالي" })).toBeVisible();
 });

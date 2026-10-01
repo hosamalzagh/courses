@@ -150,7 +150,7 @@ class CenterStudyTeachingController extends Controller
             $query->lock('FOR UPDATE OF sessions');
         }
         $row = $query->first();
-        abort_unless($row && $permissions->can('read', (int) $row->branch_id), 404);
+        abort_unless($row && $permissions->canInWorkspace('read', (int) $row->branch_id), 404);
 
         return [...(array) $row,
             'branch_id' => (int) $row->branch_id,
