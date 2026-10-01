@@ -372,17 +372,20 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await page.getByRole("textbox", { name: "اسم الفرع" }).fill("Denied Browser Branch");
     await page.getByRole("textbox", { name: "رمز الفرع" }).fill("denied-browser-branch");
     let deniedBody: { code: string } | undefined;
+    const fulfilled = Promise.withResolvers<void>();
     await page.route("**/api/v1/center/branches", async route => {
       if (route.request().method() !== "POST") return route.continue();
       const actual = await route.fetch();
       deniedBody = await actual.json();
       await route.fulfill({ response: actual });
-    });
+      fulfilled.resolve();
+    }, { times: 1 });
     const forbiddenResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/center/branches") && response.request().method() === "POST");
     await page.getByRole("button", { name: "حفظ الفرع" }).click();
     const revoked = await forbiddenResponse;
     expect(revoked.status()).toBe(409);
     expect(deniedBody?.code).toBe("workspace_expired");
+    await fulfilled.promise;
     await page.unroute("**/api/v1/center/branches");
     await expect(page).toHaveURL(`${host}/admin/workspaces?expired=1&return_to=${encodeURIComponent("/admin/settings")}`);
     await expect(page.getByRole("heading", { name: "اختيار مساحة العمل", exact: true })).toBeVisible();
@@ -501,10 +504,12 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await expectWorkspaceUrl(page, "/admin");
     await page.goto(workspaceUrl(page, `${host}/admin/settings?tab=branches`));
     await expect(page.getByRole("button", { name: "إنشاء فرع" })).toBeVisible();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Original owner invitation failure:", [password, staffPassword, secondManagerPassword].reduce((text, secret) => text.replaceAll(secret, "[redacted]"), message));
+    throw error;
   } finally {
-    await staffPage.close();
-    await secondManagerPage.close();
-    await landlordPage.close();
+    await Promise.allSettled([staffPage.close(), secondManagerPage.close(), landlordPage.close()]);
     runFixture(String.raw`
       $slug = getenv('COURSES_BROWSER_SLUG');
       $email = getenv('COURSES_BROWSER_EMAIL');

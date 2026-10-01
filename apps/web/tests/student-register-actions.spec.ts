@@ -1,6 +1,7 @@
 import { expectWorkspaceUrl, workspaceUrl } from "./workspace-testhelpers";
 import { expect, test } from '@playwright/test';
 import { credentials, signIn } from './local-fixtures';
+import type { MemberContext } from '@/lib/server-context';
 
 const origin = process.env.COURSES_TEST_ORIGIN ?? 'http://alpha.courses.test';
 
@@ -111,14 +112,35 @@ test('student rows expose authorized actions and the profile keeps its summary f
   expect(printedColors).toEqual({ background: 'rgb(255, 255, 255)', color: 'rgb(0, 0, 0)' });
 });
 
-test('read-only staff do not receive edit or finance actions', async ({ page }) => {
-  const staff = credentials('staff');
-  await signIn(page, origin, staff.email, staff.password);
-  await page.goto(workspaceUrl(page, `${origin}/admin/students`));
-  const row = page.getByRole('table', { name: 'طلاب الفرع الحالي' }).locator('tbody tr').first();
-  await row.getByRole('button', { name: /^إجراءات الطالب / }).click();
-  const menu = page.getByRole('menu');
-  await expect(menu.getByRole('menuitem', { name: 'عرض الملف' })).toBeVisible();
-  await expect(menu.getByRole('menuitem', { name: 'تعديل البيانات' })).toHaveCount(0);
-  await expect(menu.getByRole('menuitem', { name: 'الحساب المالي' })).toHaveCount(0);
+test('read-only staff do not receive edit or finance actions', async ({ page, browser }) => {
+  const staff = credentials('staff'); const ownerCredentials = credentials('alpha');
+  const owner = await browser.newPage();
+  await signIn(owner, origin, ownerCredentials.email, ownerCredentials.password);
+  const context = await (await owner.request.get(`${origin}/api/v1/center/member-workspace`)).json() as MemberContext;
+  const member = context.members.find(member => member.user.email === staff.email)!;
+  const north = context.branches.find(branch => branch.slug === 'north')!;
+  async function grants(center_roles: string[], branch_roles: Record<string, string[]>) {
+    await owner.request.get(`${origin}/sanctum/csrf-cookie`);
+    const token = (await owner.context().cookies(origin)).find(cookie => cookie.name === 'XSRF-TOKEN')!.value;
+    const response = await owner.request.put(`${origin}/api/v1/center/members/${member.id}/grants`, {
+      headers: { Accept: 'application/json', 'X-XSRF-TOKEN': decodeURIComponent(token), 'X-Courses-Workspace': new URL(owner.url()).searchParams.get('workspace')! },
+      data: { center_roles, branch_roles },
+    });
+    expect(response.status()).toBe(200);
+  }
+  let changed = false;
+  try {
+    await grants([], { [north.id]: ['branch_auditor'] }); changed = true;
+    await signIn(page, origin, staff.email, staff.password);
+    await page.goto(workspaceUrl(page, `${origin}/admin/students`));
+    const row = page.getByRole('table', { name: 'طلاب الفرع الحالي' }).locator('tbody tr').first();
+    await row.getByRole('button', { name: /^إجراءات الطالب / }).click();
+    const menu = page.getByRole('menu');
+    await expect(menu.getByRole('menuitem', { name: 'عرض الملف' })).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'تعديل البيانات' })).toHaveCount(0);
+    await expect(menu.getByRole('menuitem', { name: 'الحساب المالي' })).toHaveCount(0);
+  } finally {
+    if (changed) await grants(member.center_roles, member.branch_roles);
+    await owner.close();
+  }
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useMemo, useId, type ReactNode, type Dispatch, type SetStateAction } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useMemo, useId, useCallback, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { useLinkStatus } from "next/link";
 import { PrefetchLink as Link } from "./PrefetchLink";
 import { getAdminHeader } from "@/lib/admin-header";
@@ -10,6 +10,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import type { CenterContext } from "@/lib/server-context";
 import { centerRequest, responseMessage } from "@/lib/client-api";
 import { Button } from "./Button";
+import { buttonVariants } from "./ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetClose, SheetTrigger } from "./ui/sheet";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "./ui/dropdown-menu";
 import { ThemeToggle } from "./ThemeProvider";
@@ -99,7 +100,12 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
   }
   const actions = currentActions.map(([id, item]) => <span key={id} className="header-action-group">{item.actions}</span>);
   const [collapsed, setCollapsed] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuState, setMenuState] = useState({ path, workspace, open: false });
+  if (menuState.path !== path || menuState.workspace !== workspace) {
+    setMenuState({ path, workspace, open: false });
+  }
+  const menuOpen = menuState.open && menuState.path === path && menuState.workspace === workspace;
+  const setMenuOpen = useCallback((open: boolean) => setMenuState({ path, workspace, open }), [path, workspace]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const drawerClose = useRef<HTMLButtonElement>(null);
@@ -128,7 +134,7 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
       media.removeEventListener("change", closeOnDesktop);
 
     };
-  }, [menuOpen]);
+  }, [menuOpen, setMenuOpen]);
 
   async function signOut() {
     setBusy(true); setError("");
@@ -146,6 +152,16 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
     </Link>)}</nav>;
   }
 
+  function workspaceControl(mobile = false) {
+    const name = !workspaceResolved ? "جارٍ تحميل مساحة العمل…" : context.workspace?.mode === "branch" ? context.workspace.branch?.name : context.workspace?.mode === "center" ? "إدارة المركز" : "اختر مساحة العمل";
+    const compact = collapsed && !mobile;
+    const icon = <svg aria-hidden="true" className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4" /></svg>;
+    return <div className={`flex min-w-0 items-center gap-1 px-1 text-xs ${compact ? "justify-center" : "justify-between"}`} aria-label="مساحة العمل الحالية">
+      <span className={compact ? "sr-only" : "min-w-0 break-words"} data-workspace-name>{name}</span>
+      {path !== "/admin/workspaces" && context.workspace_can_switch ? <Link className={buttonVariants({ variant: "ghost", size: "icon-xs", className: "max-[900px]:size-11" })} href={`/admin/workspaces?return_to=${encodeURIComponent(workspaceSection(path))}`} aria-label="تبديل مساحة العمل" title={`تبديل مساحة العمل: ${name}`} onClick={() => setMenuOpen(false)}>{icon}</Link> : compact ? <svg aria-hidden="true" className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><title>{name}</title>{navigationIcons.branches}</svg> : null}
+    </div>;
+  }
+
   function account(mobile = false) {
     return <div className="sidebar-account">
       {!collapsed || mobile ? <div className="sidebar-user"><strong>{context.user.name}</strong><span className="membership-status"><span aria-hidden="true">●</span> نشطة</span></div> : null}
@@ -160,8 +176,10 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
   return <WorkspaceNavigation.Provider value={workspace ?? context.workspace?.id ?? null}><PageRegistration.Provider value={registration}><TablePreferenceUser.Provider value={String(context.user.id)}><Sheet open={menuOpen} onOpenChange={setMenuOpen}><div className={`center-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
     <a className="skip-link" href="#center-content">انتقل إلى المحتوى</a>
     <aside className="center-sidebar">
-      <Link className="brand" href="/admin" aria-label="Courses — الرئيسية"><span className="brand-mark" aria-hidden="true">C</span>{!collapsed ? <span>Courses</span> : null}</Link>
-      {!collapsed ? <div className="sidebar-center"><span className="eyebrow">مساحة المركز</span><strong>{context.center.name}</strong></div> : null}
+      <div className="sidebar-center"><div className="flex min-w-0 items-start gap-2">
+        <Link className="brand" href="/admin" aria-label={`${context.center.name} — الرئيسية`}><span className="brand-mark" aria-hidden="true">{context.center.name.trim().charAt(0)}</span></Link>
+        {!collapsed ? <div className="min-w-0 flex-1"><strong>{context.center.name}</strong>{workspaceControl()}</div> : null}
+      </div>{collapsed ? workspaceControl() : null}</div>
       <div className="sidebar-navigation">{navigation()}</div>
       <div className="sidebar-bottom">{navigation(false, true)}
         {account()}
@@ -169,14 +187,14 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
     </aside>
     <div className="center-frame">
       <header className="center-topbar">
-        <div className="topbar-context"><SheetTrigger render={<Button ref={menuButton} className="hidden min-w-0 max-[900px]:inline-flex" />}>القائمة</SheetTrigger><div><nav className="page-breadcrumbs" aria-label="مسار الصفحة"><ol className="flex flex-wrap items-center gap-1"><li><Link href="/admin">{context.center.name}<NavigationPending /></Link></li>{(currentPage?.trail?.length ?? 0) > 1 ? <li className="min-[901px]:hidden"><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="sm" aria-label="عرض المسار الكامل" />}>…</DropdownMenuTrigger><DropdownMenuContent className="max-w-[calc(100vw-2rem)] w-64">{currentPage?.trail?.slice(0, -1).map(item => <DropdownMenuItem key={item.href} render={<Link href={breadcrumbHref(item)} />} className="whitespace-normal break-words">{item.label}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></li> : null}{currentPage?.trail?.map((item, index) => <li key={item.href} className={`${index < (currentPage?.trail?.length ?? 0) - 1 ? "hidden min-[901px]:flex" : "flex"} min-w-0 items-center gap-1`}><span aria-hidden="true">‹</span><Link className="break-words" href={breadcrumbHref(item)}>{item.label}</Link></li>)}<li className="flex min-w-0 items-center gap-1"><span aria-hidden="true">‹</span><span aria-current="page">{title}</span></li></ol></nav><h1>{title}</h1><div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm"><span className="break-words" data-workspace-name>{!workspaceResolved ? "جارٍ تحميل مساحة العمل…" : context.workspace?.mode === "branch" ? context.workspace.branch?.name : context.workspace?.mode === "center" ? "إدارة المركز" : "اختر مساحة العمل"}</span>{path !== "/admin/workspaces" && context.workspace_can_switch ? <Link className="text-link" href={`/admin/workspaces?return_to=${encodeURIComponent(workspaceSection(path))}`}>تبديل مساحة العمل</Link> : null}{context.workspace?.mode === "branch" && (context.workspace_scope === "authorized_branches" || context.workspace_scope === "authorized_financial_branches" || context.workspace_scope === "center") && path !== "/admin/workspaces" ? <span className="muted">{context.workspace_scope === "authorized_financial_branches" ? "نطاق الحساب: الفروع المصرح بها ماليًا" : context.workspace_scope === "center" ? "نطاق الصفحة: المركز" : "نطاق الصفحة: الفروع المصرح بها"}</span> : null}</div>{description ? <p className="page-description">{description}</p> : null}</div></div>
+        <div className="topbar-context"><SheetTrigger render={<Button ref={menuButton} className="hidden min-w-0 max-[900px]:inline-flex" />}>القائمة</SheetTrigger><div><nav className="page-breadcrumbs" aria-label="مسار الصفحة"><ol className="flex flex-wrap items-center gap-1"><li><Link href="/admin">{context.center.name}<NavigationPending /></Link></li>{(currentPage?.trail?.length ?? 0) > 1 ? <li className="min-[901px]:hidden"><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="sm" aria-label="عرض المسار الكامل" />}>…</DropdownMenuTrigger><DropdownMenuContent className="max-w-[calc(100vw-2rem)] w-64">{currentPage?.trail?.slice(0, -1).map(item => <DropdownMenuItem key={item.href} render={<Link href={breadcrumbHref(item)} />} className="whitespace-normal break-words">{item.label}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></li> : null}{currentPage?.trail?.map((item, index) => <li key={item.href} className={`${index < (currentPage?.trail?.length ?? 0) - 1 ? "hidden min-[901px]:flex" : "flex"} min-w-0 items-center gap-1`}><span aria-hidden="true">‹</span><Link className="break-words" href={breadcrumbHref(item)}>{item.label}</Link></li>)}<li className="flex min-w-0 items-center gap-1"><span aria-hidden="true">‹</span><span aria-current="page">{title}</span></li></ol></nav><h1>{title}</h1>{context.workspace?.mode === "branch" && (context.workspace_scope === "authorized_branches" || context.workspace_scope === "authorized_financial_branches" || context.workspace_scope === "center") && path !== "/admin/workspaces" ? <p className="muted text-xs">{context.workspace_scope === "authorized_financial_branches" ? "نطاق الحساب: الفروع المصرح بها ماليًا" : context.workspace_scope === "center" ? "نطاق الصفحة: المركز" : "نطاق الصفحة: الفروع المصرح بها"}</p> : null}{description ? <p className="page-description">{description}</p> : null}</div></div>
         <div className="topbar-actions">{actions}</div>
       </header>
       <div id="center-content" tabIndex={-1} className="center-content">{error ? <InlineNotice tone="error">{error}</InlineNotice> : null}{children}</div>
       <footer className="center-footer">Courses <span>·</span> إدارة المركز والفروع</footer>
     </div>
     <SheetContent side="right" showCloseButton={false} initialFocus={drawerClose} finalFocus={menuButton} className="p-4">
-      <SheetHeader><div className="flex items-center justify-between gap-2"><SheetTitle>{context.center.name}</SheetTitle><SheetClose ref={drawerClose} render={<Button />}>إغلاق القائمة</SheetClose></div></SheetHeader>
+      <SheetHeader><div className="flex items-center justify-between gap-2"><SheetTitle>{context.center.name}</SheetTitle><SheetClose ref={drawerClose} render={<Button />}>إغلاق القائمة</SheetClose></div>{workspaceControl(true)}</SheetHeader>
       <div className="sidebar-navigation">{navigation(true)}</div><div className="sidebar-bottom">{navigation(true, true)}{account(true)}</div>
     </SheetContent>
   </div></Sheet></TablePreferenceUser.Provider></PageRegistration.Provider></WorkspaceNavigation.Provider>;

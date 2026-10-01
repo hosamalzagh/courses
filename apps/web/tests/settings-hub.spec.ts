@@ -75,7 +75,7 @@ test("owner opens only the selected settings data and legacy links retain parame
     await ssr.goto(`${origin}/admin/settings?tab=branches`);
     await expect(ssr.getByRole("table", { name: "الفروع" })).toContainText("الفرع الشمالي");
   } finally { await noScript.close(); }
-  await page.getByRole("link", { name: "Courses — الرئيسية" }).click();
+  await page.getByRole("link", { name: / — الرئيسية$/ }).click();
   await expect(page).toHaveURL(`${origin}/admin`);
   await expect(page.locator("main").getByRole("table")).toHaveCount(0);
 });
