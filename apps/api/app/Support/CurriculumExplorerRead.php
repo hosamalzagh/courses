@@ -128,7 +128,11 @@ class CurriculumExplorerRead
         $batches = $batches->keyBy(fn ($batch) => $batch['parent']['kind'].':'.$batch['parent']['id']);
         foreach ($expanded as $key => $parent) {
             $parentRow = $payloads('expanded_parent_'.$key)->first();
-            abort_unless($parentRow, 404);
+            // Auxiliary disclosure state can outlive deletion or access changes.
+            // The scoped selected record above remains mandatory.
+            if (! $parentRow) {
+                continue;
+            }
             $items = $payloads('expanded_child_'.$key);
             $batches->put($key, ['parent' => $read->present($parentRow), 'items' => $items->take(50)->map(fn ($row) => $read->present($row))->values(),
                 'page' => $parent['page'], 'has_more' => $items->count() > 50]);

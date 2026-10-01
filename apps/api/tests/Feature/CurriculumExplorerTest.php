@@ -218,6 +218,49 @@ class CurriculumExplorerTest extends TestCase
         $this->assertLessThanOrEqual(6, (int) $last->headers->get('X-Courses-Query-Count'));
     }
 
+    public function test_deleted_auxiliary_expansions_do_not_hide_the_still_authorized_selection(): void
+    {
+        $selected = $this->postJson("{$this->base}/courses", ['name' => 'Still selected', 'branch_id' => $this->north,
+            'request_id' => (string) Str::uuid()])->assertCreated()->json('course');
+        $auxiliary = $this->postJson("{$this->base}/courses", ['name' => 'Auxiliary course', 'branch_id' => $this->north,
+            'request_id' => (string) Str::uuid()])->assertCreated()->json('course');
+        $stage = $this->postJson("{$this->base}/courses/{$auxiliary['id']}/stages", ['name' => 'Auxiliary stage',
+            'request_id' => (string) Str::uuid()])->assertCreated()->json('stage');
+        $level = $this->postJson("{$this->base}/stages/{$stage['id']}/levels", ['name' => 'Auxiliary level',
+            'request_id' => (string) Str::uuid(), 'lectures' => [['number' => 1, 'content' => 'Unused plan', 'planned_hours' => 1]]])
+            ->assertCreated()->json('level');
+        $workspace = $this->postJson("{$this->base}/workspaces", ['mode' => 'branch', 'branch_id' => $this->north])->assertOk()->json('workspace.id');
+        $expanded = "course:{$selected['id']}:1,course:{$auxiliary['id']}:1,stage:{$stage['id']}:1,level:{$level['id']}:1";
+        $url = "{$this->base}/curriculum-explorer?kind=course&id={$selected['id']}&expanded={$expanded}";
+        $this->withHeader('X-Courses-Workspace', $workspace)->getJson($url)->assertOk()->assertJsonCount(4, 'tree.batches');
+
+        $writer = User::factory()->create();
+        CenterMembership::create(['tenant_id' => $this->center->id, 'user_id' => $writer->id, 'status' => 'active']);
+        $this->center->run(fn () => DB::table('center_grants')->insert(['user_id' => $writer->id, 'role' => 'center_owner',
+            'created_at' => now(), 'updated_at' => now()]));
+        $this->actingAs($writer, 'web')->withoutHeader('X-Courses-Workspace');
+        $writerWorkspace = $this->postJson("{$this->base}/workspaces", ['mode' => 'branch', 'branch_id' => $this->north])->assertOk()->json('workspace.id');
+        $this->withHeader('X-Courses-Workspace', $writerWorkspace);
+        $this->deleteJson("{$this->base}/levels/{$level['id']}")->assertOk();
+        $this->deleteJson("{$this->base}/stages/{$stage['id']}")->assertOk();
+        $this->deleteJson("{$this->base}/courses/{$auxiliary['id']}")->assertOk();
+
+        $this->actingAs($this->owner, 'web')->withHeader('X-Courses-Workspace', $workspace);
+        $response = $this->getJson($url)->assertOk()->assertJsonPath('curriculum.navigation.course.id', $selected['id'])
+            ->assertJsonCount(1, 'tree.path')->assertJsonCount(1, 'tree.batches')
+            ->assertJsonPath('tree.batches.0.parent.id', $selected['id'])->assertJsonPath('tree.batches.0.items', []);
+        foreach ([$auxiliary['id'], $stage['id'], $level['id']] as $id) {
+            $this->assertStringNotContainsString($id, $response->getContent());
+        }
+        $count = $response->headers->get('X-Courses-Query-Count');
+        $this->assertMatchesRegularExpression('/^[0-9]+$/', $count);
+        $this->assertLessThanOrEqual(6, (int) $count);
+        foreach (['course' => $auxiliary['id'], 'stage' => $stage['id'], 'level' => $level['id']] as $kind => $id) {
+            $this->getJson("{$this->base}/curriculum-explorer?kind={$kind}&id={$id}&expanded=course:{$selected['id']}:1")->assertNotFound();
+            $this->getJson("{$this->base}/curriculum-explorer/children?kind={$kind}&id={$id}")->assertNotFound();
+        }
+    }
+
     public function test_viewer_tree_permissions_foreign_selection_and_revocation_apply_to_the_composite_read(): void
     {
         $course = $this->postJson("{$this->base}/courses", ['name' => 'Visible course', 'branch_id' => $this->north,
@@ -236,7 +279,12 @@ class CurriculumExplorerTest extends TestCase
             ->assertJsonPath('curriculum.navigation.course.can_delete', false);
         $this->assertLessThanOrEqual(6, (int) $response->headers->get('X-Courses-Query-Count'));
         $this->getJson("{$this->base}/curriculum-explorer?kind=course&id={$foreign['id']}")->assertNotFound();
-        $this->getJson("{$this->base}/curriculum-explorer?expanded=course:{$foreign['id']}:1")->assertNotFound();
+        foreach (['', "kind=course&id={$course['id']}&"] as $selection) {
+            $auxiliary = $this->getJson("{$this->base}/curriculum-explorer?{$selection}expanded=course:{$foreign['id']}:1")
+                ->assertOk()->assertJsonPath('tree.batches', []);
+            $this->assertStringNotContainsString($foreign['id'], $auxiliary->getContent());
+            $this->assertStringNotContainsString('Hidden south', $auxiliary->getContent());
+        }
         $this->getJson("{$this->base}/curriculum-explorer?q=Hidden")->assertOk()->assertJsonPath('tree.search.items', []);
         $this->center->run(fn () => DB::table('branch_grants')->where('user_id', $viewer->id)->delete());
         $this->getJson("{$this->base}/curriculum-explorer?kind=course&id={$course['id']}")->assertStatus(409)->assertJsonPath('code', 'workspace_expired');
