@@ -5,6 +5,7 @@ namespace App\Support;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
 /** A session-bound, immutable selection. Raw permissions remain independent. */
@@ -30,7 +31,8 @@ class CenterWorkspace
             $id = $request->session()->get('initial_workspace');
         }
         if ($id === null) {
-            if ($request->session()->get('workspace_required')) {
+            // Older browser sessions have the web login key but no workspace flags.
+            if ($request->session()->get('workspace_required') || $request->session()->has(Auth::guard('web')->getName())) {
                 self::unavailable('workspace_required');
             }
 

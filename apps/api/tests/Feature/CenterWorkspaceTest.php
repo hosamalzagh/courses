@@ -50,6 +50,50 @@ class CenterWorkspaceTest extends TestCase
         $this->actingAs($this->staff, 'web')->withSession(['center_id' => $this->center->id]);
     }
 
+    public function test_preexisting_authenticated_session_requires_selection_before_protected_reads_or_writes(): void
+    {
+        $this->assertPreexistingSessionRequiresSelection(false);
+    }
+
+    public function test_preexisting_owner_session_requires_selection_before_implicit_center_access(): void
+    {
+        $this->assertPreexistingSessionRequiresSelection(true);
+    }
+
+    private function assertPreexistingSessionRequiresSelection(bool $manager): void
+    {
+        if ($manager) {
+            $this->center->run(fn () => DB::table('center_grants')->insert([
+                'user_id' => $this->staff->id, 'role' => 'center_owner', 'created_at' => now(), 'updated_at' => now(),
+            ]));
+        }
+        // This session predates workspace support: only its center and web identity exist.
+        Auth::guard('web')->login($this->staff);
+        $this->assertTrue(session()->has(Auth::guard('web')->getName()));
+        Auth::forgetGuards();
+        $this->assertFalse(session()->has('initial_workspace'));
+        $this->assertFalse(session()->has('workspace_required'));
+        foreach (['user', 'curriculum-workspace'] as $path) {
+            $this->getJson('http://alpha.courses.test/api/v1/center/'.$path)
+                ->assertStatus(409)->assertJsonPath('code', 'workspace_required');
+        }
+        $payload = ['request_id' => (string) Str::uuid(), 'branch_id' => $this->branches[1], 'name' => 'Unselected old session'];
+        $this->postJson('http://alpha.courses.test/api/v1/center/courses', $payload)
+            ->assertStatus(409)->assertJsonPath('code', 'workspace_required');
+        $this->center->run(fn () => $this->assertSame(0, DB::table('courses')->count()));
+        $this->getJson('http://alpha.courses.test/api/v1/center/workspaces')->assertOk()->assertJsonCount($manager ? 3 : 2, 'branches');
+        $workspace = $this->postJson('http://alpha.courses.test/api/v1/center/workspaces', [
+            'mode' => 'branch', 'branch_id' => $this->branches[0],
+        ])->assertOk()->json('workspace.id');
+        $this->withHeader('X-Courses-Workspace', $workspace)
+            ->getJson('http://alpha.courses.test/api/v1/center/curriculum-workspace')->assertOk()
+            ->assertJsonPath('workspace.branch.id', $this->branches[0]);
+        $this->postJson('http://alpha.courses.test/api/v1/center/courses', $payload)->assertForbidden();
+        $this->postJson('http://alpha.courses.test/api/v1/center/courses', [
+            ...$payload, 'branch_id' => $this->branches[0],
+        ])->assertCreated();
+    }
+
     public function test_selected_workspace_scopes_course_reads_and_transactional_writes_without_changing_raw_grants(): void
     {
         $selection = $this->postJson('http://alpha.courses.test/api/v1/center/workspaces', [
