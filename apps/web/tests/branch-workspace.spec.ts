@@ -41,7 +41,7 @@ function reads(since: number) {
   return JSON.parse(fixture(String.raw`
     echo \Illuminate\Support\Facades\DB::connection('central')->table('telescope_entries')
       ->where('type', 'request')->where('sequence', '>', ` + since + String.raw`)
-      ->whereRaw("content::jsonb->>'uri' LIKE '%api/v1/center/curriculum-workspace%'")
+      ->whereRaw("content::jsonb->>'uri' LIKE '%api/v1/center/curriculum-explorer%'")
       ->whereRaw("content::jsonb->'headers'->>'host' = 'alpha.courses.test'")
       ->pluck('content')->map(fn ($content) => json_decode($content, true)['response_headers']['x-courses-query-count'] ?? null)->toJson();
   `)) as string[];
@@ -90,7 +90,7 @@ test("password, scoped course journey, independent tabs, dirty switch, Back and 
   const course = `كورس التحقق ${suffix}`;
   await page.getByRole("textbox", { name: "اسم الكورس" }).fill(course);
   await page.getByRole("button", { name: "حفظ المنهج", exact: true }).click();
-  await page.getByRole("link", { name: course, exact: true }).click();
+  await page.getByRole("navigation", { name: "شجرة المنهج", exact: true }).getByRole("link", { name: course, exact: true }).click();
   await expect(page.getByRole("heading", { name: `مراحل ${course}`, exact: true })).toBeVisible();
   expect(new URL(page.url()).searchParams.get("workspace")).toBe(firstId);
   const second = await context.newPage();
@@ -131,7 +131,7 @@ test("password, scoped course journey, independent tabs, dirty switch, Back and 
 
     const since = cursor();
     await page.reload();
-    await expect(page.getByRole("link", { name: course, exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "شجرة المنهج", exact: true }).getByRole("link", { name: course, exact: true })).toBeVisible();
     await expect.poll(() => reads(since).length).toBe(1);
     const counts = reads(since);
     expect(counts.every(count => /^\d+$/.test(count) && Number(count) <= 6 && Number(count) > 0)).toBe(true);

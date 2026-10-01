@@ -99,11 +99,12 @@ test('student settings header shows only relevant actions on desktop and mobile'
     const toggle = page.getByRole('checkbox', { name: 'تفعيل البحث بين الفروع', exact: true });
     await expect(toggle).toBeVisible();
     await expect(page.getByRole('checkbox', { name: 'السماح بمشاركة الملفات الجديدة', exact: true })).toBeVisible();
+    const originalSearchEnabled = await toggle.isChecked();
     await toggle.click();
-    await expect(page.getByRole('alertdialog', { name: 'تفعيل البحث بين الفروع' })).toBeVisible();
+    await expect(page.getByRole('alertdialog', { name: originalSearchEnabled ? 'تعطيل البحث بين الفروع' : 'تفعيل البحث بين الفروع' })).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(toggle).toBeFocused();
-    await expect(toggle).not.toBeChecked();
+    await expect(toggle).toBeChecked({ checked: originalSearchEnabled });
     await expect(page.getByRole('tablist', { name: 'أقسام الإعدادات' }).getByRole('tab', { name: 'الحقول الإضافية' })).toHaveCount(0);
     await expect(page.getByRole('tab', { name: 'إعدادات الطلاب', exact: true })).toHaveAttribute('aria-selected', 'true');
     await page.getByRole('tab', { name: 'الحقول الإضافية', exact: true }).click();

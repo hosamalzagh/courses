@@ -1,4 +1,4 @@
-import { expectWorkspaceUrl, workspaceUrl } from "./workspace-testhelpers";
+import { workspaceUrl } from "./workspace-testhelpers";
 import { expect, test } from "@playwright/test";
 import { credentials, signIn } from "./local-fixtures";
 

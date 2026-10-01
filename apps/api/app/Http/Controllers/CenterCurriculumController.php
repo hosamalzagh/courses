@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\Center;
 use App\Models\CenterMembership;
 use App\Support\CenterPermissions;
+use App\Support\CurriculumRecords;
 use Closure;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -87,10 +89,7 @@ class CenterCurriculumController extends Controller
             $pagination[$kind]['has_more'] = $items->count() > 50;
             $records[$kind] = $items->take(50)->map(function ($row) use ($permissions, $levelId, $data, $kind): array {
                 $record = json_decode($row->payload, true);
-                $record['can_manage'] = $permissions->can('curriculum.manage', $record['branch_id']);
-                if ($kind === 'courses') {
-                    $this->hideCopySource($record, $permissions);
-                }
+                $record = CurriculumRecords::present($kind, $record, $permissions);
                 if ($levelId !== null && isset($record['plan_history'])) {
                     $history = $record['plan_history'];
                     $record['plan_history'] = array_slice($history, 0, 20);
@@ -314,96 +313,69 @@ class CenterCurriculumController extends Controller
         });
     }
 
+    public function destroyCourse(Request $request, string $courseId): JsonResponse
+    {
+        return $this->destroyRecord($request, 'courses', $courseId);
+    }
+
+    public function destroyStage(Request $request, string $stageId): JsonResponse
+    {
+        return $this->destroyRecord($request, 'stages', $stageId);
+    }
+
+    public function destroyLevel(Request $request, string $levelId): JsonResponse
+    {
+        return $this->destroyRecord($request, 'levels', $levelId);
+    }
+
+    private function destroyRecord(Request $request, string $kind, string $id): JsonResponse
+    {
+        abort_unless(Str::isUuid($id), 404);
+        try {
+            return $this->write($request, function (CenterPermissions $permissions) use ($request, $kind, $id): JsonResponse {
+                $record = $this->read($kind, $id, $permissions);
+                $this->authorize($permissions, $record['branch_id']);
+                DB::connection('tenant')->table($kind)->where('id', $id)->lockForUpdate()->first();
+                if ($kind === 'levels') {
+                    DB::connection('tenant')->table('study_plan_versions')->where('level_id', $id)->lockForUpdate()->get();
+                }
+                $record = $this->read($kind, $id, $permissions);
+                $reason = CurriculumRecords::deletionBlockedReason($kind, $record);
+                if ($reason !== null) {
+                    throw new HttpResponseException(response()->json(['code' => 'curriculum_in_use', 'message' => $reason], 409));
+                }
+                if ($kind === 'levels') {
+                    $plans = DB::connection('tenant')->table('study_plan_versions')->where('level_id', $id)->select('id');
+                    DB::connection('tenant')->table('plan_lectures')->whereIn('plan_version_id', $plans)->delete();
+                    DB::connection('tenant')->table('study_plan_versions')->where('level_id', $id)->delete();
+                }
+                DB::connection('tenant')->table($kind)->where('id', $id)->delete();
+                $singular = ['courses' => 'course', 'stages' => 'stage', 'levels' => 'level'][$kind];
+                $this->audit($request, 'curriculum.'.$singular.'_deleted', $record['branch_id'], $kind, $record, ['id' => $id, 'deleted' => true]);
+
+                return response()->json(['deleted_id' => $id]);
+            });
+        } catch (QueryException $exception) {
+            if ($exception->getCode() !== '23503') {
+                throw $exception;
+            }
+
+            return response()->json(['code' => 'curriculum_in_use', 'message' => 'لا يمكن حذف هذا السجل لارتباطه بسجلات دراسية محفوظة.'], 409);
+        }
+    }
+
     private function records(string $kind, CenterPermissions $permissions, bool $includeLectures = true,
         ?int $selectedVersion = null, int $versionsPage = 1, bool $includeHistory = false): Builder
     {
-        $query = DB::connection('tenant')->table('courses');
-        if ($kind === 'courses') {
-            $query->leftJoin('curriculum_course_copies as copies', 'copies.copied_course_id', '=', 'courses.id');
-        }
-        if ($kind !== 'courses') {
-            $query->join('stages', 'stages.course_id', '=', 'courses.id');
-        }
-        if ($kind === 'levels') {
-            $query->join('levels', 'levels.stage_id', '=', 'stages.id')->join('study_plan_versions as plans', function ($join) use ($selectedVersion): void {
-                $join->on('plans.level_id', '=', 'levels.id');
-                if ($selectedVersion !== null) {
-                    $join->where('plans.version', $selectedVersion);
-                } else {
-                    $join->whereRaw('plans.version = (SELECT max(latest.version) FROM study_plan_versions AS latest WHERE latest.level_id = levels.id)');
-                }
-            });
-        }
-        if (! $permissions->isCenterManager()) {
-            $query->whereIn('courses.branch_id', $this->scope($permissions));
-        }
-        $permissions->workspace?->constrain($query, 'courses.branch_id');
-        $query->select([$kind.'.id', $kind.'.name', $kind.'.completion_threshold', $kind.'.completion_revision', 'courses.branch_id']);
-        if ($kind === 'courses') {
-            $query->addSelect(['copies.source_course_id', 'copies.source_course_name',
-                'copies.source_branch_id', 'copies.source_branch_name']);
-        }
-        if ($kind !== 'courses') {
-            $query->addSelect(['stages.course_id', 'courses.name as course_name']);
-        }
-        if ($kind === 'levels') {
-            $lecturePayload = $includeLectures ? <<<'SQL'
-COALESCE((SELECT json_agg(json_build_object('id', lectures.id, 'number', lectures.number, 'content', lectures.content, 'title', lectures.title, 'planned_hours', lectures.planned_hours::float) ORDER BY lectures.number)
-FROM (SELECT * FROM plan_lectures WHERE plan_version_id = plans.id ORDER BY number LIMIT 200) lectures), '[]'::json)
-SQL : "'[]'::json";
-            $previousLectures = $includeLectures ? <<<'SQL'
-COALESCE((SELECT json_agg(json_build_object('number', lectures.number, 'content', lectures.content, 'title', lectures.title, 'planned_hours', lectures.planned_hours::float) ORDER BY lectures.number)
-FROM (SELECT number, content, title, planned_hours FROM plan_lectures WHERE plan_version_id = (SELECT previous.id FROM study_plan_versions AS previous WHERE previous.level_id = levels.id AND previous.version = plans.version - 1) ORDER BY number LIMIT 200) lectures), '[]'::json)
-SQL : "'[]'::json";
-            $query->addSelect(['levels.stage_id', 'stages.name as stage_name'])->selectRaw(<<<SQL
-json_build_object('id', plans.id, 'version', plans.version, 'revision', plans.revision, 'used_at', plans.used_at,
-'lecture_count', (SELECT count(*) FROM plan_lectures WHERE plan_version_id = plans.id),
-'planned_hours', (SELECT COALESCE(sum(planned_hours), 0)::float FROM plan_lectures WHERE plan_version_id = plans.id),
-'lectures', {$lecturePayload}, 'previous_lectures', {$previousLectures}) AS plan,
-(SELECT max(latest.version) FROM study_plan_versions AS latest WHERE latest.level_id = levels.id) AS latest_version
-SQL);
-            if ($includeHistory) {
-                $historyOffset = ($versionsPage - 1) * 20;
-                $query->selectRaw(<<<SQL
-(SELECT COALESCE(json_agg(row_to_json(history) ORDER BY history.version DESC), '[]'::json) FROM (
-    SELECT versions.id, versions.version, versions.revision, versions.used_at, versions.created_at,
-        (SELECT count(*) FROM plan_lectures WHERE plan_version_id = versions.id) AS lecture_count,
-        (SELECT COALESCE(sum(planned_hours), 0)::float FROM plan_lectures WHERE plan_version_id = versions.id) AS planned_hours
-    FROM study_plan_versions AS versions WHERE versions.level_id = levels.id
-    ORDER BY versions.version DESC LIMIT 21 OFFSET {$historyOffset}
-) AS history)
-AS plan_history
-SQL);
-            }
-        }
-
-        return $query;
+        return CurriculumRecords::query($kind, $permissions, $includeLectures, $selectedVersion, $versionsPage, $includeHistory);
     }
 
     private function read(string $kind, string $id, CenterPermissions $permissions, ?int $selectedVersion = null): array
     {
         $row = $this->records($kind, $permissions, true, $selectedVersion)->where($kind.'.id', $id)->first();
         abort_unless($row, 404);
-        $record = (array) $row;
-        if (isset($record['plan'])) {
-            $record['plan'] = json_decode($record['plan'], true);
-        }
-        $record['can_manage'] = $permissions->can('curriculum.manage', $record['branch_id']);
-        if ($kind === 'courses') {
-            $this->hideCopySource($record, $permissions);
-        }
 
-        return $record;
-    }
-
-    private function hideCopySource(array &$record, CenterPermissions $permissions): void
-    {
-        if ($record['source_branch_id'] !== null && ! $permissions->can('read', (int) $record['source_branch_id'])) {
-            $record['source_course_id'] = null;
-            $record['source_course_name'] = null;
-            $record['source_branch_id'] = null;
-            $record['source_branch_name'] = null;
-        }
+        return CurriculumRecords::present($kind, (array) $row, $permissions);
     }
 
     private function create(Request $request, string $kind, array $data, int $branchId, CenterPermissions $permissions): JsonResponse

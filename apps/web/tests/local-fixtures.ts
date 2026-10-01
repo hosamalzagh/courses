@@ -2,8 +2,8 @@ import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { expect, type Browser, type Page } from "@playwright/test";
-import { finishWorkspaceEntry } from "./workspace-testhelpers";
+import { expect, test, type Browser, type Page } from "@playwright/test";
+import { finishWorkspaceEntry, workspaceUrl } from "./workspace-testhelpers";
 
 const credentialsDir = path.resolve(process.cwd(), "../api/storage/app/private");
 const php = process.env.COURSES_PHP_BIN ?? (process.platform === "darwin" ? "php85" : "php");
@@ -48,7 +48,10 @@ export async function signIn(page: Page, host: string, email: string, password: 
     const response = await responsePromise;
     if (response.status() === 429) {
       const retryAfter = Number(response.headers()["retry-after"] ?? "60");
-      await page.waitForTimeout((retryAfter + 1) * 1_000);
+      expect(Number.isFinite(retryAfter) && retryAfter >= 0 && retryAfter <= 60).toBe(true);
+      const wait = (retryAfter + 1) * 1_000;
+      test.setTimeout(test.info().timeout + wait);
+      await page.waitForTimeout(wait);
       continue;
     }
     if (response.status() === 202) {
@@ -105,8 +108,11 @@ async function acceptInvitation(browser: Browser, name: "alpha" | "beta" | "staf
 }
 
 async function ensureBranch(page: Page, name: string, slug: string) {
-  await page.goto(new URL("/admin/settings?tab=branches", page.url()).toString());
-  if (await page.getByRole("heading", { name, exact: true }).count()) return;
+  await page.goto(workspaceUrl(page, "/admin/settings?tab=branches"));
+  const current = await page.request.get(new URL("/api/v1/center/user", page.url()).href, { headers: { "X-Courses-Workspace": new URL(page.url()).searchParams.get("workspace")! } });
+  expect(current.status()).toBe(200);
+  const branches = (await current.json()).branches as { name: string; slug: string }[];
+  if (branches.some(branch => branch.name === name && branch.slug === slug)) return;
   await page.getByRole("button", { name: "إنشاء فرع" }).click();
   await page.getByRole("textbox", { name: "اسم الفرع" }).fill(name);
   await page.getByRole("textbox", { name: "رمز الفرع" }).fill(slug);

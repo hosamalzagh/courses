@@ -1,3 +1,4 @@
+import { expectWorkspaceUrl, workspaceUrl } from "./workspace-testhelpers";
 import { expect, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -18,6 +19,11 @@ async function write(page: Page, route: string, method: string, payload: object)
   }, { route, method, payload });
   if (route === 'courses' && result.status === 201) createdCourseIds.add(result.body.course.id);
   return result;
+}
+async function openFirstPlan(page: Page) {
+  const details = page.locator('[data-curriculum-details]');
+  await (await details.count() ? details : page).getByRole('button', { name: /^إدارة المستوى:/ }).click();
+  await page.getByRole('menuitem', { name: 'تعديل الخطة الأولى', exact: true }).click();
 }
 async function sequence(page: Page, branchId: number, name: string): Promise<Level> {
   const course = await write(page, 'courses', 'POST', { branch_id: branchId, name, request_id: crypto.randomUUID() });
@@ -41,7 +47,7 @@ function metricsAfter(sequence: number) {
 }
 async function budget(page: Page, route: string, cold: boolean) {
   const before = cursor(); if (cold) execFileSync(php, ['artisan', 'cache:clear', '--no-interaction'], { cwd: apiDirectory, stdio: 'pipe' });
-  expect((await page.goto(`${host}/${route}`))?.status()).toBe(200); await expect.poll(() => metricsAfter(before).requests).toBeGreaterThan(0);
+  expect((await page.goto(workspaceUrl(page, `${host}/${route}`)))?.status()).toBe(200); await expect.poll(() => metricsAfter(before).requests).toBeGreaterThan(0);
   const metrics = metricsAfter(before); expect(metrics.total).toBeGreaterThan(0); expect(metrics.recorded).toBe(metrics.total); expect(metrics.central + metrics.tenant).toBe(metrics.total); expect(metrics.total).toBeLessThanOrEqual(6);
 }
 test.beforeAll(async ({ browser }) => { test.setTimeout(180_000); await ensureLocalFixtures(browser); mkdirSync('/tmp/courses-issue24', { recursive: true }); });
@@ -75,42 +81,48 @@ test('academic staff create the hierarchy and whole lecture plan with validation
   test.setTimeout(120_000); const owner = credentials('alpha'); const name = `منهج قبول ${Date.now()}`;
   await signIn(page, host, owner.email, owner.password); await page.getByRole('link', { name: 'المناهج والخطط', exact: true }).click();
   await budget(page, 'admin/curriculum', true); await budget(page, 'admin/curriculum', false);
-  await page.getByRole('button', { name: 'إنشاء كورس', exact: true }).click(); await expect(page.getByRole('textbox', { name: 'اسم الكورس' })).toBeFocused(); await expect(page.getByRole('textbox', { name: 'اسم الكورس' })).toBeEnabled(); await expect(page.getByRole('button', { name: 'حفظ المنهج', exact: true })).toBeEnabled(); await expect(page.getByRole('button', { name: 'إلغاء', exact: true })).toBeEnabled(); await expect(page.getByRole('button', { name: 'إنشاء كورس', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'إنشاء كورس', exact: true }).click(); await expect(page.getByRole('textbox', { name: 'اسم الكورس' })).toBeFocused(); await expect(page.getByRole('textbox', { name: 'اسم الكورس' })).toBeEnabled(); await expect(page.getByRole('button', { name: 'حفظ المنهج', exact: true })).toBeEnabled(); await expect(page.getByRole('button', { name: 'إلغاء', exact: true })).toBeEnabled(); await expect(page.getByRole('button', { name: 'إنشاء كورس', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'حفظ المنهج', exact: true }).click(); await expect(page.getByRole('textbox', { name: 'اسم الكورس' })).toHaveAttribute('aria-invalid', 'true');
   await page.getByRole('textbox', { name: 'اسم الكورس' }).fill(name); await page.getByRole('link', { name: 'الإعدادات', exact: true }).click();
   const leave = page.getByRole('alertdialog', { name: 'مغادرة دون حفظ' }); await expect(leave).toBeVisible(); await leave.getByRole('button', { name: 'إلغاء', exact: true }).click(); await expect(page.getByRole('textbox', { name: 'اسم الكورس' })).toHaveValue(name);
   const courseResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/center/courses') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'حفظ المنهج', exact: true }).click(); const course = (await (await courseResponse).json()).course; createdCourseIds.add(course.id); await expect(page.getByRole('status').filter({ hasText: 'حُفظ المنهج' })).toBeVisible();
-  const courseRow = page.getByRole('row').filter({ has: page.getByRole('heading', { name, exact: true }) }); await courseRow.getByRole('button', { name: 'إضافة مرحلة دراسية' }).click();
-  await expect(page.getByRole('textbox', { name: 'اسم المرحلة الدراسية' })).toBeEnabled(); await page.getByRole('textbox', { name: 'اسم المرحلة الدراسية' }).fill('المرحلة التمهيدية'); await page.getByRole('button', { name: 'حفظ المنهج', exact: true }).click(); await expect(page.getByRole('heading', { name: 'المرحلة التمهيدية', exact: true })).toBeVisible();
-  const stageRow = page.getByRole('row').filter({ has: page.getByRole('heading', { name: 'المرحلة التمهيدية', exact: true }) }); await stageRow.getByRole('button', { name: 'إضافة مستوى وخطته' }).click();
+  await page.getByRole('searchbox', { name: 'بحث في الكورسات' }).fill(name);
+  const courseRow = page.getByRole('row').filter({ has: page.getByRole('heading', { name, exact: true }) });
+  await courseRow.getByRole('button', { name: `إدارة الكورس: ${name}`, exact: true }).click(); await page.getByRole('menuitem', { name: 'إضافة مرحلة دراسية', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'اسم المرحلة الدراسية' })).toBeEnabled(); await page.getByRole('textbox', { name: 'اسم المرحلة الدراسية' }).fill('المرحلة التمهيدية');
+  const stageResponse = page.waitForResponse(response => response.url().endsWith(`/api/v1/center/courses/${course.id}/stages`) && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'حفظ المنهج', exact: true }).click(); const stage = (await (await stageResponse).json()).stage;
+  await expectWorkspaceUrl(page, `/admin/curriculum?tab=stages&course_id=${course.id}`);
+  const stageRow = page.getByRole('row').filter({ has: page.getByRole('heading', { name: 'المرحلة التمهيدية', exact: true }) });
+  await stageRow.getByRole('button', { name: 'إدارة المرحلة الدراسية: المرحلة التمهيدية', exact: true }).click(); await page.getByRole('menuitem', { name: 'إضافة مستوى وخطته', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'اسم المستوى' })).toBeEnabled(); await page.getByRole('textbox', { name: 'اسم المستوى' }).fill('المستوى الأول'); await page.getByRole('textbox', { name: 'محتوى المحاضرة 1', exact: true }).fill('الحروف دون تقسيم فرعي');
   await page.getByRole('textbox', { name: 'الساعات المخططة للمحاضرة 1', exact: true }).fill('0'); await page.getByRole('button', { name: 'حفظ المنهج', exact: true }).click(); await expect(page.getByRole('textbox', { name: 'الساعات المخططة للمحاضرة 1', exact: true })).toHaveAttribute('aria-invalid', 'true');
   await page.getByRole('textbox', { name: 'الساعات المخططة للمحاضرة 1', exact: true }).fill('1.5'); await page.getByRole('button', { name: 'إضافة محاضرة كاملة' }).click();
   await page.getByRole('textbox', { name: 'محتوى المحاضرة 2', exact: true }).fill('الكلمات'); await page.getByRole('textbox', { name: 'عنوان المحاضرة 2 (اختياري)', exact: true }).fill('قراءة');
   const levelResponse = page.waitForResponse((response) => /\/api\/v1\/center\/stages\/[^/]+\/levels$/.test(response.url()) && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'حفظ المنهج', exact: true }).click(); const level = (await (await levelResponse).json()).level as Level; await expect(page.getByRole('link', { name: 'المستوى الأول', exact: true })).toBeVisible();
-  await page.getByRole('link', { name: 'المستوى الأول', exact: true }).click();
-  await expect(page).toHaveURL(`${host}/admin/curriculum/${level.id}`);
-  await page.getByRole('button', { name: 'تعديل الخطة الأولى' }).click();
+  await page.getByRole('link', { name: /عرض خطة المستوى · الإصدار/ }).click();
+  await expectWorkspaceUrl(page, `/admin/curriculum/${level.id}?tab=levels&stage_id=${stage.id}`);
+  await openFirstPlan(page);
   await page.getByRole('textbox', { name: 'محتوى المحاضرة 1', exact: true }).fill('تعديل قبل العودة');
   await page.evaluate(() => history.back());
   await expect(page.getByRole('alertdialog', { name: 'مغادرة دون حفظ' })).toBeVisible();
   await page.getByRole('alertdialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
-  await expect(page).toHaveURL(`${host}/admin/curriculum/${level.id}`);
+  await expectWorkspaceUrl(page, `/admin/curriculum/${level.id}?tab=levels&stage_id=${stage.id}`);
   await expect(page.getByRole('textbox', { name: 'محتوى المحاضرة 1', exact: true })).toHaveValue('تعديل قبل العودة');
   await page.getByRole('button', { name: 'إلغاء', exact: true }).click();
   await page.goBack();
-  await expect(page).toHaveURL(new RegExp('/admin/curriculum\\?tab=levels'));
+  await expectWorkspaceUrl(page, `/admin/curriculum?tab=levels&stage_id=${stage.id}`);
   await budget(page, `admin/curriculum/${level.id}`, true); await budget(page, `admin/curriculum/${level.id}`, false);
   const lectures = page.getByRole('region', { name: 'جدول المحاضرات المطلوبة — قابل للتمرير أفقيًا' }); await expect(lectures).toContainText('الحروف دون تقسيم فرعي'); await expect(lectures).toContainText('بدون عنوان');
-  await page.getByRole('button', { name: 'تعديل الخطة الأولى' }).click(); await expect(page.getByRole('textbox', { name: 'محتوى المحاضرة 1', exact: true })).toBeEnabled(); const newer = await write(page, `levels/${level.id}/first-plan`, 'PATCH', { plan_version_id: level.plan.id, revision: 1, lectures: [{ number: 1, content: 'الخطة الحالية', planned_hours: 2 }] }); expect(newer.status).toBe(200);
+  await openFirstPlan(page); await expect(page.getByRole('textbox', { name: 'محتوى المحاضرة 1', exact: true })).toBeEnabled(); const newer = await write(page, `levels/${level.id}/first-plan`, 'PATCH', { plan_version_id: level.plan.id, revision: 1, lectures: [{ number: 1, content: 'الخطة الحالية', planned_hours: 2 }] }); expect(newer.status).toBe(200);
   await page.getByRole('textbox', { name: 'محتوى المحاضرة 1', exact: true }).fill('معاينة قديمة'); await page.getByRole('button', { name: 'حفظ المنهج', exact: true }).click(); await expect(page.getByRole('alert').filter({ hasText: 'تغيّرت الخطة' })).toBeVisible();
   await page.getByRole('button', { name: 'تحميل البيانات الحالية للمنهج' }).click(); await expect(page.getByRole('textbox', { name: 'محتوى المحاضرة 1', exact: true })).toHaveValue('الخطة الحالية');
-  await page.getByRole('button', { name: 'إلغاء', exact: true }).click(); await expect(page.getByRole('button', { name: 'تعديل الخطة الأولى' })).toBeFocused();
+  await page.getByRole('button', { name: 'إلغاء', exact: true }).click(); await expect(page.getByRole('button', { name: 'إدارة المستوى: المستوى الأول', exact: true })).toBeFocused();
   await page.screenshot({ path: '/tmp/courses-issue24/curriculum-desktop.png', fullPage: true }); await page.getByRole('button', { name: 'تفعيل الوضع الداكن' }).click(); await page.screenshot({ path: '/tmp/courses-issue24/curriculum-dark.png', fullPage: true });
-  await page.setViewportSize({ width: 390, height: 844 }); await page.getByRole('button', { name: 'تعديل الخطة الأولى' }).click(); await expect(page.getByRole('textbox', { name: 'محتوى المحاضرة 1', exact: true })).toBeEnabled(); await page.screenshot({ path: '/tmp/courses-issue24/curriculum-mobile.png', fullPage: true }); expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  await page.getByRole('button', { name: 'إلغاء', exact: true }).click(); await page.goto(`${host}/admin/audit`); await page.getByText('عرض تغيير المنهج', { exact: true }).first().click(); await expect(page.getByText('الخطة الحالية', { exact: false }).first()).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 }); await openFirstPlan(page); await expect(page.getByRole('textbox', { name: 'محتوى المحاضرة 1', exact: true })).toBeEnabled(); await page.screenshot({ path: '/tmp/courses-issue24/curriculum-mobile.png', fullPage: true }); expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.getByRole('button', { name: 'إلغاء', exact: true }).click(); await page.goto(workspaceUrl(page, `${host}/admin/audit`)); await page.getByText('عرض تغيير المنهج', { exact: true }).first().click(); await expect(page.getByText('الخطة الحالية', { exact: false }).first()).toBeVisible();
 });
 
 test('branch and center isolation survive direct links and revoked forms while concurrent requests cannot duplicate plans', async ({ browser }) => {
@@ -122,19 +134,28 @@ test('branch and center isolation survive direct links and revoked forms while c
     const hidden = await sequence(owner, south.id, `منهج محجوب ${stamp}`); const visible = await sequence(owner, north.id, `منهج مصرح ${stamp}`);
     expect((await write(owner, `members/${original.id}/grants`, 'PUT', { center_roles: [], branch_roles: { [north.id]: ['academic_admin', 'branch_auditor'] } })).status).toBe(200); await signIn(staff, host, staffCredentials.email, staffCredentials.password);
     const scoped = await (await staff.request.get(`${host}/api/v1/center/curriculum-workspace`)).json() as CurriculumContext; expect(scoped.levels.some((level) => level.id === visible.id)).toBe(true); expect(scoped.levels.some((level) => level.id === hidden.id)).toBe(false); expect(JSON.stringify(scoped)).not.toContain(hidden.name);
-    expect((await staff.request.get(`${host}/api/v1/center/levels/${hidden.id}`)).status()).toBe(404); await staff.goto(`${host}/admin/curriculum/${hidden.id}`); await expect(staff.getByRole('heading', { name: 'خطة المستوى غير متاحة' })).toBeVisible();
-    await staff.goto(`${host}/admin/curriculum/${visible.id}`); await staff.getByRole('button', { name: 'تعديل الخطة الأولى' }).click(); await staff.getByRole('textbox', { name: 'محتوى المحاضرة 1', exact: true }).fill('تعديل ممنوع');
-    expect((await write(owner, `members/${original.id}/grants`, 'PUT', { center_roles: [], branch_roles: {} })).status).toBe(200); await staff.getByRole('button', { name: 'حفظ المنهج', exact: true }).click(); await expect(staff.getByRole('alert').filter({ hasText: 'لم يعد متاحًا ضمن صلاحيتك' })).toBeVisible();
+    expect((await staff.request.get(`${host}/api/v1/center/levels/${hidden.id}`)).status()).toBe(404); await staff.goto(workspaceUrl(staff, `${host}/admin/curriculum/${hidden.id}`)); await expect(staff.getByRole('heading', { name: 'سجل المنهج غير متاح' })).toBeVisible();
+    await staff.goto(workspaceUrl(staff, `${host}/admin/curriculum/${visible.id}`)); await openFirstPlan(staff); await staff.getByRole('textbox', { name: 'محتوى المحاضرة 1', exact: true }).fill('تعديل ممنوع');
+    expect((await write(owner, `members/${original.id}/grants`, 'PUT', { center_roles: [], branch_roles: {} })).status).toBe(200);
+    const deniedSave = staff.waitForResponse(response => response.url().endsWith(`/api/v1/center/levels/${visible.id}/first-plan`) && response.request().method() === 'PATCH');
+    await staff.getByRole('button', { name: 'حفظ المنهج', exact: true }).click();
+    const denied = await deniedSave; expect(denied.status()).toBe(409); expect((await denied.json()).code).toBe('workspace_expired');
+    await expect(staff).toHaveURL(/\/admin\/workspaces\?expired=1&return_to=/);
+    await expect(staff.getByRole('heading', { name: 'اختيار مساحة العمل', exact: true })).toBeVisible();
+    await expect(staff.getByRole('status').filter({ hasText: 'لم تعد مساحة العمل السابقة متاحة' })).toBeVisible();
+    await expect(staff.getByRole('textbox', { name: 'محتوى المحاضرة 1', exact: true })).toHaveCount(0);
+    const untouched = await (await owner.request.get(`${host}/api/v1/center/levels/${visible.id}`)).json();
+    expect(untouched.levels[0].plan.lectures[0].content).toBe('محتوى مستقل');
     await signIn(beta, 'http://beta.courses.test', betaCredentials.email, betaCredentials.password); expect((await beta.request.get(`http://beta.courses.test/api/v1/center/levels/${visible.id}`)).status()).toBe(404);
     const payload = { name: `منهج متزامن ${stamp}`, branch_id: north.id, request_id: crypto.randomUUID() }; const creations = await Promise.all([write(owner, 'courses', 'POST', payload), write(owner, 'courses', 'POST', payload)]);
     expect(creations.map((result) => result.status).sort()).toEqual([200, 201]); expect(creations[0].body.course.id).toBe(creations[1].body.course.id);
     const edits = await Promise.all([write(owner, `levels/${visible.id}/first-plan`, 'PATCH', { plan_version_id: visible.plan.id, revision: 1, lectures: [{ number: 1, content: 'تعديل أول', planned_hours: 2 }] }), write(owner, `levels/${visible.id}/first-plan`, 'PATCH', { plan_version_id: visible.plan.id, revision: 1, lectures: [{ number: 1, content: 'تعديل ثان', planned_hours: 2 }] })]); expect(edits.map((result) => result.status).sort()).toEqual([200, 409]);
-  } finally { if (original) expect((await write(owner, `members/${original.id}/grants`, 'PUT', { center_roles: original.center_roles, branch_roles: original.branch_roles })).status).toBe(200); await owner.close(); await staff.close(); await beta.close(); }
+  } catch (error) { console.error('Original protected-journey failure:', error); throw error; } finally { if (original) expect((await write(owner, `members/${original.id}/grants`, 'PUT', { center_roles: original.center_roles, branch_roles: original.branch_roles })).status).toBe(200); await owner.close(); await staff.close(); await beta.close(); }
 });
 
 test('a lost committed creation response recovers the saved curriculum before a changed retry', async ({ page }) => {
   test.setTimeout(90_000); const owner = credentials('alpha'); const name = `منهج استعادة ${Date.now()}`;
-  await signIn(page, host, owner.email, owner.password); await page.goto(`${host}/admin/curriculum`); await page.getByRole('button', { name: 'إنشاء كورس', exact: true }).click(); await page.getByRole('textbox', { name: 'اسم الكورس' }).fill(name);
+  await signIn(page, host, owner.email, owner.password); await page.goto(workspaceUrl(page, `${host}/admin/curriculum`)); await page.getByRole('button', { name: 'إنشاء كورس', exact: true }).click(); await page.getByRole('textbox', { name: 'اسم الكورس' }).fill(name);
   let id = ''; await page.route('**/api/v1/center/courses', async (route) => { const response = await route.fetch(); expect(response.status()).toBe(201); id = (await response.json()).course.id; createdCourseIds.add(id); await route.abort('connectionclosed'); }, { times: 1 });
   await page.getByRole('button', { name: 'حفظ المنهج', exact: true }).click(); await expect(page.getByRole('alert').filter({ hasText: 'تعذر تأكيد الحفظ' })).toBeVisible(); expect(id).toBeTruthy();
   await page.getByRole('textbox', { name: 'اسم الكورس' }).fill(`${name} تعديل`); await page.getByRole('button', { name: 'حفظ المنهج', exact: true }).click(); await expect(page.getByRole('alert').filter({ hasText: 'تغيّرت الخطة أو حُفظ الطلب' })).toBeVisible(); await page.getByRole('button', { name: 'تحميل البيانات الحالية للمنهج' }).click();

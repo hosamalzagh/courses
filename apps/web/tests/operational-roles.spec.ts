@@ -70,7 +70,10 @@ test("combined branch roles persist, sensitive grants stay separate, and open pa
     await editor.getByRole("group", { name: north.name, exact: true }).getByRole("checkbox", { name: "التسجيل", exact: true }).check();
     await editor.getByRole("group", { name: north.name, exact: true }).getByRole("checkbox", { name: "الحضور", exact: true }).check();
     await editor.getByRole("group", { name: south.name, exact: true }).getByRole("checkbox", { name: "الحسابات", exact: true }).check();
-    await editor.getByRole("button", { name: "حفظ الأدوار", exact: true }).click();
+    const saveRoles = owner.locator(".center-topbar").getByRole("button", { name: "حفظ الأدوار", exact: true });
+    await expect(saveRoles).toBeVisible();
+    await expect(editor.getByRole("button", { name: "حفظ الأدوار", exact: true })).toHaveCount(0);
+    await saveRoles.click();
     await owner.getByRole("alertdialog").getByRole("button", { name: "حفظ التغيير" }).click();
     await expect(owner.getByRole("status")).toContainText("حُفظت أدوار الموظف");
     await signIn(staff, host, staffCredentials.email, staffCredentials.password);
@@ -86,7 +89,7 @@ test("combined branch roles persist, sensitive grants stay separate, and open pa
     expect(await save(staff, original.id, { center_roles: ["center_owner"], branch_roles: {} })).toBe(403);
     await row.getByRole("button", { name: "تعديل الأدوار" }).click();
     await editor.getByRole("group", { name: north.name, exact: true }).getByRole("checkbox", { name: "خصم الرسوم بسبب مسجل" }).check();
-    await editor.getByRole("button", { name: "حفظ الأدوار", exact: true }).click();
+    await owner.locator(".center-topbar").getByRole("button", { name: "حفظ الأدوار", exact: true }).click();
     await owner.getByRole("alertdialog").getByRole("button", { name: "حفظ التغيير" }).click();
     await expect(owner.getByRole("status")).toContainText("حُفظت أدوار الموظف");
     response = await staff.request.get(`${host}/api/v1/center/user`);
@@ -94,7 +97,9 @@ test("combined branch roles persist, sensitive grants stay separate, and open pa
     expect(actions[north.id]).toContain("fees.discount");
     expect(actions[north.id]).not.toContain("finance.approve");
     expect(await save(owner, original.id, { center_roles: [], branch_roles: {} })).toBe(200);
-    expect((await staff.request.get(`${host}/api/v1/center/branches/${north.id}`)).status()).toBe(403);
+    const expiredBranch = await staff.request.get(`${host}/api/v1/center/branches/${north.id}`);
+    expect(expiredBranch.status()).toBe(409);
+    expect((await expiredBranch.json()).code).toBe("workspace_expired");
     const audit = await (await owner.request.get(`${host}/api/v1/center/audit`)).json();
     expect(audit.entries.some((entry: { event: string; details: string }) => entry.event === "member.grants_changed" && JSON.parse(entry.details).user_id === original!.user.id)).toBe(true);
 
@@ -103,7 +108,7 @@ test("combined branch roles persist, sensitive grants stay separate, and open pa
     const currentWorkspace = await (await owner.request.get(`${host}/api/v1/center/member-workspace`)).json() as MemberContext;
     expect(await save(owner, original.id, { center_roles: [], branch_roles: { [north.id]: ["attendance"] } })).toBe(200);
     await editor.getByRole("group", { name: north.name, exact: true }).getByRole("checkbox", { name: "الإدارة الأكاديمية", exact: true }).check();
-    await editor.getByRole("button", { name: "حفظ الأدوار", exact: true }).click();
+    await owner.locator(".center-topbar").getByRole("button", { name: "حفظ الأدوار", exact: true }).click();
     await owner.getByRole("alertdialog").getByRole("button", { name: "حفظ التغيير" }).click();
     await expect(owner.getByRole("alert").filter({ hasText: "تغيّرت صلاحيات الموظف" })).toContainText("تغيّرت صلاحيات الموظف");
     expect(currentWorkspace.members.find((member) => member.id === original!.id)?.grant_revision).toBeTruthy();

@@ -11,6 +11,7 @@ import type { CenterContext } from "@/lib/server-context";
 import { centerRequest, responseMessage } from "@/lib/client-api";
 import { Button } from "./Button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetClose, SheetTrigger } from "./ui/sheet";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "./ui/dropdown-menu";
 import { ThemeToggle } from "./ThemeProvider";
 import { InlineNotice } from "./InlineNotice";
 import { TablePreferenceUser } from "./TablePreferences";
@@ -24,7 +25,8 @@ const navigationIcons: Record<string, ReactNode> = {
   security: <><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3Z" /><path d="m8 12 3 3 5-6" /></>,
 };
 
-type PageHeader = { context: CenterContext; title: string; description?: ReactNode; path: string; workspace: string | null };
+export type PageTrail = { label: string; href: string; preserveSearchParams?: readonly string[] }[];
+type PageHeader = { context: CenterContext; title: string; description?: ReactNode; path: string; workspace: string | null; trail?: PageTrail };
 type PageActions = { context?: CenterContext; actions?: ReactNode; path: string; workspace: string | null };
 const PageRegistration = createContext<{ register: Dispatch<SetStateAction<PageHeader | null>>; registerActions: Dispatch<SetStateAction<Record<string, PageActions>>> } | null>(null);
 
@@ -34,16 +36,16 @@ function NavigationPending() {
 }
 
 // Tiny client bridges keep server page markup outside the client module tree.
-export function CenterPageRegistration({ context, title, description }: { context: CenterContext; title: string; description?: ReactNode }) {
+export function CenterPageRegistration({ context, title, description, trail }: { context: CenterContext; title: string; description?: ReactNode; trail?: PageTrail }) {
   const register = useContext(PageRegistration)?.register;
   const path = usePathname();
   const workspace = context.workspace?.id ?? null;
   useLayoutEffect(() => {
     if (!register) return;
-    const page = { context, title, description, path, workspace };
+    const page = { context, title, description, path, workspace, trail };
     register(page);
     return () => register((current) => current === page ? null : current);
-  }, [register, context, title, description, path, workspace]);
+  }, [register, context, title, description, path, workspace, trail]);
   return null;
 }
 
@@ -74,7 +76,8 @@ export function CenterHeaderActions({ children }: { children: ReactNode }) {
 
 export function CenterLayout({ initialContext, children }: { initialContext: CenterContext; children: ReactNode }) {
   const path = usePathname();
-  const workspace = useSearchParams().get("workspace") ?? initialContext.workspace?.id ?? null;
+  const searchParams = useSearchParams();
+  const workspace = searchParams.get("workspace") ?? initialContext.workspace?.id ?? null;
   const [page, register] = useState<PageHeader | null>(null);
   const [pageActions, registerActions] = useState<Record<string, PageActions>>({});
   const registration = useMemo(() => ({ register, registerActions }), []);
@@ -85,6 +88,15 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
   const fallbackHeader = getAdminHeader(path, context);
   const title = currentPage?.title ?? fallbackHeader.title;
   const description = currentPage?.description ?? fallbackHeader.description;
+  function breadcrumbHref(item: PageTrail[number]) {
+    if (!item.preserveSearchParams) return item.href;
+    const target = new URL(item.href, "https://courses.invalid");
+    for (const key of item.preserveSearchParams) {
+      const value = searchParams.get(key);
+      if (value === null) target.searchParams.delete(key); else target.searchParams.set(key, value);
+    }
+    return target.pathname + target.search + target.hash;
+  }
   const actions = currentActions.map(([id, item]) => <span key={id} className="header-action-group">{item.actions}</span>);
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -157,7 +169,7 @@ export function CenterLayout({ initialContext, children }: { initialContext: Cen
     </aside>
     <div className="center-frame">
       <header className="center-topbar">
-        <div className="topbar-context"><SheetTrigger render={<Button ref={menuButton} className="hidden min-w-0 max-[900px]:inline-flex" />}>القائمة</SheetTrigger><div><nav className="page-breadcrumbs" aria-label="مسار الصفحة"><Link href="/admin">{context.center.name}<NavigationPending /></Link><span aria-hidden="true">‹</span><span aria-current="page">{title}</span></nav><h1>{title}</h1><div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm"><span className="break-words" data-workspace-name>{!workspaceResolved ? "جارٍ تحميل مساحة العمل…" : context.workspace?.mode === "branch" ? context.workspace.branch?.name : context.workspace?.mode === "center" ? "إدارة المركز" : "اختر مساحة العمل"}</span>{path !== "/admin/workspaces" && context.workspace_can_switch ? <Link className="text-link" href={`/admin/workspaces?return_to=${encodeURIComponent(workspaceSection(path))}`}>تبديل مساحة العمل</Link> : null}{context.workspace?.mode === "branch" && (context.workspace_scope === "authorized_branches" || context.workspace_scope === "authorized_financial_branches" || context.workspace_scope === "center") && path !== "/admin/workspaces" ? <span className="muted">{context.workspace_scope === "authorized_financial_branches" ? "نطاق الحساب: الفروع المصرح بها ماليًا" : context.workspace_scope === "center" ? "نطاق الصفحة: المركز" : "نطاق الصفحة: الفروع المصرح بها"}</span> : null}</div>{description ? <p className="page-description">{description}</p> : null}</div></div>
+        <div className="topbar-context"><SheetTrigger render={<Button ref={menuButton} className="hidden min-w-0 max-[900px]:inline-flex" />}>القائمة</SheetTrigger><div><nav className="page-breadcrumbs" aria-label="مسار الصفحة"><ol className="flex flex-wrap items-center gap-1"><li><Link href="/admin">{context.center.name}<NavigationPending /></Link></li>{(currentPage?.trail?.length ?? 0) > 1 ? <li className="min-[901px]:hidden"><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="sm" aria-label="عرض المسار الكامل" />}>…</DropdownMenuTrigger><DropdownMenuContent className="max-w-[calc(100vw-2rem)] w-64">{currentPage?.trail?.slice(0, -1).map(item => <DropdownMenuItem key={item.href} render={<Link href={breadcrumbHref(item)} />} className="whitespace-normal break-words">{item.label}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></li> : null}{currentPage?.trail?.map((item, index) => <li key={item.href} className={`${index < (currentPage?.trail?.length ?? 0) - 1 ? "hidden min-[901px]:flex" : "flex"} min-w-0 items-center gap-1`}><span aria-hidden="true">‹</span><Link className="break-words" href={breadcrumbHref(item)}>{item.label}</Link></li>)}<li className="flex min-w-0 items-center gap-1"><span aria-hidden="true">‹</span><span aria-current="page">{title}</span></li></ol></nav><h1>{title}</h1><div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm"><span className="break-words" data-workspace-name>{!workspaceResolved ? "جارٍ تحميل مساحة العمل…" : context.workspace?.mode === "branch" ? context.workspace.branch?.name : context.workspace?.mode === "center" ? "إدارة المركز" : "اختر مساحة العمل"}</span>{path !== "/admin/workspaces" && context.workspace_can_switch ? <Link className="text-link" href={`/admin/workspaces?return_to=${encodeURIComponent(workspaceSection(path))}`}>تبديل مساحة العمل</Link> : null}{context.workspace?.mode === "branch" && (context.workspace_scope === "authorized_branches" || context.workspace_scope === "authorized_financial_branches" || context.workspace_scope === "center") && path !== "/admin/workspaces" ? <span className="muted">{context.workspace_scope === "authorized_financial_branches" ? "نطاق الحساب: الفروع المصرح بها ماليًا" : context.workspace_scope === "center" ? "نطاق الصفحة: المركز" : "نطاق الصفحة: الفروع المصرح بها"}</span> : null}</div>{description ? <p className="page-description">{description}</p> : null}</div></div>
         <div className="topbar-actions">{actions}</div>
       </header>
       <div id="center-content" tabIndex={-1} className="center-content">{error ? <InlineNotice tone="error">{error}</InlineNotice> : null}{children}</div>

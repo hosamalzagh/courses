@@ -1,3 +1,4 @@
+import { finishWorkspaceEntry, expectWorkspaceUrl, workspaceUrl } from "./workspace-testhelpers";
 import { createHmac, randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -148,7 +149,8 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(email);
     await page.getByRole("textbox", { name: "كلمة المرور" }).fill(password);
     await page.getByRole("button", { name: "دخول المركز" }).click();
-    await expect(page).toHaveURL(`${host}/admin`);
+    await finishWorkspaceEntry(page);
+    await expectWorkspaceUrl(page, "/admin/settings?tab=branches");
     await expect(page.getByRole("button", { name: "إنشاء فرع" })).toBeVisible();
     for (const [name, branchSlug] of [["فرع التجربة الشمالي", "pilot-north"], ["فرع التجربة الجنوبي", "pilot-south"]]) {
       await page.getByRole("button", { name: "إنشاء فرع" }).click();
@@ -164,7 +166,8 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await northCard.locator("xpath=following-sibling::tr[1]").getByRole("textbox", { name: "اسم الفرع" }).fill("فرع التجربة الشمالي المحدّث");
     await northCard.locator("xpath=following-sibling::tr[1]").getByRole("textbox", { name: "العنوان" }).fill("شارع التجربة ١");
     const updated = page.waitForResponse((response) => /\/api\/v1\/center\/branches\/\d+$/.test(response.url()) && response.request().method() === "PATCH");
-    await northCard.locator("xpath=following-sibling::tr[1]").getByRole("button", { name: "حفظ التعديل" }).click();
+    await expect(northCard.locator("xpath=following-sibling::tr[1]").getByRole("button", { name: "حفظ التعديل", exact: true })).toHaveCount(0);
+    await page.locator(".center-topbar").getByRole("button", { name: "حفظ التعديل", exact: true }).click();
     expect((await updated).status()).toBe(200);
     await expect(page.getByRole("heading", { name: "فرع التجربة الشمالي المحدّث" })).toBeVisible();
     await expect(page.getByRole("row").filter({ has: page.getByRole("heading", { name: "فرع التجربة الشمالي المحدّث" }) })).toContainText("شارع التجربة ١");
@@ -175,7 +178,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await page.getByRole("button", { name: "حفظ الفرع" }).click();
     await expect(page.getByRole("heading", { name: "فرع التجربة الشرقي" })).toBeVisible();
 
-    await page.goto(`${host}/admin/members`);
+    await page.goto(workspaceUrl(page, `${host}/admin/members?tab=invitations`));
     await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(staffEmail);
     const staffInvitationResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/center/members/invitations") && response.request().method() === "POST");
     await page.getByRole("button", { name: "إرسال الدعوة" }).click();
@@ -207,9 +210,12 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await staffPage.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(staffEmail);
     await staffPage.getByRole("textbox", { name: "كلمة المرور" }).fill(staffPassword);
     await staffPage.getByRole("button", { name: "دخول المركز" }).click();
-    await expect(staffPage).toHaveURL(`${host}/admin`);
+    await finishWorkspaceEntry(staffPage, { allowEmpty: true });
+    await expect(staffPage).toHaveURL(`${host}/admin/workspaces`);
+    await expect(staffPage.getByText("لا توجد فروع متاحة لك.", { exact: false })).toBeVisible();
     await expect(staffPage.getByText("Pilot Staff", { exact: true })).toBeVisible();
 
+    await page.goto(workspaceUrl(page, `${host}/admin/members`));
     const memberSequence = telescopeSequence(slug, email);
     await page.reload();
     const staffCard = page.getByRole("row").filter({ has: page.getByRole("heading", { name: "Pilot Staff" }) });
@@ -240,15 +246,20 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await firstManagerCard.locator("xpath=following-sibling::tr[1]").getByRole("group", { name: "فرع التجربة الشمالي المحدّث" }).getByRole("checkbox", { name: "مدير الفرع" }).check();
     await firstManagerCard.locator("xpath=following-sibling::tr[1]").getByRole("group", { name: "فرع التجربة الشمالي المحدّث" }).getByRole("checkbox", { name: "تدقيق الفرع" }).check();
     await firstManagerCard.locator("xpath=following-sibling::tr[1]").getByRole("group", { name: "فرع التجربة الجنوبي" }).getByRole("checkbox", { name: "مدير الفرع" }).check();
-    await firstManagerCard.locator("xpath=following-sibling::tr[1]").getByRole("button", { name: "حفظ الأدوار" }).click();
+    await expect(firstManagerCard.locator("xpath=following-sibling::tr[1]").getByRole("button", { name: "حفظ الأدوار", exact: true })).toHaveCount(0);
+    await page.locator(".center-topbar").getByRole("button", { name: "حفظ الأدوار", exact: true }).click();
     await expect(page.getByText("حُفظت أدوار الموظف وإسنادات فروعه.")).toBeVisible();
     const secondManagerCard = page.getByRole("row").filter({ has: page.getByRole("heading", { name: "Second Branch Manager" }) });
     await secondManagerCard.getByRole("button", { name: "تعديل الأدوار" }).click();
     await secondManagerCard.locator("xpath=following-sibling::tr[1]").getByRole("group", { name: "فرع التجربة الشمالي المحدّث" }).getByRole("checkbox", { name: "مدير الفرع" }).check();
     await secondManagerCard.locator("xpath=following-sibling::tr[1]").getByRole("group", { name: "فرع التجربة الشمالي المحدّث" }).getByRole("checkbox", { name: "تدقيق الفرع" }).check();
-    await secondManagerCard.locator("xpath=following-sibling::tr[1]").getByRole("button", { name: "حفظ الأدوار" }).click();
+    await expect(secondManagerCard.locator("xpath=following-sibling::tr[1]").getByRole("button", { name: "حفظ الأدوار", exact: true })).toHaveCount(0);
+    await page.locator(".center-topbar").getByRole("button", { name: "حفظ الأدوار", exact: true }).click();
     await expect(secondManagerCard.getByRole("button", { name: "تعديل الأدوار" })).toBeVisible();
 
+    await staffPage.reload();
+    await finishWorkspaceEntry(staffPage, { branchName: "فرع التجربة الشمالي المحدّث" });
+    await staffPage.goto(workspaceUrl(staffPage, `${host}/admin/settings?tab=branches`));
     const firstManagerSequence = telescopeSequence(slug, email);
     await staffPage.reload();
     let firstManagerRequests: MeasuredRequest[] = [];
@@ -263,7 +274,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await expect(staffPage.getByRole("heading", { name: "فرع التجربة الجنوبي" })).toBeVisible();
     await expect(staffPage.getByRole("heading", { name: "فرع التجربة الشرقي" })).toHaveCount(0);
     const auditSequence = telescopeSequence(slug, email);
-    await staffPage.goto(`${host}/admin/audit`);
+    await staffPage.goto(workspaceUrl(staffPage, `${host}/admin/audit`));
     await expect(staffPage.getByRole("heading", { name: "سجل التدقيق" })).toBeVisible();
     await expect(staffPage.getByRole("heading", { name: "تغيير أدوار الفرع" }).first()).toBeVisible();
     let auditRequests: MeasuredRequest[] = [];
@@ -279,8 +290,9 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await secondManagerPage.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(secondManagerEmail);
     await secondManagerPage.getByRole("textbox", { name: "كلمة المرور" }).fill(secondManagerPassword);
     await secondManagerPage.getByRole("button", { name: "دخول المركز" }).click();
-    await expect(secondManagerPage).toHaveURL(`${host}/admin`);
-    await secondManagerPage.goto(`${host}/admin/settings?tab=branches`);
+    await finishWorkspaceEntry(secondManagerPage);
+    await expectWorkspaceUrl(secondManagerPage, "/admin");
+    await secondManagerPage.goto(workspaceUrl(secondManagerPage, `${host}/admin/settings?tab=branches`));
     await expect(secondManagerPage.getByRole("heading", { name: "فرع التجربة الشمالي المحدّث" })).toBeVisible();
     await expect(secondManagerPage.getByRole("heading", { name: "فرع التجربة الجنوبي" })).toHaveCount(0);
     const southId = Number(runFixture(String.raw`
@@ -296,29 +308,30 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await firstManagerCard.getByRole("button", { name: "تعديل الأدوار" }).click();
     await firstManagerCard.locator("xpath=following-sibling::tr[1]").getByRole("checkbox", { name: "مسؤول المركز" }).check();
     const adminGrant = page.waitForResponse((response) => response.url().includes("/api/v1/center/members/") && response.url().endsWith("/grants") && response.request().method() === "PUT");
-    await firstManagerCard.locator("xpath=following-sibling::tr[1]").getByRole("button", { name: "حفظ الأدوار" }).click();
+    await expect(firstManagerCard.locator("xpath=following-sibling::tr[1]").getByRole("button", { name: "حفظ الأدوار", exact: true })).toHaveCount(0);
+    await page.locator(".center-topbar").getByRole("button", { name: "حفظ الأدوار", exact: true }).click();
     expect((await adminGrant).status()).toBe(200);
     await expect(firstManagerCard).toContainText("مسؤول المركز");
-    await staffPage.goto(`${host}/admin/settings?tab=branches`);
+    await staffPage.goto(workspaceUrl(staffPage, `${host}/admin/settings?tab=branches`));
     await expect(staffPage.getByRole("heading", { name: "فرع التجربة الشرقي" })).toBeVisible();
-    await staffPage.goto(`${host}/admin/settings`);
+    await staffPage.goto(workspaceUrl(staffPage, `${host}/admin/settings`));
     await staffPage.getByRole("textbox", { name: "بريد التواصل" }).fill("office@alpha.test");
     await staffPage.getByRole("button", { name: "حفظ الإعدادات" }).click();
     await expect(staffPage.getByText("حُفظت إعدادات المركز.")).toBeVisible();
-    await staffPage.goto(`${host}/admin/members`);
+    await staffPage.goto(workspaceUrl(staffPage, `${host}/admin/members`));
     const ownerCard = staffPage.getByRole("row").filter({ has: staffPage.getByRole("heading", { name: "Browser Owner" }) });
     await expect(ownerCard).toBeVisible();
     await expect(ownerCard.getByRole("button", { name: "تعديل الأدوار" })).toHaveCount(0);
     await ownerCard.getByRole("button", { name: "إيقاف العضوية" }).click();
-    await staffPage.getByRole("dialog").getByRole("button", { name: "إيقاف العضوية" }).click();
-    await expect(staffPage.locator(".notice[role=alert]")).toContainText("لا يمكن إيقاف آخر مالك نشط للمركز");
+    await staffPage.getByRole("alertdialog").getByRole("button", { name: "إيقاف العضوية" }).click();
+    await expect(staffPage.getByRole("alert").filter({ hasText: "لا يمكن إيقاف آخر مالك نشط للمركز" })).toContainText("لا يمكن إيقاف آخر مالك نشط للمركز");
     await expect(ownerCard).toContainText("نشط");
-    await staffPage.goto(`${host}/admin`);
+    await staffPage.goto(workspaceUrl(staffPage, `${host}/admin`));
 
     await staffCard.getByRole("button", { name: "إيقاف العضوية" }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "إيقاف العضوية" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "إيقاف العضوية" }).click();
     await expect(staffCard).toContainText("موقوف");
-    await secondManagerPage.goto(`${host}/admin/audit`);
+    await secondManagerPage.goto(workspaceUrl(secondManagerPage, `${host}/admin/audit`));
     await expect(secondManagerPage.getByRole("heading", { name: "تغيير حالة موظف الفرع" })).toBeVisible();
     await expect(secondManagerPage.getByText(`فرع رقم ${southId}`)).toHaveCount(0);
     await staffPage.reload();
@@ -329,6 +342,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await staffPage.reload();
     await expect(staffPage.getByText("Pilot Staff", { exact: true })).toBeVisible();
     const expiredEmail = `${slug}-expired@courses.test`;
+    await page.goto(workspaceUrl(page, `${host}/admin/members?tab=invitations`));
     await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(expiredEmail);
     await page.getByRole("button", { name: "إرسال الدعوة" }).click();
     await expect(page.getByText(expiredEmail)).toBeVisible();
@@ -348,7 +362,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     `, slug, email);
     await page.reload();
     await expect(page.getByRole("row").filter({ hasText: expiredEmail })).toContainText("انتهت صلاحية الدعوة");
-    await page.goto(`${host}/admin/settings?tab=branches`);
+    await page.goto(workspaceUrl(page, `${host}/admin/settings?tab=branches`));
     runFixture(String.raw`
       $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
       $user = \App\Models\User::where('email', getenv('COURSES_BROWSER_EMAIL'))->firstOrFail();
@@ -357,15 +371,32 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await page.getByRole("button", { name: "إنشاء فرع" }).click();
     await page.getByRole("textbox", { name: "اسم الفرع" }).fill("Denied Browser Branch");
     await page.getByRole("textbox", { name: "رمز الفرع" }).fill("denied-browser-branch");
+    let deniedBody: { code: string } | undefined;
+    await page.route("**/api/v1/center/branches", async route => {
+      if (route.request().method() !== "POST") return route.continue();
+      const actual = await route.fetch();
+      deniedBody = await actual.json();
+      await route.fulfill({ response: actual });
+    });
     const forbiddenResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/center/branches") && response.request().method() === "POST");
     await page.getByRole("button", { name: "حفظ الفرع" }).click();
-    expect((await forbiddenResponse).status()).toBe(403);
-    await expect(page.locator(".notice[role=alert]")).toContainText("خارج صلاحيتك");
+    const revoked = await forbiddenResponse;
+    expect(revoked.status()).toBe(409);
+    expect(deniedBody?.code).toBe("workspace_expired");
+    await page.unroute("**/api/v1/center/branches");
+    await expect(page).toHaveURL(`${host}/admin/workspaces?expired=1&return_to=${encodeURIComponent("/admin/settings")}`);
+    await expect(page.getByRole("heading", { name: "اختيار مساحة العمل", exact: true })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "اسم الفرع", exact: true })).toHaveCount(0);
     runFixture(String.raw`
       $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
       $user = \App\Models\User::where('email', getenv('COURSES_BROWSER_EMAIL'))->firstOrFail();
       $center->run(fn () => \Illuminate\Support\Facades\DB::table('center_grants')->insert(['user_id' => $user->id, 'role' => 'center_owner', 'created_at' => now(), 'updated_at' => now()]));
     `, slug, email);
+    await page.reload();
+    await finishWorkspaceEntry(page);
+    await page.goto(workspaceUrl(page, `${host}/admin/settings?tab=branches`));
+    const retainedBranches = await (await page.request.get(`${host}/api/v1/center/user`)).json();
+    expect(retainedBranches.branches.some((branch: { slug: string }) => branch.slug === "denied-browser-branch")).toBe(false);
     runFixture(String.raw`
       $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
       $user = \App\Models\User::where('email', getenv('COURSES_BROWSER_EMAIL'))->firstOrFail();
@@ -383,7 +414,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(email);
     await page.getByRole("textbox", { name: "كلمة المرور" }).fill(password);
     await page.getByRole("button", { name: "دخول المركز" }).click();
-    await expect(page.locator(".notice[role=alert]")).toContainText("أُوقفت عضويتك");
+    await expect(page.getByRole("alert").filter({ hasText: "أُوقفت عضويتك" })).toContainText("أُوقفت عضويتك");
     runFixture(String.raw`
       $center = \App\Models\Center::where('slug', getenv('COURSES_BROWSER_SLUG'))->firstOrFail();
       $user = \App\Models\User::where('email', getenv('COURSES_BROWSER_EMAIL'))->firstOrFail();
@@ -393,7 +424,9 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await page.getByRole("textbox", { name: "البريد الإلكتروني" }).fill(email);
     await page.getByRole("textbox", { name: "كلمة المرور" }).fill(password);
     await page.getByRole("button", { name: "دخول المركز" }).click();
-    await expect(page).toHaveURL(`${host}/admin`);
+    await finishWorkspaceEntry(page);
+    await expectWorkspaceUrl(page, "/admin");
+    await page.goto(workspaceUrl(page, `${host}/admin/settings?tab=branches`));
     await expect(page.getByRole("button", { name: "إنشاء فرع" })).toBeVisible();
     const sequence = telescopeSequence(slug, email);
     await page.reload();
@@ -420,7 +453,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     const platformCookies = await page.context().cookies("http://courses.test");
     expect(platformCookies.some((cookie) => cookie.name.includes("session"))).toBe(false);
 
-    await page.goto(`${host}/admin/security`);
+    await page.goto(workspaceUrl(page, `${host}/admin/security`));
     await page.getByRole("textbox", { name: "كلمة المرور الحالية" }).fill(password);
     await page.getByRole("button", { name: "تفعيل التحقق بخطوتين" }).click();
     const secret = (await page.getByLabel("مفتاح المصادقة").textContent())?.trim();
@@ -429,7 +462,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     await page.getByRole("button", { name: "تفعيل التحقق", exact: true }).click();
     await expect(page.getByRole("heading", { name: "التحقق بخطوتين مفعّل" })).toBeVisible();
 
-    await page.goto(`${host}/admin`);
+    await page.goto(workspaceUrl(page, `${host}/admin`));
     const expiredSession = (await page.context().cookies(host)).find((cookie) => cookie.name.includes("session"));
     if (!expiredSession) throw new Error("The center session cookie was missing before logout.");
     await page.getByRole("button", { name: "تسجيل الخروج" }).click();
@@ -439,7 +472,7 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
     const afterLogout = await page.request.get(`${host}/api/v1/center/user`, { headers: { Accept: "application/json" } });
     expect(afterLogout.status()).toBe(401);
     await page.context().addCookies([expiredSession]);
-    await page.goto(`${host}/admin`);
+    await page.goto(workspaceUrl(page, `${host}/admin`));
     await expect(page).toHaveURL(`${host}/login?expired=1`);
     await expect(page.getByRole("status")).toContainText("انتهت جلسة الدخول");
 
@@ -464,7 +497,9 @@ test("first owner accepts, signs in with MFA, sees current roles, and signs out 
       break;
     }
     expect(authenticated).toBe(true);
-    await expect(page).toHaveURL(`${host}/admin`);
+    await finishWorkspaceEntry(page);
+    await expectWorkspaceUrl(page, "/admin");
+    await page.goto(workspaceUrl(page, `${host}/admin/settings?tab=branches`));
     await expect(page.getByRole("button", { name: "إنشاء فرع" })).toBeVisible();
   } finally {
     await staffPage.close();

@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState, type FormEvent } from "react";
+import { curriculumExplorerHref } from "@/lib/curriculum-explorer";
+import { useSearchParams } from "next/navigation";
 import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
+import { useCurriculumPresentation } from "../curriculum/CurriculumExplorer";
+import { GroupRecordMenu } from "./GroupRecordMenu";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions, CenterPageActions } from "@/components/CenterShell";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
@@ -20,9 +24,11 @@ import type { GroupContext, GroupInstructorChoice, StudyGroup } from "@/lib/grou
 type Editor = "create" | StudyGroup | null;
 type Fields = { planId: string; name: string; price: string; threshold: string; instructorIds: string[] };
 
-export function GroupControls({ context }: { context: GroupContext }) {
+export function GroupControls({ context, explorer }: { context: GroupContext; explorer?: "group" | "level" }) {
+  const showDetails = useCurriculumPresentation();
   const formId = useId();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const trigger = useRef<HTMLElement | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const submitting = useRef(false);
@@ -52,7 +58,7 @@ export function GroupControls({ context }: { context: GroupContext }) {
   useEffect(() => { if (editor && editor !== "create") heading.current?.focus(); }, [editor]);
   const dirty = editor !== null && baseline !== JSON.stringify(fields);
   const canManage = (branchId: number) => context.permissions.can_manage_center || context.permissions.branch_actions?.[String(branchId)]?.includes("curriculum.manage");
-  const canCreate = context.level_choices.some(choice => canManage(choice.branch_id));
+  const canCreate = explorer !== "group" && context.level_choices.some(choice => canManage(choice.branch_id));
   const chosenPlan = context.level_choices.find(choice => choice.plan_version_id === fields.planId);
   const branchId = editor && editor !== "create" ? editor.branch_id : chosenPlan?.branch_id;
   const chosenGroup = editor && editor !== "create" ? editor : null;
@@ -110,9 +116,10 @@ export function GroupControls({ context }: { context: GroupContext }) {
   }
 
   function open(next: Exclude<Editor, null>, preserveTrigger = false) {
+    showDetails?.();
     if (!preserveTrigger) trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const value: Fields = next === "create"
-      ? { planId: "", name: "", price: "0.00", threshold: "", instructorIds: [] }
+      ? { planId: context.navigation && context.level_choices.length === 1 ? context.level_choices[0].plan_version_id : "", name: "", price: "0.00", threshold: "", instructorIds: [] }
       : { planId: next.plan_version_id, name: next.name, price: next.approved_price,
           threshold: next.completion_threshold_override === null ? "" : String(next.completion_threshold_override),
           instructorIds: next.instructors.map(item => item.id) };
@@ -123,10 +130,18 @@ export function GroupControls({ context }: { context: GroupContext }) {
     if (next !== "create") {
       void loadOptions(next.branch_id, 1, "", true);
       if (!next.approved_lectures) void loadDetails(next.id);
-    } else detailAbort.current?.abort();
+    } else {
+      detailAbort.current?.abort();
+      const selected = context.level_choices.find(choice => choice.plan_version_id === value.planId);
+      if (selected) void loadOptions(selected.branch_id, 1, "", true);
+    }
   }
 
   function close() {
+    if (explorer && searchParams.has("intent")) {
+      const params = new URLSearchParams(searchParams.toString()); params.delete("intent");
+      router.replace(`/admin/curriculum?${params}`, { scroll: false });
+    }
     optionAbort.current?.abort(); detailAbort.current?.abort();
     setEditor(null); setConfirmClose(false); setConfirmStart(false); setError(""); setConflict(false);
     requestAnimationFrame(() => {
@@ -164,7 +179,10 @@ export function GroupControls({ context }: { context: GroupContext }) {
         else { const validation = await responseFieldErrors(response); setFieldErrors(validation); setError(await responseMessage(response)); if (Object.keys(validation).length) focusFieldError(validation); }
         return;
       }
-      close(); setNotice("حُفظت المجموعة وإعداداتها داخل الفرع."); router.refresh();
+      const saved = explorer && editor === "create" ? await response.json() as { group: { id: string; name: string } } : null;
+      close(); setNotice("حُفظت المجموعة وإعداداتها داخل الفرع.");
+      if (saved) router.push(curriculumExplorerHref({ kind: "group", ...saved.group }, searchParams.toString()));
+      router.refresh();
     } catch { setError("تعذر التأكد من الحفظ. أعد الطلب نفسه؛ لن تُنشأ مجموعة مكررة."); }
     finally { submitting.current = false; setBusy(false); }
   }
@@ -202,16 +220,28 @@ export function GroupControls({ context }: { context: GroupContext }) {
     finally { submitting.current = false; setBusy(false); }
   }
 
+  const intent = searchParams.get("intent");
+  const intentHandled = useRef(false);
+  const applyIntent = useEffectEvent(() => { const group = context.groups[0]; if (group?.can_manage) open(group); });
+  useEffect(() => {
+    if (intent !== "group") { intentHandled.current = false; return; }
+    if (explorer !== "group" || intentHandled.current) return;
+    let active = true;
+    queueMicrotask(() => { if (active) { intentHandled.current = true; applyIntent(); } });
+    return () => { active = false; };
+  }, [intent, explorer]);
+
   function pages(kind: keyof GroupContext["pagination"], label: string) {
     const info = context.pagination[kind];
     if (info.page === 1 && !info.has_more) return null;
     const href = (page: number) => {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams(searchParams.toString());
       for (const [key, value] of Object.entries(context.pagination)) {
         const current = key === kind ? page : value.page;
-        if (current > 1) params.set(key === "groups" ? "page" : `${key}_page`, String(current));
+        const param = key === "groups" && !explorer ? "page" : `${key}_page`;
+        if (current > 1) params.set(param, String(current)); else params.delete(param);
       }
-      return `/admin/groups${params.size ? `?${params}` : ""}`;
+      return `${explorer ? "/admin/curriculum" : "/admin/groups"}${params.size ? `?${params}` : ""}`;
     };
     return <nav className="form-actions" aria-label={`دفعات ${label}`}>
       {info.page > 1 ? <Link href={href(info.page - 1)}>الدفعة السابقة</Link> : null}
@@ -230,7 +260,7 @@ export function GroupControls({ context }: { context: GroupContext }) {
       <FieldGroup>
         <FieldSet disabled={busy} className="form-stack" style={{ border: 0, padding: 0, margin: 0 }}>
           {editor === "create" ? <Field data-invalid={Boolean(fieldErrors.plan_version_id)}>
-            <FieldLabel htmlFor={`${formId}-plan`}>المستوى وإصدار الخطة</FieldLabel>
+            <FieldLabel htmlFor={`${formId}-plan`}>{explorer ? `إصدار خطة ${context.navigation?.level_name}` : "المستوى وإصدار الخطة"}</FieldLabel>
             <NativeSelect id={`${formId}-plan`} value={fields.planId} onChange={event => {
               const selected = context.level_choices.find(choice => choice.plan_version_id === event.target.value);
               update({ planId: event.target.value, instructorIds: [] });
@@ -289,18 +319,18 @@ export function GroupControls({ context }: { context: GroupContext }) {
         </FieldSet>
       </FieldGroup>
     </form> : <>
-      <DataTable id="study-groups" title="المجموعات" description="المجموعات محدودة بدفعات. كل مجموعة تحتفظ بإصدار خطتها ومحاضريها وإعدادات دراستها." rows={context.groups} rowKey={group => group.id}
+      <DataTable id="study-groups" title="المجموعات" rows={context.groups} rowKey={group => group.id}
         searchText={group => `${group.name} ${group.branch_name} ${group.course_name} ${group.level_name}`}
         emptyMessage="لا توجد مجموعات متاحة. أنشئ مجموعة من مستوى له خطة ومحاضرون في الفرع."
         columns={[
-          { key: "name", label: "المجموعة", filterText: row => row.name, render: row => <strong>{row.name}</strong> },
+          { key: "name", label: "المجموعة", filterText: row => row.name, render: row => <Link href={explorer ? curriculumExplorerHref({ kind: "group", id: row.id, name: row.name }, searchParams.toString()) : `/admin/groups/${row.id}/sessions`}><strong>{row.name}</strong></Link> },
           { key: "level", label: "المسار", filterText: row => `${row.branch_name} ${row.course_name} ${row.stage_name} ${row.level_name}`, render: row => `${row.branch_name} · ${row.course_name} ← ${row.stage_name} ← ${row.level_name}` },
           { key: "plan", label: "الخطة", render: row => `إصدار ${row.plan_version.toLocaleString("ar-EG")} · ${row.approved_lecture_count.toLocaleString("ar-EG")} محاضرة معتمدة` },
-          { key: "status", label: "الحالة", render: row => row.status === "waiting" ? "تنتظر البدء" : row.status === "started" ? "بدأت" : "مكتملة" },
+          { key: "status", label: "الحالة", filterText: row => row.status === "waiting" ? "تنتظر البدء" : row.status === "started" ? "بدأت" : "مكتملة", render: row => row.status === "waiting" ? "تنتظر البدء" : row.status === "started" ? "بدأت" : "مكتملة" },
           { key: "price", label: "السعر", render: row => row.approved_price },
           { key: "threshold", label: "الإتمام", render: row => `${row.completion_threshold.toLocaleString("ar-EG")}٪${row.completion_threshold_override === null ? " · موروثة" : " · مخصصة"}` },
           { key: "instructors", label: "المحاضرون", render: row => row.instructors.map(item => item.name).join("، ") },
-          { key: "actions", label: "الإجراءات", actions: true, render: row => <div className="form-actions"><Link href={`/admin/groups/${row.id}/sessions`}>جدول المحاضرات</Link><Link href={`/admin/groups/${row.id}/coverage`}>تقرير التغطية</Link>{row.can_manage ? <Button data-group-edit={row.id} disabled={busy} onClick={() => open(row)}>إدارة {row.name}</Button> : null}</div> },
+          { key: "actions", label: "الإجراءات", actions: true, render: row => <GroupRecordMenu group={row} disabled={busy} sessionsHref={explorer ? curriculumExplorerHref({ kind: "group", id: row.id, name: row.name }, searchParams.toString()) : `/admin/groups/${row.id}/sessions`} onManage={() => open(row)} /> },
         ]} />
       {pages("groups", "المجموعات")}
       {pages("levels", "المستويات والخطط")}

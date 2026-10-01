@@ -9,6 +9,7 @@ use App\Http\Controllers\CenterContentEquivalenceController;
 use App\Http\Controllers\CenterCourseCompletionController;
 use App\Http\Controllers\CenterCurriculumController;
 use App\Http\Controllers\CenterCurriculumCopyController;
+use App\Http\Controllers\CenterCurriculumExplorerController;
 use App\Http\Controllers\CenterGroupRequirementController;
 use App\Http\Controllers\CenterGroupRequirementEquivalenceController;
 use App\Http\Controllers\CenterInstructorController;
@@ -213,6 +214,9 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('curriculum/submissions/{requestId}', [CenterCurriculumController::class, 'submission']);
         Route::get('levels/{levelId}', [CenterCurriculumController::class, 'workspace']);
         Route::post('courses', [CenterCurriculumController::class, 'storeCourse']);
+        Route::delete('courses/{courseId}', [CenterCurriculumController::class, 'destroyCourse']);
+        Route::delete('stages/{stageId}', [CenterCurriculumController::class, 'destroyStage']);
+        Route::delete('levels/{levelId}', [CenterCurriculumController::class, 'destroyLevel']);
         Route::get('courses/{courseId}/copy-destinations', [CenterCurriculumCopyController::class, 'destinations']);
         Route::get('courses/{courseId}/copy-preview', [CenterCurriculumCopyController::class, 'preview']);
         Route::post('courses/{courseId}/copies', [CenterCurriculumCopyController::class, 'store']);
@@ -223,6 +227,8 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::patch('courses/{courseId}/completion-threshold', [CenterCurriculumController::class, 'updateCourseThreshold']);
         Route::patch('stages/{stageId}/completion-threshold', [CenterCurriculumController::class, 'updateStageThreshold']);
         Route::patch('levels/{levelId}/completion-threshold', [CenterCurriculumController::class, 'updateLevelThreshold']);
+        Route::get('curriculum-explorer', [CenterCurriculumExplorerController::class, 'workspace']);
+        Route::get('curriculum-explorer/children', [CenterCurriculumExplorerController::class, 'children']);
         Route::get('group-workspace', [CenterStudyGroupController::class, 'workspace']);
         Route::get('absence-review', [CenterAbsenceReviewController::class, 'workspace']);
         Route::post('absence-review/waitlist-batches', [CenterAbsenceReviewController::class, 'previewWaitlistBatch']);

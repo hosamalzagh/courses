@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Center;
 use App\Models\CenterMembership;
 use App\Support\CenterPermissions;
+use App\Support\StudyGroupRead;
 use Closure;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -45,6 +46,7 @@ class CenterStudyGroupController extends Controller
     public function workspace(Request $request, ?string $groupId = null): JsonResponse
     {
         $data = $request->validate([
+            'level_id' => ['sometimes', 'uuid'],
             'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
             'levels_page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
         ]);
@@ -56,28 +58,45 @@ class CenterStudyGroupController extends Controller
             $hasMore = false;
         } else {
             $page = (int) ($data['page'] ?? 1);
-            $rows = $this->records($permissions)->orderBy('study_groups.created_at')->orderBy('study_groups.id')
+            $rows = $this->records($permissions)
+                ->when(isset($data['level_id']), fn (Builder $query) => $query->where('study_groups.level_id', $data['level_id']))->orderBy('study_groups.created_at')->orderBy('study_groups.id')
                 ->offset(($page - 1) * 50)->limit(51)->get();
             $hasMore = $rows->count() > 50;
             $groups = $rows->take(50)->map(fn ($row) => $this->present($row, $permissions));
         }
         $scope = $this->scope($permissions);
         $levelsPage = (int) ($data['levels_page'] ?? 1);
-        $levels = DB::connection('tenant')->table('study_plan_versions as plans')
-            ->join('levels', 'levels.id', '=', 'plans.level_id')
-            ->join('stages', 'stages.id', '=', 'levels.stage_id')
-            ->join('courses', 'courses.id', '=', 'stages.course_id')
-            ->join('branches', 'branches.id', '=', 'courses.branch_id')
-            ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('courses.branch_id', $scope))
-            ->tap(fn (Builder $query) => $permissions->workspace?->constrain($query, 'courses.branch_id'))
+        $levelsQuery = StudyGroupRead::planChoicesQuery($permissions)
+            ->when(isset($data['level_id']), fn (Builder $query) => $query->where('levels.id', $data['level_id']))
             ->orderBy('courses.created_at')->orderBy('levels.id')->orderBy('plans.version')
-            ->offset(($levelsPage - 1) * 50)->limit(51)
-            ->select(['plans.id as plan_version_id', 'plans.version as plan_version', 'plans.level_id', 'levels.name as level_name',
-                'courses.branch_id', 'branches.name as branch_name', 'courses.name as course_name', 'stages.name as stage_name'])
-            ->selectRaw('COALESCE(levels.completion_threshold, stages.completion_threshold, courses.completion_threshold) AS completion_threshold')
-            ->get();
+            ->offset(($levelsPage - 1) * 50)->limit(51);
+
+        // A scoped level's ancestor metadata must remain available even on an empty group page.
+        $navigation = null;
+        if (isset($data['level_id'])) {
+            $ancestor = DB::connection('tenant')->table('levels')
+                ->join('stages', 'stages.id', '=', 'levels.stage_id')
+                ->join('courses', 'courses.id', '=', 'stages.course_id')
+                ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('courses.branch_id', $scope))
+                ->tap(fn (Builder $query) => $permissions->workspace?->constrain($query, 'courses.branch_id'))
+                ->where('levels.id', $data['level_id'])
+                ->select(['levels.id as level_id', 'levels.name as level_name', 'stages.id as stage_id',
+                    'stages.name as stage_name', 'courses.id as course_id', 'courses.name as course_name']);
+            $choices = DB::connection('tenant')->query()->fromSub($levelsQuery, 'choices')
+                ->selectRaw("'choice'::text AS kind, to_jsonb(choices) AS payload");
+            $ancestorRow = DB::connection('tenant')->query()->fromSub($ancestor, 'ancestor')
+                ->selectRaw("'navigation'::text AS kind, to_jsonb(ancestor) AS payload");
+            $rows = $choices->unionAll($ancestorRow)->get();
+            $levels = $rows->where('kind', 'choice')->map(fn ($row) => json_decode($row->payload));
+            $navigation = $rows->firstWhere('kind', 'navigation');
+            abort_unless($navigation, 404);
+            $navigation = json_decode($navigation->payload);
+        } else {
+            $levels = $levelsQuery->get();
+        }
 
         return response()->json([
+            'navigation' => $navigation,
             'user' => $request->user()->only(['id', 'name', 'email']),
             'membership' => $request->attributes->get('center_membership')->only(['status', 'grants_version']),
             'center' => $request->attributes->get('center')->only(['id', 'name', 'slug']),
@@ -241,38 +260,7 @@ SQL, [$id, now(), $data['plan_version_id']]);
 
     private function records(CenterPermissions $permissions, bool $includeLectures = false): Builder
     {
-        $query = DB::connection('tenant')->table('study_groups')
-            ->join('levels', 'levels.id', '=', 'study_groups.level_id')
-            ->join('stages', 'stages.id', '=', 'levels.stage_id')
-            ->join('courses', 'courses.id', '=', 'stages.course_id')
-            ->join('branches', 'branches.id', '=', 'courses.branch_id')
-            ->join('study_plan_versions as plans', 'plans.id', '=', 'study_groups.plan_version_id')
-            ->select([
-                'study_groups.id', 'study_groups.level_id', 'study_groups.plan_version_id', 'study_groups.name',
-                'study_groups.status', 'study_groups.approved_price', 'study_groups.revision', 'study_groups.started_at',
-                'study_groups.completion_threshold as completion_threshold_override',
-                'courses.branch_id', 'branches.name as branch_name', 'courses.name as course_name', 'stages.name as stage_name', 'levels.name as level_name',
-                'plans.version as plan_version',
-            ])->selectRaw(<<<'SQL'
-COALESCE(study_groups.completion_threshold, levels.completion_threshold, stages.completion_threshold, courses.completion_threshold) AS completion_threshold,
-(SELECT count(*) FROM study_group_requirements WHERE group_id = study_groups.id AND retired_at IS NULL) AS approved_lecture_count,
-COALESCE((SELECT json_agg(json_build_object('id', instructors.id, 'name', instructors.name) ORDER BY instructors.name)
-FROM study_group_instructors JOIN instructors ON instructors.id = study_group_instructors.instructor_id
-WHERE study_group_instructors.group_id = study_groups.id), '[]'::json) AS instructors
-SQL);
-        if ($includeLectures) {
-            $query->selectRaw(<<<'SQL'
-COALESCE((SELECT json_agg(json_build_object('number', lecture.number, 'content', lecture.content, 'title', lecture.title, 'planned_hours', lecture.planned_hours::float) ORDER BY lecture.number)
-FROM (SELECT number, content, title, planned_hours FROM study_group_requirements WHERE group_id = study_groups.id AND retired_at IS NULL ORDER BY number LIMIT 200) lecture), '[]'::json) AS approved_lectures
-SQL);
-        }
-        if (! $permissions->isCenterManager()) {
-            $query->whereIn('courses.branch_id', $this->scope($permissions));
-        }
-
-        $permissions->workspace?->constrain($query, 'courses.branch_id');
-
-        return $query;
+        return StudyGroupRead::groupsQuery($permissions, $includeLectures);
     }
 
     private function scope(CenterPermissions $permissions): array
@@ -291,9 +279,7 @@ SQL);
 
     private function present(object $row, CenterPermissions $permissions): array
     {
-        return [...(array) $row, 'instructors' => json_decode($row->instructors, true),
-            ...isset($row->approved_lectures) ? ['approved_lectures' => json_decode($row->approved_lectures, true)] : [],
-            'can_manage' => $permissions->can('curriculum.manage', (int) $row->branch_id)];
+        return StudyGroupRead::presentGroup($row, $permissions);
     }
 
     private function canRead(CenterPermissions $permissions, int $branchId): bool

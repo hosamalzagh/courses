@@ -115,7 +115,7 @@ test('read-only staff do not receive edit or finance actions', async ({ page }) 
   const staff = credentials('staff');
   await signIn(page, origin, staff.email, staff.password);
   await page.goto(workspaceUrl(page, `${origin}/admin/students`));
-  const row = page.getByRole('table', { name: 'الطلاب في فروعي' }).locator('tbody tr').first();
+  const row = page.getByRole('table', { name: 'طلاب الفرع الحالي' }).locator('tbody tr').first();
   await row.getByRole('button', { name: /^إجراءات الطالب / }).click();
   const menu = page.getByRole('menu');
   await expect(menu.getByRole('menuitem', { name: 'عرض الملف' })).toBeVisible();

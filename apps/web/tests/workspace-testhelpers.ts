@@ -37,7 +37,13 @@ export async function finishWorkspaceEntry(page: Page, options: { branchName?: s
     await expect(page.locator("[data-workspace-name]")).toBeVisible();
     if (data.permissions.can_manage_center && await page.locator("[data-workspace-name]").textContent() !== "إدارة المركز") {
       await page.getByRole("link", { name: "تبديل مساحة العمل", exact: true }).click();
+      const selected = page.waitForResponse(response => new URL(response.url()).pathname === "/api/v1/center/workspaces" && response.request().method() === "POST");
       await page.getByRole("button", { name: "إدارة المركز", exact: true }).click();
+      const selectedResponse = await selected;
+      expect(selectedResponse.ok()).toBe(true);
+      const chosen = await selectedResponse.json();
+      expect(chosen.workspace.mode).toBe("center");
+      await expect(page).toHaveURL(new URL(chosen.destination, page.url()).href);
       await expect(page.locator("[data-workspace-name]")).toHaveText("إدارة المركز");
     }
   }
@@ -50,6 +56,7 @@ export async function finishWorkspaceEntry(page: Page, options: { branchName?: s
     url.searchParams.set("workspace", data.workspace.id);
     await page.goto(url.href);
   }
+  await expect(page.locator(".route-progress")).toHaveCount(0);
   return rememberWorkspace(page);
 }
 
@@ -79,7 +86,7 @@ function canonical(url: URL): string {
 
 export async function expectWorkspaceUrl(page: Page, route: string): Promise<void> {
   const expected = canonical(new URL(workspaceUrl(page, route)));
-  await expect(page).toHaveURL(url => canonical(new URL(url)) === expected);
+  await expect(page, `Expected captured workspace URL: ${expected}`).toHaveURL(url => canonical(new URL(url)) === expected);
 }
 
 export async function expectWorkspaceHref(page: Page, link: Locator, route: string): Promise<void> {

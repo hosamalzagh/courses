@@ -6,7 +6,7 @@ export function newSubmissionId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export async function centerRequest(path: string, method: "GET" | "POST" | "PATCH" | "PUT", body?: object, signal?: AbortSignal): Promise<Response> {
+export async function centerRequest(path: string, method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", body?: object, signal?: AbortSignal, options?: { redirectOnUnavailable?: boolean }): Promise<Response> {
   const workspace = new URLSearchParams(window.location.search).get("workspace");
   if (method !== "GET") {
     await fetch("/sanctum/csrf-cookie", { credentials: "same-origin", cache: "no-store" });
@@ -37,7 +37,7 @@ export async function centerRequest(path: string, method: "GET" | "POST" | "PATC
     (await response.clone().json().catch(() => ({}))).code === "membership_suspended") {
     window.location.replace("/admin");
   }
-  if (response.status === 423 || response.status === 503) {
+  if (response.status === 423 || (response.status === 503 && options?.redirectOnUnavailable !== false)) {
     window.location.replace("/admin");
   }
 
@@ -59,6 +59,7 @@ export async function responseMessage(response: Response): Promise<string> {
   }
   if (response.status === 409) {
     const data = await response.clone().json().catch(() => ({}));
+    if (data.code === "curriculum_in_use" && typeof data.message === "string") return data.message;
     if (data.code === "invitation_delivery_uncertain") {
       return "حالة إرسال الدعوة غير مؤكدة. اطلب من دعم المنصة التحقق من البريد قبل إعادة الإرسال.";
     }
