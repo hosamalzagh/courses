@@ -227,3 +227,61 @@ test("MFA single branch auto-entry and zero branch recovery", async ({ page }) =
   await expect(page.getByText("لا توجد فروع متاحة لك.", { exact: false })).toBeVisible();
   await expect(page.getByRole("button", { name: "إدارة المركز", exact: true })).toHaveCount(0);
 });
+
+test("legacy settings redirects preserve a selected branch different from the initial workspace", async ({ page }) => {
+  test.setTimeout(120_000);
+  const redirectOrigin = process.env.COURSES_REDIRECT_TEST_ORIGIN ?? origin;
+  fixture(String.raw`
+    $center->run(function () use ($user) {
+      if (\Illuminate\Support\Facades\DB::table('center_grants')->where('user_id', $user->id)->where('role', 'center_owner')->exists()) throw new \RuntimeException('Fixture must not already be an owner');
+      \Illuminate\Support\Facades\DB::table('center_grants')->insert(['user_id'=>$user->id, 'role'=>'center_owner', 'created_at'=>now(), 'updated_at'=>now()]);
+    });
+  `);
+  try {
+    await login(page);
+    await choose(page, names[0]);
+    await expect(page.locator(".route-progress")).toHaveCount(0);
+    const north = new URL(page.url()).searchParams.get("workspace");
+    expect(north).toMatch(/^[a-f0-9-]{36}$/);
+    await page.getByRole("link", { name: "تبديل مساحة العمل", exact: true }).click();
+    await choose(page, names[1]);
+    await expect(page.locator(".route-progress")).toHaveCount(0);
+    const south = new URL(page.url()).searchParams.get("workspace");
+    expect(south).toMatch(/^[a-f0-9-]{36}$/);
+    expect(south).not.toBe(north);
+    const initial = await page.request.get(`${origin}/api/v1/center/user`);
+    expect(initial.ok()).toBe(true);
+    expect((await initial.json()).workspace.id).toBe(north);
+
+    const routes: { path: string; tab: string; params: Record<string, string> }[] = [
+      { path: "/admin/security", tab: "security", params: {} },
+      { path: "/admin/student-custom-fields", tab: "student-fields", params: { page: "2" } },
+      { path: "/admin/student-profile-choices", tab: "student-choices", params: { kind: "city", page: "2", q: "مدينة التحقق" } },
+      { path: "/admin/student-search", tab: "students", params: { tab: "settings", q: "بحث الإعدادات", page: "2" } },
+    ];
+    for (const route of routes) {
+      const query = new URLSearchParams({ ...route.params, workspace: south! });
+      await page.goto(`${redirectOrigin}${route.path}?${query}`);
+      const expected = new URLSearchParams({ tab: route.tab });
+      for (const [key, value] of Object.entries(route.params)) if (key !== "tab") expected.set(key, value);
+      expected.set("workspace", south!);
+      await expect(page).toHaveURL(`${redirectOrigin}/admin/settings?${expected}`);
+      await expect(page.locator(".sidebar-center [data-workspace-name]")).toHaveText(names[1]);
+      await expect(page.locator(".route-progress")).toHaveCount(0);
+    }
+    const search = new URLSearchParams({ q: "بحث الطلاب", workspace: south! });
+    await page.goto(`${redirectOrigin}/admin/student-search?${search}`);
+    await expect(page).toHaveURL(url => url.origin === redirectOrigin && url.pathname === "/admin/students"
+      && url.searchParams.get("q") === "بحث الطلاب" && url.searchParams.get("workspace") === south);
+    const actual = new URL(page.url()).searchParams;
+    // Center search may fall back to the permitted branch view when its policy is disabled.
+    actual.delete("scope");
+    expect([...actual.entries()].sort()).toEqual([...search.entries()].sort());
+    await expect(page.locator(".sidebar-center [data-workspace-name]")).toHaveText(names[1]);
+    await expect(page.locator(".route-progress")).toHaveCount(0);
+  } finally {
+    fixture(String.raw`
+      $center->run(fn () => \Illuminate\Support\Facades\DB::table('center_grants')->where('user_id', $user->id)->where('role', 'center_owner')->delete());
+    `);
+  }
+});
