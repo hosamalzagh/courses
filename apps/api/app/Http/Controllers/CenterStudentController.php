@@ -784,8 +784,12 @@ class CenterStudentController extends Controller
 
     private function associate(string $id, array $branchIds): void
     {
-        foreach ($branchIds as $branchId) {
-            DB::connection('tenant')->table('student_branches')->insertOrIgnore(['student_id' => $id, 'branch_id' => $branchId, 'created_at' => now()]);
+        $createdAt = now();
+        foreach (array_chunk($branchIds, 500) as $chunk) {
+            DB::connection('tenant')->table('student_branches')->insertOrIgnore(array_map(
+                fn ($branchId): array => ['student_id' => $id, 'branch_id' => $branchId, 'created_at' => $createdAt],
+                $chunk,
+            ));
         }
     }
 
@@ -793,12 +797,17 @@ class CenterStudentController extends Controller
     {
         $basic = fn (?array $student): ?array => $student === null ? null : array_intersect_key($student, array_flip(['student_number', 'manual_code', 'name', 'phone', 'legacy_phone', 'contacts', 'channels', 'profile_choices', ...self::GENERAL_FIELDS]));
         $identityChanged = array_values(array_filter(StudentIdentity::FIELDS, fn (string $field): bool => ($before['identity'][$field] ?? null) !== ($after['identity'][$field] ?? null)));
-        foreach ($branchIds as $branchId) {
-            DB::connection('tenant')->table('center_audit_logs')->insert([
-                'actor_id' => $request->user()->id, 'branch_id' => $branchId, 'event' => $event,
-                'details' => json_encode(['student_id' => $after['id'], 'before' => $basic($before), 'after' => $basic($after), 'identity_changed' => $identityChanged, 'custom_fields_changed' => $customChangedFields,
-                    'associated_before' => in_array($branchId, $previousBranchIds, true), 'associated_after' => true]), 'created_at' => now(),
-            ]);
+        $details = ['student_id' => $after['id'], 'before' => $basic($before), 'after' => $basic($after),
+            'identity_changed' => $identityChanged, 'custom_fields_changed' => $customChangedFields, 'associated_after' => true];
+        $previous = array_fill_keys($previousBranchIds, true);
+        $actorId = $request->user()->id;
+        $createdAt = now();
+        foreach (array_chunk($branchIds, 500) as $chunk) {
+            DB::connection('tenant')->table('center_audit_logs')->insert(array_map(
+                fn ($branchId): array => ['actor_id' => $actorId, 'branch_id' => $branchId, 'event' => $event,
+                    'details' => json_encode([...$details, 'associated_before' => isset($previous[$branchId])]), 'created_at' => $createdAt],
+                $chunk,
+            ));
         }
     }
 
