@@ -33,6 +33,7 @@ class CenterStudentEventNoteController extends Controller
             ->where('notes.student_id', $studentId)->where('attempts.student_id', $studentId)
             ->where('notes.event_type', 'study_attempt')->whereColumn('notes.branch_id', 'fees.branch_id')
             ->when(! $permissions->isCenterManager(), fn ($query) => $query->whereIn('fees.branch_id', $readableBranches))
+            ->tap(fn ($query) => $permissions->workspace?->constrain($query, 'fees.branch_id'))
             ->orderByDesc('notes.updated_at')->orderByDesc('notes.id')
             ->offset(((int) ($data['page'] ?? 1) - 1) * 20)->limit(21)
             ->get(['notes.event_id as attempt_id', 'notes.branch_id', 'notes.body', 'notes.important', 'notes.revision',
@@ -58,7 +59,7 @@ class CenterStudentEventNoteController extends Controller
             ->where('attempts.id', $attemptId)->where('attempts.student_id', $studentId)
             ->first(['fees.branch_id as event_branch_id', 'notes.id', 'notes.body', 'notes.important', 'notes.revision',
                 'notes.created_by_name', 'notes.updated_by_name', 'notes.created_at', 'notes.updated_at']);
-        abort_unless($row && $permissions->can('read', (int) $row->event_branch_id), 404);
+        abort_unless($row && $permissions->canInWorkspace('read', (int) $row->event_branch_id), 404);
         $page = (int) ($data['page'] ?? 1);
         $versions = $row->id === null ? collect() : DB::connection('tenant')->table('student_event_note_revisions')
             ->where('note_id', $row->id)
@@ -94,7 +95,7 @@ class CenterStudentEventNoteController extends Controller
                 ->join('study_attempt_fees as fees', 'fees.attempt_id', '=', 'attempts.id')
                 ->where('attempts.id', $attemptId)->where('attempts.student_id', $studentId)
                 ->lockForUpdate()->first(['attempts.id', 'fees.branch_id as event_branch_id']);
-            abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->event_branch_id), 404);
+            abort_unless($attempt && $permissions->canInWorkspace('enrollment.manage', (int) $attempt->event_branch_id), 404);
 
             return $this->persist($request, $db, 'study_attempt', $attemptId, $studentId,
                 (int) $attempt->event_branch_id, $data, $hash, ['attempt_id' => $attemptId]);
@@ -108,7 +109,7 @@ class CenterStudentEventNoteController extends Controller
             'before_revision' => ['sometimes', 'integer', 'min:1']]);
         $permissions = $request->attributes->get('center_permissions');
         $entry = $this->attendanceEntry($groupId, $sessionId, $entryId, false, true);
-        abort_unless($entry && $entry->status !== null && $permissions->can('read', (int) $entry->branch_id), 404);
+        abort_unless($entry && $entry->status !== null && $permissions->canInWorkspace('read', (int) $entry->branch_id), 404);
         $page = (int) ($data['page'] ?? 1);
         $versions = $entry->note_id === null ? collect() : DB::connection('tenant')->table('student_event_note_revisions')
             ->where('note_id', $entry->note_id)
@@ -145,9 +146,9 @@ class CenterStudentEventNoteController extends Controller
         return CenterWrites::run($request, function (CenterPermissions $permissions) use ($request, $groupId, $sessionId, $entryId, $data, $hash): JsonResponse {
             $db = DB::connection('tenant');
             $entry = $this->attendanceEntry($groupId, $sessionId, $entryId, true);
-            abort_unless($entry && $entry->status !== null && $permissions->can('read', (int) $entry->branch_id)
-                && ($permissions->can('attendance.record', (int) $entry->branch_id)
-                    || $permissions->can('attendance.correct', (int) $entry->branch_id)), 404);
+            abort_unless($entry && $entry->status !== null && $permissions->canInWorkspace('read', (int) $entry->branch_id)
+                && ($permissions->canInWorkspace('attendance.record', (int) $entry->branch_id)
+                    || $permissions->canInWorkspace('attendance.correct', (int) $entry->branch_id)), 404);
             if ((int) $entry->revision !== (int) $data['entry_revision']) {
                 $this->conflict('attendance_occurrence_changed');
             }

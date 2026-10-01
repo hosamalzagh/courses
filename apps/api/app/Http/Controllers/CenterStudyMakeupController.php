@@ -287,7 +287,7 @@ class CenterStudyMakeupController extends Controller
             $query->lock('FOR UPDATE OF students, attempts');
         }
         $attempt = $query->first();
-        abort_unless($attempt && $permissions->can('enrollment.manage', (int) $attempt->branch_id), 404);
+        abort_unless($attempt && $permissions->canInWorkspace('enrollment.manage', (int) $attempt->branch_id), 404);
 
         return $attempt;
     }

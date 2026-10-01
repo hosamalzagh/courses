@@ -211,7 +211,7 @@ export function StudentForm({ context, student }: { context: StudentContext; stu
         {canReadIdentity ? <StudentIdentityFields key={editor === 'new' ? requestId : `${editor.id}-${editor.revision}`} prefix={formPrefix} identity={identity} onChange={value => {setSaved(false);setIdentity(value);setFieldErrors({});}} dateOfBirth={general.date_of_birth} onBirthChange={value => changeGeneral('date_of_birth',value)} studentId={editor === 'new' ? undefined : editor.id} branchIds={branchIds} errors={fieldErrors} onFieldErrors={setFieldErrors} busy={busy} canManage={canManageIdentity} onBusyChange={value => {saving.current=value;setBusy(value);}} /> : null}
         </FieldGroup>
         </FormSection>
-        {!autoAllBranches ? <FormSection id='student-branches' title='الفروع' description='اختر الفروع التي سيُربط بها ملف الطالب.'>
+        {!autoAllBranches && context.workspace?.mode !== "branch" ? <FormSection id='student-branches' title='الفروع' description='اختر الفروع التي سيُربط بها ملف الطالب.'>
         <FieldSet data-invalid={Boolean(fieldErrors.branch_ids)} aria-describedby={fieldErrors.branch_ids ? 'student-branches-error' : 'student-branches-hint'}><FieldLegend>الفروع المرتبطة بالطالب</FieldLegend>
           <FieldDescription id='student-branches-hint'>اختر فروع التسجيل المصرح بها. تبقى ارتباطات الملف السابقة محفوظة.</FieldDescription>
           {manageable.map((branch) => {

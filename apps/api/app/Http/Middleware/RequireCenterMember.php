@@ -45,7 +45,10 @@ class RequireCenterMember
             if (isset($payload['permissions'])) {
                 $permissions = $request->attributes->get('center_permissions');
                 $payload['workspace'] = $permissions->workspace?->toArray();
-                $payload['workspace_scope'] = $request->is('api/v1/center/curriculum-workspace', 'api/v1/center/levels/*') ? 'selected' : 'authorized_branches';
+                // Account movements retain each independently authorized financial branch.
+                $payload['workspace_scope'] = $request->is('api/v1/center/students/*/account')
+                    ? 'authorized_financial_branches'
+                    : ($request->is('api/v1/center/members*', 'api/v1/center/audit*', 'api/v1/center/settings*', 'api/v1/center/dashboard*', 'api/v1/center/user') ? 'center' : 'selected');
                 $payload['workspace_can_switch'] = ($permissions->isCenterManager() && ($permissions->workspace?->mode === 'branch' || $permissions->hasBranches)) || count($permissions->readableBranchIds()) > 1;
                 $response->setData($payload);
             }

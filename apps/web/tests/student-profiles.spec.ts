@@ -1,3 +1,4 @@
+import { finishWorkspaceEntry, expectWorkspaceUrl, workspaceUrl, workspacePath } from "./workspace-testhelpers";
 import { test, expect, type Page, type BrowserContext } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -23,7 +24,7 @@ test('creation and edit load branch choices beyond the first fifty without losin
     const result = await write(page, 'branches', 'POST', { name: `فرع إضافي ${Date.now()} ${index}`, slug: `profile-${Date.now()}-${index}` });
     expect(result.status).toBe(201); lastBranch = result.body.branch; branchIds.push(lastBranch!.id);
   }
-  await page.goto(`${betaHost}/admin/students/new`);
+  await page.goto(workspaceUrl(page, `${betaHost}/admin/students/new`));
   const name = `طالب فروع ${Date.now()}`;
   await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name);
   await page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true }).fill('مدرسة محفوظة أثناء التحميل');
@@ -41,8 +42,8 @@ test('creation and edit load branch choices beyond the first fifty without losin
   expect(student.branch_ids).toContain(lastBranch!.id);
   const expanded = await write(page, `students/${student.id}`, 'PATCH', { name, branch_ids: branchIds.slice(0, 50), revision: student.revision });
   expect(expanded.status).toBe(200); expect(expanded.body.student.branch_ids.length).toBeGreaterThan(50);
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
-  await page.goto(`${betaHost}/admin/students/${student.id}/edit`);
+  await expectWorkspaceUrl(page, `/admin/students/${student.id}?focus=edit`);
+  await page.goto(workspaceUrl(page, `${betaHost}/admin/students/${student.id}/edit`));
   await page.getByRole('textbox', { name: 'جهة العمل', exact: true }).fill('جهة محفوظة أثناء التحميل');
   while (await page.getByRole('button', { name: 'تحميل المزيد من الفروع', exact: true }).count()) {
     const response = page.waitForResponse((response) => response.url().includes('student-workspace?branches_page='));
@@ -52,7 +53,7 @@ test('creation and edit load branch choices beyond the first fifty without losin
   }
   await expect(page.getByRole('checkbox', { name: `${lastBranch!.name} — مرتبط بالفعل`, exact: true })).toBeChecked();
   await page.getByRole('button', { name: 'حفظ بيانات الطالب', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${student.id}?focus=edit`);
   const current = (await (await page.request.get(`${betaHost}/api/v1/center/students/${student.id}`)).json()).students[0];
   expect(current.branch_ids).toContain(lastBranch!.id); expect(current.employer).toBe('جهة محفوظة أثناء التحميل');
 });
@@ -66,8 +67,8 @@ test('cached student editors keep unique native submit ownership', async ({ page
   await page.getByRole('tab', { name: 'البحث عن طالب', exact: true }).click();
   await page.getByRole('textbox', { name: 'البحث في جميع الملفات المصرح بها', exact: true }).fill(prefix);
   await page.getByRole('button', { name: 'بحث عن طالب', exact: true }).click();
-  await page.locator(`a[href="/admin/students/${first.id}"]`).first().click();
-  await expect(page).toHaveURL(`${host}/admin/students/${first.id}`);
+  await page.locator(`a[href="${workspacePath(page, `/admin/students/${first.id}`)}"]`).first().click();
+  await expectWorkspaceUrl(page, `${host}/admin/students/${first.id}`);
   await page.locator('.center-topbar').getByRole('link', { name: 'تعديل ملف الطالب', exact: true }).click();
   const firstFormId = await page.locator('.center-topbar').getByRole('button', { name: 'حفظ بيانات الطالب', exact: true }).getAttribute('form');
   await page.locator('.center-topbar').getByRole('link', { name: 'إلغاء', exact: true }).click();
@@ -75,8 +76,8 @@ test('cached student editors keep unique native submit ownership', async ({ page
   await page.getByRole('tab', { name: 'البحث عن طالب', exact: true }).click();
   await page.getByRole('textbox', { name: 'البحث في جميع الملفات المصرح بها', exact: true }).fill(prefix);
   await page.getByRole('button', { name: 'بحث عن طالب', exact: true }).click();
-  await page.locator(`a[href="/admin/students/${second.id}"]`).first().click();
-  await expect(page).toHaveURL(`${host}/admin/students/${second.id}`);
+  await page.locator(`a[href="${workspacePath(page, `/admin/students/${second.id}`)}"]`).first().click();
+  await expectWorkspaceUrl(page, `${host}/admin/students/${second.id}`);
   await page.locator('.center-topbar').getByRole('link', { name: 'تعديل ملف الطالب', exact: true }).click();
   const save = page.locator('.center-topbar').getByRole('button', { name: 'حفظ بيانات الطالب', exact: true });
   const secondFormId = await save.getAttribute('form');
@@ -85,7 +86,7 @@ test('cached student editors keep unique native submit ownership', async ({ page
   await expect(page.locator(`form[id="${secondFormId}"]`)).toHaveCount(1);
   await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(`${prefix} ب معدل`);
   await save.click();
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${second.id}\\?focus=edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${second.id}?focus=edit`);
   const a = (await (await page.request.get(`${host}/api/v1/center/students/${first.id}`)).json()).students[0];
   const b = (await (await page.request.get(`${host}/api/v1/center/students/${second.id}`)).json()).students[0];
   expect(a.name).toBe(`${prefix} أ`);
@@ -121,10 +122,10 @@ test('combined profile keeps number and sharing through suspension, general edit
   await page.goBack();
   await expect(page.getByRole('alertdialog')).toContainText('مغادرة دون حفظ');
   await page.getByRole('alertdialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}/edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${student.id}/edit`);
   await expect(page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true })).toHaveValue('مدرسة التكامل');
   await page.getByRole('button', { name: 'حفظ بيانات الطالب', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${student.id}?focus=edit`);
   const current = (await (await page.request.get(`${host}/api/v1/center/students/${student.id}`)).json()).students[0];
   expect(current.student_number).toBe(start); expect(current.school).toBe('مدرسة التكامل');
   expect(current.sharing_enabled).toBe(false); expect(current.status).toBe('suspended');
@@ -147,9 +148,9 @@ test('combined profile keeps number and sharing through suspension, general edit
   await expect(page.getByText('المشاركة بين الفروع: مغلقة', { exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'تعديل ملف الطالب', exact: true }).click();
   await page.getByRole('link', { name: 'إلغاء', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${student.id}?focus=edit`);
   await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}/edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${student.id}/edit`);
   await expect(page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true })).toBeVisible();
   await page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true }).fill('تعديل لم يُحفظ');
   await page.goForward();
@@ -159,14 +160,14 @@ test('combined profile keeps number and sharing through suspension, general edit
   await page.evaluate(() => history.go(-2));
   await expect(page.getByRole('alertdialog')).toContainText('مغادرة دون حفظ');
   await page.getByRole('alertdialog').getByRole('button', { name: 'إلغاء', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}/edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${student.id}/edit`);
   await expect(page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true })).toHaveValue('تعديل لم يُحفظ');
   await page.goForward();
   await page.getByRole('alertdialog').getByRole('button', { name: 'مغادرة دون حفظ', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${student.id}?focus=edit`);
   expect((await (await page.request.get(`${host}/api/v1/center/students/${student.id}`)).json()).students[0].school).toBe('مدرسة التكامل');
   await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}/edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${student.id}/edit`);
   await page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true }).fill('تعديل بعد العودة');
   await page.goBack();
   await expect(page.getByRole('alertdialog')).toContainText('مغادرة دون حفظ');
@@ -198,14 +199,16 @@ async function signIn(page: Page, name: 'alpha' | 'beta' | 'staff' = 'alpha') {
   if (session) {
     await page.context().addCookies(session.cookies);
     await page.goto(`${name === 'beta' ? betaHost : host}/admin`);
-    await expect(page).toHaveURL(/\/admin$/);
+    await finishWorkspaceEntry(page);
+    await expectWorkspaceUrl(page, "/admin");
     return;
   }
   await page.goto(`${name === 'beta' ? betaHost : host}/login`);
   await page.getByRole('textbox', { name: 'البريد الإلكتروني' }).fill(owner.email);
   await page.getByRole('textbox', { name: 'كلمة المرور', exact: true }).fill(owner.password);
   await page.getByRole('button', { name: 'دخول المركز', exact: true }).click();
-  await expect(page).toHaveURL(/\/admin$/);
+  await finishWorkspaceEntry(page);
+  await expectWorkspaceUrl(page, "/admin");
 }
 
 async function write(page: Page, route: string, method: string, payload: object) {
@@ -222,7 +225,7 @@ async function write(page: Page, route: string, method: string, payload: object)
 }
 
 async function create(page: Page, name: string, code?: {label:string;value:string}, passport?: string, custom?: {label:string;value:string}) {
-  await page.goto(`${host}/admin/students/new`);
+  await page.goto(workspaceUrl(page, `${host}/admin/students/new`));
   await expect(page.getByRole('textbox', { name: 'اسم الطالب', exact: true })).toBeFocused();
   await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name);
   if (code) await page.getByRole('textbox',{name:code.label,exact:true}).fill(code.value);
@@ -239,7 +242,7 @@ async function create(page: Page, name: string, code?: {label:string;value:strin
   await page.getByRole('button', { name: 'حفظ ملف الطالب', exact: true }).click();
   const student = (await (await response).json()).student;
   createdStudentIds.add(student.id);
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${student.id}?focus=edit`);
   return student;
 }
 
@@ -281,9 +284,9 @@ test.afterEach(() => {
 
 test('dedicated creation and edit preserve optional data, focus, validation, dirty navigation and the profile summary', async ({ page }) => {
   await signIn(page);
-  await page.goto(`${host}/admin/students`);
+  await page.goto(workspaceUrl(page, `${host}/admin/students`));
   await page.getByRole('link', { name: 'إنشاء ملف طالب', exact: true }).click();
-  await expect(page).toHaveURL(/\/admin\/students\/new$/);
+  await expectWorkspaceUrl(page, "/admin/students/new");
   const name = `طالب قبول ${Date.now()}`;
   await page.getByRole('button', { name: 'حفظ ملف الطالب' }).click();
   await expect(page.getByRole('textbox', { name: 'اسم الطالب', exact: true })).toHaveAttribute('aria-invalid', 'true');
@@ -304,13 +307,13 @@ test('dedicated creation and edit preserve optional data, focus, validation, dir
   await page.getByRole('button', { name: 'حفظ ملف الطالب' }).click();
   const student = (await (await response).json()).student;
   createdStudentIds.add(student.id);
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${student.id}?focus=edit`);
   await expect(page.getByRole('heading', { name: 'ملف الطالب', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'تعديل ملف الطالب', exact: true })).toBeFocused();
   await expect(page.getByText('مدرسة القبول', { exact: true })).toBeVisible();
   await expect(page.getByText('شارع المدرسة', { exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'تعديل ملف الطالب', exact: true }).click();
-  await expect(page).toHaveURL(/\/edit$/);
+  await expectWorkspaceUrl(page, `/admin/students/${student.id}/edit`);
   await page.getByRole('textbox', { name: 'التخصص', exact: true }).fill('تعديل غير محفوظ');
   await page.getByRole('link', { name: 'إلغاء', exact: true }).click();
   const dialog = page.getByRole('alertdialog', { name: 'مغادرة دون حفظ' });
@@ -319,7 +322,7 @@ test('dedicated creation and edit preserve optional data, focus, validation, dir
   await expect(page.getByRole('link', { name: 'إلغاء', exact: true })).toBeFocused();
   await expect(page.getByRole('textbox', { name: 'التخصص', exact: true })).toHaveValue('تعديل غير محفوظ');
   await page.getByRole('button', { name: 'حفظ بيانات الطالب', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${student.id}\\?focus=edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${student.id}?focus=edit`);
   await expect(page.getByText('تعديل غير محفوظ', { exact: true })).toBeVisible();
   if (artifacts) await page.screenshot({ path: path.join(artifacts, 'profile-light.png'), fullPage: true });
   await page.getByRole('button', { name: 'تفعيل الوضع الداكن' }).click();
@@ -332,7 +335,7 @@ test('dedicated creation and edit preserve optional data, focus, validation, dir
   if (artifacts) await page.screenshot({ path: path.join(artifacts, 'form-mobile.png'), fullPage: true });
   await page.getByRole('link', { name: 'إلغاء', exact: true }).click();
   await expect(page.getByRole('link', { name: 'تعديل ملف الطالب', exact: true })).toBeFocused();
-  await page.goto(`${host}/admin/audit`);
+  await page.goto(workspaceUrl(page, `${host}/admin/audit`));
   await page.getByText('عرض تغيير ملف الطالب', { exact: true }).first().click();
   await expect(page.getByText('بعد التغيير:', { exact: false }).first()).toContainText('تعديل غير محفوظ');
 });
@@ -340,7 +343,7 @@ test('dedicated creation and edit preserve optional data, focus, validation, dir
 test('stale edits reload current data and a committed creation with a lost response recovers the same file', async ({ page }) => {
   await signIn(page);
   const name = `استعادة ${Date.now()}`;
-  await page.goto(`${host}/admin/students/new`);
+  await page.goto(workspaceUrl(page, `${host}/admin/students/new`));
   await page.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name);
   let savedId = '';
   await page.route('**/api/v1/center/students', async (route) => {
@@ -362,7 +365,7 @@ test('stale edits reload current data and a committed creation with a lost respo
   await expect(page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true })).toHaveValue('');
   await page.getByRole('textbox', { name: 'المدرسة / جهة الدراسة', exact: true }).fill('محفوظ');
   await page.getByRole('button', { name: 'حفظ بيانات الطالب', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${savedId}\\?focus=edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${savedId}?focus=edit`);
   const records = await (await page.request.get(`${host}/api/v1/center/student-workspace?q=${encodeURIComponent(name)}`)).json();
   expect(records.students).toHaveLength(1);
   await page.getByRole('link', { name: 'تعديل ملف الطالب', exact: true }).click();
@@ -392,13 +395,13 @@ test('branch and center boundaries, permission revocation and parallel submissio
     await signIn(staff, 'staff');
     expect((await staff.request.get(`${host}/api/v1/center/students/${hidden.body.student.id}`)).status()).toBe(404);
     expect((await write(staff, `students/${hidden.body.student.id}`, 'PATCH', { name:'تجاوز', branch_ids:[], revision:1, school:'تجاوز' })).status).toBe(404);
-    await staff.goto(`${host}/admin/students/${hidden.body.student.id}/edit`);
+    await staff.goto(workspaceUrl(staff, `${host}/admin/students/${hidden.body.student.id}/edit`));
     await expect(staff.getByRole('heading', { name: 'ملف الطالب غير متاح' })).toBeVisible();
     expect((await write(owner, `members/${member.id}/grants`, 'PUT', {center_roles:[],branch_roles:{[north.id]:['registration'],[south.id]:['attendance']}})).status).toBe(200);
-    await staff.goto(`${host}/admin/students/${visible.body.student.id}/edit`);
+    await staff.goto(workspaceUrl(staff, `${host}/admin/students/${visible.body.student.id}/edit`));
     await staff.getByRole('textbox', {name:'المدرسة / جهة الدراسة',exact:true}).fill('تعديل مخول');
     await staff.getByRole('button', {name:'حفظ بيانات الطالب',exact:true}).click();
-    await expect(staff).toHaveURL(new RegExp(`/admin/students/${visible.body.student.id}\\?focus=edit$`));
+    await expectWorkspaceUrl(staff, `/admin/students/${visible.body.student.id}?focus=edit`);
     await expect(staff.getByText('تعديل مخول',{exact:true})).toBeVisible();
     await staff.getByRole('link', {name:'تعديل ملف الطالب',exact:true}).click();
     await staff.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(`تعديل ممنوع ${stamp}`);
@@ -426,15 +429,15 @@ test('a shared contact warning permits a separate student without merging profil
   await signIn(page);
   const name = `طالب قبول ${Date.now()}`;
   const phone = `010${String(Date.now()).slice(-8)}`;
-  await page.goto(`${host}/admin/students/new`);
+  await page.goto(workspaceUrl(page, `${host}/admin/students/new`));
   await page.getByRole('textbox', { name:'اسم الطالب', exact:true }).fill(name);
   await enterContact(page, phone);
   const firstResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/center/students') && response.request().method() === 'POST');
   await page.getByRole('button', {name:'حفظ ملف الطالب',exact:true}).click();
   const first = (await (await firstResponse).json()).student;
   createdStudentIds.add(first.id);
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${first.id}\\?focus=edit$`));
-  await page.goto(`${host}/admin/students/new`);
+  await expectWorkspaceUrl(page, `/admin/students/${first.id}?focus=edit`);
+  await page.goto(workspaceUrl(page, `${host}/admin/students/new`));
   await page.getByRole('textbox', {name:'اسم الطالب',exact:true}).fill(`طالب آخر ${Date.now()}`);
   await enterContact(page, phone);
   await page.getByRole('button', {name:'حفظ ملف الطالب',exact:true}).click();
@@ -444,7 +447,7 @@ test('a shared contact warning permits a separate student without merging profil
   const second = (await (await secondResponse).json()).student;
   createdStudentIds.add(second.id);
   expect(second.student_number).not.toBe(first.student_number);
-  await expect(page).toHaveURL(new RegExp(`/admin/students/${second.id}\\?focus=edit$`));
+  await expectWorkspaceUrl(page, `/admin/students/${second.id}?focus=edit`);
 });
 
 test('normal SSR register, create, profile and edit each use at most six measured application SQL queries', async ({ page }) => {
@@ -452,7 +455,7 @@ test('normal SSR register, create, profile and edit each use at most six measure
   const student = await create(page, `طالب قبول ${Date.now()}`);
   for (const route of ['/admin/students', '/admin/students/new', `/admin/students/${student.id}`, `/admin/students/${student.id}/edit`]) {
     const cursor = measureCursor();
-    await page.goto(`${host}${route}`);
+    await page.goto(workspaceUrl(page, `${host}${route}`));
     await expect(page.getByRole('heading', { level:1 })).toBeVisible();
     const rows = measuredReads(cursor);
     expect(rows.length).toBeGreaterThan(0);
@@ -460,13 +463,13 @@ test('normal SSR register, create, profile and edit each use at most six measure
     expect(rows.reduce((sum,row) => sum+(row.count ?? Number.NaN),0)).toBeLessThanOrEqual(6);
     console.log(JSON.stringify({route,application_sql:rows.reduce((sum,row)=>sum+(row.count ?? Number.NaN),0),requests:rows.length}));
   }
-  await page.goto(`${host}/admin/students?q=${encodeURIComponent(String(student.student_number))}`);
+  await page.goto(workspaceUrl(page, `${host}/admin/students?q=${encodeURIComponent(String(student.student_number))}`));
   const cursor = measureCursor();
-  const link = page.locator(`a[href="/admin/students/${student.id}"]`).first();
+  const link = page.locator(`a[href="${workspacePath(page, `/admin/students/${student.id}`)}"]`).first();
   await link.hover();
   await expect.poll(() => measuredReads(cursor).length).toBeGreaterThan(0);
   await link.click();
-  await expect(page).toHaveURL(`${host}/admin/students/${student.id}`);
+  await expectWorkspaceUrl(page, `${host}/admin/students/${student.id}`);
   await expect(page.getByRole('heading', {name:'ملف الطالب',exact:true})).toBeVisible();
   const rows = measuredReads(cursor);
   expect(rows.every((row) => typeof row.count === 'number' && row.count > 0)).toBe(true);

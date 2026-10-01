@@ -213,6 +213,7 @@ Route::middleware(['web', MeasureCenterQueries::class, ResolveCenter::class])->p
         Route::get('curriculum/submissions/{requestId}', [CenterCurriculumController::class, 'submission']);
         Route::get('levels/{levelId}', [CenterCurriculumController::class, 'workspace']);
         Route::post('courses', [CenterCurriculumController::class, 'storeCourse']);
+        Route::get('courses/{courseId}/copy-destinations', [CenterCurriculumCopyController::class, 'destinations']);
         Route::get('courses/{courseId}/copy-preview', [CenterCurriculumCopyController::class, 'preview']);
         Route::post('courses/{courseId}/copies', [CenterCurriculumCopyController::class, 'store']);
         Route::post('courses/{courseId}/stages', [CenterCurriculumController::class, 'storeStage']);

@@ -112,6 +112,12 @@ class CenterPermissions
             || in_array($action, self::actions($this->branchRoles[$branchId] ?? []), true);
     }
 
+    /** Ordinary source access; cross-branch destinations use can() explicitly. */
+    public function canInWorkspace(string $action, int $branchId): bool
+    {
+        return $this->can($action, $branchId) && ($this->workspace?->includes($branchId) ?? true);
+    }
+
     public function toArray(): array
     {
         return [

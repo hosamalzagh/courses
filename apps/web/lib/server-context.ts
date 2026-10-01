@@ -9,7 +9,7 @@ export type Branch = { id: number; name: string; slug: string; address: string |
 export type CenterSettings = { contact_email: string | null; phone: string | null; address: string | null; student_number_start?: number; student_number_revision?: number; student_code_enabled?: boolean; student_code_label?: string; student_code_revision?: number; student_all_branches_enabled?: boolean; student_all_branches_revision?: number; financial_currency?: string | null; financial_currency_revision?: number; financial_currency_locked_at?: string | null };
 export type CenterContext = {
   workspace?: import("./workspace").CenterWorkspace | null;
-  workspace_scope?: "selected" | "authorized_branches";
+  workspace_scope?: "selected" | "authorized_branches" | "authorized_financial_branches" | "center";
   workspace_can_switch?: boolean;
   user: { id: number; name: string; email: string; mfa_enabled?: boolean; mfa_required_for_platform?: boolean };
   membership: { status: string; grants_version: number };

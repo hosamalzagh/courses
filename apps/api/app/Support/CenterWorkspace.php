@@ -22,7 +22,10 @@ class CenterWorkspace
         if ($request->is('api/v1/center/workspaces')) {
             return null;
         }
-        $id = $request->header('X-Courses-Workspace');
+        $id = $request->header('X-Courses-Workspace') ?? $request->query('workspace');
+        if ($id !== null && (! is_string($id) || ! Str::isUuid($id))) {
+            self::unavailable('workspace_expired');
+        }
         if ($id === null) {
             $id = $request->session()->get('initial_workspace');
         }
@@ -86,6 +89,11 @@ class CenterWorkspace
     public function assertBranch(int $branchId): void
     {
         abort_if($this->mode === 'branch' && $this->branch['id'] !== $branchId, 403);
+    }
+
+    public function includes(int $branchId): bool
+    {
+        return $this->mode === 'center' || (int) $this->branch['id'] === $branchId;
     }
 
     public function toArray(): array

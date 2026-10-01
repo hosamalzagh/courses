@@ -1,3 +1,4 @@
+import { expectWorkspaceUrl, workspaceUrl } from "./workspace-testhelpers";
 import { expect, test } from '@playwright/test';
 import { credentials, signIn } from './local-fixtures';
 
@@ -6,7 +7,7 @@ const origin = process.env.COURSES_TEST_ORIGIN ?? 'http://alpha.courses.test';
 test('student rows expose authorized actions and the profile keeps its summary first', async ({ page }, testInfo) => {
   const owner = credentials('alpha');
   await signIn(page, origin, owner.email, owner.password);
-  await page.goto(`${origin}/admin/students`);
+  await page.goto(workspaceUrl(page, `${origin}/admin/students`));
 
   const table = page.getByRole('table', { name: 'الطلاب في فروعي' });
   await page.getByRole('button', { name: 'الأعمدة — الطلاب في فروعي' }).click();
@@ -26,6 +27,8 @@ test('student rows expose authorized actions and the profile keeps its summary f
   await expect(menu.getByRole('menuitem', { name: 'تقرير الطالب' })).toBeVisible();
   await expect(menu.getByRole('menuitem', { name: 'تعديل البيانات' })).toBeVisible();
   await expect(menu.getByRole('menuitem', { name: 'الحساب المالي' })).toBeVisible();
+  const studentHref = await menu.getByRole('menuitem', { name: 'عرض الملف', exact: true }).getAttribute('href');
+  const selectedStudentId = new URL(studentHref!, origin).pathname.split('/')[3];
   await page.keyboard.press('Escape');
   await expect(actions).toBeFocused();
   const studentName = await row.locator('h3').textContent();
@@ -35,17 +38,17 @@ test('student rows expose authorized actions and the profile keeps its summary f
   await searchRow.getByRole('button', { name: /^إجراءات الطالب / }).click();
   await expect(menu.getByRole('menuitem', { name: 'تقرير الطالب' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await page.goto(`${origin}/admin/students`);
+  await page.goto(workspaceUrl(page, `${origin}/admin/students`));
   const firstActions = page.getByRole('table', { name: 'الطلاب في فروعي' }).locator('tbody tr').first().getByRole('button', { name: /^إجراءات الطالب / });
   await firstActions.click();
   await menu.getByRole('menuitem', { name: 'تعديل البيانات' }).click();
-  await expect(page).toHaveURL(/\/admin\/students\/[0-9a-f-]+\/edit$/);
+  await expectWorkspaceUrl(page, `/admin/students/${selectedStudentId}/edit`);
   await expect(page.getByRole('button', { name: 'حفظ بيانات الطالب' })).toBeVisible();
-  await page.goto(`${origin}/admin/students`);
+  await page.goto(workspaceUrl(page, `${origin}/admin/students`));
   await page.getByRole('table', { name: 'الطلاب في فروعي' }).locator('tbody tr').first().getByRole('button', { name: /^إجراءات الطالب / }).click();
   await menu.getByRole('menuitem', { name: 'عرض الملف' }).click();
 
-  await expect(page).toHaveURL(/\/admin\/students\/[0-9a-f-]+$/);
+  await expectWorkspaceUrl(page, `/admin/students/${selectedStudentId}`);
   const summary = page.getByRole('region', { name: 'ملخص الطالب' });
   const status = page.getByRole('heading', { name: /حالة ملف الطالب/ });
   await expect(summary).toBeVisible();
@@ -111,7 +114,7 @@ test('student rows expose authorized actions and the profile keeps its summary f
 test('read-only staff do not receive edit or finance actions', async ({ page }) => {
   const staff = credentials('staff');
   await signIn(page, origin, staff.email, staff.password);
-  await page.goto(`${origin}/admin/students`);
+  await page.goto(workspaceUrl(page, `${origin}/admin/students`));
   const row = page.getByRole('table', { name: 'الطلاب في فروعي' }).locator('tbody tr').first();
   await row.getByRole('button', { name: /^إجراءات الطالب / }).click();
   const menu = page.getByRole('menu');

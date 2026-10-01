@@ -52,6 +52,7 @@ class CenterContentEquivalenceController extends Controller
             ->join('courses as target_courses', 'target_courses.id', '=', 'target_stages.course_id')
             ->when(! $permissions->isCenterManager(), fn (Builder $builder) => $builder
                 ->whereIn('source_courses.branch_id', $visible)->whereIn('target_courses.branch_id', $visible))
+            ->tap(fn (Builder $query) => $permissions->workspace?->constrain($query, 'source_courses.branch_id'))
             ->when($historyQuery !== '', fn (Builder $builder) => $builder->where(function (Builder $search) use ($historyQuery): void {
                 foreach (['approvals.reason', 'approvals.approved_by_name', 'source_levels.name',
                     'target_levels.name', 'source_courses.name', 'target_courses.name'] as $column) {
@@ -133,9 +134,9 @@ SQL)
                     ->get()->keyBy('id');
                 $source = $plans->get($data['source_plan_version_id']);
                 $target = $plans->get($data['target_plan_version_id']);
-                abort_unless($source && $target && $permissions->can('read', (int) $source->branch_id)
+                abort_unless($source && $target && $permissions->canInWorkspace('read', (int) $source->branch_id)
                     && $permissions->can('read', (int) $target->branch_id), 404);
-                abort_unless($permissions->can('content.equivalence', (int) $source->branch_id)
+                abort_unless($permissions->canInWorkspace('content.equivalence', (int) $source->branch_id)
                     && $permissions->can('content.equivalence', (int) $target->branch_id), 403);
                 $knownSource = array_column(json_decode($source->lectures, true), 'id');
                 $knownTarget = array_column(json_decode($target->lectures, true), 'id');

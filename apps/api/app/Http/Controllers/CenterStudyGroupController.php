@@ -69,6 +69,7 @@ class CenterStudyGroupController extends Controller
             ->join('courses', 'courses.id', '=', 'stages.course_id')
             ->join('branches', 'branches.id', '=', 'courses.branch_id')
             ->when(! $permissions->isCenterManager(), fn (Builder $query) => $query->whereIn('courses.branch_id', $scope))
+            ->tap(fn (Builder $query) => $permissions->workspace?->constrain($query, 'courses.branch_id'))
             ->orderBy('courses.created_at')->orderBy('levels.id')->orderBy('plans.version')
             ->offset(($levelsPage - 1) * 50)->limit(51)
             ->select(['plans.id as plan_version_id', 'plans.version as plan_version', 'plans.level_id', 'levels.name as level_name',
@@ -269,6 +270,8 @@ SQL);
             $query->whereIn('courses.branch_id', $this->scope($permissions));
         }
 
+        $permissions->workspace?->constrain($query, 'courses.branch_id');
+
         return $query;
     }
 
@@ -295,7 +298,7 @@ SQL);
 
     private function canRead(CenterPermissions $permissions, int $branchId): bool
     {
-        return $permissions->can('read', $branchId);
+        return $permissions->canInWorkspace('read', $branchId);
     }
 
     private function write(Request $request, Closure $operation): JsonResponse

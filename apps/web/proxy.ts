@@ -8,7 +8,7 @@ export function proxy(request: NextRequest) {
     destination.search = "";
     if (settings) destination.searchParams.set("tab", "students");
     if (!settings) destination.searchParams.set("scope", "center");
-    for (const key of ["q", "page"]) {
+    for (const key of ["q", "page", "workspace"]) {
       const value = request.nextUrl.searchParams.get(key);
       if (value !== null) destination.searchParams.set(key, value);
     }

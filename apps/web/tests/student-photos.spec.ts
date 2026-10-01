@@ -1,3 +1,4 @@
+import { finishWorkspaceEntry, expectWorkspaceUrl } from "./workspace-testhelpers";
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
@@ -29,7 +30,8 @@ async function signIn(page: Page, who = "alpha") {
     .getByRole("textbox", { name: "كلمة المرور", exact: true })
     .pressSequentially(credentials[who].password);
   await page.getByRole("button", { name: "دخول المركز", exact: true }).click();
-  await expect(page).toHaveURL(/\/admin$/);
+  await finishWorkspaceEntry(page);
+  await expectWorkspaceUrl(page, "/admin");
 }
 async function write(
   page: Page,

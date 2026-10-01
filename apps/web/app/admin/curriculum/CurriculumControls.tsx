@@ -316,11 +316,10 @@ export function CurriculumControls({ context, detail = false, section = 'courses
           { key: 'name', label: 'الكورس', filterText: (row) => row.name, render: (row) => <><h3><Link href={`/admin/curriculum?tab=stages&course_id=${encodeURIComponent(row.id)}`}>{row.name}</Link></h3>{row.source_course_name && row.source_branch_name ? <p className='muted'>نسخة من {row.source_course_name} · {row.source_branch_name}</p> : null}</> },
           { key: 'branch', label: 'الفرع', filterText: (row) => branchName(row.branch_id), render: (row) => branchName(row.branch_id) },
           { key: 'threshold', label: 'نسبة الإتمام', render: (row) => `${row.completion_threshold.toLocaleString('ar-EG')}٪` },
-          { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => row.can_manage || manageable.some(branch => branch.id !== row.branch_id)
-            ? <span className='flex flex-wrap gap-2'>
+          { key: 'actions', label: 'الإجراءات', actions: true, render: (row) => <span className='flex flex-wrap gap-2'>
               {row.can_manage ? <><Button data-curriculum-edit={row.id} disabled={busy || editor !== null || copyCourse !== null} onClick={() => open({ kind: 'stage', course: row })}>إضافة مرحلة دراسية</Button><Button disabled={busy || editor !== null || copyCourse !== null} onClick={() => open({ kind: 'threshold', scope: 'course', record: row })}>تحديد نسبة الإتمام</Button></> : null}
-              {manageable.some(branch => branch.id !== row.branch_id) ? <Button disabled={busy || editor !== null || copyCourse !== null} onClick={() => openCopy(row)}>نسخ المنهج إلى فرع</Button> : null}
-            </span> : 'عرض فقط' },
+              <Button disabled={busy || editor !== null || copyCourse !== null} onClick={() => openCopy(row)}>نسخ المنهج إلى فرع</Button>
+            </span> },
         ]} />{batch('courses')}
 </>;
   const stages = <>        <DataTable id='curriculum-stages' title='المراحل الدراسية' rows={context.stages} rowKey={(row) => row.id} searchText={(row) => `${row.name} ${row.course_name}`} emptyMessage='لا توجد مراحل دراسية متاحة. أضف مرحلة من الكورس.' columns={[

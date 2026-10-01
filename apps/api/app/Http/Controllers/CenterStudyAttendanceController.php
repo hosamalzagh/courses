@@ -383,7 +383,7 @@ class CenterStudyAttendanceController extends Controller
             $query->lockForUpdate();
         }
         $session = $query->first();
-        abort_unless($session && $permissions->can('read', (int) $session->branch_id), 404);
+        abort_unless($session && $permissions->canInWorkspace('read', (int) $session->branch_id), 404);
 
         return $session;
     }

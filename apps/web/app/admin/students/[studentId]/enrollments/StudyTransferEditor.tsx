@@ -99,7 +99,6 @@ export function StudyTransferEditor({ studentId, attempt, groups, initialGroupsP
   const [groupsPage, setGroupsPage] = useState(initialGroupsPage);
   const [hasMoreGroups, setHasMoreGroups] = useState(groupsHasMore);
   const [loadingGroups, setLoadingGroups] = useState(false);
-  const initialChoicesLoaded = useRef(false);
   const [date, setDate] = useState("");
   const [reason, setReason] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -120,9 +119,8 @@ export function StudyTransferEditor({ studentId, attempt, groups, initialGroupsP
   useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
   useEffect(() => {
-    if (!initialChoicesLoaded.current) { initialChoicesLoaded.current = true; return; }
     let cancelled = false;
-    centerRequest(`students/${studentId}/enrollments?${new URLSearchParams({ ...(query ? { q: query } : {}), groups_page: String(groupsPage) })}`, "GET")
+    centerRequest(`students/${studentId}/enrollments?${new URLSearchParams({ purpose: 'transfer', attempt_id: attempt.id, ...(query ? { q: query } : {}), groups_page: String(groupsPage) })}`, "GET")
       .then(async response => {
         if (!response.ok) throw new Error(await responseMessage(response));
         return response.json() as Promise<StudyEnrollmentContext>;
@@ -131,7 +129,7 @@ export function StudyTransferEditor({ studentId, attempt, groups, initialGroupsP
         setChoices(data.groups); setHasMoreGroups(data.pagination.groups_has_more); setLoadingGroups(false);
       }).catch(cause => { if (!cancelled) { setLoadingGroups(false); setError(cause instanceof Error ? cause.message : "تعذر تحميل مجموعات الوجهة."); } });
     return () => { cancelled = true; };
-  }, [studentId, query, groupsPage]);
+  }, [studentId, attempt.id, query, groupsPage]);
 
   function changeGroup(value: string) { previewGeneration.current++; setGroupId(value); setSelectedGroup(choices.find(group => group.id === value) ?? null); setPreview(null); setHistory([]); setHistoryPage(1); setLoading(false); setError(""); requestId.current = null; }
   function changeDate(value: string) { previewGeneration.current++; setDate(value); setPreview(null); setHistory([]); setHistoryPage(1); setLoading(false); setError(""); requestId.current = null; }

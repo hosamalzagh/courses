@@ -22,7 +22,7 @@ class CenterGroupRequirementEquivalenceController extends Controller
         ]);
         $permissions = $request->attributes->get('center_permissions');
         $group = $this->group($groupId, $permissions);
-        abort_unless($permissions->can('curriculum.manage', (int) $group->branch_id), 403);
+        abort_unless($permissions->canInWorkspace('curriculum.manage', (int) $group->branch_id), 403);
         $page = (int) ($data['page'] ?? 1);
         $search = trim($data['q'] ?? '');
         $rows = DB::connection('tenant')->table('study_group_requirements as historical')
@@ -68,7 +68,7 @@ SQL, [$groupId]);
         ]);
         $permissions = $request->attributes->get('center_permissions');
         $group = $this->group($groupId, $permissions, false, $data['required_requirement_id']);
-        abort_unless($permissions->can('curriculum.manage', (int) $group->branch_id), 403);
+        abort_unless($permissions->canInWorkspace('curriculum.manage', (int) $group->branch_id), 403);
         abort_unless($group->required_requirement !== null, 404);
         $required = json_decode($group->required_requirement);
         $page = (int) ($data['page'] ?? 1);
@@ -135,7 +135,7 @@ SQL, [$groupId]);
                 fn (string $id): array => [$id => $this->group($id, $permissions, true)]);
             $requiredGroup = $groups[$groupId];
             $candidateGroup = $groups[$candidateGroupId];
-            abort_unless($permissions->can('curriculum.manage', (int) $requiredGroup->branch_id)
+            abort_unless($permissions->canInWorkspace('curriculum.manage', (int) $requiredGroup->branch_id)
                 && $permissions->can('curriculum.manage', (int) $candidateGroup->branch_id), 403);
             $prior = $db->table('study_group_requirement_equivalences')
                 ->where('request_id', $data['request_id'])->first();
@@ -217,7 +217,7 @@ SQL, [$groupId]);
             abort_unless($context, 404);
             $groups = collect([$groupId, $context->candidate_group_id])->sort()->mapWithKeys(
                 fn (string $id): array => [$id => $this->group($id, $permissions, true)]);
-            abort_unless($permissions->can('curriculum.manage', (int) $groups[$groupId]->branch_id)
+            abort_unless($permissions->canInWorkspace('curriculum.manage', (int) $groups[$groupId]->branch_id)
                 && $permissions->can('curriculum.manage', (int) $groups[$context->candidate_group_id]->branch_id), 403);
             $approval = $db->table('study_group_requirement_equivalences')->where('id', $approvalId)
                 ->lockForUpdate()->first();

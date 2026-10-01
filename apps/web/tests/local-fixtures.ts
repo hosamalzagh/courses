@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, type Browser, type Page } from "@playwright/test";
+import { finishWorkspaceEntry } from "./workspace-testhelpers";
 
 const credentialsDir = path.resolve(process.cwd(), "../api/storage/app/private");
 const php = process.env.COURSES_PHP_BIN ?? (process.platform === "darwin" ? "php85" : "php");
@@ -61,7 +62,8 @@ export async function signIn(page: Page, host: string, email: string, password: 
     break;
   }
   expect(signedIn).toBe(true);
-  await expect(page).toHaveURL(`${host}/admin`);
+  await finishWorkspaceEntry(page);
+  await expect(page).toHaveURL(url => url.origin === host && (url.pathname === "/admin" || (url.pathname === "/admin/settings" && url.searchParams.get("tab") === "branches")));
 }
 
 export async function invitationUrl(email: string, host: string): Promise<string> {

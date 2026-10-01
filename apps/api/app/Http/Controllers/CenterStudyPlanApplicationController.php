@@ -163,7 +163,7 @@ class CenterStudyPlanApplicationController extends Controller
             $query->lockForUpdate();
         }
         $group = $query->first();
-        abort_unless($group && $permissions->can('read', (int) $group->branch_id), 404);
+        abort_unless($group && $permissions->canInWorkspace('read', (int) $group->branch_id), 404);
 
         return $group;
     }

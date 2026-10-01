@@ -63,7 +63,7 @@ export function AbsenceBulkWaitlist({ context, filters, selected, onSelectionCha
   const selectableIds = selectable.map(row => row.id);
   const allPageSelected = selectableIds.length > 0 && selectableIds.every(id => selected.includes(id));
   const scopeDescription = (scope: Record<string, string>) => [
-    scope.branch_id ? context.branches.find(branch => branch.id === Number(scope.branch_id))?.name ?? `فرع #${scope.branch_id}` : "الفروع المصرح بها",
+    scope.branch_id ? context.branches.find(branch => branch.id === Number(scope.branch_id))?.name ?? `فرع #${scope.branch_id}` : context.workspace?.mode === "branch" ? context.workspace.branch?.name ?? "الفرع الحالي" : "الفروع المصرح بها",
     ...(["course_id", "stage_id", "level_id", "group_id"] as const).flatMap(key => {
       const id = scope[key];
       return id ? [context.options.find(option => option.id === id)?.name ?? id] : [];

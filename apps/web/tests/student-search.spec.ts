@@ -1,3 +1,4 @@
+import { expectWorkspaceUrl, expectWorkspaceHref, workspaceUrl } from "./workspace-testhelpers";
 import { test, expect, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -33,7 +34,7 @@ async function restorePolicy(page: Page, enabled: boolean) {
 async function budget(page: Page, url: string, cold: boolean) {
   if (cold) execFileSync(php, ['artisan', 'cache:clear', '--no-interaction'], { cwd: apiDirectory, stdio: 'pipe' });
   const cursor = Number(execFileSync(php, ['artisan', 'tinker', '--no-interaction', '--execute=' + String.raw`echo \Illuminate\Support\Facades\DB::connection('central')->table('telescope_entries')->max('sequence') ?? 0;`], { cwd: apiDirectory, stdio: 'pipe' }).toString().trim());
-  const response = await page.goto(url);
+  const response = await page.goto(workspaceUrl(page, url));
   expect(response?.status()).toBe(200);
   await expect(page.getByRole('searchbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' })).toBeVisible();
   const metrics = () => JSON.parse(execFileSync(php, ['artisan', 'tinker', '--no-interaction', '--execute=' + String.raw`
@@ -89,7 +90,7 @@ test('student lookup keeps one field, scopes and barcode mode in the URL', async
 
     await budget(page, `${host}/admin/students?q=${encodeURIComponent(name)}`, true);
     await budget(page, `${host}/admin/students?q=${encodeURIComponent(name)}`, false);
-    await page.goto(`${host}/admin/students`);
+    await page.goto(workspaceUrl(page, `${host}/admin/students`));
     await expect(page.getByRole('searchbox')).toHaveCount(1);
     await expect(page.getByRole('table')).toHaveCount(1);
     const search = page.getByRole('searchbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' });
@@ -113,7 +114,7 @@ test('student lookup keeps one field, scopes and barcode mode in the URL', async
     await expect(page).toHaveURL(/mode=identifier.*identifier=/);
     await expect(page.getByRole('row').filter({ hasText: name })).toBeVisible();
 
-    const legacy = await page.goto(`${host}/admin/student-search?q=${encodeURIComponent(name)}&page=2`);
+    const legacy = await page.goto(workspaceUrl(page, `${host}/admin/student-search?q=${encodeURIComponent(name)}&page=2`));
     expect(legacy?.status()).toBe(200);
     await expect(page).toHaveURL(/\/admin\/students\?scope=center&q=.*&page=2/);
     await page.setViewportSize({ width: 390, height: 844 });
@@ -129,10 +130,10 @@ test('center search management confirms visibility, recovers stale and uncertain
   const initial = (await workspace(page)).policy.enabled;
   try {
     await restorePolicy(page, false);
-    await page.goto(`${host}/admin/students`);
+    await page.goto(workspaceUrl(page, `${host}/admin/students`));
     await expect(page.getByRole('radio', { name: 'كل المركز', exact: true })).toBeDisabled();
     await expect(page.getByRole('searchbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' })).toBeEnabled();
-    await page.goto(`${host}/admin/settings?tab=students`);
+    await page.goto(workspaceUrl(page, `${host}/admin/settings?tab=students`));
     const toggle = page.getByRole('checkbox', { name: 'تفعيل البحث بين الفروع', exact: true });
     await toggle.click();
     const dialog = page.getByRole('alertdialog', { name: 'تفعيل البحث بين الفروع' });
@@ -156,7 +157,7 @@ test('center search management confirms visibility, recovers stale and uncertain
     await budget(page, `${host}/admin/students?scope=center&q=غيرمطابق`, false);
     await page.getByRole('button', { name: 'مسح البحث في نتائج البحث', exact: true }).click();
     await expect(page.getByRole('searchbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' })).toBeFocused();
-    await page.goto(`${host}/admin/settings?tab=students`);
+    await page.goto(workspaceUrl(page, `${host}/admin/settings?tab=students`));
     // Keep this open snapshot while another protected request changes policy twice.
     const old = (await workspace(page)).policy;
     expect((await write(page, 'student-search-policy', 'PATCH', { enabled: false, revision: old.revision })).status).toBe(200);
@@ -184,7 +185,7 @@ test('center search management confirms visibility, recovers stale and uncertain
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: '/tmp/courses-issue22/search-mobile.png', fullPage: true });
-    await page.goto(`${host}/admin/audit`);
+    await page.goto(workspaceUrl(page, `${host}/admin/audit`));
     await page.getByText('عرض تغيير إتاحة البحث', { exact: true }).first().click();
     await expect(page.getByText('بعد التغيير: مغلق', { exact: true }).first()).toBeVisible();
   } finally { await restorePolicy(page, initial); }
@@ -207,7 +208,7 @@ test('search and similarity reveal basic data only and lose revoked cross-branch
     const hidden = await write(owner, 'students', 'POST', { name, phone: '01099007766', branch_ids: [south], request_id: crypto.randomUUID() });
     expect(hidden.status).toBe(201);
     await signIn(staff, host, staffCredentials.email, staffCredentials.password);
-    await staff.goto(`${host}/admin/students?scope=center`);
+    await staff.goto(workspaceUrl(staff, `${host}/admin/students?scope=center`));
     await expect(staff.getByRole('tab', { name: 'الطلاب', exact: true })).toHaveCount(0);
     await staff.getByRole('searchbox', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل' }).fill(name);
     await staff.getByRole('button', { name: 'الاسم أو رقم الطالب الداخلي أو رقم التواصل', exact: true }).click();
@@ -218,7 +219,7 @@ test('search and similarity reveal basic data only and lose revoked cross-branch
     await expect(row).toContainText('بيانات أساسية فقط'); await expect(row.getByRole('link')).toHaveCount(0);
     expect((await staff.request.get(`${host}/api/v1/center/students/${hidden.body.student.id}`)).status()).toBe(404);
     expect((await write(staff, `students/${hidden.body.student.id}`, 'PATCH', { name: 'Denied', branch_ids: [north], revision: 1 })).status).toBe(404);
-    await staff.goto(`${host}/admin/students`);
+    await staff.goto(workspaceUrl(staff, `${host}/admin/students`));
     await staff.getByRole('button', { name: 'إنشاء ملف طالب', exact: true }).click();
     await staff.getByRole('textbox', { name: 'اسم الطالب', exact: true }).fill(name);
     await staff.getByRole('link', { name: 'الطلاب', exact: true }).click();

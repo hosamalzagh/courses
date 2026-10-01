@@ -30,6 +30,7 @@ class CenterInstructorController extends Controller
         if (! $permissions->isCenterManager()) {
             $branches->whereIn('id', $this->branchScope($permissions, 'read'));
         }
+        $permissions->workspace?->constrain($branches, 'id');
         $branches = $branches->offset(($branchPage - 1) * 50)->limit(51)->get(['id', 'name', 'slug', 'address']);
         $query = $this->visibleInstructors($permissions);
         if ($instructorId !== null) {
@@ -154,6 +155,10 @@ class CenterInstructorController extends Controller
 
     private function validateProfile(Request $request): array
     {
+        $workspace = $request->attributes->get('center_permissions')->workspace;
+        if ($workspace?->mode === 'branch' && ! $request->exists('branch_ids')) {
+            $request->merge(['branch_ids' => $request->isMethod('POST') ? [$workspace->branch['id']] : []]);
+        }
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'], 'phone' => ['nullable', 'string', 'max:50'],
             'branch_ids' => ['present', 'array', $request->isMethod('POST') ? 'min:1' : 'min:0', 'max:50'], 'branch_ids.*' => ['integer', 'distinct'],
@@ -171,7 +176,7 @@ class CenterInstructorController extends Controller
     private function authorizeBranches(CenterPermissions $permissions, array $branchIds): void
     {
         foreach ($branchIds as $branchId) {
-            abort_unless($permissions->can('instructors.manage', $branchId), 403);
+            abort_unless($permissions->canInWorkspace('instructors.manage', $branchId), 403);
         }
         abort_unless(DB::connection('tenant')->table('branches')->whereIn('id', $branchIds)->count() === count($branchIds), 403);
     }
@@ -187,6 +192,7 @@ class CenterInstructorController extends Controller
         if (! $permissions->isCenterManager()) {
             $associations->whereIn('branch_id', $this->branchScope($permissions, 'read'));
         }
+        $permissions->workspace?->constrain($associations, 'branch_id');
 
         return DB::connection('tenant')->table('instructors')
             ->select(['instructors.id', 'name', 'phone', 'revision'])

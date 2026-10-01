@@ -1,3 +1,4 @@
+import { expectWorkspaceUrl, workspaceUrl } from "./workspace-testhelpers";
 import { expect, test } from "@playwright/test";
 import { credentials, signIn } from "./local-fixtures";
 
@@ -5,7 +6,7 @@ const alpha = "http://alpha.courses.test";
 test("compact shared tables support saved columns, ordering and draft filters", async ({ page, browser }) => {
   const owner = credentials("alpha");
   await signIn(page, alpha, owner.email, owner.password);
-  await page.goto(`${alpha}/admin/settings?tab=branches`);
+  await page.goto(workspaceUrl(page, `${alpha}/admin/settings?tab=branches`));
   let requests = 0;
   page.on("request", (request) => { if (request.url().includes("/api/v1/center/")) requests++; });
   const table = page.getByRole("table", { name: "الفروع", exact: true });
@@ -74,7 +75,7 @@ test("compact shared tables support saved columns, ordering and draft filters", 
     const staffPage = await staffContext.newPage();
     const staff = credentials("staff");
     await signIn(staffPage, alpha, staff.email, staff.password);
-    await staffPage.goto(`${alpha}/admin/settings?tab=branches`);
+    await staffPage.goto(workspaceUrl(staffPage, `${alpha}/admin/settings?tab=branches`));
     await expect(staffPage.getByRole("table", { name: "الفروع", exact: true }).getByRole("columnheader", { name: "العنوان", exact: true })).toBeVisible();
   } finally { await staffContext.close(); }
 });

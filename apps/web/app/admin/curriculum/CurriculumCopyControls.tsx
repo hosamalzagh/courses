@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useWorkspaceRouter as useRouter } from "@/components/WorkspaceNavigation";
 import { Button } from "@/components/Button";
 import { CenterHeaderActions } from "@/components/CenterShell";
@@ -26,19 +26,44 @@ export function CurriculumCopyControls({ course, context, onClose }: {
   const formId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   const focusError = useCallback((node: HTMLDivElement | null) => { node?.focus(); }, []);
-  const branches = context.branches.filter(branch => branch.id !== course.branch_id &&
-    (context.permissions.can_manage_center || context.permissions.branch_actions?.[String(branch.id)]?.includes("curriculum.manage")));
-  const [targetBranchId, setTargetBranchId] = useState(branches[0]?.id ?? 0);
+  const [branches, setBranches] = useState<{ id: number; name: string }[]>([]);
+  const [destinationsPage, setDestinationsPage] = useState(1);
+  const [destinationsRetry, setDestinationsRetry] = useState(0);
+  const [destinationsHasMore, setDestinationsHasMore] = useState(false);
+  const [loadingDestinations, setLoadingDestinations] = useState(true);
+  const [targetBranchId, setTargetBranchId] = useState(0);
+  const selectedDestination = useRef<{ id: number; name: string } | null>(null);
   const [preview, setPreview] = useState<CopyPreview | null>(null);
   const [requestId, setRequestId] = useState(newSubmissionId);
   const [busy, setBusy] = useState<"preview" | "copy" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    const load = new AbortController();
+    centerRequest(`courses/${course.id}/copy-destinations?page=${destinationsPage}`, "GET", undefined, load.signal)
+      .then(async response => {
+        if (!response.ok) throw new Error(await responseMessage(response));
+        return response.json() as Promise<{ branches: { id: number; name: string }[]; has_more: boolean }>;
+      }).then(data => {
+        if (load.signal.aborted) return;
+        const selected = selectedDestination.current;
+        setBranches(selected && !data.branches.some(branch => branch.id === selected.id)
+          ? [selected, ...data.branches] : data.branches);
+        setDestinationsHasMore(data.has_more);
+        if (!selected && data.branches[0]) {
+          selectedDestination.current = data.branches[0];
+          setTargetBranchId(data.branches[0].id);
+        }
+        setLoadingDestinations(false);
+      }).catch(cause => { if (!load.signal.aborted) { setLoadingDestinations(false); setError(cause instanceof Error ? cause.message : "تعذر تحميل فروع الوجهة."); } });
+    return () => load.abort();
+  }, [course.id, destinationsPage, destinationsRetry]);
+
   const pendingKey = (branchId: number) => `curriculum-copy:${context.center.id}:${context.user.id}:${course.id}:${branchId}`;
 
   async function loadPreview(page = 1) {
-    if (!targetBranchId || busy) return;
+    if (!targetBranchId || busy || loadingDestinations) return;
     setBusy("preview"); setError(""); setNotice("");
     try {
       const stored = localStorage.getItem(pendingKey(targetBranchId));
@@ -73,7 +98,7 @@ export function CurriculumCopyControls({ course, context, onClose }: {
   }
 
   async function copy() {
-    if (!preview || busy || copied) return;
+    if (!preview || busy || copied || loadingDestinations) return;
     setBusy("copy"); setError(""); setNotice("");
     try {
       const payload = {
@@ -106,22 +131,33 @@ export function CurriculumCopyControls({ course, context, onClose }: {
     <p className="muted">سيُنسخ الكورس ومراحله ومستوياته وجميع إصدارات خططه إلى فرع آخر. لا تُنسخ المجموعات أو الطلاب أو الحضور أو الماليات أو معادلات المحتوى.</p>
     <form id={formId} onSubmit={submit}>
       <FieldGroup><Field><FieldLabel htmlFor="curriculum-copy-target">الفرع الوجهة</FieldLabel>
-        <NativeSelect id="curriculum-copy-target" value={targetBranchId} disabled={Boolean(busy) || copied}
-          onChange={event => { setTargetBranchId(Number(event.target.value)); setPreview(null); setRequestId(newSubmissionId()); setError(""); }}>
+        <NativeSelect id="curriculum-copy-target" value={targetBranchId} disabled={Boolean(busy) || copied || loadingDestinations}
+          onChange={event => {
+            const branchId = Number(event.target.value);
+            if (branchId === targetBranchId) return;
+            selectedDestination.current = branches.find(branch => branch.id === branchId) ?? null;
+            setTargetBranchId(branchId); setPreview(null); setRequestId(newSubmissionId()); setError("");
+          }}>
           {branches.map(branch => <NativeSelectOption key={branch.id} value={branch.id}>{branch.name}</NativeSelectOption>)}
         </NativeSelect>
         <FieldDescription>المصدر: {course.name} · {context.branches.find(branch => branch.id === course.branch_id)?.name ?? `فرع #${course.branch_id}`}. سيصبح منهج الوجهة مستقلًا بعد النسخ.</FieldDescription>
       </Field></FieldGroup>
     </form>
     <CenterHeaderActions>
-      {!copied ? <Button form={formId} type="submit" busy={busy === "preview"} disabled={Boolean(busy) || !targetBranchId}>
+      {!copied ? <Button form={formId} type="submit" busy={busy === "preview"} disabled={Boolean(busy) || loadingDestinations || !targetBranchId}>
         {preview ? "تحديث المعاينة" : "معاينة ما سيُنسخ"}
       </Button> : null}
-      {preview && !copied ? <Button variant="primary" busy={busy === "copy"} disabled={Boolean(busy)} onClick={() => void copy()}>تأكيد النسخ</Button> : null}
+      {preview && !copied ? <Button variant="primary" busy={busy === "copy"} disabled={Boolean(busy) || loadingDestinations} onClick={() => void copy()}>تأكيد النسخ</Button> : null}
       <Button onClick={onClose} disabled={Boolean(busy)}>العودة إلى الكورسات</Button>
     </CenterHeaderActions>
     {error ? <div ref={focusError} tabIndex={-1}><InlineNotice tone="error">{error}</InlineNotice></div> : null}
     {notice ? <InlineNotice>{notice}</InlineNotice> : null}
+    {loadingDestinations ? <p className="muted" role="status">جارٍ تحميل فروع الوجهة…</p> : !branches.length ? <p className="muted">لا يوجد فرع وجهة متاح ضمن صلاحيتك.</p> : null}
+    {error && !loadingDestinations ? <Button disabled={Boolean(busy)} onClick={() => { setError(""); setLoadingDestinations(true); setDestinationsRetry(value => value + 1); }}>إعادة تحميل فروع الوجهة</Button> : null}
+    {destinationsHasMore || destinationsPage > 1 ? <div className="form-actions">
+      <Button disabled={Boolean(busy) || loadingDestinations || destinationsPage <= 1} onClick={() => { setLoadingDestinations(true); setDestinationsPage(page => page - 1); }}>الفروع السابقة</Button>
+      <Button disabled={Boolean(busy) || loadingDestinations || !destinationsHasMore} onClick={() => { setLoadingDestinations(true); setDestinationsPage(page => page + 1); }}>الفروع التالية</Button>
+    </div> : null}
     {preview ? <div className="form-stack" aria-live="polite">
       <p>المصدر: {preview.source.name} · {preview.source.branch_name} ← الوجهة: {preview.target.name}</p>
       <p>{preview.counts.stages.toLocaleString("ar-EG")} مرحلة · {preview.counts.levels.toLocaleString("ar-EG")} مستوى · {preview.counts.plans.toLocaleString("ar-EG")} إصدار خطة · {preview.counts.lectures.toLocaleString("ar-EG")} محاضرة مخططة</p>

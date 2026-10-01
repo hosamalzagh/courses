@@ -1,3 +1,4 @@
+import { expectWorkspaceUrl, workspaceUrl } from "./workspace-testhelpers";
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { credentials as localCredentials, ensureLocalFixtures, signIn } from './local-fixtures';
@@ -26,7 +27,7 @@ async function headerSubmit(page: Page, label: string) {
 
 test('every admin editor places submit and cancel in the shared header', async ({ page }) => {
   test.setTimeout(90_000);
-  await page.goto(`${origin}/admin/settings?tab=branches`);
+  await page.goto(workspaceUrl(page, `${origin}/admin/settings?tab=branches`));
   await page.getByRole('button', { name: 'إنشاء فرع', exact: true }).click();
   await headerSubmit(page, 'حفظ الفرع');
   await page.getByRole('textbox', { name: 'اسم الفرع', exact: true }).fill('تحقق الهيدر');
@@ -38,17 +39,17 @@ test('every admin editor places submit and cancel in the shared header', async (
   await page.locator('.center-topbar').getByRole('button', { name: 'إلغاء', exact: true }).click();
   await expect(page.getByRole('button', { name: 'إنشاء فرع', exact: true })).toBeFocused();
 
-  await page.goto(`${origin}/admin/instructors`);
+  await page.goto(workspaceUrl(page, `${origin}/admin/instructors`));
   await page.getByRole('button', { name: 'إنشاء ملف محاضر', exact: true }).click();
   await headerSubmit(page, 'حفظ ملف المحاضر');
   await page.locator('.center-topbar').getByRole('button', { name: 'إلغاء', exact: true }).click();
 
-  await page.goto(`${origin}/admin/curriculum`);
+  await page.goto(workspaceUrl(page, `${origin}/admin/curriculum`));
   await page.getByRole('button', { name: 'إنشاء كورس', exact: true }).click();
   await headerSubmit(page, 'حفظ المنهج');
   await page.locator('.center-topbar').getByRole('button', { name: 'إلغاء', exact: true }).click();
 
-  await page.goto(`${origin}/admin/members`);
+  await page.goto(workspaceUrl(page, `${origin}/admin/members`));
   await headerSubmit(page, 'إرسال الدعوة');
   const edit = page.getByRole('button', { name: 'تعديل الأدوار', exact: true }).first();
   if (await edit.count()) {
@@ -57,7 +58,7 @@ test('every admin editor places submit and cancel in the shared header', async (
     await page.locator('.center-topbar').getByRole('button', { name: 'إلغاء', exact: true }).click();
   }
 
-  await page.goto(`${origin}/admin/settings`);
+  await page.goto(workspaceUrl(page, `${origin}/admin/settings`));
   const generalHeader = page.locator('.center-topbar');
   const contactEmail = page.getByRole('textbox', { name: 'بريد التواصل' });
   const savedEmail = await contactEmail.inputValue();
@@ -83,7 +84,7 @@ test('every admin editor places submit and cancel in the shared header', async (
   await headerSubmit(page, 'حفظ بداية الترقيم');
   await numbering.fill(String(Number(await numbering.inputValue()) - 1));
 
-  await page.goto(`${origin}/admin/settings?tab=security`);
+  await page.goto(workspaceUrl(page, `${origin}/admin/settings?tab=security`));
   await headerSubmit(page, 'تفعيل التحقق بخطوتين');
 });
 
@@ -91,7 +92,7 @@ test('student settings header shows only relevant actions on desktop and mobile'
   for (const [width, theme] of [[1440, 'light'], [390, 'dark']] as const) {
     await page.setViewportSize({ width, height: 844 });
     await page.context().addCookies([{ name: 'courses_theme', value: theme, url: origin }]);
-    await page.goto(`${origin}/admin/settings?tab=students`);
+    await page.goto(workspaceUrl(page, `${origin}/admin/settings?tab=students`));
     const header = page.locator('.center-topbar');
     await expect(header.getByRole('button', { name: /حفظ (بداية الترقيم|إعداد الفروع|إعداد الباركود الإضافي)/ })).toHaveCount(0);
     await expect(header.getByRole('button', { name: 'إجراءات البحث والمشاركة', exact: true })).toHaveCount(0);
@@ -106,12 +107,12 @@ test('student settings header shows only relevant actions on desktop and mobile'
     await expect(page.getByRole('tablist', { name: 'أقسام الإعدادات' }).getByRole('tab', { name: 'الحقول الإضافية' })).toHaveCount(0);
     await expect(page.getByRole('tab', { name: 'إعدادات الطلاب', exact: true })).toHaveAttribute('aria-selected', 'true');
     await page.getByRole('tab', { name: 'الحقول الإضافية', exact: true }).click();
-    await expect(page).toHaveURL(`${origin}/admin/settings?tab=student-fields`);
+    await expectWorkspaceUrl(page, `${origin}/admin/settings?tab=student-fields`);
     await expect(page.getByRole('tab', { name: 'الطلاب', exact: true })).toHaveAttribute('aria-selected', 'true');
     await page.getByRole('tab', { name: 'قوائم بيانات الطالب', exact: true }).click();
-    await expect(page).toHaveURL(`${origin}/admin/settings?tab=student-choices`);
+    await expectWorkspaceUrl(page, `${origin}/admin/settings?tab=student-choices`);
     await page.getByRole('tab', { name: 'إعدادات الطلاب', exact: true }).click();
-    await expect(page).toHaveURL(`${origin}/admin/settings?tab=students`);
+    await expectWorkspaceUrl(page, `${origin}/admin/settings?tab=students`);
 
     const numbering = page.getByRole('spinbutton', { name: 'بداية ترقيم الطلاب' });
     const original = await numbering.inputValue();
@@ -136,7 +137,7 @@ test('unsaved student settings stay guarded through separate and combined browse
   const confirmation = page.getByRole('alertdialog', { name: 'مغادرة دون حفظ' });
   await expect(confirmation).toBeVisible();
   await confirmation.getByRole('button', { name: 'إلغاء', exact: true }).click();
-  await expect(page).toHaveURL(`${origin}/admin/settings?tab=students`);
+  await expectWorkspaceUrl(page, `${origin}/admin/settings?tab=students`);
   await expect(checkbox).toBeChecked({ checked: !original });
 
   await checkbox.click();
@@ -154,7 +155,7 @@ test('unsaved student settings stay guarded through separate and combined browse
   await confirmation.getByRole('button', { name: 'مغادرة دون حفظ', exact: true }).click();
   await expect(confirmation).toBeVisible();
   await confirmation.getByRole('button', { name: 'إلغاء', exact: true }).click();
-  await expect(page).toHaveURL(`${origin}/admin/settings?tab=students`);
+  await expectWorkspaceUrl(page, `${origin}/admin/settings?tab=students`);
   await checkbox.click();
   await page.evaluate(() => window.history.back());
   await expect(confirmation).toBeVisible();
@@ -165,7 +166,7 @@ test('unsaved student settings stay guarded through separate and combined browse
 test('student form keeps header actions visible on a narrow dark screen', async ({ page }) => {
   await page.getByRole('button', { name: 'تفعيل الوضع الداكن', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`${origin}/admin/students/new`);
+  await page.goto(workspaceUrl(page, `${origin}/admin/students/new`));
   await headerSubmit(page, 'حفظ ملف الطالب');
   await expect(page.locator('.center-topbar').getByRole('link', { name: 'إلغاء', exact: true })).toBeVisible();
   await expect(page.locator('#student-name')).toHaveAttribute('data-slot', 'input');
@@ -200,7 +201,7 @@ test('center-wide student linking updates the owner creation form', async ({ pag
   const settingName = 'ربط كل ملف طالب جديد بجميع فروع المركز';
 
   async function setBranchLinking(enabled: boolean) {
-    await page.goto(`${origin}/admin/settings?tab=students`);
+    await page.goto(workspaceUrl(page, `${origin}/admin/settings?tab=students`));
     const checkbox = page.getByRole('checkbox', { name: settingName, exact: true });
     await expect(checkbox).toBeVisible();
     if ((await checkbox.isChecked()) !== enabled) {
@@ -215,10 +216,10 @@ test('center-wide student linking updates the owner creation form', async ({ pag
 
   try {
     await setBranchLinking(!original);
-    await page.goto(`${origin}/admin/students/new`);
+    await page.goto(workspaceUrl(page, `${origin}/admin/students/new`));
     await expect(page.getByRole('region', { name: 'الفروع', exact: true })).toHaveCount(original ? 1 : 0);
     await expect(page.locator('.center-topbar').getByRole('button', { name: 'حفظ ملف الطالب', exact: true })).toBeVisible();
-    await page.goto(`${origin}/admin/audit`);
+    await page.goto(workspaceUrl(page, `${origin}/admin/audit`));
     const change = page.getByRole('row').filter({ hasText: 'تغيير ربط ملفات الطلاب الجديدة بالفروع' }).first();
     await expect(change).toBeVisible();
     await change.getByText('عرض تغيير ربط الفروع', { exact: true }).click();
@@ -230,7 +231,7 @@ test('center-wide student linking updates the owner creation form', async ({ pag
 });
 
 test('student creation recovers a changed branch setting without losing entered data', async ({ page }) => {
-  await page.goto(`${origin}/admin/students/new`);
+  await page.goto(workspaceUrl(page, `${origin}/admin/students/new`));
   const workspaceResponse = await page.request.get(`${origin}/api/v1/center/student-workspace`);
   expect(workspaceResponse.ok()).toBe(true);
   const workspace = await workspaceResponse.json();

@@ -29,7 +29,7 @@ class CenterStudyCoverageController extends Controller
             ->selectRaw('COALESCE(groups.completion_threshold, levels.completion_threshold, stages.completion_threshold, courses.completion_threshold) AS completion_threshold')
             ->selectRaw("COALESCE((SELECT json_agg(json_build_object('id', COALESCE(plan_lecture_id, id), 'number', number, 'title', title, 'content', content) ORDER BY number) FROM study_group_requirements WHERE group_id = groups.id AND retired_at IS NULL), '[]'::json) AS requirements")
             ->first();
-        abort_unless($group && $permissions->can('read', (int) $group->branch_id), 404);
+        abort_unless($group && $permissions->canInWorkspace('read', (int) $group->branch_id), 404);
 
         $requirements = json_decode($group->requirements, true);
         $requiredCount = count($requirements);

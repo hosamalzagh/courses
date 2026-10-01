@@ -502,7 +502,7 @@ SQL);
             $query->lockForUpdate();
         }
         $row = $query->first();
-        abort_unless($row && $permissions->can('read', (int) $row->branch_id), 404);
+        abort_unless($row && $permissions->canInWorkspace('read', (int) $row->branch_id), 404);
 
         $history = json_decode($row->historical_requirements, true);
 
